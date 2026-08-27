@@ -13,6 +13,7 @@ import {
   type Simpul,
 } from "./ast";
 import { SRC, daftarSumber } from "./kueri-terkurung";
+import { buktikan, grafPanggilan, type Graf } from "./panggilan";
 
 /**
  * BARIS BARU DAN TENANT-NYA — arah TULIS yang tak pernah punya gerbang.
@@ -51,6 +52,8 @@ export interface SitusTulis {
   kelas: KelasTulis;
   /** ekspresi yang jadi nilai `companyId`, apa adanya */
   sumber: string;
+  /** pembantu bernama yang memuat situs ini — kunci ke graf panggilan */
+  pembantu?: string;
 }
 
 /** Berkas yang memang bekerja LINTAS perusahaan (cermin daftar sapuan BACA). */
@@ -61,6 +64,24 @@ const GLOBAL = [
 ];
 
 const PANGKAL = new Set(["db", "tx", "trx"]);
+const FUNGSI = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
+
+/** Pembantu bernama TERLUAR yang memuat simpul ini. */
+function pembantuPemuat(n: Simpul, k: Konteks): string | undefined {
+  let x: Simpul | undefined = n;
+  let nama: string | undefined;
+  while (x) {
+    if (FUNGSI.has(x.type)) {
+      if (x.type === "FunctionDeclaration" && x.id?.type === "Identifier") nama = x.id.name as string;
+      else {
+        const up = k.induk.get(x);
+        if (up?.type === "VariableDeclarator" && up.id?.type === "Identifier") nama = up.id.name as string;
+      }
+    }
+    x = k.induk.get(x);
+  }
+  return nama;
+}
 
 interface Konteks {
   nama: string;
@@ -295,7 +316,12 @@ export function situsTulis(kode?: { nama: string; isi: string }[]): SitusTulis[]
         if (arg?.type === "Identifier") {
           const d = deklarasiTerlihat(arg, arg.name as string, k.induk, k.lingkup);
           if (!d) {
-            keluar.push({ ...situs, kelas: "PARAMETER", sumber: arg.name as string });
+            keluar.push({
+              ...situs,
+              kelas: "PARAMETER",
+              sumber: arg.name as string,
+              pembantu: pembantuPemuat(n, k),
+            });
             return;
           }
         }
@@ -311,8 +337,34 @@ export function situsTulis(kode?: { nama: string; isi: string }[]): SitusTulis[]
           : a.parameter
             ? "PARAMETER"
             : "TURUNAN";
-      keluar.push({ ...situs, kelas, sumber: teksAsli.replace(/\s+/g, " ").slice(0, 60) });
+      keluar.push({
+        ...situs,
+        kelas,
+        sumber: teksAsli.replace(/\s+/g, " ").slice(0, 60),
+        ...(kelas === "PARAMETER" ? { pembantu: pembantuPemuat(n, k) } : {}),
+      });
     });
   }
   return keluar;
+}
+
+/**
+ * BUKTI untuk kelas `PARAMETER`: tiap pembantu yang membawa tenant lewat
+ * parameternya ditelusuri ke SELURUH situs panggilnya, lintas berkas.
+ *
+ * Inilah yang membedakan "diputuskan pemanggil" sebagai janji dari sebagai
+ * bukti. Daftar tulisan tangan hanya menyatakan keadaan hari ini; graf
+ * panggilan menyatakan keadaan tiap kali gerbangnya jalan — dan satu pemanggil
+ * BARU yang mengoper tenant dari permintaan membuat pembantunya berhenti
+ * terbukti, dengan berkas & barisnya disebut.
+ */
+export function buktiPemanggil(
+  situs: SitusTulis[],
+  graf: Graf = grafPanggilan(),
+): { terbukti: Set<string>; belum: Map<string, string>; pembantu: string[] } {
+  const nama = [...new Set(situs.filter((x) => x.kelas === "PARAMETER" && x.pembantu).map((x) => x.pembantu!))];
+  const h = buktikan(graf, nama);
+  const belum = new Map<string, string>();
+  for (const n of nama) if (!h.terbukti.has(n)) belum.set(n, h.belum.get(n) ?? "tak dinilai");
+  return { terbukti: h.terbukti, belum, pembantu: nama };
 }

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { daftarSumber, kelas, petaKelas, semuaKueri, type Kueri } from "./util/kueri-terkurung";
+import {
+  buktiKondisi,
+  daftarSumber,
+  kelas,
+  petaKelas,
+  petaKelasDibuktikan,
+  semuaKueri,
+  type Kueri,
+} from "./util/kueri-terkurung";
+import { grafPanggilan } from "./util/panggilan";
 
 /**
  * SETIAP KUERI TERKURUNG PERUSAHAANNYA — arah BACA dan TULIS.
@@ -21,11 +30,16 @@ import { daftarSumber, kelas, petaKelas, semuaKueri, type Kueri } from "./util/k
  *   B    21  lewat `branchId` DI DALAM `.where` (bukan sekadar kolom terpilih)
  *   C    35  kunci saringnya ikut dioper ke PANGGILAN BERNAMA ber-`company_id`
  *   E    68  memang LINTAS perusahaan: auth, panel super admin, cadangan, seed
- *   F    56  tak teresolusi mekanis → DIPILAH TANGAN, daftarnya di bawah
+ *   P     6  terkurung lewat KONDISI yang dioper — DIBUKTIKAN graf panggilan
+ *   F    50  tak teresolusi mekanis → DIPILAH TANGAN, daftarnya di bawah
  *
  * Angka-angka itu bergerak 2026-08-27 ketika instrumennya pindah ke pohon
  * sintaks — bukan karena aturannya berubah, melainkan karena BUKTINYA akhirnya
- * terbaca. Rinciannya di `docs/audit/vena-audit.md`.
+ * terbaca. Kelas `P` menyusul hari yang sama: enam situs yang tadinya `F`
+ * dengan alasan tulisan tangan ("pemanggilnya mengurung") kini dibuktikan
+ * lewat GRAF PANGGILAN lintas berkas — dan pemanggil BARU yang mengoper
+ * kondisi tanpa tenant menjatuhkan buktinya. Rinciannya di
+ * `docs/audit/vena-audit.md`.
  *
  * Diukur juga lewat HTTP dengan DUA tenant sungguhan (id milik tenant A
  * dibuktikan terbaca oleh A lebih dulu): sebelas rute detail ber-`:id`
@@ -41,8 +55,8 @@ import { daftarSumber, kelas, petaKelas, semuaKueri, type Kueri } from "./util/k
  * baru di berkas yang sama menaikkan jumlahnya → merah, dan menagih keputusan.
  */
 const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
-  ["modules/produksi/routes.ts", { situs: 10, alasan:
-    "kunci `inArray` lahir dari baris yang SUDAH terkurung (`byId`, `rows`, `kirimMap`, `batchByProd`); sisanya menulis ke `productions.id` hasil select ber-`conds` yang memuat companyId. DUA situs baru sejak pemindainya memakai lingkup: `.where(and(...conds))` di `tahapSebagian`/`tahapSeluruhFaktur` — `conds` di sana PARAMETER, dan satu-satunya perakitnya (:1642) memuat `eq(productions.companyId, auth.company_id!)`. Vonis lamanya A2 mengkredit `const conds` di :1642 itu juga, tapi lewat kecocokan-pertama-di-berkas — benar karena mujur, bukan karena terbaca" }],
+  ["modules/produksi/routes.ts", { situs: 4, alasan:
+    "kunci `inArray` lahir dari baris yang SUDAH terkurung (`byId`, `rows`, `kirimMap`, `batchByProd`); sisanya menulis ke `productions.id` hasil select ber-`conds` yang memuat companyId. ENAM situs `.where(and(...conds))` KELUAR dari daftar ini sejak graf panggilan bisa membuktikannya: `conds` parameter `tahapSebagian`/`tahapSeluruhFaktur`, dan satu-satunya situs panggilnya (:1653) mengoper kondisi ber-`eq(productions.companyId, auth.company_id!)` — kelas P" }],
   ["modules/bahan/routes.ts", { situs: 9, alasan:
     "`id` diverifikasi `eq(ingredients.companyId, auth.company_id!)` lebih dulu di handler yang sama (mis. :638, :1062, :1663) yang membalas 404, lalu anak-anaknya (`ingredientSteps`, `ingredientComponents`, `ingredientSuppliers`, `menuComponents`) dibaca/dihapus lewat id yang sudah lolos itu. Empat situs baru: pembuktinya kueri lain, bukan panggilan bernama — dan kueri tetangga bukan verifikasi" }],
   ["modules/pesanan/routes.ts", { situs: 8, alasan:
@@ -81,7 +95,7 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
 
 describe("tiap kueri terkurung perusahaannya", () => {
   const daftar = daftarSumber();
-  const peta = petaKelas(daftar);
+  const peta = petaKelasDibuktikan(daftar);
   const f = peta.filter((k) => k.kelas === "F");
 
   it("PREMIS: populasinya besar dan tiap kelas terisi", () => {
@@ -137,6 +151,29 @@ describe("tiap kueri terkurung perusahaannya", () => {
         1,
       ),
     ).toBe("F");
+  });
+
+  it("kelas P: terkurung lewat KONDISI yang dioper, dan itu DIBUKTIKAN", () => {
+    const pp = peta.filter((k) => k.kelas === "P");
+    expect(pp.length, "tak ada situs kelas P — grafnya tak menghasilkan apa pun").toBeGreaterThanOrEqual(4);
+    const b = buktiKondisi();
+    expect(
+      [...b.belum].map(([n, a]) => `${n}: ${a}`),
+      "pembantu kondisi yang tak bisa dibuktikan — turunkan ke F & daftarkan",
+    ).toEqual([]);
+    expect(b.terbukti.has("tahapSebagian")).toBe(true);
+  });
+
+  it("BUKTI MERAH kelas P: satu pemanggil ber-kondisi TANPA tenant menjatuhkannya", () => {
+    const racun = {
+      nama: "modules/palsu/routes.ts",
+      isi: "async function h(c) { const conds = [eq(productions.id, c.req.param('id'))]; await tahapSebagian({ conds }); }",
+    };
+    const b = buktiKondisi(grafPanggilan([racun]));
+    expect(b.terbukti.has("tahapSebagian"), "suntikan tak menjatuhkan buktinya").toBe(false);
+    expect(b.belum.get("tahapSebagian")).toMatch(/modules\/palsu\/routes\.ts/);
+    // PASANGAN: pembantu lain tak ikut tumbang.
+    expect(b.terbukti.has("selectLaporan")).toBe(true);
   });
 
   it("DETEKTOR TERBUKTI: rantainya tak menelan kueri tetangga", () => {

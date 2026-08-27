@@ -50,6 +50,70 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## "Diputuskan pemanggil" berhenti jadi janji — server (uji) — 2026-08-27
+
+- **Kenapa vena ini ada**: dua putaran terakhir menutup dua arah gerbang tenant,
+  dan **keduanya berhenti di tempat yang sama** — nilai yang datang lewat
+  PARAMETER. Keduanya menuliskannya "tenant diputuskan pemanggil" lalu
+  menyerahkannya ke daftar pilah-tangan: **31 klaim** (25 sisi TULIS di 14
+  berkas, 6 sisi BACA). Semuanya benar hari itu, dan semuanya **SNAPSHOT**.
+
+- **Yang tak dijaga apa pun: pemanggil BARU.** Satu pemanggil `createSale` atau
+  `catatLogFaktur` yang mengisi `companyId` dari badan permintaan tak akan
+  memerahkan apa pun — kedua gerbang hanya membaca situs `insert`/`select`-nya,
+  tak pernah pemanggilnya. Alasan tulisan tangan ("ketiga pemanggilnya
+  mengurung") **membusuk diam-diam pada pemanggil keempat**.
+
+- **Tindak**: `test/util/panggilan.ts` — graf panggilan **lintas berkas** (112
+  berkas, **435 pembantu bernama**, **10 nama bertabrakan** yang dilaporkan dan
+  ditolak sebagai bukti) plus **titik-tetap**: sebuah pembantu TERBUKTI bila tiap
+  situs panggilnya mengoper tenant yang (a) menelusur ke `auth.company_id`,
+  (b) berada di berkas kelas E, atau (c) datang dari pembantu yang sendirinya
+  sudah terbukti. Diulang sampai stabil.
+
+- **Hasil, dua arah**:
+
+  | arah | sebelum | sesudah |
+  |---|---|---|
+  | TULIS | 25 situs / 14 berkas beralasan TANGAN | **20 pembantu, 20 TERBUKTI**; daftar tangan **kosong** |
+  | BACA | 6 situs kelas `F` beralasan TANGAN | kelas **`P` = 6**, `F` **56 → 50** |
+
+  `selaraskanTutupBill` **sengaja tidak** diikutkan: parameternya `billId` —
+  sebuah id baris yang diverifikasi di hulu, bukan kondisi yang membawa tenant.
+  Ia tetap `F` dan tetap ditagih daftar tangan. Titik-tetap yang tak konvergen
+  bukan alasan melonggarkan.
+
+- **Empat penajaman, semuanya ditemukan sambil membuktikan** — dan tiap satunya
+  bentuk NYATA di repo ini:
+
+  | bentuk | tanpa penajaman |
+  |---|---|
+  | slot tenant hidup di **anotasi TIPE** (`row: { companyId: string; … }`) | `catatHargaMenu` & `denganKlaimIdempoten` tak punya slot → situs panggilnya tak pernah diperiksa |
+  | himpunan kandidat harus **tertutup atas pemanggil** | 4 pembantu `perlengkapan/service.ts` menggantung: syarat (c) menanyakan pembantu yang tak pernah dinilai |
+  | objek literal dibuka **satu tingkat**, dan **sebelum** penanda auth/klien diuji | `{ auth, fakturId, conds, body: c.req.valid(…) }` berhenti di penanda KLIEN milik `body` — properti yang sama sekali bukan tenantnya — sehingga `conds` tak pernah terbaca |
+  | kedalaman telusur 4 → **6** | rantai terpanjang yang nyata: `konteks` → objek → properti ringkas `conds` → `const conds = [...]` |
+
+  Titik-tetapnya konvergen dalam **4 putaran** (TULIS) dan **2** (BACA).
+
+- **Bukti merah, dua arah, dan keduanya berpasangan**:
+  · satu pemanggil `catatAbsen({ companyId: body.company_id })` disuntikkan →
+  `catatAbsen` **berhenti terbukti**, dengan berkas & barisnya disebut,
+  sementara `createSale` dan `catatLogFaktur` **tetap** terbukti — tuduhannya
+  tepat sasaran, bukan longsor;
+  · satu pemanggil `tahapSebagian({ conds })` dengan kondisi **tanpa** tenant →
+  kelas `P`-nya jatuh, sementara `selectLaporan` tetap terbukti.
+
+- **Batas, ditulis jujur**: grafnya berdasar NAMA dalam satu ruang nama seluruh
+  `src`; 10 nama bertabrakan (`quoteIdent`, `jalankan`, `toDto`, `ambilSatu`, …)
+  **tak boleh** jadi bukti dan memang ditolak. Pembantu **tanpa** situs panggil
+  yang terbaca dihitung **belum terbukti**, bukan bersih.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.430** (205 berkas, +3 uji) ·
+  tak satu baris pun `src` tersentuh, jadi `verify-api` & cakupan rute tak bisa
+  terpengaruh dan tidak dijalankan.
+
+---
+
 ## Baris BARU dan tenant-nya: arah TULIS yang tak pernah punya gerbang — server (uji) — 2026-08-27 — **BERSIH**
 
 - **Kenapa vena ini ada**: sapuan pengurungan tenant hanya melihat

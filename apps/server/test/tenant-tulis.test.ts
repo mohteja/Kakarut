@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { situsTulis, tabelBerTenant, type SitusTulis } from "./util/tenant-tulis";
+import { buktiPemanggil, situsTulis, tabelBerTenant, type SitusTulis } from "./util/tenant-tulis";
+import { grafPanggilan } from "./util/panggilan";
 
 /**
  * BARIS BARU DAN TENANT-NYA — arah yang tak pernah punya gerbang.
@@ -21,7 +22,7 @@ import { situsTulis, tabelBerTenant, type SitusTulis } from "./util/tenant-tulis
  *   tabel ber-`companyId`            42 dari 59
  *   insert ke tabel ber-tenant      101
  *     · AUTH       48  `auth.company_id!` langsung dari token
- *     · PARAMETER  25  tenant diputuskan PEMANGGIL (daftarnya di bawah)
+ *     · PARAMETER  25  tenant diputuskan PEMANGGIL — kini DIBUKTIKAN graf panggilan
  *     · TURUNAN     1  diwarisi dari baris induk yang dibaca terkurung
  *     · E          27  berkas yang memang lintas perusahaan (seed, admin, auth)
  *     · KLIEN       0  ← yang tak boleh ada, dan memang tak ada
@@ -31,44 +32,21 @@ import { situsTulis, tabelBerTenant, type SitusTulis } from "./util/tenant-tulis
  */
 
 /**
- * Situs yang tenant-nya diputuskan PEMANGGIL. Kuncinya BERKAS + JUMLAH — situs
- * baru menaikkan angkanya dan menagih satu keputusan, bukan lewat diam-diam.
+ * Pembantu pembawa tenant yang BELUM bisa dibuktikan mekanis.
  *
- * Belum ada kelas mekanis untuk "pemanggilnya membuktikan": itu menuntut
- * penelusuran antar-fungsi (parameter → destrukturisasi → tiap situs panggil),
- * dan sudah tercatat sebagai utang di ledger. Sampai ada, tiap berkas di sini
- * membawa alasan yang bisa diperiksa.
+ * Daftar ini SENGAJA kosong hari ini, dan kosongnya berarti sesuatu: ke-20
+ * pembantu yang membawa `companyId` lewat parameternya sudah dibuktikan lewat
+ * GRAF PANGGILAN — tiap situs panggilnya, lintas berkas, mengoper tenant yang
+ * menelusur ke `auth.company_id!` (atau berada di berkas kelas E, atau datang
+ * dari pembantu yang sendirinya sudah terbukti). Titik-tetapnya konvergen dalam
+ * 4 putaran.
+ *
+ * Sampai putaran ini isinya 14 berkas / 25 situs berisi alasan TULISAN TANGAN —
+ * dan alasan tulisan tangan hanya menyatakan keadaan hari itu. Yang tak
+ * dijaganya: pemanggil BARU. Sekarang pemanggil baru yang mengoper tenant dari
+ * permintaan membuat pembantunya berhenti terbukti dan mendarat di sini.
  */
-const TENANT_DARI_PEMANGGIL = new Map<string, { situs: number; alasan: string }>([
-  ["modules/perlengkapan/service.ts", { situs: 6, alasan:
-    "seluruh pintu perlengkapan menerima `params: { companyId, … }` dari rute yang membacanya dari `auth.company_id!`; tak satu pun rute mengambilnya dari badan permintaan" }],
-  ["modules/rekomendasi/rencana.ts", { situs: 5, alasan:
-    "`params.companyId` dirakit `rencana()` yang dipanggil rute rekomendasi dengan `auth.company_id!`; `barisFaktur()` menuliskannya ke tiap baris faktur" }],
-  ["modules/penjualan/service.ts", { situs: 2, alasan:
-    "`createSale(params)` — dua pintu pembayaran (`POST /penjualan` dan `/sync`) sama-sama mengisi `params.companyId` dari token" }],
-  ["modules/sync/idempoten.ts", { situs: 2, alasan:
-    "kunci idempotensi ditulis dengan companyId milik sesi yang sedang menjalankan perintah; pemanggilnya `/sync` yang sudah ber-`requireCompany`" }],
-  ["modules/absensi/routes.ts", { situs: 1, alasan:
-    "`opts.companyId` dirakit di rute absensi yang sama dari `auth.company_id!` sebelum dioper ke pencatat" }],
-  ["modules/customer/service.ts", { situs: 1, alasan:
-    "`companyId` parameter `upsertCustomer`; pemanggilnya rute member & alur penjualan, keduanya dari token" }],
-  ["modules/menu/routes.ts", { situs: 1, alasan:
-    "`catatHargaMenu(tx, row)` menerima baris log yang SUDAH lengkap dari pemanggilnya di modul yang sama" }],
-  ["modules/penjualan/refund.ts", { situs: 1, alasan:
-    "`refundSajian(tx, params)` — `params.companyId` datang dari rute refund yang membacanya dari token" }],
-  ["modules/penjualan/rekalkulasi.ts", { situs: 1, alasan:
-    "`hitungUlangBiayaPenjualan(tx, saleId, companyId, …)` menerima companyId sebagai parameter dan memakainya di kueri pertamanya juga" }],
-  ["modules/pesanan/routes.ts", { situs: 1, alasan:
-    "`ctx.companyId` dirakit penangan rute papan pesanan dari `auth.company_id!` sebelum masuk `selaraskanTutupBill`" }],
-  ["modules/produksi/konsumsi.ts", { situs: 1, alasan:
-    "`companyId` parameter pencatat konsumsi produksi; pemanggilnya alur produksi yang sudah membaca faktur terkurung" }],
-  ["modules/produksi/log.ts", { situs: 1, alasan:
-    "`catatLogFaktur(tx, log)` menerima baris log lengkap; tiap pemanggil mengisinya dari `auth.company_id!`" }],
-  ["modules/produksi/routes.ts", { situs: 1, alasan:
-    "`arg.companyId` pada pencatat dana faktur, dirakit di rute yang sama dari token" }],
-  ["modules/shift/routes.ts", { situs: 1, alasan:
-    "`params.companyId` pada pembuka shift, dari `auth.company_id!` di rute yang sama" }],
-]);
+const BELUM_TERBUKTI = new Map<string, string>();
 
 /** Situs yang mewarisi tenant dari baris INDUK yang sudah dibaca terkurung. */
 const WARISAN = new Map<string, { situs: number; alasan: string }>([
@@ -103,21 +81,18 @@ describe("tenant pada baris BARU: dari token, bukan dari permintaan", () => {
     ).toEqual([]);
   });
 
-  it("tenant lewat PEMANGGIL: tiap berkas terdaftar, jumlahnya cocok, tak ada kuburan", () => {
-    const hitung = new Map<string, number>();
-    for (const x of per("PARAMETER")) hitung.set(x.berkas, (hitung.get(x.berkas) ?? 0) + 1);
-    const salah: string[] = [];
-    for (const [berkas, n] of hitung) {
-      const d = TENANT_DARI_PEMANGGIL.get(berkas);
-      if (!d) salah.push(`${berkas}: ${n} situs, belum terdaftar`);
-      else if (d.situs !== n) salah.push(`${berkas}: terdaftar ${d.situs}, sekarang ${n}`);
-    }
-    for (const k of TENANT_DARI_PEMANGGIL.keys()) {
-      if (!hitung.has(k)) salah.push(`${k}: sudah tak punya situs — hapus dari daftar`);
-    }
-    expect(salah, salah.join("\n")).toEqual([]);
-    for (const [k, v] of TENANT_DARI_PEMANGGIL) {
-      expect(v.alasan.length, `${k} tanpa alasan yang bisa diperiksa`).toBeGreaterThan(70);
+  it("tenant lewat PEMANGGIL: DIBUKTIKAN grafnya, bukan dijanjikan daftarnya", () => {
+    const b = buktiPemanggil(semua);
+    expect(b.pembantu.length, "tak ada pembantu pembawa tenant terbaca").toBeGreaterThanOrEqual(15);
+    const belum = [...b.belum].map(([n, a]) => `${n}: ${a}`);
+    // Yang belum terbukti WAJIB terdaftar beralasan — tak boleh lewat diam-diam.
+    const takTerdaftar = belum.filter((x) => !BELUM_TERBUKTI.has(x.split(":")[0]));
+    expect(
+      takTerdaftar,
+      `pembantu membawa tenant lewat parameter, dan pemanggilnya tak bisa dibuktikan:\n${takTerdaftar.join("\n")}`,
+    ).toEqual([]);
+    for (const k of BELUM_TERBUKTI.keys()) {
+      expect(b.belum.has(k), `entri daftar sudah terbukti — hapus: ${k}`).toBe(true);
     }
   });
 
@@ -159,6 +134,26 @@ describe("BUKTI MERAH: gerbangnya benar-benar bisa menuduh", () => {
     expect(k[0]?.kelas).toBe("AUTH");
     // `saleItems` tak punya kolom companyId — bukan urusan sapuan ini.
     expect(sapu("await db.insert(saleItems).values({ qty: 1 });")).toEqual([]);
+  });
+});
+
+describe("BUKTI MERAH graf panggilan: satu pemanggil baru cukup untuk memerahkan", () => {
+  it("pemanggil ber-`body.company_id` membuat pembantunya BERHENTI terbukti", () => {
+    const semua = situsTulis();
+    const bersih = buktiPemanggil(semua);
+    expect(bersih.terbukti.has("catatAbsen"), "premis hilang: catatAbsen tak lagi terbukti").toBe(true);
+
+    const racun = {
+      nama: "modules/palsu/routes.ts",
+      isi: 'async function h(c) { const body = c.req.valid("json"); await catatAbsen({ companyId: body.company_id, userId: 1 }); }',
+    };
+    const kotor = buktiPemanggil(semua, grafPanggilan([racun]));
+    expect(kotor.terbukti.has("catatAbsen"), "suntikan tak memerahkan apa pun").toBe(false);
+    expect(kotor.belum.get("catatAbsen")).toMatch(/modules\/palsu\/routes\.ts:1 \[KLIEN\]/);
+
+    // PASANGAN: yang lain tak ikut tumbang — tuduhannya tepat sasaran.
+    expect(kotor.terbukti.has("createSale")).toBe(true);
+    expect(kotor.terbukti.has("catatLogFaktur")).toBe(true);
   });
 });
 
