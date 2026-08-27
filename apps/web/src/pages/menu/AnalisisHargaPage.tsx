@@ -22,7 +22,7 @@ const SEBAB_LABEL: Record<MenuPriceLogRow["sebab"], string> = {
 
 /** Rincian satu menu: penyumbang HPP + riwayat perubahan harga jualnya. */
 function Rincian({ row }: { row: AnalisisHargaRow }) {
-  const { data: riwayat } = useQuery({
+  const { data: riwayat, error: riwayatGagal } = useQuery({
     queryKey: ["menu-riwayat-harga", row.id],
     queryFn: () => api<MenuPriceLogRow[]>(`/menu/${row.id}/riwayat-harga`),
   });
@@ -73,7 +73,9 @@ function Rincian({ row }: { row: AnalisisHargaRow }) {
 
       <div>
         <div className="mb-1 text-xs font-semibold text-stone-500">Riwayat harga jual</div>
-        {!riwayat ? (
+        {riwayatGagal ? (
+          <ErrorText error={riwayatGagal} />
+        ) : !riwayat ? (
           <p className="text-xs text-stone-400">Memuat…</p>
         ) : riwayat.length === 0 ? (
           <p className="text-xs text-stone-400">

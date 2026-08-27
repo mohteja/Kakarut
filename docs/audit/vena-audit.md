@@ -50,6 +50,91 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Gagal memuat ≠ NOL: bentuk ketiga yang tak pernah dipertimbangkan — web — 2026-08-27
+
+- **Kenapa vena ini ada**: `gagal-muat-bukan-kosong.test.ts` sudah ada, dan ia
+  gerbang yang JUJUR — ia menuliskan batasnya sendiri, dan batas itu benar
+  untuk dua bentuk yang dipikirkannya: **KALIMAT** (`(x ?? []).length === 0` →
+  *"Belum ada supplier"*) dijaga, dan **DAFTAR PILIHAN** (`.map()` di dropdown)
+  **sengaja dilewati** dengan alasan yang tepat — *"daftar pilihan yang kosong
+  tak MENGKLAIM apa pun."*
+
+  Ada bentuk **KETIGA**, dan alasan pengecualian itu tak berlaku untuknya:
+  **ANGKA**. Lencana yang lenyap *memang* mengklaim sesuatu — **"tidak ada yang
+  menunggu."**
+
+- **Instrumen AST untuk pertama kalinya diarahkan ke `apps/web`** (ia mengurai
+  TSX). Populasi: **163 situs `useQuery`**.
+
+- **TEMUAN, diukur di PERAMBAN sungguhan** (satu pengajuan menunggu,
+  `page.route()` membalas 500):
+
+  | | lencana "Rekap Absen" |
+  |---|---|
+  | jaringan sehat | **"1"** |
+  | `/pengajuan?status=menunggu` → 500 | **LENYAP** |
+
+  Dan pencarian atas seluruh layar untuk kata *gagal/error/coba lagi*:
+  **0 kecocokan**. Tak satu pun kalimat menyebutkan kegagalan itu. Ini di
+  `Layout.tsx` — komponen yang tampil di **setiap** layar, dengan
+  `refetchInterval` **30–60 detik**: gangguan jaringan sesaat membuat beban
+  kerja hilang dari pandangan, lalu kembali, tanpa satu tanda pun.
+
+  Kesembilan lencana navigasi meruntuhkan kegagalan jadi nol dengan empat
+  bentuk berbeda — `(x ?? []).length`, `x?.kotor ?? 0`,
+  `x?.rows.filter(…).length ?? 0`, dan `hitungBelum(x?.rows)` yang berakhir
+  `.size`.
+
+- **Dua batas mesin lama dicabut, dan keduanya membuatnya melaporkan kebersihan
+  yang tak ada**:
+  1. ia **REGEX** (`const { … } = useQuery(`) → buta pada `const q = useQuery(…)`;
+  2. aturan `?? []`-nya menuntut koalesens menempel **langsung** pada nama
+     `data` → tiap balasan berbentuk `{ rows: … }` lolos. `TransferStokPage`
+     merender *"Belum ada transfer stok."* saat gagal, dan gerbang lama tak
+     pernah melihatnya — kelas yang justru jadi alasan gerbang itu dibuat.
+
+- **Tiga kebutaan detektor BARU, ditemukan sebelum satu tuduhan ditulis** —
+  dan ketiganya arah yang berlawanan, jadi keduanya harus dikejar:
+  1. **Under-report**: versi pertama melaporkan 11 situs; lima lencana
+     `Layout.tsx` lain memakai bentuk yang tak ada di daftar polanya. Aturannya
+     ditulis ulang dari BENTUK (ke mana `data` mengalir), bukan dari daftar
+     pola — sebab daftar pola selalu kurang. Rantai opsional & tanda kurung
+     juga harus dilewati saat menghitung lompatan, dan satu lompatan ke
+     pembantu lokal (`hitungBelum`) ditambahkan.
+  2. **Over-report**: `some`/`every`/`find` sempat dihitung sebagai angka, dan
+     itu menuduh `SatuanSelect` (memilih apakah nilai terpilih perlu jadi
+     `<option>`) dan `StokAwalPage` (`if (!tersimpan) return`). Keduanya
+     keputusan internal. Dicabut.
+  3. **Garis yang memisahkan keduanya**: angkanya harus **SAMPAI KE MATA** —
+     dirender di JSX. Tanpa garis itu tiap hitungan internal jadi tertuduh, dan
+     tuduhan palsu yang ditulis akan dipercaya.
+
+- **Angka sebelum → sesudah**: `ANGKA` **24 → 3** · `GALAT` **76 → 97** ·
+  `KALIMAT` **1 → 0** · `PILIHAN` 16 (pengecualiannya **tetap**, alasannya
+  dipindahkan apa adanya). Yang diperbaiki 21 situs di 10 berkas; yang paling
+  mahal: peringatan *"N menu akan melewati ambang food cost"* di
+  `LaporanHargaModal` yang dulu **lenyap** saat perhitungannya gagal, dan
+  `(N faktur)` + `Rp` pengeluaran di `TambahStokPage`.
+
+- **Tiga sisa terdaftar beralasan**, dan ketiganya keputusan internal: pemilih
+  menu dasar varian, penyaring bahan di picker, dan satu yang justru **contoh
+  bentuk yang benar** — `const n = ringkas ? (ringkas[b.id] ?? 0) : null`,
+  yang sudah membedakan "belum tahu" dari nol.
+
+- **Kenaikan instrumen dibuktikan tak melonggarkan**: aturan regex lama
+  dipertahankan sebagai fungsi (`kalimatLama`) dan dijalankan ulang di gerbang
+  — ia wajib tetap menemukan **nol**, sama seperti sebelum putaran ini. Pin
+  lama (kontrak `TabelResponsif` + sembilan jangkar per-berkas) **tak
+  disentuh**.
+
+- **Gerbang**: `typecheck` bersih (server+web) · `npm test` **2.479** (208
+  berkas) · build web ✔ · Playwright e2e **8/8** (dua uji baru) ·
+  `audit:invarian` 26/26. **`verify-api` TIDAK dijalankan** — `apps/server/src`
+  tak tersentuh satu baris pun (`git status` sebagai buktinya), penerapan
+  aturan repo ini, bukan jalan pintasnya.
+
+---
+
 ## KAPAN: ruas keempat, dan aturan yang hidup di satu pintu saja — server — 2026-08-27
 
 - **Kenapa vena ini ada**: tiga ruas sudah punya gerbang — `companyId`

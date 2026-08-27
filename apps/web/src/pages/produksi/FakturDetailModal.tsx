@@ -50,14 +50,14 @@ export function FakturDetailModal({
   // Permintaan Stok. Faktur input langsung tetap "Hapus" biasa.
   const dariPermintaan = grup.dariPermintaan;
 
-  const { data: dana } = useQuery({
+  const { data: dana, error: danaGagal } = useQuery({
     queryKey: [endpoint, "dana", grup.fakturId],
     queryFn: () =>
       api<{ rows: DanaEntri[]; total: number }>(`${endpoint}/dana/${grup.fakturId}`),
     enabled: mode === "lihat" && !!grup.fakturId && grup.danaCair !== 0,
   });
   // jejak kegiatan faktur: dibuat → ubah tahap → konfirmasi/penerimaan
-  const { data: log } = useQuery({
+  const { data: log, error: logGagal } = useQuery({
     queryKey: [endpoint, "log", grup.fakturId],
     queryFn: () => api<{ rows: FakturLogRow[] }>(`${endpoint}/log/${grup.fakturId}`),
     enabled: mode === "lihat" && !!grup.fakturId,
@@ -163,6 +163,7 @@ export function FakturDetailModal({
             )}
           </dl>
 
+          <ErrorText error={danaGagal} />
           {dana && dana.rows.length > 0 && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-2 text-sm">
               <div className="mb-1 font-semibold text-stone-700">💸 Buku dana faktur</div>
@@ -193,6 +194,7 @@ export function FakturDetailModal({
             </div>
           )}
 
+          <ErrorText error={logGagal} />
           {log && log.rows.length > 0 && (
             <div className="rounded-lg border border-stone-200 p-2 text-sm">
               <div className="mb-1 font-semibold text-stone-700">📜 Riwayat tahap</div>

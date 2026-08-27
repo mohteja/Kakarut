@@ -72,7 +72,7 @@ export function LaporanHargaModal({
     return () => clearTimeout(t);
   }, [kunci]);
 
-  const { data: dampak, isFetching: dampakJalan } = useQuery({
+  const { data: dampak, isFetching: dampakJalan, error: dampakGagal } = useQuery({
     queryKey: ["laporan-harga-dampak", grup.fakturId, kunciTunda],
     enabled: perbaruiAcuan && kunciTunda !== "[]",
     queryFn: () =>
@@ -186,6 +186,7 @@ export function LaporanHargaModal({
                       );
                     })}
                   </div>
+                  <ErrorText error={dampakGagal} />
                   {(dampak?.menu_lewat_ambang.length ?? 0) > 0 && (
                     <div className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-xs text-red-700">
                       <b>{dampak!.menu_lewat_ambang.length} menu</b> akan melewati ambang food cost{" "}

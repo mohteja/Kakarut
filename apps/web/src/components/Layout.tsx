@@ -85,7 +85,7 @@ export function Layout() {
   // Barang". Pakai ulang GET /penerimaan (key sama dgn PenerimaanPage → cache
   // dedup + auto-update saat kasir terima/tolak). Non-aktif utk super admin
   // (tanpa company). Segarkan berkala karena barang bisa datang kapan saja.
-  const { data: pen } = useQuery({
+  const { data: pen, error: penGagal } = useQuery({
     queryKey: ["penerimaan", dataQuery],
     queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan${dataQuery}`),
     enabled: !!auth && !auth.user.is_super_admin,
@@ -96,7 +96,7 @@ export function Layout() {
   // Jumlah bahan menipis/habis → badge di nav "Stok". Pakai ulang GET /stok
   // (key sama dgn StokPage → cache dedup). Merah bila ada yang habis, kuning
   // bila hanya menipis.
-  const { data: stok } = useQuery({
+  const { data: stok, error: stokGagal } = useQuery({
     queryKey: ["stok", dataQuery],
     queryFn: () => api<{ status: string }[]>(`/stok${dataQuery}`),
     enabled: !!auth && !auth.user.is_super_admin,
@@ -122,13 +122,13 @@ export function Layout() {
   // Kitchen tak terhitung → notif "belum selesai" hilang walau sebenarnya ada.
   const scopePengadaan = dariKantor ? "?branch_id=all" : dataQuery;
   const qsPengadaan = `${scopePengadaan}${scopePengadaan ? "&" : "?"}per_page=500`;
-  const { data: prodNav } = useQuery({
+  const { data: prodNav, error: prodGagal } = useQuery({
     queryKey: ["produksi-nav", scopePengadaan],
     queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/produksi${qsPengadaan}`),
     enabled: lihatPengadaan,
     refetchInterval: 60_000,
   });
-  const { data: beliNav } = useQuery({
+  const { data: beliNav, error: beliGagal } = useQuery({
     queryKey: ["pembelian-nav", scopePengadaan],
     queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/pembelian${qsPengadaan}`),
     enabled: lihatPengadaan,
@@ -141,7 +141,7 @@ export function Layout() {
   const beliBelum = hitungBelum(beliNav?.rows);
   // Faktur BELI PERLENGKAPAN yang masih aktif (menunggu dibeli / diproses) →
   // badge di nav "Beli Perlengkapan" — notifikasi yang sama dgn Beli Bahan Baku.
-  const { data: bpNav } = useQuery({
+  const { data: bpNav, error: bpGagal } = useQuery({
     queryKey: ["perlengkapan-beli"],
     queryFn: () =>
       api<{ id: string; faktur_id: string | null; status: string }[]>("/perlengkapan/beli"),
@@ -155,7 +155,7 @@ export function Layout() {
   ).size;
   // Pengajuan cuti/libur yang menunggu ACC → badge di nav "Rekap Absen".
   // Hanya manajemen yang memutuskan, jadi hanya mereka yang perlu di-query.
-  const { data: pengajuanNav } = useQuery({
+  const { data: pengajuanNav, error: pengajuanGagal } = useQuery({
     queryKey: ["pengajuan", "menunggu"],
     queryFn: () => api<{ id: string }[]>("/pengajuan?status=menunggu"),
     enabled: !!auth && !auth.user.is_super_admin && manajemenGuard,
@@ -165,7 +165,7 @@ export function Layout() {
 
   // Ringkasan kebersihan hari ini — endpoint ringan khusus badge (bukan /rekap
   // yang memuat sebulan penuh), jadi aman di-poll tiap menit.
-  const { data: kebersihanNav } = useQuery({
+  const { data: kebersihanNav, error: kebersihanGagal } = useQuery({
     queryKey: ["kebersihan-ringkas"],
     queryFn: () => api<{ tanggal: string; total: number; kotor: number }>("/kebersihan/ringkas"),
     enabled: !!auth && !auth.user.is_super_admin && manajemenGuard,
@@ -185,7 +185,7 @@ export function Layout() {
     divisi !== "central_kitchen" &&
     !(roleGuard === "tim" &&
       cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen");
-  const { data: pesananNav } = useQuery({
+  const { data: pesananNav, error: pesananGagal } = useQuery({
     queryKey: ["pesanan", dataQuery, hariIniPesanan],
     queryFn: () => api<{ status: string }[]>(`/pesanan${qsPesanan}`),
     enabled: lihatPesanan,
@@ -196,7 +196,7 @@ export function Layout() {
   // Meja yang sedang dipakai tamu → badge di nav "Meja". Kunci & URL sama
   // persis dengan halaman Meja + modal Pilih Meja kasir, jadi ketiganya berbagi
   // satu cache dan badge turun seketika begitu meja dibereskan.
-  const { data: mejaNav } = useQuery({
+  const { data: mejaNav, error: mejaGagal } = useQuery({
     queryKey: ["meja-status", dataQuery],
     queryFn: () => api<{ status: string }[]>(`/meja/status${dataQuery}`),
     enabled: lihatPesanan,
@@ -246,13 +246,46 @@ export function Layout() {
   // tutup drawer setelah navigasi/aksi di layar mobile
   const tutup = () => setMenuOpen(false);
 
-  // Badge notifikasi oranye (mis. jumlah faktur pengadaan belum selesai).
-  const badgeOranye = (n: number) =>
-    n > 0 ? (
-      <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-orange-500 px-1 text-xs font-bold text-white">
+  /**
+   * Badge notifikasi oranye — dan tanda GAGAL yang bukan angka.
+   *
+   * `badgeOranye(n)` dulu merender `null` saat `n <= 0`, sementara tiap lencana
+   * meruntuhkan kegagalan jadi nol (`(pengajuanNav ?? []).length`,
+   * `kebersihanNav?.kotor ?? 0`, `hitungBelum(prodNav?.rows)`). Jadi permintaan
+   * yang GAGAL terlihat persis seperti "tidak ada yang menunggu" — di komponen
+   * yang tampil di SETIAP layar, dengan `refetchInterval` 30–60 detik.
+   *
+   * Terukur di peramban sungguhan (2026-08-27, satu pengajuan menunggu):
+   *   jaringan sehat → lencana "1"
+   *   `/pengajuan?status=menunggu` dibalas 500 → lencana LENYAP, dan tak ada
+   *   satu pun kalimat di layar yang menyebutkan kegagalan itu.
+   *
+   * Yang dipasang SENGAJA bukan angka: "0" saat gagal justru memperkuat
+   * kebohongan yang sedang diperbaiki. Tandanya abu-abu (bukan oranye) supaya
+   * tak terbaca sebagai pekerjaan yang menunggu, dan judulnya menjelaskan.
+   */
+  const badgeOranye = (n: number, gagal?: unknown, uji?: string) => {
+    if (gagal) {
+      return (
+        <span
+          data-testid={uji}
+          title="Gagal memuat — jumlahnya belum tentu nol"
+          aria-label="gagal memuat"
+          className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-stone-400 px-1 text-xs font-bold text-white"
+        >
+          !
+        </span>
+      );
+    }
+    return n > 0 ? (
+      <span
+        data-testid={uji}
+        className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-orange-500 px-1 text-xs font-bold text-white"
+      >
         {n}
       </span>
     ) : null;
+  };
   const navFlex = (s: { isActive: boolean }) => `${linkClass(s)} flex items-center gap-2`;
 
   // Konten adalah AREA SCROLL TERSENDIRI (terpisah dari sidebar) — tiap
@@ -384,7 +417,7 @@ export function Layout() {
               {isManajemen && penuh && (
                 <NavLink to="/rekap-absen" className={navFlex}>
                   <span>🗓 Rekap Absen</span>
-                  {badgeOranye(pengajuanMenunggu)}
+                  {badgeOranye(pengajuanMenunggu, pengajuanGagal, "nav-lencana-pengajuan")}
                 </NavLink>
               )}
               {/* Rekap kebersihan harian — Kantor saja (sama seperti rekap absen).
@@ -392,8 +425,13 @@ export function Layout() {
               {isManajemen && penuh && (
                 <NavLink to="/rekap-kebersihan" className={navFlex}>
                   <span>🧼 Rekap Kebersihan</span>
-                  {kebersihanKotor > 0 ? (
-                    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
+                  {kebersihanGagal ? (
+                    badgeOranye(0, kebersihanGagal, "nav-lencana-kebersihan")
+                  ) : kebersihanKotor > 0 ? (
+                    <span
+                      data-testid="nav-lencana-kebersihan"
+                      className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white"
+                    >
                       {kebersihanKotor}
                     </span>
                   ) : null}
@@ -423,11 +461,11 @@ export function Layout() {
                 <>
                   <NavLink to="/produksi" className={navFlex}>
                     <span>🏭 Produksi Bahan Baku</span>
-                    {badgeOranye(produksiBelum)}
+                    {badgeOranye(produksiBelum, prodGagal, "nav-lencana-produksi")}
                   </NavLink>
                   <NavLink to="/pembelian" className={navFlex}>
                     <span>🛒 Beli Bahan Baku</span>
-                    {badgeOranye(beliBelum)}
+                    {badgeOranye(beliBelum, beliGagal, "nav-lencana-beli")}
                   </NavLink>
                   <NavLink to="/transfer-stok" className={linkClass}>
                     🔄 Transfer Stok
@@ -447,7 +485,7 @@ export function Layout() {
                 <>
                   <NavLink to="/produksi" className={navFlex}>
                     <span>🏭 Produksi</span>
-                    {badgeOranye(produksiBelum)}
+                    {badgeOranye(produksiBelum, prodGagal, "nav-lencana-produksi")}
                   </NavLink>
                   <NavLink to="/resep" className={linkClass}>
                     🧾 Resep
@@ -460,7 +498,7 @@ export function Layout() {
               {!timDiCk && !dCk && (
                 <NavLink to="/pesanan" className={navFlex}>
                   <span>🛎 Pesanan Masuk</span>
-                  {badgeOranye(pesananDikerjakan)}
+                  {badgeOranye(pesananDikerjakan, pesananGagal, "nav-lencana-pesanan")}
                 </NavLink>
               )}
               {/* Kasir (jual) & Tutup Kasir: HANYA peran kasir */}
@@ -494,7 +532,7 @@ export function Layout() {
               {!timDiCk && !dCk && (
                 <NavLink to="/pengaturan/meja" className={navFlex}>
                   <span>🍽 Meja</span>
-                  {badgeOranye(mejaTerisi)}
+                  {badgeOranye(mejaTerisi, mejaGagal, "nav-lencana-meja")}
                 </NavLink>
               )}
               {/* Menu STOK hanya di KANTOR (owner/admin). Di cabang & CK, staf
@@ -503,14 +541,17 @@ export function Layout() {
               {isManajemen && penuh ? (
                 <NavLink to="/stok" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
                   <span>📦 Stok</span>
-                  {stokKritis > 0 && (
-                    <span
-                      className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
-                      title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
-                    >
-                      {stokKritis}
-                    </span>
-                  )}
+                  {stokGagal
+                    ? badgeOranye(0, stokGagal, "nav-lencana-stok")
+                    : stokKritis > 0 && (
+                        <span
+                          data-testid="nav-lencana-stok"
+                          className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1 text-xs font-bold text-white ${adaHabis ? "bg-red-600" : "bg-amber-500"}`}
+                          title={adaHabis ? "Ada bahan habis" : "Ada bahan menipis"}
+                        >
+                          {stokKritis}
+                        </span>
+                      )}
                 </NavLink>
               ) : (
                 <>
@@ -537,8 +578,13 @@ export function Layout() {
               {!timDiCk && (
                 <NavLink to="/penerimaan" className={(s) => `${linkClass(s)} flex items-center gap-2`}>
                   <span>📥 Penerimaan Barang</span>
-                  {kirimanMenunggu > 0 && (
-                    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white">
+                  {penGagal ? (
+                    badgeOranye(0, penGagal, "nav-lencana-penerimaan")
+                  ) : kirimanMenunggu > 0 && (
+                    <span
+                      data-testid="nav-lencana-penerimaan"
+                      className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-xs font-bold text-white"
+                    >
                       {kirimanMenunggu}
                     </span>
                   )}
@@ -564,15 +610,15 @@ export function Layout() {
                   )}
                   <NavLink to="/produksi" className={navFlex}>
                     <span>🏭 Produksi Bahan Baku</span>
-                    {badgeOranye(produksiBelum)}
+                    {badgeOranye(produksiBelum, prodGagal, "nav-lencana-produksi")}
                   </NavLink>
                   <NavLink to="/pembelian" className={navFlex}>
                     <span>🛒 Beli Bahan Baku</span>
-                    {badgeOranye(beliBelum)}
+                    {badgeOranye(beliBelum, beliGagal, "nav-lencana-beli")}
                   </NavLink>
                   <NavLink to="/perlengkapan/beli" className={navFlex}>
                     <span>🧺 Beli Perlengkapan</span>
-                    {badgeOranye(perlengkapanBelum)}
+                    {badgeOranye(perlengkapanBelum, bpGagal, "nav-lencana-perlengkapan")}
                   </NavLink>
                   {/* pindahkan stok READY antar lokasi (mis. ganti barang rusak) */}
                   <NavLink to="/transfer-stok" className={linkClass}>

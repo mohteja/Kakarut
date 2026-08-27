@@ -122,7 +122,7 @@ function AksiMenu({
  */
 function TempatSOModal({ karyawan, onClose }: { karyawan: Karyawan; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: tempatGagal } = useQuery({
     queryKey: ["karyawan-tempat", karyawan.user_id],
     queryFn: () => api<KaryawanTempatDto>(`/karyawan/${karyawan.user_id}/tempat`),
   });
@@ -177,6 +177,8 @@ function TempatSOModal({ karyawan, onClose }: { karyawan: Karyawan; onClose: () 
           <div className="py-8 text-center">
             <Spinner />
           </div>
+        ) : tempatGagal ? (
+          <ErrorText error={tempatGagal} />
         ) : (data?.tersedia.length ?? 0) === 0 ? (
           <div className="py-6 text-center text-sm text-stone-400">
             Belum ada tempat penyimpanan di cabang ini.
@@ -232,12 +234,12 @@ export function KaryawanPage() {
     queryFn: () => api<Karyawan[]>("/karyawan"),
   });
   // arsip = karyawan yang sudah keluar; riwayatnya tetap bisa dilihat
-  const { data: arsip = [] } = useQuery({
+  const { data: arsip = [], error: arsipGagal } = useQuery({
     queryKey: ["karyawan", "arsip"],
     queryFn: () => api<Karyawan[]>("/karyawan?arsip=true"),
   });
   // undangan pending (alur "menunggu diundang") + form undang via email
-  const { data: undangan = [] } = useQuery({
+  const { data: undangan = [], error: undanganGagal } = useQuery({
     queryKey: ["undangan"],
     queryFn: () => api<UndanganKaryawanRow[]>("/karyawan/undangan"),
   });
@@ -255,7 +257,7 @@ export function KaryawanPage() {
   const [aktivitasFor, setAktivitasFor] = useState<Karyawan | null>(null);
   // Modal penugasan tempat SO (petugas opname) seorang karyawan kasir/tim
   const [tempatFor, setTempatFor] = useState<Karyawan | null>(null);
-  const { data: aktivitas } = useQuery({
+  const { data: aktivitas, error: aktivitasGagal } = useQuery({
     queryKey: ["karyawan-aktivitas", aktivitasFor?.user_id],
     queryFn: () =>
       api<{ rows: AktivitasRow[] }>(`/karyawan/${aktivitasFor!.user_id}/aktivitas`),
@@ -399,7 +401,7 @@ export function KaryawanPage() {
             tab === "arsip" ? "bg-orange-600 text-white" : "bg-white text-stone-600 hover:bg-stone-100"
           }`}
         >
-          🗄 Arsip ({arsip.length})
+          🗄 Arsip ({arsipGagal ? "!" : arsip.length})
         </button>
       </div>
 
@@ -518,6 +520,7 @@ export function KaryawanPage() {
       )}
 
       {/* Undangan yang masih menunggu diterima (alur "menunggu diundang") */}
+      <ErrorText error={undanganGagal} />
       {tab === "aktif" && undangan.length > 0 && (
         <Card className="mt-4 p-4">
           <h2 className="mb-1 font-bold text-stone-800">📨 Undangan Tertunda ({undangan.length})</h2>
@@ -877,7 +880,9 @@ export function KaryawanPage() {
         onClose={() => setAktivitasFor(null)}
         title={`🗒 Aktivitas — ${aktivitasFor?.nama ?? ""}`}
       >
-        {aktivitas && aktivitas.rows.length > 0 ? (
+        {aktivitasGagal ? (
+          <ErrorText error={aktivitasGagal} />
+        ) : aktivitas && aktivitas.rows.length > 0 ? (
           <ol className="max-h-96 space-y-1.5 overflow-y-auto text-sm">
             {aktivitas.rows.map((a) => (
               <li key={a.id} className="rounded-lg border border-stone-100 px-2.5 py-1.5">

@@ -198,7 +198,7 @@ export function ResepPage() {
   // Katalog menu — hanya untuk memberi tahu BERAPA menu yang HPP-nya ikut
   // bergerak bila harga bahan ini diperbarui. Owner/admin saja; peran pelaksana
   // tak menyentuh harga sehingga tak perlu request tambahan.
-  const { data: menuSemua } = useQuery({
+  const { data: menuSemua, error: menuSemuaGagal } = useQuery({
     queryKey: ["menu"],
     enabled: bolehUbah,
     queryFn: () => api<MenuDto[]>("/menu"),
@@ -1130,6 +1130,7 @@ export function ResepPage() {
                           <div>
                             Harga batch: <b>{formatRupiah(dipilih.harga_beli)}</b> →{" "}
                             <b>{formatRupiah(hargaBatch)}</b>
+                            <ErrorText error={menuSemuaGagal} />
                             {menuTerdampak > 0 && (
                               <>
                                 {" "}

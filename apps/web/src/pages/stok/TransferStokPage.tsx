@@ -123,7 +123,7 @@ export function TransferStokPage() {
   const bahanBeli = saldoRows.filter((r) => r.pengadaan === "beli");
   const bahanProduksi = saldoRows.filter((r) => r.pengadaan === "produksi");
 
-  const { data: riwayat, isLoading: riwayatLoading } = useQuery({
+  const { data: riwayat, isLoading: riwayatLoading, error: riwayatGagal } = useQuery({
     queryKey: ["transfer-stok"],
     queryFn: () => api<{ rows: TransferStokFaktur[] }>("/transfer-stok"),
   });
@@ -651,6 +651,8 @@ export function TransferStokPage() {
       <h2 className="mb-2 text-lg font-bold text-stone-800">Riwayat Transfer</h2>
       {riwayatLoading ? (
         <Spinner />
+      ) : riwayatGagal ? (
+        <ErrorText error={riwayatGagal} />
       ) : (riwayat?.rows ?? []).length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
           Belum ada transfer stok.

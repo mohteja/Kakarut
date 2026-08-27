@@ -31,7 +31,7 @@ export function ProfilPage() {
     queryFn: () => api<ProfilDto>("/profil"),
   });
   // kegiatan terakhir akun ini (jejak log faktur: buat/ubah tahap/terima)
-  const { data: aktivitas } = useQuery({
+  const { data: aktivitas, error: aktivitasGagal } = useQuery({
     queryKey: ["profil-aktivitas"],
     queryFn: () => api<{ rows: AktivitasRow[] }>("/profil/aktivitas"),
   });
@@ -123,6 +123,7 @@ export function ProfilPage() {
       )}
 
       {/* Aktivitas terakhir (jejak kegiatan faktur) */}
+      <ErrorText error={aktivitasGagal} />
       {aktivitas && aktivitas.rows.length > 0 && (
         <Card className="mb-4 p-4">
           <h2 className="mb-2 font-bold text-stone-800">🗒 Aktivitas Saya</h2>
