@@ -50,6 +50,75 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Baris BARU dan tenant-nya: arah TULIS yang tak pernah punya gerbang — server (uji) — 2026-08-27 — **BERSIH**
+
+- **Kenapa vena ini ada**: sapuan pengurungan tenant hanya melihat
+  `select`/`update`/`delete` — ketiganya punya `.where`, dan pengurungannya
+  terbaca di sana. **`insert` tak punya `.where` sama sekali**, jadi ia tak
+  pernah masuk populasi mana pun. Pertanyaannya juga berbeda: bukan "baris mana
+  yang terbaca" melainkan **"nilai `companyId` yang DITULIS datang dari mana"**.
+  Kalau ia dipungut dari permintaan, satu penyewa menanam baris di ruang
+  penyewa lain.
+
+- **Ledger sudah menulis celahnya sendiri**: vena "Isolasi tenant pada
+  PENULISAN" (2026-08-22) menyapu 162 penulisan lalu menyatakannya bersih —
+  *"tapi sapuannya hidup di scratchpad dan tak pernah jadi gerbang."* Sampai
+  hari ini `insert` memang tak dijaga apa pun.
+
+- **KENAPA BARU BISA DISAPU SEKARANG**: nilainya hampir tak pernah ada di situs
+  `insert`-nya. `.values(items.map((b) => ({ companyId, … })))` ·
+  `.values(rows)` yang dirakit belasan baris di atas · `.values(values)` yang
+  diisi `.push` · `.values([...barisFaktur(a), ...barisFaktur(b)])`. Properti
+  RINGKAS, callback, larik ber-`push`, pembantu bernama, elemen sebar — tak satu
+  pun terbaca regex. Yang dibutuhkan resolusi per-LINGKUP, dan itu baru ada
+  sejak dua putaran terakhir.
+
+- **Populasi, terhitung**: **42 dari 59 tabel** punya kolom `companyId`;
+  **101 insert** menulis ke tabel-tabel itu (dari 128 insert seluruhnya).
+
+  | kelas | jumlah | arti |
+  |---|---|---|
+  | `AUTH` | **48** | `auth.company_id!` langsung dari token |
+  | `PARAMETER` | **25** | tenant diputuskan PEMANGGIL — terdaftar per berkas beralasan |
+  | `TURUNAN` | **1** | diwarisi baris induk yang dibaca terkurung (`b.companyId` saat faktur maju tahap) |
+  | `E` | **27** | berkas yang memang lintas perusahaan (seed, admin, auth, onboarding) |
+  | **`KLIEN`** | **0** | ← tenant dari permintaan; yang tak boleh ada |
+  | **`TANPA`** | **0** | ← insert ke tabel ber-tenant yang lupa mengisinya |
+
+  **BERSIH**: tak satu pun dari 101 insert memungut `companyId` dari badan atau
+  kueri permintaan. Yang dibayar putaran ini bukan temuan melainkan **gerbang
+  yang menjaga kedua angka nol itu tetap nol**.
+
+- **Pemindainya salah EMPAT kali sebelum satu tuduhan pun ditulis**, dan tiap
+  kali karena satu bentuk perakit baris yang NYATA ada di repo ini:
+
+  | bentuk | akibat versi sebelumnya |
+  |---|---|
+  | `.map((b) => ({ … }))` | `ParenthesizedExpression` simpul tersendiri di pohon Oxc → **20 insert** terbaca "tak menyebut companyId", dua di antaranya ber-`auth.company_id!` terang-terangan |
+  | `const values = []` lalu `values.push({ … })` | larik terbaca kosong |
+  | `const baris = (r) => r.map(…)` | pembantu ber-badan EKSPRESI tak punya `return` untuk dicari |
+  | `values([...baris(a), ...baris(b)])` | elemen SEBAR tak dibuka → seluruh larik kosong |
+
+  Keempatnya kini uji PREMIS di gerbangnya: **TANPA 20 → 7 → 4 → 1 → 0**, dan
+  tiap penurunan punya sebab yang bisa ditunjuk.
+
+- **Bukti merah, empat arah**: `companyId: body.company_id` → `KLIEN` ·
+  `c.req.valid('json')` lewat satu nama → tetap `KLIEN` · insert tanpa
+  `companyId` → `TANPA` · **PASANGAN**: dari token → `AUTH`, dan tabel yang
+  memang tak punya kolom tenant (`saleItems`) tak ikut disapu sama sekali.
+
+- **Utang yang ditulis**: kelas `PARAMETER` (25 situs, 14 berkas) berarti
+  "tenant diputuskan pemanggil", dan itu masih diverifikasi TANGAN — daftarnya
+  di gerbang, tiap berkas beralasan. Membuktikannya mekanis menuntut
+  penelusuran antar-fungsi yang sama dengan utang putaran lalu; keduanya kini
+  satu utang: **parameter → destrukturisasi → tiap situs panggil**.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.427** (205 berkas, +13 uji) ·
+  tak satu baris pun `src` tersentuh, jadi `verify-api` & cakupan rute tak bisa
+  terpengaruh dan tidak dijalankan.
+
+---
+
 ## Gerbang ISOLASI TENANT: vonis "aman" yang buktinya tak pernah terbaca — server (uji) — 2026-08-27
 
 - **Kenapa vena ini ada**: putaran lalu mencatat penyapu yang masih berbasis
