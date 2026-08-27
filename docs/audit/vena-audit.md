@@ -50,6 +50,113 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Periksa-dulu-baru-tulis: siapa yang menahan saat dua orang bersamaan — server — 2026-08-27
+
+- **Kenapa vena ini ada**: repo ini punya **21 berkas uji** yang menyebut
+  `FOR UPDATE`, advisory lock, atau balapan — dan tiap satunya menguji **SATU
+  pintu**. Yang tak pernah ada: sapuan atas seluruh populasi. Halaman pertama
+  ledger ini menulis kenapa itu penting: *"Tak satu pun ditemukan dengan
+  membaca kode; semuanya muncul dari menyapu seluruh populasi lalu memisahkan
+  yang menyimpang."*
+
+- **Aturannya, lagi-lagi, sudah ditulis lengkap** — di `src/lib/kunci.ts`,
+  beserta ketiga jawaban sahnya:
+
+  > *"Pola 'periksa dulu, baru tulis' hanya aman bila ada sesuatu untuk
+  > DIKUNCI. … Indeks unik menutup celah itu bila aturannya bisa ditulis
+  > sebagai kesamaan kolom … Yang TIDAK bisa: aturan bertindih rentang
+  > tanggal. Untuk itu kuncinya harus diambil atas NAMA aturan."*
+
+  Dan `modules/pengajuan/routes.ts:337` menamai yang keempat: *"Idiomnya sudah
+  baku di basis kode ini — lihat persetujuan penyesuaian opname: UPDATE
+  bersyarat status + periksa barisnya + 409/404."*
+
+- **Populasi**: **58 fungsi di 32 berkas** yang MEMBACA lalu MENULIS **tabel
+  yang sama** (baca tabel A lalu tulis tabel B bukan balapan — penulisannya
+  atomik, dan induk yang terhapus bersamaan hanya membuatnya gagal FK).
+  `KUNCI` **21** · `BENTROK` **12** · `KLAIM` **16** · `KLAIM_BUTA` **5** ·
+  `TELANJANG` **4**.
+
+- **TEMUAN, dan ia tanda tangan sesi ini dalam bentuk paling murni.** Tiga
+  fungsi mengerjakan pekerjaan yang sama persis — mengisi kode unik-per-
+  perusahaan saat boot & seed, dengan keunikan dijamin sebuah `Set` yang hidup
+  di dalam SATU proses:
+
+  | pengisi kode | advisory lock | indeks unik |
+  |---|---|---|
+  | `backfillEmployeeCode` (users) | **ya**, dengan komentar *"dua instance server yang boot bersamaan tak mengisi kode ganda"* | **ya** (`memberships_company_kode_uq`) |
+  | `backfillKodeBahan` | **tidak** | **tidak** |
+  | `backfillKodeMenu` | **tidak** | **tidak** |
+
+  Komentar kolomnya bahkan menuliskan jaminan yang tak berlaku: *"kode produk
+  ringkas … unik per company **via generator**"*.
+
+- **TERUKUR, bukan dinalar** (basis data seed, 232 bahan, 0 kode ganda):
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | dua `backfillKodeBahan` serentak | terisi **232 + 230** | terisi **232 + 0** |
+  | kode ganda dalam satu perusahaan | **2** (`BB264`, `BB238` — masing-masing dua bahan) | **0** |
+
+  Dan ini bukan keadaan langka: penyebaran repo ini memutar instance baru
+  sebelum yang lama berhenti, jadi dua boot yang bertindih adalah keadaan
+  NORMAL.
+
+- **Perbaikannya memakai rumah yang sudah ada**: `kunciBackfillKode` di
+  `src/lib/kunci.ts` — satu tempat, dengan angka pengukurannya tertulis di
+  situ, supaya pengisi kode KEEMPAT tak lahir tanpa penahan.
+
+- **PEMINDAINYA SALAH TIGA KALI, dan ketiganya tertangkap dengan membaca
+  situs yang dituduhnya** — bukan dengan membaca pemindainya:
+
+  | # | tuduhan | kenapa salah |
+  |---|---|---|
+  | 1 | `POST /stok/opname/sesi/:id/acc` | ia memulangkan `{ ok, jumlah: updated.length }` — untuk operasi borongan, mengabarkan BERAPA yang kena lebih jujur daripada melempar. Dan pintu ini justru yang **dirujuk** `pengajuan/routes.ts` sebagai contoh baku. |
+  | 2 | `backfillKodeBahanTx` — **perbaikanku sendiri** | regex penahannya hanya kenal `kunciAntrean`, bukan `kunciBackfillKode` yang baru lahir. Sekarang pembantunya dikenali dari BENTUK nama (`kunci…(`), bukan dari daftar nama — daftar nama adalah cara gerbang menuduh pembantu berikutnya. |
+  | 3 | `POST /shift/kunci-hitungan` | ia membaca ULANG sesudah klaimnya, dan komentarnya sudah menulis alasannya: *"yang kalah balapan harus melaporkan nominal yang BENAR-BENAR tersimpan, bukan yang ia kirim."* Idiom KELIMA, yang gerbangnya lalu diajari. |
+
+- **TUDUHAN YANG DICABUT sesudah ditelusuri**: `catatRealisasiDana`
+  (`faktur_dana`, uang) terlihat telanjang — baca total, hitung selisih,
+  sisipkan. Ditelusuri ke KEDUA pemanggilnya: keduanya berjalan sesudah klaim
+  tahap faktur (`WHERE status = <yang dibaca> AND qty = <yang dibaca>` +
+  `returning` + 409 `status_berubah`), jadi permintaan kedua kalah di situ dan
+  tak pernah sampai. Batas "berlingkup satu fungsi" yang sudah ditulis, bekerja
+  persis seperti yang ditulis.
+
+- **Angka sebelum → sesudah**: tertuduh **11 → 9** (dua backfill dikunci) ·
+  dari 9 sisanya **4 `sah`** (alasannya bisa ditunjuk) dan **5 `utang`** yang
+  jumlahnya dipaku `MAKS_UTANG` dengan syarat batasnya wajib TURUN.
+
+- **Utang yang diakui, berangka, dengan nama** (5): `catatAbsen` — cap absen
+  berikutnya ditentukan dari cap terakhir yang dibaca, dan `attendances` tak
+  punya indeks unik apa pun · `tibaBeliPerlengkapan` — klaimnya ADA tapi
+  hasilnya tak dilihat, jadi yang kalah tetap dibalas sukses · `execPenjualan`
+  · pembuatan penyewa · `pastikanSuperAdmin`, yang tetangganya di berkas
+  sebelah sudah menunjukkan jawabannya.
+
+- **Bukti merah pada pohon SUNGGUHAN, dua arah**: mencabut kunci dari
+  `backfillKodeBahan` → merah (`expected 'KLAIM_BUTA' to be 'KUNCI'`); fungsi
+  baru yang membaca lalu menyisipkan tabel yang sama → merah menyebut berkas,
+  baris, kelas, dan tabelnya. **PASANGAN**: baca tabel A lalu tulis tabel B
+  bukan balapan · keempat penahan diterima · klaim yang hasilnya tak dilihat
+  TETAP tertuduh · klaim yang dibaca ulang diterima. **CAKUPAN** dipaku: ≥45
+  situs, ≥25 berkas, dan tiap kelas aman wajib ≥10 anggota — nol di salah
+  satunya berarti pemindainya buta, bukan repo-nya bersih.
+
+- **Batas detektor, ditulis jujur**: lingkupnya satu FUNGSI, jadi kunci yang
+  dipegang PEMANGGIL tak terlihat (dan itulah yang membuat tuduhan
+  `catatRealisasiDana` lahir) · nama tabel dibandingkan sebagai TEKS argumen,
+  jadi alias & subquery di SQL mentah tak terlihat · "hasilnya diperiksa"
+  dinilai dari pengenal yang muncul di `if`/`throw`/`c.json` di fungsi yang
+  sama.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.509** (210 berkas) ·
+  **`verify-api.sh` 3.245 lolos / 0 gagal** (DB segar) · `audit:invarian`
+  **26/26**. **Playwright e2e tidak dijalankan** — `apps/web` tak tersentuh
+  satu baris pun (`git status` sebagai buktinya).
+
+---
+
 ## Daftar yang DIPOTONG, dan terbaca sebagai lengkap — server + web — 2026-08-27
 
 - **Kenapa vena ini ada**: empat putaran terakhir mengejar satu kelas di tiga
@@ -6819,6 +6926,9 @@ berlaku di situ).
       101 situs / 44 ber-`??` / 40 runtuh; yang mahal justru BUKAN di situs
       itu melainkan di `catch (_) { return []; }` milik antrean offline —
       Rp150.000 pending terbaca 0 perintah dengan `hasError` tetap false
+- [ ] **Periksa-dulu-baru-tulis tanpa penahan** — 9 situs tersisa (4 `sah`,
+      **5 `utang` yang jumlahnya dipaku**); yang paling terasa `catatAbsen`,
+      karena `attendances` tak punya indeks unik apa pun
 - [ ] **Pemotongan daftar yang tak dikatakan** — 23 situs tersisa (14 `sah`,
       **9 `utang` yang jumlahnya dipaku**), plus sisi ponsel `GET
       /stok/penyesuaian` yang headernya dikirim tapi belum dirender
