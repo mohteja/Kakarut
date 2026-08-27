@@ -126,3 +126,26 @@ export function angkaAtauNull(teks: string | number | null | undefined): number 
   const n = angkaDari(teks);
   return Number.isNaN(n) ? null : n;
 }
+
+/**
+ * PEMBAGIAN YANG BOLEH TAK PUNYA JAWABAN.
+ *
+ * Rumus inti repo ini menjawab pembagi nol dengan **0**, dan nol itu dipercaya.
+ * Contoh yang terukur lewat HTTP: menu komplimen (`harga_jual = 0`) ber-HPP
+ * Rp2.083 dinilai `food_cost_persen: 0` — layar mewarnainya HIJAU, "food cost
+ * sempurna", padahal kau mengeluarkan Rp2.083 dan tak menerima apa pun.
+ *
+ * Lencana yang menerima angka itu SUDAH menuliskan aturannya lebih dulu
+ * (`MenuListPage.tsx`): *"'—' adalah jawaban yang benar, dan 0% akan terbaca
+ * sebagai food cost sempurna."* Yang kurang bukan aturannya — melainkan
+ * rumusnya, yang tak pernah bisa mengatakan "tak diketahui".
+ *
+ * `null` = **tak bisa dihitung**. Ia BUKAN pengganti nol yang sah: pembilang
+ * nol dengan penyebut wajar tetap `0`, sebab itu jawaban yang benar-benar
+ * diketahui.
+ */
+export function bagiAtauNull(pembilang: number, penyebut: number): number | null {
+  if (!Number.isFinite(pembilang) || !Number.isFinite(penyebut) || penyebut === 0) return null;
+  const hasil = pembilang / penyebut;
+  return Number.isFinite(hasil) ? hasil : null;
+}

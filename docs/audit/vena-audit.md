@@ -50,6 +50,1076 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Penghapusan yang GAGAL, dihitung sebagai berhasil — server+web+mobile — 2026-08-27
+
+- **Kenapa vena ini ada**: antrean formal ledger habis di ANTREAN KESEBELAS,
+  jadi putaran ini lahir dari sensus baru atas kelas yang **belum pernah disapu
+  sekali pun** — dan yang gerbang repo ini sendiri sudah namai, di kepala
+  `verify-api.sh`: *"galat yang ditelan lalu muncul sebagai kebingungan di
+  tempat lain."*
+
+- **Populasi, terhitung baca-saja**: **270 blok `catch`** (server 69 · web 45 ·
+  mobile 156) → **24 berbadan KOSONG** → **12 tanpa satu kata pun alasan**
+  (server 5 · mobile 7). Sepuluh di antaranya BENAR dan cuma perlu alasannya
+  ditulis; dua sisanya satu bentuk, dan bentuk itulah temuannya.
+
+- **Aturan yang dinamai**: *menghapus boleh diam HANYA untuk "sudah tidak ada";
+  kegagalan lain tak boleh dihitung sebagai berhasil — dan tak boleh membuang
+  catatan yang menamai objeknya.* Aturan sapuannya: **menelan galat itu jujur
+  HANYA bila alasannya tertulis.**
+
+- **Bentuknya**: kontrak `StorageDriver.hapus` menuliskan batasnya sendiri —
+  *"berkas yang sudah tak ada bukan galat"* — sementara kedua driver LOKAL
+  menulisnya `unlink(...).catch(() => {})`, menelan `EPERM`/`EISDIR`/`EACCES`/
+  `EROFS` juga. Saudara kandungnya di R2 melempar (`DeleteObject` idempoten
+  untuk kunci hilang). **Satu antarmuka, dua kejujuran yang berlawanan** — dan
+  yang lokal itulah yang dipakai pemasangan tanpa R2. Tiga pintu memanggilnya,
+  dan ketiganya membuang baris/hitungan yang MENAMAI objeknya tanpa tahu
+  objeknya masih ada; satu di antaranya bahkan menuliskan alasannya **lebih
+  sempit daripada yang dilakukannya** (`/* objek mungkin sudah hilang */`).
+
+- **TERUKUR lewat HTTP** (DB dev segar + disk sungguhan; baris suntikan
+  dibuktikan terbaca lewat `GET /admin/sistem/backup` lebih dulu; kegagalan
+  hapus dipaksa dengan mengganti objeknya jadi DIREKTORI bernama sama —
+  `unlink` atas direktori gagal bahkan untuk root):
+
+  | pintu | sebelum | sesudah |
+  |---|---|---|
+  | `DELETE /admin/sistem/backup/:id` | **200 `{"ok":true}`** · baris 1 → 0 · objek **tetap ada** | **502** bernama · baris **dipertahankan** · objek tetap ada |
+  | `POST /admin/sistem/backup/retensi` | **`{"dibuang":1}`** · baris 1 → 0 · objek **tetap ada** | `{"dibuang":0,"gagal":1}` · baris **dipertahankan** (retensi berikutnya mencoba lagi) |
+  | `POST /admin/sistem/sapu-unggahan` | **`dihapus: 3`** padahal hanya **2** hilang (yang gagal masih dilayani **HTTP 200**) | `dihapus` hanya yang benar terhapus + medan `gagal_hapus` tersendiri |
+
+  Retensi diukur dengan `BACKUP_KEEP=1` pada mesin ukur, dan sapuan dengan satu
+  berkas ber-`chattr +i`. Keduanya cara ukur, bukan cara uji — §268 memakai
+  trik direktori yang tak butuh hak istimewa sama sekali.
+
+- **Tindak**: `hapusBerkasLokal(baseDir, key)` lahir di
+  `modules/upload/jalur-aman.ts` (tetangga `jalurDalam`, yang sudah dipakai
+  kedua driver lokal) — menelan **hanya `ENOENT`**, melempar sisanya; komentar
+  `/* sudah tidak ada — idempoten */` **pindah ke sana**, tempat ia benar.
+  `LocalDriver` & `LocalCadanganStorage` memanggilnya; **driver R2 tak
+  disentuh** — ia sudah persis kontraknya. Lalu ketiga pintu memutuskan sendiri:
+  DELETE melempar 502 bernama (galat aslinya **hanya ke log**, tidak ke
+  penyewa); retensi **melewati** barisnya dan menghitung `gagal` terpisah;
+  sapuan `try/catch` per berkas agar satu berkas bandel tak menghentikan
+  pembersihan ribuan lainnya. Sepuluh telanan yang BENAR diberi alasan tertulis,
+  dan `jadwalkanPangkasErrorLog` naik satu tingkat: dari menelan jadi
+  **mencatat** (kalau ia gagal terus, tabel log tumbuh tanpa batas dan tak ada
+  satu pun tanda kenapa).
+
+- **Detektor DIBUKTIKAN bisa menuduh — sesudah EMPAT generasi**, dan tiap
+  generasi diperbaiki karena satu kesalahan yang bisa ditunjuk:
+
+  | generasi | cacatnya | akibat |
+  |---|---|---|
+  | 1 | komentar tak dibutakan | pemindainya menuduh **prosa di komentarnya sendiri** (`hapusBerkasLokal` mengutip bentuk lamanya) |
+  | 2 | "komentar mana pun dalam 6 baris ke atas" | **JSDoc sebuah fungsi memaafkan telanan di baris pertama badannya** (`jadwalkanPangkasErrorLog`) |
+  | 3 | ditelusuri dari token `.catch`, bukan awal pernyataannya | 2 tuduhan palsu (`app.ts`, `sync/idempoten.ts` — `.catch` mendarat di baris keempat rantai yang sama) |
+  | 4 | "sebelum situs" dihitung sampai awal pernyataan **juga untuk bentuk blok** | komentar yang menjelaskan ISI `try` memaafkan telanannya (`api_client.dart:185` & `:704`) |
+
+  Yang berlaku sekarang: situs dicari di sumber yang **komentarnya dibutakan**;
+  alasan dicari di sumber **mentah** — di dalam badan `catch`, di tengah rantai
+  tepat sebelum `.catch`, atau pada baris komentar tepat di atas pernyataannya
+  (bentuk blok: di atas kata `try`-nya) — dan komentar di atas `{` sebuah blok
+  **tidak** dihitung, sebab itu doc deklarasinya. Keempat kelolosan itu dipaku
+  jadi uji PREMIS di kedua gerbang.
+
+- **Bukti merah**: bentuk lama (`unlink(...).catch(() => {})`) direkonstruksi di
+  dalam uji dan terbukti **memulangkan sukses** untuk direktori yang sama yang
+  ditolak `hapusBerkasLokal`. Ketiga pin pintu diadu dengan kode yang
+  dikembalikan ke bentuk lamanya: **5 dari 13 uji memerah**, dan hijau lagi
+  begitu dipulihkan.
+
+- **Pasangan yang menentukan**: idempotensi TIDAK ikut ditutup — cadangan yang
+  objeknya **memang sudah hilang** tetap **200** dan barisnya tetap dibuang;
+  cadangan wajar tetap **200** dan berkasnya ikut hilang; keempat pernyataan
+  §253 (dirujuk selamat · yatim tua terhapus · yatim segar selamat · mode hitung
+  tak menghapus) tetap hijau.
+
+- **Dua ralat rencana, dicatat bukan disembunyikan**: (1) rencananya menuduh
+  `BackupPage.tsx` tak menyampaikan penolakan 502 — dibaca sampai habis,
+  `<ErrorText error={hapus.error} />` sudah merendernya merah apa adanya;
+  cabang `onError` yang sempat kutulis **dicabut** sebagai mubazir. (2) yang
+  ternyata memang salah di halaman itu hal lain: kotak kabarnya `string | null`
+  yang **selalu dirender hijau**, jadi *"Gagal mengunduh cadangan."* tampil
+  sebagai kabar baik. Diberi nada (`{teks, gagal}`) — kegagalan yang dicetak
+  hijau adalah kegagalan yang dipercaya sebagai keberhasilan.
+
+- **Satu pintu KELUAR dari daftar "tak terjangkau"**:
+  `POST /admin/sistem/backup/retensi` selama ini terdaftar `DILUAR_JANGKAUAN`
+  ("mengubah retensi cadangan mesin yang menjalankannya"). Alasannya terlalu
+  takut: dengan `BACKUP_KEEP` bawaan 14 ia tak membuang apa pun pada suite.
+  Cakupan rute **273 → 274**.
+
+- **Batas detektor, ditulis jujur**:
+  - hanya `catch` **berbadan kosong** yang terhitung. `catch` yang cuma
+    `console.warn` lalu membuang kegagalannya **di luar populasi ini** — kelas
+    tetangga yang dinyatakan **belum disapu**, bukan bersih;
+  - komentar tepat di atas dihitung sebagai alasan tertulis, dan **mutunya tak
+    diperiksa**: komentar yang membicarakan hal lain tetap lolos. Yang dijaga
+    adanya KEPUTUSAN tertulis, bukan mutunya;
+  - retensi & sapuan yatim **tak** diukur ulang CI dengan kegagalan yang
+    dipaksa: keduanya butuh DB, dan memaksa `unlink` gagal atas berkas yang
+    di-`list` menuntut `chattr +i` (butuh CAP_LINUX_IMMUTABLE — tak ada di CI).
+    Yang dijaga gerbang adalah **bentuknya** (`continue` sebelum `db.delete`,
+    penghitung `gagalHapus` terpisah) berikut bukti merahnya; angka
+    ujung-ke-ujungnya adalah pengukuran tangan di atas;
+  - **`await` yang hilang (promise mengambang) diperiksa dan TIDAK diusulkan**:
+    repo ini tak punya ESLint sama sekali, jadi kelasnya memang terbuka — tapi
+    detektor TEKS menuduh **99 dari 101** panggilan async di posisi pernyataan,
+    hampir semuanya argumen `Promise.all([...])` atau `mutationFn: () => api(…)`.
+    Kelas itu butuh **tipe**, bukan teks. Diusulkan untuk putaran lain, dengan
+    angkanya.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.396** (203 berkas) ·
+  `verify-api` **3.189 lolos, 0 gagal** vs Postgres **segar** (§268: 16
+  pernyataan) · cakupan rute **273 → 274** (satu pintu yang dulu "tak
+  terjangkau") · `audit:invarian` 26/26 · build web · Playwright e2e 6/6 ·
+  `flutter analyze` bersih · `flutter test` **564** (+7).
+
+---
+
+## Pembagi nol dijawab NOL, dan nol itu dipercaya — server+web+mobile — 2026-08-26
+
+- **Kenapa**: sembilan putaran menyapu *siapa yang boleh*, *punya siapa*, *apa
+  yang dirakit*, dan *apa yang berhenti berlaku*. Yang belum pernah disapu:
+  **apa yang dijawab ketika sebuah angka TAK BISA dihitung**
+- **Aturannya sudah dinamai & dibayar sesi ini** — vena biaya menetapkan
+  **`null`, bukan `0`** (*"nol tercetak 'Rp 0' dan dipercaya"*), ditegakkan di
+  DTO dan di layar (`TAK_DIKETAHUI = "—"`). Ia **tidak** ditegakkan di rumus
+  intinya: `foodCostPersen(hpp, hargaJual) = hargaJual > 0 ? … : 0`
+- **Dan lencana penerimanya sudah menuliskan kerusakannya lebih dulu**,
+  `MenuListPage.tsx:26-28`: *"'—' adalah jawaban yang benar, dan **0% akan
+  terbaca sebagai food cost sempurna**."* Aturannya ada, penjaganya dipasang di
+  layar, rumusnya dibiarkan tak bisa berkata "tak tahu"
+- **TERUKUR lewat HTTP** — menu komplimen (`harga_jual = 0`, sah menurut
+  skemanya: `z.number().nonnegative()`) ber-resep Rp2.083:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | `food_cost_persen` | **0** → layar **HIJAU "0,0%"** | **`null`** → "—" |
+  | posisi di Analisis Harga (urut food cost tertinggi dulu) | **77 dari 93** — di antara menu tersehat | **94 dari 94** — ekor, dengan "—" |
+  | `penyumbang[].persen_hpp` saat HPP menunya nol | **0** | **`null`** |
+  | **PASANGAN** HPP 0 tapi dijual Rp15.000 | 0 | **0** (nol yang SAH tetap nol) |
+  | **PASANGAN** porsi penyumbang menu komplimen | 100 | **100** (tak menular) |
+
+  Kau mengeluarkan Rp2.083 per porsi dan tak menerima apa pun, dan layarnya
+  memuji menu itu sebagai yang paling sehat di katalog
+- **Populasi** (pembagian ber-fallback literal `0`, komentar dibutakan, di
+  `packages/shared` + `apps/server`): **10 situs** →
+
+  | kelas | jumlah | dasar |
+  |---|---|---|
+  | dijaga **CHECK basis data** | **6** | `ingredients_isi_ck` di migrasi `0000` — cabang nolnya tak pernah menyala |
+  | **PENJAGA_AWAL** | **1** | `hariTerjadwal()` dibuka `if (perHari < 1) return []` |
+  | **NOL yang BENAR** | **1** | `refund.ts` — nota tanpa PB1 memang mengembalikan nol rupiah |
+  | **NOL yang dipercaya, TERJANGKAU** | **2** | `foodCostPersen` · `persen_hpp` — keduanya diperbaiki |
+
+  Sisa **8** setelah perbaikan, semuanya terdaftar dengan kelas + alasan
+- **Premisnya DIPERIKSA, bukan diyakini**: gerbangnya membaca
+  `apps/server/drizzle/*.sql` dan menuntut `ingredients_isi_ck` benar-benar ada
+  di sana. "Dijaga basis data" tak boleh jadi mantra — kalau migrasi kelak
+  mencabutnya, keenam situs itu kehilangan dasarnya dan gerbang ini yang merah
+- **Dua PRESEDEN yang sudah benar, dan itu yang membuat sisanya jadi cacat**:
+  `produksi/routes.ts:540` sudah memulangkan `null` (`b.qty > 0 ? … : (… ?? null)`),
+  dan `MenuFormPage.tsx` sudah menulis `"—"` lewat penjaga tulisan tangannya
+  sendiri. **Ralat atas rencanaku**: rencana menyebut layar itu memajang
+  "0.0%" — membacanya utuh, ia SUDAH benar. Yang salah rumusnya, dan penjaga
+  di layar itu kini dilepas karena aturannya sudah tinggal di rumusnya
+- **Satu rumah**: `bagiAtauNull(pembilang, penyebut)` di
+  `packages/shared/src/angka.ts` — rumah yang sudah menampung
+  `angkaDari`/`angkaAtauNull`. `null` = **tak bisa dihitung**; ia BUKAN
+  pengganti nol yang sah
+- **Typechecker yang mengenumerasi populasinya**, bukan tebakan:
+  `MenuDtoPenuh.food_cost_persen` diubah `number` → `number | null` — dan
+  justru *itulah* kebohongannya, sebab `hpp` selalu ada (ia jumlah) sementara
+  food cost adalah PEMBAGIAN yang penyebutnya boleh nol. Typechecker lalu
+  menunjuk **11 situs** di server (6) & web (5): pengurutan analisis, dampak
+  harga, tiga situs ambang/warna, dan porsi penyumbang
+- **Keputusan yang ditulis eksplisit, bukan lewat `?? 0`**:
+  - pengurutan analisis: yang tak terhitung diurut **terpisah di ekor** —
+    menyamakannya dengan 0% membuatnya mengendap di antara menu tersehat;
+  - dampak harga: yang tak terhitung **tak bisa menyeberang ambang** (`continue`),
+    sebab `?? 0` akan membuat tiap menu komplimen tampak baru jatuh ke bawah
+    ambang setiap kali harga bahan naik;
+  - ponsel: `_warnaFoodCost(null)` → **abu**, bukan hijau; `lewatAmbang` →
+    `false` karena tak ada angka, dan itu ditulis di komentarnya supaya tak
+    terbaca sebagai "aman"
+- **Gerbang lama menagih dua penyesuaian, keduanya sah**:
+  `diadili-lintas-fungsi` menuduh `bagiAtauNull(p.kontribusi * 100, dto.hpp)` —
+  ekspresi aritmetika yang dioper ke fungsi yang memutuskan. Diperbaiki dengan
+  **merestrukturisasi** (rasio dihitung dulu, dikali 100 sesudahnya), bukan
+  dengan pengecualian; `lampiran-dto-utuh` menagih regenerasi Lampiran A
+- **Bukti merah, dua sisi**: bentuk LAMA direkonstruksi apa adanya di dalam uji
+  dan dibuktikan menjawab **0** untuk kasus yang sama — tanpa itu tak ada
+  yang membuktikan temuannya nyata. Dan keduanya di-assert **SEPAKAT** di jalur
+  wajar (tiga pasang angka), jadi perbaikannya tak menggeser satu angka pun
+- **Batas, jujur**:
+  - detektornya melihat bentuk **ternary → literal 0**. Pembagian yang **sama
+    sekali tanpa penjaga** (menghasilkan `Infinity`/`NaN`) tak terlihat olehnya
+    — populasi itu belum disapu, dan satu-satunya yang kutemui
+    (`perlengkapan/service.ts`) ketahuan karena kebetulan berbentuk ternary;
+  - sapuannya berhenti di `packages/shared` + `apps/server`; pembagian di
+    `apps/web` dan di Dart **tidak** disapu putaran ini;
+  - `foodCostPersen` kini `number | null`, tapi `hpp`/`harga_saran` tetap
+    `number` — keduanya penjumlahan, bukan pembagian, dan menulari mereka
+    dengan `null` akan menyebarkan ketidaktahuan ke angka yang diketahui;
+  - `MenuDto.food_cost_persen` sudah `number | null` sejak vena biaya, jadi
+    **kabelnya tak berubah bentuk** — yang berubah artinya: `null` kini berarti
+    "ditahan **atau** tak terhitung". Klien lama membacanya sama
+- **Tindak**: `packages/shared/src/angka.ts` (`bagiAtauNull`) · `hpp.ts` ·
+  `types.ts` (`MenuDtoPenuh`, `PenyumbangHpp`) · `menu/routes.ts` ·
+  `produksi/routes.ts` · `AnalisisHargaPage.tsx` · `MenuFormPage.tsx` ·
+  `pembagi-nol-tak-jadi-nol.test.ts` (9 uji) · verify-api **§267** (10 asersi) ·
+  ponsel: `format.dart` (`formatPersen`) · dua model · dua layar · `harga_test.dart` (+5 uji)
+- Gerbang: typecheck bersih · `npm test` **2.377** (202 berkas) · `verify-api`
+  **3.173 lolos, 0 gagal** vs Postgres SEGAR (§267 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6** ·
+  `flutter analyze` bersih · `flutter test` **557**
+
+---
+
+## Sajian yang DIBATALKAN dapur tetap bisa ditagih — server+web+mobile — 2026-08-26
+
+- **Kenapa**: usulan antrean yang ditulis putaran lalu dengan angkanya
+  (`pesanan_status='batal'`). Menyapunya menemukan bentuk yang sama persis
+  dengan tanda tangan sesi ini — kali ini pada **UANG TAMU**
+- **Aturannya sudah ditulis, bahkan dikomentari panjang** di
+  `open-bill/routes.ts`, tepat di atas penyaring bon: *"Di slip, membawa baris
+  batal berarti menyuruh dapur memasaknya lagi. Di sini artinya **MENAGIH TAMU
+  untuk makanan yang tak pernah datang**. Pembatalan biasanya terjadi karena
+  bahannya habis, jadi tamunya justru orang yang sudah dikecewakan sekali."*
+  Ia ditegakkan di **empat** tempat — slip dapur, bon tagihan, keranjang kasir
+  web (`cartTagih`), keranjang ponsel (`lineTagih`) — dan **tidak** di pintu
+  yang benar-benar mengambil uangnya
+- **TEREPRODUKSI lewat HTTP**, satu bill dua baris yang salah satunya
+  dibatalkan dapur:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | bon sesudah pembatalan | Rp1.000 | Rp1.000 |
+  | `POST /penjualan` dengan kedua baris | **201** | **409** `baris_dibatalkan` |
+  | total penjualan yang terbit | **Rp6.000** | — |
+  | stok bahan baris yang dibatalkan | **50 → 49** | **50 → 50** |
+
+  Barisnya tersimpan sebagai `"Nasi Putih" Rp5.000 pesanan_status="batal"` —
+  **sekaligus batal DAN ditagih** — dan stok terpotong untuk masakan yang tak
+  pernah dibuat. Bon berkata Rp1.000; pintu bayar menerima Rp6.000
+- **§229 sudah memaku bahwa BON-nya turun** saat baris dibatalkan. Yang tak
+  pernah diuji: apakah **pembayarannya** menghormati bon itu
+- **`createSale` mengiterasi `params.items` yang DIKIRIM KLIEN.** Ia
+  mencocokkan `open_bill_item_id` → `menuId`, mewarisi `pesananStatus` dari
+  baris bill-nya… lalu menagihnya. Tak ada satu pun pemeriksaan status
+- **Populasi** (literal `"batal"`/`'batal'`, komentar dibutakan):
+
+  | akar | literal | pembanding JS | pembanding domain PESANAN |
+  |---|---|---|---|
+  | `apps/server/src` | 19 → **15** | 5 → **1** | 4 → **0** |
+  | `packages/shared/src` | 6 → **4** | 3 → **1** | 3 → **1** (rumahnya) |
+  | `apps/web/src` | 10 → **6** | 8 → **4** | 4 → **0** |
+
+  Aturan pesanan yang ditulis tangan: **11 → 1**. Sisa 4+1 pembanding milik
+  **bendera LAIN** — status faktur beli perlengkapan yang kebetulan memakai
+  kata yang sama; didaftarkan beralasan, tidak disatukan (menyatukannya justru
+  menyesatkan)
+- **Satu rumah**: `dibatalkanDapur(status)` + `barisDitagih(items, status)` di
+  `packages/shared/src/pesanan.ts`. Bentuk barisnya berbeda antar pemanggil
+  (`pesanan_status` di DTO server, `pesananStatus` di keranjang web), jadi
+  statusnya diambil lewat **pengakses** — yang disatukan aturannya, bukan
+  bentuknya
+- **Penjaganya di `createSale`, satu titik untuk DUA pintu**: `POST /penjualan`
+  dan `/sync` sama-sama memanggilnya. Keduanya diuji, bukan disimpulkan —
+  §266 menembak keduanya dan keduanya membalas 409 dengan sebab yang sama
+- **DITOLAK, bukan dilewatkan diam-diam.** Melewatkan barisnya akan membuat
+  kasir menerima uang sebesar total lama dan memberi kembalian yang salah
+  tanpa ada yang tahu — bug yang lebih sunyi daripada yang sedang ditutup
+- **409, bukan 400, dan itu diangkat ke permukaan sebelum dikerjakan**: galat
+  berkode di jalur ini kelas `PenjualanGagal` yang konstruktornya hanya
+  menerima 409; hanya galat berkode yang membawa `sebab`, dan antrean offline
+  ponsel membedakan sebab **hanya** lewat itu. Maknanya pun konflik keadaan,
+  bukan permintaan cacat
+- **Ponsel tak perlu berubah, dan alasannya sudah ditulis di sana**:
+  `_sebabSudahTercatat` adalah daftar **PUTIH**, jadi sebab baru otomatis
+  diperlakukan gagal & terlihat kasir. Yang ditambah cuma fikstur kontrak
+  (regenerasi) dan **uji bernama** untuk `baris_dibatalkan` — perilaku yang
+  benar karena konstruksi tetap layak dipaku
+- **Detektor**: sapuan literal `"batal"` atas ketiga akar, memisahkan yang
+  hidup **di dalam `` sql`…` ``** dari pembanding JS. **Dibuktikan bisa
+  menuduh**: `dibatalkanDapur(l.pesananStatus)` di `KasirPage.tsx`
+  dikembalikan ke `l.pesananStatus === "batal"` (suntikan di-assert
+  **mengubah berkasnya**) → detektor menuduh berkas & barisnya, dan berkasnya
+  tak terdaftar sebagai bendera lain. Berkas UTUH: nol tuduhan
+- **PASANGAN**: bayar hanya baris yang SAH tetap **201** dengan total **persis
+  sama dengan bon** sesudah pembatalan; penjualannya berisi **satu** baris;
+  baris batal **tetap tercatat** di bill-nya (jejak, bukan dihapus); dan
+  `dibatalkanDapur(null/undefined/""/"BATAL")` semuanya **false** — status
+  yang belum terisi tak boleh hilang dari tagihan diam-diam, itu bug yang
+  persis berlawanan arah
+- **Tiga gerbang lama menagih penyesuaian, dan ketiganya dipaku ke NIATNYA**:
+  `bill-dibuka-lagi-meja` memaku ejaan `kartu === "batal"` (dua situs) dan
+  `pb1-satu-rumus` memaku **baris impor apa adanya** — menambah satu nama ke
+  daftar impor yang sama memerahkannya tanpa satu pun rumus berpindah.
+  Ditulis ulang jadi "bill tertutup TEPAT saat kartunya batal" dan "hitungPb1
+  ada di dalam impor dari @kakarut/shared". `lampiran-dto-utuh` &
+  `status-satu-kontrak` menagih regenerasi, dan itu dikerjakan
+- **Batas, jujur**:
+  - **`pesanan_status` pada penjualan yang SUDAH dibayar tidak disentuh.**
+    Membatalkan baris di sana urusan **refund** (`qty_refund`); memotong omzet
+    dari status papan akan menabrak jalur uang yang sudah punya pemiliknya.
+    Diukur, dicatat, tidak diperbaiki;
+  - penjaganya hanya menutup baris yang **berasal dari open bill**
+    (`open_bill_item_id`). Penjualan langsung tak punya baris batal saat
+    dibuat, jadi kelasnya tak terjangkau di sana — tapi itu keadaan hari ini,
+    bukan jaminan;
+  - detektor menilai `=== "batal"` secara **tekstual**. Perbandingan lewat
+    variabel (`const B = "batal"; x === B`) akan terbaca aman — tak ada situs
+    seperti itu hari ini;
+  - empat literal di **SQL mentah** (`okupansi.ts` ×2, `penjualan/routes.ts`
+    ×2) tetap literal: SQL tak bisa memanggil fungsi JS, dan memindahkannya ke
+    JS berarti menarik seluruh baris ke memori untuk menjawab satu boolean
+- **Ketegangan dengan tetangganya, ditulis di kodenya**: "tolak melebihi stok"
+  sengaja **TIDAK** berlaku di `/sync` — menolaknya tak mencegah apa pun, ia
+  hanya menghapus penjualan yang sungguh terjadi. Yang ini berbeda jenisnya:
+  stok minus adalah **peringatan tentang masa depan**, baris yang dibatalkan
+  adalah **fakta tentang yang disajikan**
+- **Tindak**: `packages/shared/src/pesanan.ts` (rumah aturan) · `types.ts`
+  (`SebabPenjualanGagal` +1) · `penjualan/service.ts` (penjaga) ·
+  `open-bill/routes.ts` · `pesanan/routes.ts` · `KasirPage.tsx` ·
+  `PesananPage.tsx` (empat penyaring dipindah) ·
+  `test/batal-tak-ditagih.test.ts` (12 uji) · verify-api **§266** (11 asersi) ·
+  ponsel: fikstur kontrak diregenerasi + `offline_queue_test.dart` (+1 uji)
+- Gerbang: typecheck bersih · `npm test` **2.368** (201 berkas) · `verify-api`
+  **3.163 lolos, 0 gagal** vs Postgres SEGAR (§266 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6** ·
+  `flutter analyze` bersih · `flutter test` **552**
+
+---
+
+## Baris yang sudah dinyatakan TIDAK BERLAKU, dan empat pintu yang lupa — server — 2026-08-26
+
+- **Kenapa**: 77 vena menyapu *siapa yang boleh masuk*, *perusahaan siapa*,
+  *angka siapa*, dan *apa yang dirakit dari masukan*. Yang tak pernah disapu
+  sekali pun: apakah baris yang sudah dinyatakan **tidak berlaku** benar-benar
+  berhenti dihitung. Ada empat benderanya, dan tak satu pun punya rumah —
+  aturannya ditulis ulang di tiap situs
+- **Populasi** (sapuan menyentuh rantai drizzle **dan** SQL mentah, dua cara
+  hitung dilaporkan terpisah): **134 situs** menyentuh tabel berbendera atau
+  anaknya —
+
+  | induk | MENYARING | lewat variabel/pembantu | menulis | TELANJANG |
+  |---|---|---|---|---|
+  | `sales` (+ `sale_items`, `sale_consumptions`) | 23 | 12 | 5 | 9 |
+  | `productions` (+ `production_consumptions`) | 26 | 19 | 2 | 6 |
+  | `memberships` | 22 | 0 | 0 | 10 |
+
+  Bentuknya: **107 drizzle · 27 SQL mentah**; sisa TELANJANG-nya 23 drizzle +
+  2 SQL mentah, dipilah tangan dan didaftarkan beralasan
+- **EMPAT TEMUAN, satu aturan, dan semuanya menugaskan PEKERJAAN.** Aturan
+  "anggota = keanggotaan yang **belum diarsipkan**" ditulis eksplisit di
+  `auth/session.ts` (*"keanggotaan AKTIF: perusahaan aktif + belum diarsip"*)
+  dan ditegakkan di **sebelas** tempat. Empat pintu memakai aturan yang sama
+  tanpa bagian terakhirnya. Terukur lewat HTTP terhadap DB dev, dengan
+  karyawan yang benar-benar diarsipkan lebih dulu:
+
+  | pintu | sebelum | sesudah |
+  |---|---|---|
+  | `POST /produksi/faktur` (`worker_id`) | **201** | **400** |
+  | `PATCH /produksi/faktur/:key` (`worker_id`) | **200** | **400** |
+  | `POST /rekomendasi/menu/faktur` (`worker_id`) | **201** | **400** |
+  | `PUT /penyimpanan/:id/petugas` (`user_ids`) | **200** | **400** |
+  | `PUT /karyawan/:id/tempat` (memberi) | 200 | **400** |
+
+  Bukan teori: faktur **PR-0054** terbit pukul 13.46 dengan
+  `dikerjakan_oleh: "Keluar Uji 143"` — karyawan yang diarsipkan pukul 11.42
+  hari yang sama
+- **Yang paling telanjang**: balasan `PUT /penyimpanan/:id/petugas` memuat
+  `{"user_id":"…","nama":"Keluar Uji 143","role":"admin","aktif":false}` —
+  **`"aktif": false` tepat di sebelah penugasan yang baru saja diterimanya.**
+  Layarnya tahu; pintunya tidak
+- **Beratnya ditulis apa adanya**: yang rusak **bukan aksesnya**. Orang itu
+  sudah tak bisa login — `session.ts` menyaringnya, dan §54 memakukannya
+  (401). Yang rusak **pembukuannya**: dokumen yang lahir sesudah ia berhenti
+  menyebut namanya sebagai pelaksana, dan tak ada satu pun galat yang muncul
+- **Satu rumah**: `pastikanAnggotaAktif(userId, companyId)` di
+  `middleware/auth.ts`, tempat `pastikanCabang`/`resolveBranchId` sudah
+  tinggal. **Dua sebab dijawab dua kalimat** — *"bukan anggota perusahaan"*
+  dan *"sudah diarsipkan (keluar)"* menuntut tindakan berbeda dari orang yang
+  membaca layarnya, dan menjawab keduanya dengan satu kalimat adalah temuan
+  yang sudah pernah ditulis ledger ini
+- **PASANGAN, dan yang satu ini menentukan**: mengarsipkan karyawan **tidak**
+  menghapus penugasan tempat SO-nya, dan pintu itu satu-satunya cara
+  membersihkannya dari sisi karyawan. Karena itu yang diperiksa hanya nama
+  yang **DIMASUKKAN**: memberi → **400**, **mengosongkan → 200** (diuji pada
+  tiga karyawan terarsip). Pengetatan yang mengunci daftarnya selamanya bukan
+  pengetatan, ia bug kedua. Ditambah: karyawan aktif tetap 201/200 di ketiga
+  pintu, arsipnya tetap terbaca di `?arsip=true`, dan faktur lama **tetap**
+  menyebut pelaksananya — yang ditutup pintunya, bukan masa lalunya
+- **Detektor**: rantai drizzle (`.from`/`join` + ekor pernyataan) **dan**
+  pernyataan `` sql`…` `` yang benar-benar `.execute(`. **Dibuktikan bisa
+  menuduh, dua kelas berbeda**: (1) empat `isNull(sales.deletedAt)` dicabut
+  dari `laporan/routes.ts` (suntikan di-assert **mengubah berkasnya**) → **11
+  situs** berubah jadi TELANJANG dengan berkas, baris, dan nama tabelnya —
+  termasuk `saleItems` & `saleConsumptions`, tempat uangnya; (2) saringan
+  dicabut dari **pembantu bernama** `kondisiFaktur()` di `penerimaan` →
+  pemakainya ikut merah, jadi penelusuran pembantu bukan pemaaf buta. Berkas
+  yang UTUH: nol tuduhan di kedua kasus
+- **Detektornya sendiri salah tiga kali, dan ketiganya terukur** — semuanya
+  ditemukan sebelum satu tuduhan pun ditulis:
+  1. **pembantu bernama tak ditelusuri** → dua pintu `penerimaan` tertuduh
+     keliru (saringannya hidup di `kondisiFaktur()`). Kelas yang sama memakan
+     26 tuduhan pada sapuan tanggal putaran lalu;
+  2. **literal larik terpotong** — `ekorPernyataan` hanya menghitung KURUNG,
+     jadi `const conds = [a, b]` terputus di koma pertama dan `isNull(...)` di
+     baris berikutnya tak terlihat: **10 pintu produksi** tertuduh keliru;
+  3. **batas pernyataan berhenti di `{` mana pun** → daftar SELECT-nya sendiri
+     terpotong, jadi `db.select({ archivedAt: … }).from(memberships)` terbaca
+     telanjang. Kurungnya kini diseimbangkan MUNDUR
+  Angka TELANJANG bergerak 41 → 35 → 29 → 25 karena ketiganya, bukan karena
+  aturannya dilonggarkan
+- **Satu rumah untuk instrumennya juga**: pemindai SQL mentah
+  (`templateSql`/`tanpaSubkueri`/`badanPembantu`) hidup privat di
+  `daftar-tanpa-langit-langit.test.ts`. **Dipindah** ke
+  `test/util/sql-mentah.ts`; berkas lama mengimpornya dan tetap 10/10 hijau
+- **Batas, jujur**:
+  - **`users.deletedAt` sengaja DI LUAR populasi**, dan alasannya diukur: enam
+    jalur auth sudah menyaringnya, sementara ~20 sentuhan sisanya adalah JOIN
+    UNTUK NAMA (`deletedBy`, `dikerjakan_oleh`) — di situ menyaring justru
+    SALAH. Menariknya masuk akan menenggelamkan gerbangnya dalam 20
+    pengecualian dan membuatnya tak berarti;
+  - daftar pengecualiannya berkunci **berkas + JUMLAH**, bukan nomor baris —
+    stabil terhadap penyuntingan, tapi situs telanjang baru di berkas yang
+    sama hanya menagih keputusan lewat kenaikan hitungannya, tak menyebut
+    barisnya;
+  - kelas `LEWAT_VARIABEL` menilai nama yang **terdekat sebelum** situsnya
+    (fungsi di-hoist). Nama yang dibentuk ulang di tengah rantai — atau
+    saringan yang datang lewat argumen dari berkas LAIN — masih terbaca aman;
+  - **`sales.deleted_at` & `productions.deleted_at` tak menghasilkan satu pun
+    temuan.** Jalur uang & stok memang sudah rapi, dan itu ditulis sebagai
+    negatif bersih berangka: 23+26 situs menyaring, 31 lewat variabel bernama,
+    15 sisanya satu-hop/penomoran/penulisan yang terdaftar beralasan
+- **Usulan antrean berikutnya, dengan angkanya** (diukur di putaran ini,
+  sengaja TIDAK dikerjakan): **`pesanan_status = 'batal'`** — baris pesanan
+  yang DIBATALKAN dapur. **86 sebutan** di 6 berkas; hanya **4** menyaring di
+  SQL dan **2** menyaring di JS (`.filter(it => it.pesanan_status !== "batal")`).
+  Sebagian besar 86 itu memang cuma memajang status, jadi populasinya harus
+  dipersempit ke kueri yang MENGHITUNG uang/stok sebelum ada tuduhan
+- **Tindak**: `middleware/auth.ts` (`pastikanAnggotaAktif`) ·
+  `produksi/routes.ts` · `rekomendasi/rencana.ts` · `penyimpanan/routes.ts` ·
+  `users/routes.ts` · `test/util/sql-mentah.ts` (baru, dipindah) ·
+  `test/util/bendera-hapus.ts` (baru) ·
+  `test/bendera-hapus-disaring.test.ts` (8 uji) · verify-api **§265**
+  (16 asersi)
+- Gerbang: typecheck bersih · `npm test` **2.356** (200 berkas) · `verify-api`
+  **3.152 lolos, 0 gagal** vs Postgres SEGAR (§265 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**
+
+---
+
+## HTML surat dirakit dari data pengguna, tanpa satu pun pelolos — server+web — 2026-08-26
+
+- **Kenapa**: putaran lalu menutup *ke mana* tautan surat menunjuk. Menyapu
+  sekitarnya menemukan saudara kandungnya di berkas yang sama — *apa* yang
+  dirakit di sekelilingnya
+- **Populasi** (literal templat ber-tag-HTML **dan** ber-interpolasi, dihitung
+  pengurai templat, bukan grep):
+
+  | akar | literal | melolos SEBELUM | melolos SESUDAH |
+  |---|---|---|---|
+  | `apps/server/src` | 12 → 13 | **0** | **7** |
+  | `packages/shared/src` | 0 | 0 | 0 |
+  | `apps/web/src` | 11 | 3 | 3 |
+
+  (Angka sebelum diukur dengan pengurai yang SAMA terhadap `HEAD`, lewat
+  `git show`, supaya keduanya sebanding. Server bertambah satu literal karena
+  perakit suratnya dipecah jadi fungsi murni.)
+
+  Delapan "tidak" di web adalah situs **penggabungan** (`${kepala}`, `${tabel}`,
+  `${opts.bodyHtml}`) yang tiap sisipan **datanya** sudah lewat `esc()` di hulu
+  — web memang sudah benar, dan angkanya karena itu tak berubah. Yang tak punya
+  pelolos sama sekali: **server**. Sesudah: enam sisa di server semuanya
+  terdaftar beralasan (satu `index.ts` + lima `backup-peringatan.ts`)
+- **Yang paling tajam**: `modules/users/routes.ts:330` merakit surat undangan
+  dari `co.nama`. Nama perusahaan divalidasi `z.string().trim().min(1)` — tanpa
+  batasan aksara — dan di jalur ini penyerang memilih **keduanya**: isi yang
+  disuntik (nama perusahaannya sendiri, bebas didaftarkan) dan penerimanya
+  (`body.email`, alamat mana pun). Suratnya berangkat dari domain produk dan
+  lolos SPF/DKIM
+- **UKURAN, dari keluaran perakit yang sungguhan** (bukan dari membaca; badan
+  surat tak terkirim di dev, jadi perakitnya diekstrak dulu **tanpa mengubah
+  isinya**, baru diukur — "sebelum" dan "sesudah" datang dari fungsi yang sama):
+
+  | kasus | `<a` sebelum | `<a` sesudah |
+  |---|---|---|
+  | undangan, nama = `</b></p><p><a href="https://penyerang.example">…` | **2** | **1** |
+  | verifikasi, nama sama | **2** | **1** |
+  | undangan, url = `https://kakarut.app" onmouseover="jahat()" x="` | 1 tag ber-**3 atribut** | 1 tag ber-**1 atribut** (`href`) |
+
+  Satu `<a` itu milik Kakarut; yang kedua milik penyerang. Sesudah: suntikannya
+  jadi teks yang terlihat (`&lt;/b&gt;…`), bukan tag
+- **Vektor kedua menumpuk di atas putaran lalu**: `${url}` duduk **di dalam
+  atribut** (`<a href="${url}">`), dan `url` lahir dari `appBaseUrl(c)` — yang
+  tanpa `APP_BASE_URL`/`APP_HOST_DIPERCAYA` masih diturunkan dari
+  `X-Forwarded-Host`. Putaran lalu menutup *tujuan*-nya; ini menutup
+  *keluar-dari-atribut*-nya
+- **Beratnya dinilai jujur, bukan dibesarkan** — dua klaim yang sengaja TIDAK
+  dibuat, karena masing-masing diperiksa dan ternyata tak terjangkau:
+  - **bukan injeksi header `Subject`**: nodemailer dan Resend sama-sama
+    menyandikan header (`modules/mail/service.ts`);
+  - **bukan XSS**: klien surat menyaring `<script>` dan atribut peristiwa.
+  Yang NYATA dan tak disaring: **penyuntikan tautan & pemalsuan isi**
+- **Detektor**: pengurai templat literal (backtick, `${}` bersarang, kutip,
+  dan **literal regex**) atas ketiga akar. **Bisa menuduh, dibuktikan**:
+  `lolosHtml` dicabut dari `surat.ts` (suntikan di-assert **mengubah berkasnya**,
+  bukan sekadar dijalankan) → detektor menyebut berkas, baris, dan nama
+  ekspresinya (`namaPerusahaan`); berkas yang UTUH tak dituduh sama sekali
+- **Detektornya sendiri sempat salah, dan itu terukur**: versi pertama tak
+  mengenal literal regex, jadi `${name.replace(/"/g, '""')}` di `lib/backup.ts`
+  membuat `"` di dalam regex terbaca sebagai pembuka string — satu "templat"
+  menelan **141 baris sisa berkasnya**. Sesudah `lewatiRegex`: 24 templat,
+  tak ada yang kabur
+- **PASANGAN**: nama wajar ber-`&` dan ber-apostrof tetap **TERBACA** —
+  `Warung Bu Ani & Anak` → `&amp;` (bukan `&amp;amp;`, bukan dibuang),
+  `D'Rasa "Enak"` utuh; tautan sah `<a href="…/daftar">…</a>` tetap satu tag
+  utuh; undangan tetap **201** dan barisnya muncul di daftar pending
+- **Yang TIDAK dilolos, dengan alasan yang bisa diperiksa** (daftar bernama,
+  per-ekspresi, ber-anti-kuburan): `index.ts` `${buildId}` (heksa dari
+  `computeBuildId`) · lima situs `backup-peringatan.ts` (surat ke super admin
+  yang seluruh isinya dirakit server; zona waktunya dari `companies.timezone`
+  yang **tak punya satu pun jalur tulis**) · `web/lib/pdf.ts` dan tiga belas
+  ekspresi `DokumenBelanjaModal.tsx` (angka, dua ternary yang kedua cabangnya
+  literal, konstanta, dan potongan yang dirakit di berkas yang sama)
+- **Satu rumah, bukan salinan**: `esc` **dipindah** dari
+  `DokumenBelanjaModal.tsx:225` ke `packages/shared/src/html.ts` sebagai
+  `lolosHtml`/`lolosAtribut`, dan berkas web itu mengimpornya. Menyalinnya akan
+  melahirkan aturan kedua — kelas yang baru saja dibayar putaran lalu (lima
+  salinan validasi tanggal). Gerbangnya memaku itu: berkas mana pun di luar
+  `shared/html.ts` yang memuat literal `"&lt;"` dituduh
+- **Menyimpang dari rencana, disengaja**: rencana menyebut `subject` ikut
+  dilolos. Tidak dilakukan — `subject` dirender sebagai **teks biasa**, bukan
+  HTML, dan transportnya sudah menyandikan header. Melolosnya justru akan
+  memajang `Undangan bergabung Warung Bu Ani &amp;amp; Anak` di judul surat:
+  menukar satu bug dengan bug yang lebih sunyi
+- **Tindak**: `packages/shared/src/html.ts` (baru) ·
+  `modules/mail/surat.ts` (baru — perakit surat jadi fungsi murni yang bisa
+  diuji) · `modules/auth/routes.ts` · `modules/users/routes.ts` ·
+  `DokumenBelanjaModal.tsx` (esc dipindah) ·
+  `test/util/templat-html.ts` (baru) · `test/html-surat-dilolos.test.ts`
+  (12 uji) · verify-api **§264** (5 asersi)
+- **Batas, jujur**:
+  - **badan suratnya tak pernah diuji lewat HTTP.** Di dev tak ada SMTP/Resend,
+    `kirimEmail` melempar dan ditangkap diam-diam — jadi HTML-nya tak terlihat
+    dari luar. Yang diukur keluaran **perakitnya**; §264 hanya membuktikan
+    alurnya hidup dan pelolosan tak merembes ke penyimpanan;
+  - detektornya melihat **literal templat**, bukan HTML yang dirakit lewat
+    `+` antar string biasa atau `Array.join` — populasi itu belum disapu;
+  - "melolos" dinilai per-ekspresi secara tekstual (`lolosHtml(`/`esc(` muncul
+    di dalamnya). Sisipan yang memanggil pelolos di CABANG saja
+    (`x ? lolosHtml(a) : b`) akan terbaca aman — tak ada situs seperti itu
+    hari ini, tapi detektornya tak akan menangkapnya bila lahir;
+  - klien surat tak diuji satu per satu; klaim "skrip disaring" bersandar pada
+    perilaku umum, dan justru karena itu **tak dijadikan alasan menurunkan**
+    tingkat temuannya
+- **Negatif bersih yang ikut terukur**: `packages/shared/src` **nol** literal
+  HTML ber-interpolasi — perakit struk & ESC/POS di sana bekerja dengan bita,
+  bukan markup, jadi tak ada permukaan yang perlu dijaga
+- Gerbang: typecheck bersih · `npm test` **2.348** (199 berkas) · `verify-api`
+  **3.136 lolos, 0 gagal** vs Postgres SEGAR (§264 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**
+
+---
+
+## Tautan email lahir dari header peminta — server — 2026-08-26
+
+- **Kenapa**: permukaan "apa yang dipakai membangun tautan di surat" tak punya
+  satu pun entri di 76 vena sebelumnya. Ditemukan saat menyapu sisa param
+  query, bukan dicari — `lib/base-url.ts` menurunkan host dari header
+  permintaan
+- **TEREPRODUKSI lewat HTTP, dan ini pengambilalihan akun — bukan phishing**:
+
+  ```
+  POST /api/auth/forgot-password        Host: penyerang.example
+  → {"dev_reset_url":"http://penyerang.example/reset-password?token=a9c078…"}
+
+  POST /api/auth/forgot-password        X-Forwarded-Host: penyerang.example
+                                        X-Forwarded-Proto: https
+  → {"dev_reset_url":"https://penyerang.example/reset-password?token=e7fc51…"}
+  ```
+
+  Tokennya **hidup dan milik korban**. Surat mendarat di kotak masuk KORBAN,
+  tampak sah (domainnya cuma beda di mata yang teliti), dan sekali diklik
+  tokennya berpindah tangan. Protonya pun ikut ditempa
+- **Empat tautan lewat pintu yang sama**: reset password (`auth:285`),
+  verifikasi email (`auth:253`, `auth:436`), undangan karyawan (`users:326`)
+- **Penawarnya KONFIGURASI, dan `APP_BASE_URL` tak di-set di mana pun** yang
+  bisa kubaca — tak ada di `ci.yml`, `Dockerfile`, `docker-compose*`, atau
+  `.env.example`. Env produksi hidup di panel Dokploy yang tak bisa kubaca,
+  jadi **aku tak bisa menyatakan produksi rentan** — yang bisa kunyatakan:
+  bawaannya rentan, dan tak ada apa pun di repo yang menutupnya
+- **Yang diperbaiki**, dan urutannya sengaja:
+  1. `APP_BASE_URL` di-set → dipakai apa adanya, **header diabaikan total**
+     (terukur: `Host: penyerang.example` → `https://kanonik.kakarut.id`);
+  2. `APP_HOST_DIPERCAYA` (env baru, dipisah koma) → host dari header **wajib
+     ada di daftar**; kalau tidak, entri pertama dipakai sebagai domain
+     kanonik. Terukur: host tempaan → `https://app.kakarut.id`, sementara
+     host yang MEMANG sah (`kakarut.id`) tetap dihormati — pemasangan
+     multi-domain tak ikut mati;
+  3. keduanya kosong → perilaku lama **dipertahankan**, tapi dilaporkan
+     `kritis` ke panel super admin lewat `pemeriksaan-setelan`, satu jalur
+     dengan `jwt_bawaan` dan `superadmin_password_bawaan`
+- **Kenapa nomor 3 TIDAK dibuat keras**, dan ini keputusan yang ditulis:
+  bila produksi belum menyetel apa pun, menolak menurunkan dari header membuat
+  SELURUH tautan reset & verifikasi menunjuk `localhost` — surat yang sama
+  sekali tak bisa dipakai. Itu menukar lubang yang **butuh penyerang** dengan
+  kerusakan yang **pasti**. Yang benar: membuatnya TERLIHAT sampai disetel
+- **Terukur bahwa laporannya jujur**: temuan `kritis` muncul saat keduanya
+  kosong, dan **hilang (0)** begitu `APP_BASE_URL` atau `APP_HOST_DIPERCAYA`
+  disetel — bukan omelan permanen yang lalu diabaikan orang
+- **Detektor: DIBUKTIKAN bisa menuduh** — daftar-izin dicabut dari
+  `appBaseUrl` (suntikan di-assert mendarat) → uji merah menyebut nilainya:
+  `expected 'http://penyerang.example' to be 'https://app.kakarut.id'`.
+  Dipulihkan
+- **PASANGAN**: alur reset yang SAH tetap hidup (`ok:true` + token terbit),
+  host multi-domain yang sah tetap dipakai, dan tak ada tautan email lain
+  yang merakit host sendiri (sapuan mekanis atas tiga modul pengirim surat)
+- **Tindak**: `lib/base-url.ts` (daftar-izin + `tautanEmailDariHeader`) ·
+  `config/env.ts` (`APP_HOST_DIPERCAYA`) · `pemeriksaan-setelan.ts` (temuan
+  `kritis`) · `tautan-email-tak-dari-header.test.ts` (6 uji) · verify-api
+  **§263** (4 asersi)
+- **YANG HARUS DILAKUKAN PEMILIK, dan hanya dia yang bisa**: set
+  `APP_BASE_URL` ke domain publik aplikasi di panel Dokploy, lalu restart.
+  Sampai itu terjadi, lubangnya masih terbuka di produksi — kode ini membuat
+  keadaan itu terlihat, bukan hilang
+- **Batas, jujur**:
+  - yang disapu **tautan di surat**; header permintaan yang dipakai untuk hal
+    LAIN (mis. pembangunan URL di balasan API) belum diukur;
+  - daftar-izin membandingkan host **persis**, tanpa wildcard subdomain —
+    pemasangan ber-subdomain-per-tenant harus menyebut semuanya;
+  - aku tak bisa membaca env produksi, jadi status produksi **tak diklaim**
+- **Negatif bersih yang ikut terukur di putaran ini**, dicatat supaya tak
+  terbaca terlupakan: (1) **ETag/cache** — keempat rute daftar ber-ETag sudah
+  `Cache-Control: private, no-cache` + `Vary: Authorization`, jadi `/menu`
+  yang kini berbeda isi per peran tak bisa tersaji silang; (2) **param angka
+  query** — ketiga situsnya berbatas rapi (`Number.isFinite` + `Math.min/max`,
+  atau 400 eksplisit untuk `biaya_tetap`); (3) **error_logs** sengaja tak
+  menyimpan badan permintaan & query string, dan komentarnya menulis alasannya
+- Gerbang: typecheck bersih · `npm test` **2.336** (198 berkas) · `verify-api`
+  **3.131 lolos, 0 gagal** vs Postgres SEGAR (§263 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6** ·
+  `flutter test` **551** (fikstur kontrak status diregenerasi — `types.ts`
+  berubah di vena biaya)
+
+---
+
+## Tanggal dari query & badan: cabang GAGALNYA tak bertuan — server — 2026-08-26
+
+- **Kenapa**: permukaan yang tak punya satu pun entri di 75 vena sebelumnya.
+  Badan permintaan sudah disapu (114 skema `.strict()`, `z.number().max()`,
+  larik berbatas); **param query tak pernah**. Terukur: **82** pembacaan
+  `c.req.query("...")`, **NOL** yang lewat skema
+- **Populasi tanggal** (setelah tiga kali memperbaiki pengurainya): **36**
+  pembacaan param tanggal —
+
+  | | jumlah |
+  |---|---|
+  | memeriksa keabsahannya lalu **GAGAL DIAM** (dilewati / jatuh ke bawaan) | **29** |
+  | tak memeriksa sama sekali | **5** |
+  | menolak | **2** |
+
+  Aturannya ada, dipanggil, bahkan dikomentari. Yang tak pernah ada: **apa
+  yang terjadi saat ia bilang "tidak sah"**
+- **Akarnya satu**: aturan "tanggal ini sah" punya **LIMA salinan yang tak
+  sepakat** — `laporan:34`, `rekomendasi:86`, `penerimaan:243`,
+  `perlengkapan:73` (regex-saja) vs `absensi:51`, `pengajuan:29` (regex +
+  tanggalnya benar-benar ada). Yang kedua benar
+- **TEMUAN 1 — 500 pada tanggal yang mungkin diketik orang.** Terukur lewat
+  HTTP: `GET /laporan?dari=2026-02-30` → **500 `"Terjadi kesalahan pada
+  server"`**. Bentuknya lolos regex, isinya ditolak Postgres. Berlaku di
+  **seluruh** rute `/laporan/*`, dan sama untuk `2026-13-45`, `9999-99-99`,
+  `2026-02-29` (2026 bukan kabisat). **SESUDAH: 400 yang MENYEBUT paramnya** —
+  `Tanggal pada "sampai" tidak sah: "2026-02-31" — pakai format YYYY-MM-DD`
+- **TEMUAN 2 — saringan dibuang diam-diam.** `pengajuan:168` memakai
+  `if (dari && tanggalValid(dari))`; cabang gagalnya **melewati** saringannya.
+  Terukur: rentang sah → **4** baris; `?dari=BUKAN&sampai=xxx` → **13**
+  (seluruh tabel); dan **satu paruh ngawur membuang KEDUA saringannya**
+  (`?dari=2026-08-01&sampai=BUKAN` → 13 juga). Balasannya larik telanjang,
+  jadi layar tetap memajang pilihan tanggal yang tak pernah dipakai.
+  **SESUDAH: 400 bernama**
+- **TEMUAN 3 — permukaan BADAN kena penyakit yang sama.** Diukur sesudah dua
+  temuan pertama, bukan diandaikan: `POST /stok/awal` dengan
+  `tanggal: "2026-02-30"` → **500**, sebab `z.string().regex(...)` pun cuma
+  memeriksa bentuk. **SESUDAH: 400.** Ditutup dengan `zTanggal` di rumah yang
+  sama
+- **Aturan yang akhirnya bisa DINAMAI**, dan repo ini sudah memakainya tanpa
+  menamainya: **jatuh ke bawaan itu jujur HANYA bila balasannya menyebut apa
+  yang dipakai.** `/laporan` mengembalikan `dari`/`sampai`; `/absensi/rekap`
+  dan `/kebersihan/rekap` mengembalikan `bulan`/`dari`/`sampai` — layarnya
+  merender dari nilai itu, bukan dari yang diketik orang. `/pengajuan` dan
+  `/kebersihan` memulangkan larik telanjang — di sana bawaan berarti berbohong
+- **Gerbang lama menahan pengetatan yang BERLEBIHAN, lagi.** Membuat `?bulan=`
+  menolak mematahkan **empat asersi verify-api yang sudah ada** (*"rekap:
+  bulan 00 → jatuh ke bulan berjalan (bukan 500)"*). Kontraknya sengaja
+  dipaku, dan pengukuran membenarkannya: rekap MENYEBUT bulan yang dipakai,
+  jadi bawaannya jujur. Dikembalikan lewat `bulanQueryAtau`, dengan alasannya
+  tertulis. Preseden persis §191 (`kasir → POST /penyimpanan`)
+- **Detektor: DIBUKTIKAN bisa menuduh — dan terbukti menuduh PALSU tiga kali
+  lebih dulu.** Jendela tiga-baris pertama menandai 26 situs "telanjang";
+  sebagian besar ternyata dijaga oleh **pembantu bernama** (`bacaHari(...)`,
+  `tglValid(...)`) atau **daftar-izin** (`=== "pagi"`), yang jendelaku tak
+  lihat. Sesudah pengurainya mengenali ketiganya: 33 pembantu · 13 daftar-izin
+  · 10 branch · sisanya. Bukti merah akhir: `tanggalQuery` dicabut dari
+  `/pengajuan` (suntikan di-assert mendarat) → gerbang menuduh **dua barisnya
+  dengan nomor baris**
+- **Hasil**: 36 pembacaan mentah → **0**. Lima salinan aturan → **satu rumah**
+  (`lib/tanggal-query.ts`), dipakai query (`tanggalQuery`/`bulanQuery`/
+  `bulanQueryAtau`) dan badan (`zTanggal`)
+- **PASANGAN, terukur** — pengetatan tanpa pasangan adalah cara mengubah
+  perbaikan jadi kerusakan:
+
+  | pasangan | hasil |
+  |---|---|
+  | `?dari=&sampai=` (form kosong) | tetap **200**, 13 baris — persis sama dengan tanpa param |
+  | 8 rute berentang, dengan & tanpa rentang | **200** semua |
+  | rentang TERBALIK (`dari > sampai`) | **200** — nol baris adalah jawaban yang benar, bukan galat |
+  | rekap `?bulan=NGAWUR` | jatuh ke bawaan **dan balasannya menyebutnya** |
+
+- **Tindak**: `lib/tanggal-query.ts` (rumah) · 9 modul dialihkan ·
+  `tanggal-query-satu-rumah.test.ts` (4 uji: premis kabisat/`2026-02-30`,
+  sapuan mekanis pembacaan mentah, sapuan salinan regex di KEDUA permukaan,
+  pasangan "kosong = tanpa rentang") · verify-api **§262** (39 asersi)
+- **Dua gerbang berdiri lain ikut bereaksi, dan keduanya benar**:
+  `batas-hari-zona` menuntut jembatan `T00:00:00Z` baru terdaftar beralasan
+  (dua entri lama jadi satu, sebab salinannya menyusut), dan
+  `rekap-absen-pindah-cabang` memaku regex bulan yang pindah rumah — pin-nya
+  dipindahkan ke MAKSUDNYA, dua sisi
+- **Batas, jujur**:
+  - yang disapu **param tanggal**; 46 param query lain (`status`, `q`,
+    `sesi`, `page`, `per_page`, `arsip`, …) dipilah tapi **tidak** diubah —
+    semuanya daftar-izin `===` atau teks ber-`trim` yang tak bisa meledak,
+    dan itu dicatat sebagai negatif bersih berangka, bukan kekosongan;
+  - `zTanggal` menutup medan tanggal di badan, **bukan** medan waktu
+    (`timestamptz`) — permukaan lain yang belum diukur;
+  - aturan "bawaan sah bila balasannya menyebutnya" ditulis sebagai prosa dan
+    dipaku per-situs, **belum** jadi sapuan mekanis — rute baru yang jatuh ke
+    bawaan tanpa menyebutkannya takkan tertangkap
+- Gerbang: typecheck bersih · `npm test` **2.330** (197 berkas) · `verify-api`
+  **3.127 lolos, 0 gagal** vs Postgres SEGAR (§262 baru) · cakupan rute **273**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**. Tak
+  ada berkas Dart tersentuh → `flutter analyze`/`flutter test` tidak dijalankan
+
+---
+
+## Kebijakan BIAYA ditegakkan di pintunya — server+web+mobile — 2026-08-26
+
+- **Kenapa**: bukan bug melainkan **kebijakan yang belum satu**. Aturannya sudah
+  ditulis TIGA KALI di layar, tiap kali dengan nama sendiri — `isManajemen`
+  (`App.tsx`, `Layout.tsx`), `bolehUbah` (`ResepPage`, yang bahkan tak
+  MENGAMBIL datanya lewat `enabled: bolehUbah`), `lihatHarga`
+  (`resep_page.dart`) — dan tak pernah di pintunya. Keputusan pemilik atas tiga
+  pilihan yang disodorkan berangka: **"biaya = manajemen saja"**
+- **Terukur SEBELUM** (token peran `bar` DAN `cashier` sungguhan, DB segar,
+  fikstur dibuktikan terbaca lebih dulu) — ketiganya termasuk owner membaca
+  angka yang **SAMA PERSIS**:
+
+  | rute | yang terbaca `bar` & `cashier` |
+  |---|---|
+  | `GET /menu`, `/menu/:id` | `hpp` **5662,03** · `hpp_dine_in` 4732,03 · `harga_saran` 10820,01 · `harga_jual_bulat` 11000 · `food_cost_persen` 51,47 · `komponen[].harga_per_unit` **357,14** |
+  | `GET /bahan` | `harga_beli` **35.000** · `harga_per_unit` 777,78 |
+  | `GET /penjualan/:id` | `sale.totalHpp` **5662,0314** · `items[].hppSatuan` |
+  | `GET /perlengkapan/:id/kartu` | `total_belanja` |
+
+- **SESUDAH**: `null` untuk keduanya, angka penuh untuk owner/admin —
+  seluruhnya dipaku §261 verify-api (**37 asersi**)
+- **`null`, BUKAN 0**, dan itu keputusan yang ditulis: nol adalah angka; ia
+  tercetak "Rp 0" dan dipercaya orang. Ledger ini sudah sekali menandai `?? 0`
+  sebagai "bentuk diam yang sedang dijaga". Formatter web merendernya `—` lewat
+  `TAK_DIKETAHUI` yang **sudah ada** di berkas itu untuk nilai tak-hingga —
+  perluasan aturan yang berdiri, bukan aturan baru
+- **Penyaringnya di BATAS RUTE, bukan di service** — pagar terpenting putaran
+  ini. `toMenuDto` dipakai juga `laporan/routes.ts` dan DUA situs di berkasnya
+  sendiri yang MEMBACA `harga_jual_bulat` untuk menghitung saran harga;
+  `hitungSaldoCabang` dipakai opname, kartu stok, dan walk FIFO di dalam
+  server. Menihilkan di dalamnya bukan menjaga data — ia merusak perhitungan
+- **Tipe yang membedakan dua keadaan, bukan `!` yang membuangnya**: typechecker
+  menemukan **25** situs yang mengandaikan biaya selalu ada. Menaburkan `!` di
+  sana berarti membuang justru pemeriksaan yang menjaga penyaringnya benar.
+  Yang dibuat: `MenuDtoPenuh`/`BahanDtoPenuh`/`KomponenDtoPenuh` — DI DALAM
+  server angkanya selalu ada, DI KABEL ia boleh ditahan. `AnalisisHargaRow`
+  ikut jadi `MenuDtoPenuh` sebab rutenya sudah `requireRole("owner","admin")`
+- **Detektor: DIBUKTIKAN bisa menuduh — dan terbukti BUTA lebih dulu.** Sapuan
+  versi pertama menuntut argumen `return c.json(...)` menyebut penyaringnya. Ia
+  buta terhadap bentuk yang paling wajar dipakai orang saat mencabut
+  penjaganya:
+
+      const dto = toMenuDto(row, katalog);
+      return c.json(dto);            // ← tak menyebut toMenuDto sama sekali
+
+  Suntikan bukti merahnya persis begitu, **dan gerbangnya hijau**. Diganti
+  jadi hitungan KESEIMBANGAN (tiap `toMenuDto` yang bukan situs perhitungan
+  wajib berpasangan dengan satu `saringMenu`) → suntikan yang sama tertuduh
+  dengan angkanya: *"4 situs keluaran tapi cuma 3 yang disaring"*
+- **Gerbang lama menangkap dua situs yang kulewati sendiri**: `POST /menu` dan
+  `PUT /menu/:id` semula tak kusaring ("balasan tulis, sudah owner/admin").
+  Sapuan kelengkapan menolaknya — dan benar: satu jalan yang sama membuat
+  gerbangnya bisa menuntut kelengkapan alih-alih menghafal pengecualian
+- **Ratchet putaran KEMARIN langsung menagih keputusan atas rute baruku
+  sendiri**: `GET /stok/nilai` lahir → `izin-per-rute.test.ts` merah menuntut
+  ia diadjudikasi di `TERBUKA_SENGAJA_BACA`. Itu bukti gerbang itu hidup
+- **PASANGAN, empat lapis** — pengetatan tanpa pasangan adalah cara mengubah
+  perbaikan jadi kerusakan:
+
+  | pasangan | terukur |
+  |---|---|
+  | `GET /stok/nilai` identik owner & bar | **7.395.611,15** keduanya |
+  | kasir tetap MENJUAL | nota `PUSAT-20260826-0003`, total 11.000 |
+  | papan dapur/bar tetap terima HPP | POST sajian → `total_hpp` **5662,0314** |
+  | `bar` tetap baca menu & harga JUAL | `harga_jual` 11000, `komponen[].qty` 2 |
+
+- **UTANG BERSYARAT — ditulis di kodenya DAN diuji, bukan cuma dikomentari**:
+  `GET /stok` masih mengirim `harga_per_unit` per baris. Sebabnya tanggal
+  rilis, bukan kelalaian: kartu "Nilai stok" ponsel menghitung totalnya sendiri
+  dari baris, build terpasang masih `1.0.0+10`, dan rilis berikutnya tertahan
+  keystore. **Syarat pencabutannya tertulis**; §261 memaku keadaannya hari ini
+  (`utang bersyarat: /stok MASIH mengirim harga per bahan`) supaya pencabutannya
+  jadi keputusan sadar. Kedua klien SUDAH siap — keduanya beralih ke agregat
+  server begitu `harga_per_unit` datang `null`, dan menyebut di layar bahwa
+  cakupannya berubah jadi seluruh cabang
+- **Rumus nilai stok tak digandakan**: `GET /stok/nilai` memakai
+  `ringkasNilaiStok` dari `@kakarut/shared` — rumah yang sudah ada, dipakai web
+  dan dicerminkan Dart. `null` masuk ember `tanpa_harga_bahan` yang **sudah
+  ada** untuk harga 0, jadi build lama pun berdegradasi dengan jujur alih-alih
+  diam
+- **Tindak**: `bolehLihatBiaya` (rumah aturan, `constants.ts`) ·
+  `packages/shared/src/biaya.ts` (penyaring murni) · penyaring di 4 modul rute ·
+  `GET /stok/nilai` · web+ponsel beralih ke agregat · gerbang
+  `biaya-hanya-manajemen.test.ts` (**7 uji**) yang juga memaku ketiga definisi
+  klien tetap sepakat · §261 verify-api · CHANGELOG-API + `BELUM_TAYANG`
+- **Batas, jujur**:
+  - `foodCostMaks`/`targetPenjualan` di `GET /company` **tidak** ditutup —
+    keduanya TARGET, bukan biaya, dan `/company` dibutuhkan POS untuk `pb1Rate`
+    & `receiptFooter`. Keputusan, bukan kelupaan;
+  - pin ketiga definisi klien membaca repo ponsel yang **tak ada di CI** — ia
+    dilewati di sana (pola `kunci-satu-kontrak`), jadi yang menjaganya mesin
+    yang memuat kedua repo;
+  - sapuan kelengkapan menghitung KESEIMBANGAN, bukan menelusuri aliran nilai:
+    situs yang mengeluarkan `MenuDto` lewat variabel perantara berlapis masih
+    bisa lolos bila jumlah `saringMenu`-nya kebetulan cocok;
+  - `/stok` (di atas) belum ditutup, dan itu satu-satunya medan biaya yang
+    tersisa terbuka
+- **Kesalahan lingkungan yang dicatat**: `npm run build -w @kakarut/web` saat
+  server berjalan membuat `index.html` yang di-cache boot menunjuk aset yang
+  sudah tak ada → **404, layar kosong, e2e merah 6/6**. Bukan regresi; server
+  di-restart, e2e hijau. Kelas yang sama ("server basi") sudah sekali menggigit
+  sesi ini
+- Gerbang: typecheck bersih · `npm test` **2.326** (196 berkas) · `verify-api`
+  **3.096 lolos, 0 gagal** vs Postgres SEGAR (§261 baru) · cakupan rute
+  **273** (+1: `/stok/nilai`, rekamannya diperbarui) · `audit:invarian` 26/26 ·
+  build web · e2e Playwright **6/6** · `flutter analyze` bersih ·
+  `flutter test` **551**
+
+---
+
+## Pengurungan tenant arah BACA — server — 2026-08-26 — **BERSIH**
+
+- **Kenapa**: ledger punya entri "Isolasi tenant pada PENULISAN" (2026-08-22,
+  162 penulisan, BERSIH) — tapi entri itu meninggalkan DUA lubang, dan
+  keduanya dibayar di sini: (1) sapuannya hidup di scratchpad, **tak ada
+  gerbang berdiri**, jadi penulisan baru tanpa pengurungan bisa lahir hari ini
+  tanpa satu uji pun berubah warna; (2) **arah BACA tak pernah dihitung sekali
+  pun**. Di SaaS multi-tenant itu kelas kerusakan tertinggi: satu warung
+  membaca data warung lain
+- **Populasi** (kode TANPA komentar — prosa yang menyebut `companyId` akan
+  menyatakan aman untuk kueri yang tak pernah mengurungnya): **627** kueri
+  `db|tx .select|update|delete` — **469 baca + 158 tulis**
+
+  | kelas | jumlah | arti |
+  |---|---|---|
+  | A | **391** | mengurung `companyId`/`companies.id` di rantainya sendiri |
+  | A2 | **53** | lewat variabel atau `and(...conds)` — satu tingkat |
+  | B | **22** | lewat `branchId` (cabangnya lahir dari `resolveBranchId`) |
+  | C | **45** | kunci saringnya ikut dioper ke pemanggilan ber-`company_id` |
+  | E | **68** | memang LINTAS perusahaan: auth, panel super admin, cadangan, seed |
+  | F | **48** | tak teresolusi mekanis → **dipilah tangan satu per satu** |
+
+- **Detektor: DIBUKTIKAN bisa menuduh — dan tiga kali terbukti BUTA lebih
+  dulu.** Ini bagian yang paling mahal dan paling berharga dari putaran ini:
+
+  1. **Rantai terpotong di `;`** — rantai drizzle yang tersebar di banyak baris
+     terbaca separuh. Diperbaiki dengan kurung berimbang.
+  2. **Kurung buka dihitung GANDA** saat melompati `.metode(` — rantainya
+     menelan rute BERIKUTNYA dan meminjam `companyId` milik tetangganya.
+     Akibatnya angkanya **382 aman / 87 tidak**, dan **suntikan bukti merah pun
+     dinyatakan bersih**. Sesudah diperbaiki: **280 / 189**. Seratus tiga kueri
+     tak terkurung sempat terbaca "aman".
+  3. **Kelas C terlalu longgar** — "lingkupnya menyebut tenant di suatu tempat"
+     menyatakan aman untuk suntikan yang lingkupnya menyebut tenant untuk tabel
+     **LAIN**. Diperketat jadi "kunci yang MENYARING kueri ini ikut dioper ke
+     pemanggilan ber-`company_id`" (pola `pastikanKartu(jenis, id,
+     auth.company_id!)`): kelas C **51 → 24**.
+  4. **`lingkup()` memakai `indexOf`** — dua kueri berteks identik sama-sama
+     menunjuk situs PERTAMA. Kelas kesalahan yang sudah menggigit repo ini
+     (`re.search` memungut pembantu senama pertama). Diperbaiki: lokasi dari
+     nomor baris.
+
+  Sesudah keempatnya: suntikan telanjang **dan** suntikan tersamar sama-sama
+  tertuduh, dan **pasangannya** — variabel yang MEMANG mengurung `companyId` —
+  tidak tertuduh
+- **Pilahan tangan atas ke-48**, dan tak satu pun bocor. Empat bentuk, semuanya
+  bisa diperiksa:
+  1. **induk diverifikasi lebih dulu di handler yang sama** —
+     `pastikanKartu(jenis, id, auth.company_id!)`, `eq(ingredients.id, id) AND
+     eq(ingredients.companyId, …)` sepuluh baris di atasnya;
+  2. **kunci lahir dari kueri terkurung tepat di atasnya** — `billIds`,
+     `saleIds`, `fakturIds`, `kirimMap`, `batchByProd`;
+  3. **diperiksa di JS SESUDAH dibaca** — `bill.companyId !== companyId`
+     (`loadDetail`), `row.companyId !== companyId` (`getCustomer`). Sah, tapi
+     rapuh: WHERE-nya tak melindungi apa pun, yang melindungi baris `if`-nya;
+  4. **tabel `users` yang memang global**, kuncinya dari baris terkurung
+     (`users.id = sale.cashierUserId`) — venanya sendiri sudah pernah disapu
+- **Diukur lewat HTTP dengan DUA tenant sungguhan** (Aturan 6 — tiap id milik
+  tenant A dibuktikan terbaca oleh A lebih dulu; tanpa itu 404 milik tenant B
+  tak menyatakan apa pun, sebab id ngawur juga 404): **sepuluh rute detail
+  ber-`:id`** ditembak — `/bahan/:id/langkah` · `/resep` · `/detail` ·
+  `/meja/:id/log` · `/stok/kartu/:id` · `/stok/fifo/:id` · `/penjualan/:id` ·
+  `/slip` · `/pesanan/penjualan/:id/log` · `/perlengkapan/:id/kartu`.
+
+  | | tenant A (pemilik) | tenant B |
+  |---|---|---|
+  | kesepuluh rute | **200** | **404** |
+
+- **BUKTI MERAH atas pengukurannya sendiri** — sebab tembakan yang tak bisa
+  merah tak membuktikan apa-apa: pengurungan dicabut dari
+  `GET /bahan/:id/langkah` (suntikan di-assert mendarat), server dijalankan
+  ulang, lalu **tenant B membaca resep tenant A dengan 200**. Sapuan statisnya
+  ikut menuduh berkas & barisnya (`bahan/routes.ts:1660`). Dipulihkan
+- **Hasil: BERSIH** — 627 kueri, nol kebocoran, dan untuk pertama kalinya
+  angkanya ada
+- **Tindak**: instrumennya **pindah ke repo sebagai gerbang** —
+  `test/util/kueri-terkurung.ts` (dipakai bersama) +
+  `test/kueri-terkurung-tenant.test.ts` (7 uji): `DIPILAH_TANGAN` per BERKAS +
+  JUMLAH (bukan nomor baris — gerbang di repo ini sudah sekali patah karena
+  memaku baris yang bergeser oleh komentar), uji anti-kuburan, uji PREMIS, uji
+  yang menahan daftar GLOBAL agar tak dilonggarkan diam-diam, dan empat bukti
+  detektor sintetis yang masing-masing memaku satu dari empat kebutaan di atas.
+  **Ini juga menutup lubang (1) vena arah TULIS**: gerbangnya menilai
+  `.update`/`.delete` sekaligus. verify-api **§260** (22 asersi)
+- **Batas, jujur**:
+  - resolusi variabelnya **satu tingkat** di berkas yang sama; `conds` yang
+    dioper sebagai PARAMETER ke fungsi lain tak ditelusuri — itu sebagian dari
+    48 yang dipilah tangan;
+  - kelas B percaya `branchId` sudah lahir dari `resolveBranchId`; itu
+    **tidak** diverifikasi ulang oleh gerbang ini (vena "cabang ikut di URL"
+    yang menjaganya);
+  - bentuk ke-3 (diperiksa di JS sesudah dibaca) **lolos gerbang ini** karena
+    ia memang aman hari ini — tapi ia rapuh: mencabut satu baris `if` membuka
+    kebocoran tanpa WHERE-nya berubah. Gerbang ini takkan melihatnya;
+  - yang ditembak sepuluh rute detail; **rute daftar** (yang membalas larik)
+    tak ditembak lintas-tenant — daftarnya memang tersaring `companyId` di
+    kelas A, tapi itu pembacaan, bukan tembakan
+- Gerbang: typecheck bersih · `npm test` **2.317** (195 berkas) · `verify-api`
+  **3.072 lolos, 0 gagal** vs Postgres SEGAR (§260 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**. Tak
+  ada berkas Dart tersentuh → `flutter analyze`/`flutter test` tidak dijalankan
+
+---
+
+## 60 rute BACA terbuka, dipilah satu per satu — server — 2026-08-26
+
+- **Kenapa**: batas yang ditulis entri "Matriks IZIN per rute" sendiri —
+  *"sisanya (60 rute BACA terbuka, termasuk beberapa yang menampilkan
+  HPP/margin) belum diadjudikasi satu per satu."* Vena itu menutup dua pintu
+  TULIS; arah BACA belum pernah disentuh
+- **Populasi**: **274** rute · **105** GET · **60** GET terbuka untuk keenam
+  peran (`owner` `admin` `cashier` `tim` `kitchen` `bar`). Ke-60 dipilah
+  tangan, bukan disamaratakan
+- **Detektor**: penyusun matriks yang sudah ada (`izin-per-rute.test.ts`)
+  dijalankan pada arah GET. **DIBUKTIKAN bisa menuduh, dua lapis, suntikan
+  di-assert mendarat lebih dulu**: (1) `requireRole` dicabut dari
+  `GET /supplier/:id/kartu` → DUA uji merah, keduanya menyebut jalurnya;
+  (2) rute baru `GET /satuan/laba-rahasia` tanpa penjaga disisipkan → tertuduh
+  dengan namanya. Keduanya dipulihkan
+- **Diukur lewat HTTP dengan token peran `bar` SUNGGUHAN** (premis tokennya
+  diperiksa dulu: payload JWT-nya benar-benar `role: "bar"`), DB segar, tiap
+  fikstur dibuktikan terbaca lebih dulu lewat 200 milik owner:
+
+  | rute | yang terbaca peran `bar` SEBELUM |
+  |---|---|
+  | `GET /menu` | `hpp` **5662,03** · `hpp_dine_in` 4732,03 · `harga_saran` 10820,01 · `food_cost_persen` 51,47 · `komponen[].harga_per_unit` 357,14 / 754,55 |
+  | `GET /bahan` | `harga_beli` **35.000** · `harga_per_unit` 777,78 |
+  | `GET /bahan/:id/pembelian` | `harga_terkini` 777,78 + seluruh riwayat lot |
+  | `GET /supplier/:id/kartu` | `total_belanja` + riwayat belanja supplier |
+  | `GET /menu/panduan-markup` | seluruh tabel kebijakan markup perusahaan |
+  | `GET /penjualan/:id` | `sale.totalHpp` **5662,0314** · `items[].hppSatuan` |
+  | `GET /stok` · `GET /perlengkapan/:id/kartu` | `harga_per_unit` · `total_belanja` |
+
+- **Temuan — 7 pintu BACA yang aturannya sudah tertulis di pintu SEBELAHNYA,
+  di berkas yang SAMA.** Ini bukan disimpulkan dari klien; pasangannya bisa
+  ditunjuk barisnya:
+
+  | berkas | pintu TULIS (owner/admin sejak lama) | pintu BACA (terbuka keenam peran) |
+  |---|---|---|
+  | `bahan/routes.ts` | `PUT /:id/supplier` :1208 | `GET /:id/supplier` :1198 — **sepuluh baris di atasnya** |
+  | `bahan/routes.ts` | `POST /:id/harga` | `GET /:id/pembelian` |
+  | `perlengkapan/routes.ts` | `PUT /:id/supplier` | `GET /:id/supplier` |
+  | `perlengkapan/routes.ts` | `POST /:id/harga` | `GET /:id/pembelian` |
+  | `perlengkapan/routes.ts` | `GET /belanja` & `GET /master` (keduanya owner/admin) | `GET /beli` |
+  | `supplier/routes.ts` | `PATCH /:id` | `GET /:id/kartu` |
+  | `menu/routes.ts` | — | `GET /panduan-markup` (**NOL konsumen**: kedua klien mengimpor konstanta `PANDUAN_MARKUP` dari `@kakarut/shared`, tak satu pun lewat HTTP) |
+
+  Dua di antaranya bahkan menulis aturannya utuh di doc-comment-nya sendiri —
+  *"GET terbuka semua peran (info belanja); PUT owner/admin"* — lalu memasang
+  penjaganya di separuh kalimat itu saja
+- **SESUDAH** (terukur, tabel penuh di §259 verify-api): ketujuhnya `bar` →
+  **403**; `owner` → **200**; dan **PASANGAN**: `tim` → **200** di kedua pintu
+  bahan (layar yang membacanya memang dipasang untuk tim/tim-CK, jadi menutup
+  `tim` akan mematikan layar yang hari ini bekerja). Terbuka **60 → 53**
+- **Tindak**: 7 `requireRole` + `TERBUKA_SENGAJA_BACA` **per RUTE** (53 entri
+  bernama & beralasan, bukan per prefiks — prefiks `/stok` sendiri memuat
+  delapan pintu yang artinya berbeda) + uji anti-kuburan + uji PREMIS +
+  uji "pintu yang WAJIB terbuka masih terbuka" (11 rute) + §259 verify-api
+  (28 asersi). `izin-per-rute.test.ts` 6 → **11** uji
+- **Batas — dan ini bagian yang paling penting, ditulis apa adanya**: angka
+  biaya di `GET /menu`, `GET /bahan`, `GET /stok`, `GET /penjualan/:id`, dan
+  `GET /perlengkapan/:id/kartu` **TIDAK ditutup**, dan alasannya hasil
+  pengukuran, bukan kehabisan waktu:
+  1. **Saling terjangkau.** Menutup `hpp` di `/menu` sementara `/stok` dan
+     `/bahan` tetap memberi `harga_per_unit` per bahan (dan `/bahan/:id/resep`
+     memberi takarannya) hanya memindahkan pintunya. Penjaga yang bisa
+     dilewati lewat pintu sebelah persis penyakit yang ledger ini obati —
+     memasangnya akan menambah satu lagi, bukan mengurangi.
+  2. **Ada layar TERKIRIM yang sengaja menampilkannya ke peran non-manajemen**:
+     papan pesanan ponsel memunculkan SnackBar *"HPP transaksi dihitung ulang
+     → Rp …"* untuk dapur/bar, dan kartu "Nilai stok" di layar Stok ponsel
+     dihitung dari `harga_per_unit` **tanpa penjaga peran sama sekali**;
+     `KartuPerlengkapanModal` web (memajang `total_belanja`) dibuka dari tab
+     Stok → Perlengkapan yang juga tak berpenjaga peran.
+
+  Sementara itu KEDUA klien menulis aturan sebaliknya di layar, dengan nama:
+  ponsel `resep_page.dart` memakai `final lihatHarga = user?.isManajemen`,
+  web `ResepPage` bahkan tak mengambil datanya (`enabled: bolehUbah`), dan
+  `MenuListPage`/`AnalisisHargaPage`/`MenuHppPage` semuanya di balik
+  `isManajemen`. Jadi **kebijakannya sendiri belum satu** — menyeragamkannya
+  keputusan PRODUK (siapa boleh melihat biaya), bukan tambalan yang boleh
+  kupasang sendiri. Seluruh pengukurannya tersimpan di CATATAN BIAYA dalam
+  `izin-per-rute.test.ts` supaya keputusan itu punya angkanya saat diambil
+- **Batas kedua**: resolusi statisnya tetap buta pada penjaga yang bergantung
+  **tipe cabang** (`izinkanManajemenAtauKaryawanCk`, `izinkanProduksi`) dan
+  pada pemeriksaan kepemilikan **di dalam handler** — sama seperti putaran
+  lalu. Yang memutuskan tetap tembakan HTTP
+- **Kesalahan proses yang dicatat, bukan didiamkan**: putaran verify-api
+  pertama dibunuh timeout perkakas di menit ke-2, dan putaran kedua kujalankan
+  di atas DB yang sudah tercemar sisanya — **42 "kegagalan"** yang tak satu pun
+  nyata. Ketahuan dari `jumlah menu = 79` (seharusnya 57), bukan dari hasil
+  ujinya. Diulang dari DB yang benar-benar segar. Ditambah: `JEJAK_RUTE`
+  menerima **jalur berkas**, bukan `1` — sekali kuisi `1` dan jejaknya masuk
+  ke berkas bernama `1`
+- Gerbang: typecheck bersih · `npm test` **2.310** (194 berkas) · `verify-api`
+  **3.050 lolos, 0 gagal** vs Postgres SEGAR (§259 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · e2e Playwright **6/6**.
+  Tak ada berkas Dart tersentuh → `flutter analyze`/`flutter test` tidak
+  dijalankan, dan itu disebutkan
+
+---
+
 ## Jalur tulis KEDUA dibayar: rekalkulasi HPP — server — 2026-08-24
 
 - **Kenapa**: batas gerbang luapan-turunan — *"jalur tulis KEDUA ke kolom
@@ -123,6 +1193,72 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   (bentuk yang terbukti cukup di §245: tanpa penjaga → `201 500 500 500`)
 - Gerbang: typecheck bersih · `npm test` 2.208 · `verify-api` **2.955**
   terhadap Postgres segar · `audit:invarian` 26/26 · cakupan 271 identik
+
+---
+
+## Matriks IZIN per rute — server — 2026-08-25
+
+- **Kenapa**: pertanyaan paling dasar tentang sebuah pintu — **peran mana yang
+  efektif bisa masuk, dan apakah itu disengaja** — belum pernah dijawab ledger
+  ini sekali pun. Tenant, cabang, langit-langit daftar, presisi angka: sudah;
+  izin: belum
+- **Metode**: jawabannya tak bisa dibaca dari satu baris. Disusun dari **tiga**
+  sumber — penjaga prefiks `app.ts`, `requireRole` di rantai rutenya, dan
+  **ALIAS tingkat modul** (`const bolehAturMeja = requireRole(…)`) — lalu
+  **ditembak** dengan token peran sungguhan
+- **Populasi**: **274** rute · **15** penjaga prefiks · **101** rute terbuka
+  untuk keenam peran, **41** di antaranya TULIS · **14** yang mencurigakan
+  ditembak satu per satu
+- **Pengukuran membantah pembacaan statis DUA ARAH** (token peran `bar`):
+
+  | | hasil |
+  |---|---|
+  | `POST`/`PATCH`/`PUT`/`DELETE /meja` | **403** — dijaga alias `bolehAturMeja`; pemindai versi pertamaku menuduhnya **palsu** |
+  | `POST /penyimpanan` | **201**, dan barisnya **ADA** di `storage_locations` |
+  | `POST /supplier` | **201**, dan barisnya **ADA** di `suppliers` |
+
+- **Temuan**, dan bentuknya tanda tangan repo ini: di KEDUA modul, **mengubah**
+  master data sudah `requireRole("owner","admin")` (`PATCH /:id`,
+  `PUT /:id/petugas`), sementara **membuatnya** terbuka untuk keenam peran.
+  Aturannya sudah ditulis di pintu sebelah
+- **PENGETATAN PERTAMAKU TERLALU JAUH, dan gerbang lama yang menahannya**:
+  §191 verify-api sudah memaku kontraknya **berpasangan** — *"kasir →
+  `POST /penyimpanan` cabang SENDIRI tetap boleh"* & *"cabang lain = 403"*.
+  Menutupnya ke owner/admin saja mematahkan asersi itu. Himpunan akhirnya
+  mencerminkan `bolehAturMeja` (peran yang mengatur lantai) sambil tetap
+  menutup `tim`/`kitchen`/`bar`; `/supplier` tetap owner/admin sebab tak ada
+  kontrak yang menyatakan sebaliknya. **Inilah gunanya pasangan**: ia menahan
+  perbaikan yang berlebihan, bukan cuma perbaikan yang kurang
+- **SESUDAH**: `bar` → **403** di keduanya · `owner` tetap **201** · kasir
+  tetap bisa membuat penyimpanan di cabangnya sendiri
+- **Dua cacat pemindaiku sendiri, ketahuan lewat ANGKANYA**:
+  · `[^)]*` berhenti di `)` pertama → **3 dari 15** penjaga terbaca, dan
+    `/laporan/*` tercatat "terbuka untuk keenam peran";
+  · alias tingkat modul tak terlihat → **4** pintu meja tertuduh palsu.
+  Keduanya diperbaiki dan **dipaku uji PREMIS** supaya kebutaannya tak bisa
+  kembali diam-diam
+- **Satu rumah**: `semuaRute()` **dipindah** (bukan disalin) ke
+  `test/util/rute.ts`, pola yang sama dengan `test/util/kolom-numerik.ts`,
+  begitu gerbang kedua membutuhkannya
+- **Ratchet**: `izin-per-rute.test.ts` — pintu TULIS baru yang terbuka untuk
+  keenam peran menagih keputusan. Uji **anti-kuburan** langsung berguna: ia
+  menolak entri `/meja` yang sudah tak berlaku
+- **Bukti merah**: penjaga `POST /supplier` dicabut (suntikan di-assert
+  mendarat) → **dua** uji merah menyebut rutenya; dipulihkan
+- **Batas, jujur**: resolusi statis tak melihat penjaga **di dalam handler**
+  (mis. `terikatCabang` + perbandingan `branch_id`) maupun penjaga yang
+  bergantung **tipe cabang** (`izinkanManajemenAtauKaryawanCk` hanya
+  meloloskan `tim` bila cabangnya central kitchen). Karena itu tiap tuduhan
+  **ditembak** sebelum disebut temuan — dan justru tembakan itu yang
+  membebaskan empat pintu meja
+- **Cacat lingkungan yang sempat menyesatkan, dicatat supaya tak terulang**:
+  proses server lama (jam 07:01) masih memegang port 3000 sementara
+  `npm start` yang baru mati diam-diam, jadi satu putaran verify-api menguji
+  **kode lama**. Ketahuan dari `ps` — bukan dari hasil ujinya
+- Gerbang: typecheck bersih · `npm test` **2.305** (194 berkas) · `verify-api`
+  **3.022 lolos, 0 gagal** vs Postgres SEGAR (§258 baru) · cakupan rute **272**
+  identik · `audit:invarian` 26/26 · build web · e2e **6/6**
+- Commit: `e95cbb4`
 
 ---
 

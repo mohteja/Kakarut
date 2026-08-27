@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import {
@@ -62,6 +63,7 @@ import { kolomBarisPindah, kolomPindahCabang } from "./pindah";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   branchUntukTulis,
+  pastikanAnggotaAktif,
   pastikanCabang,
   resolveBranchId,
   terikatCabang,
@@ -114,9 +116,7 @@ const FakturEditBody = z.object({
   storage_location_id: z.string().uuid().nullish(),
   /** ganti pelaksana karyawan (khusus jalur produksi); null = kosongkan */
   worker_id: z.string().uuid().nullish(),
-  prod_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+  prod_date: zTanggal
     .optional(),
 }).strict();
 
@@ -171,9 +171,7 @@ const TahapBody = z.object({
          * masa simpan bahan (tanggal masuk + masa_simpan_hari); diabaikan
          * untuk target tahap lain.
          */
-        exp: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/, "Format exp harus YYYY-MM-DD")
+        exp: zTanggal
           .nullish(),
       }),
     )
@@ -283,9 +281,6 @@ class TahapDitolak extends HTTPException {
 const TAHAP_SEBELUM = { dikerjakan: "rencana", menunggu: "dikerjakan" } as const;
 /** urutan pipeline untuk aturan "hanya boleh maju" pada tahap sebagian */
 const URUTAN_TAHAP = { rencana: 0, dikerjakan: 1, menunggu: 2, dikonfirmasi: 3 } as const;
-
-/** Terima hanya tanggal format YYYY-MM-DD; selain itu undefined. */
-const tglValid = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
 
 /** Cocokkan satu faktur: baris ber-fakturId, atau baris lama (fakturId null) via id. */
 function cocokFaktur(key: string) {
@@ -449,13 +444,15 @@ function pesanBahanKurang(kurang: BahanKurangProduksi[]) {
   return `Bahan baku belum cukup untuk mulai produksi: ${detail}. Penuhi/terima stok bahan di cabang dulu.`;
 }
 
-/** Pastikan user adalah anggota (karyawan) perusahaan — untuk penugasan produksi. */
+/**
+ * Pastikan user adalah anggota (karyawan) perusahaan yang MASIH BEKERJA.
+ *
+ * Dulu memeriksa keanggotaannya saja: karyawan yang sudah diarsipkan (keluar)
+ * tetap bisa dijadikan pelaksana, dan namanya muncul di faktur yang lahir
+ * sesudah ia berhenti. Terukur 201 lewat HTTP sebelum diperbaiki.
+ */
 async function pastikanKaryawan(userId: string, companyId: string) {
-  const [m] = await db
-    .select({ userId: memberships.userId })
-    .from(memberships)
-    .where(and(eq(memberships.userId, userId), eq(memberships.companyId, companyId)));
-  if (!m) throw new HTTPException(400, { message: "Karyawan bukan anggota perusahaan" });
+  await pastikanAnggotaAktif(userId, companyId);
 }
 
 /** Satu baris faktur beli, secukupnya untuk menghitung harga acuan baru. */
@@ -2273,6 +2270,13 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           const baru = toMenuDto(m, katalogBaru).food_cost_persen;
           // Hanya yang MENYEBERANG ambang — menu yang sudah tinggi sejak awal
           // bukan kabar baru dan cuma membuat panel ini ramai.
+          //
+          // Food cost yang TAK BISA dihitung (harga jual nol) tak bisa
+          // menyeberang ambang mana pun: tak ada angka untuk dibandingkan.
+          // Dilewati DENGAN SENGAJA, bukan lewat `?? 0` — nol palsu di sini
+          // akan membuat tiap menu komplimen tampak baru saja jatuh ke bawah
+          // ambang setiap kali harga bahan naik.
+          if (lama === null || baru === null) continue;
           if (lama <= foodCostMaks && baru > foodCostMaks) {
             menuLewat.push({
               menu_id: m.id,
@@ -2448,10 +2452,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       // melihat faktur SEMUA cabang (kasir/tim tetap terkunci cabangnya).
       const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
       const branchId = semuaCabang ? null : await resolveBranchId(c);
-      const dari = tglValid(c.req.query("dari"));
-      const sampai = tglValid(c.req.query("sampai"));
+      const dari = tanggalQuery(c, "dari");
+      const sampai = tanggalQuery(c, "sampai");
       // dukung juga ?tanggal= (satu hari) demi kompatibilitas
-      const satuHari = tglValid(c.req.query("tanggal"));
+      const satuHari = tanggalQuery(c, "tanggal");
       const page = Math.max(1, Number(c.req.query("page") ?? "1") || 1);
       const perPage = Math.min(200, Math.max(1, Number(c.req.query("per_page") ?? "20") || 20));
 

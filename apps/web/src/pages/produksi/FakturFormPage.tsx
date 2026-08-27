@@ -393,7 +393,12 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
           ? angkaDari(it.jumlah) * b.isi
           : angkaDari(it.jumlah)
         : 0;
-    const estimasi = b && qtyPcs > 0 ? Math.round((qtyPcs / b.isi) * b.harga_beli) : null;
+    // `estimasi` memang sudah bertipe `number | null`; harga yang ditahan
+    // server masuk ke cabang yang sama — tak diketahui, bukan nol.
+    const estimasi =
+      b && b.harga_beli != null && qtyPcs > 0
+        ? Math.round((qtyPcs / b.isi) * b.harga_beli)
+        : null;
     return { b, qtyPcs, estimasi };
   }
 

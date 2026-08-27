@@ -1,3 +1,4 @@
+import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { randomUUID } from "node:crypto";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
@@ -30,7 +31,7 @@ import {
   terikatCabang,
   type AppEnv,
 } from "../../middleware/auth";
-import { hargaPerUnit } from "@kakarut/shared";
+import { hargaPerUnit, ringkasNilaiStok } from "@kakarut/shared";
 import { awalHariDi, tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { fifoBahan, hitungSaldoCabang, kartuStok, qtyDiJalan } from "./service";
@@ -95,9 +96,7 @@ const StokAwalBody = OpnameBody.omit({ client_ref: true, device_id: true }).exte
    * ditambahkan BERSAMA penanganannya — bukan mendahului.
    */
   /** tanggal berlaku saldo pembuka (YYYY-MM-DD, zona perusahaan). Default hari ini. */
-  tanggal: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal harus YYYY-MM-DD")
+  tanggal: zTanggal
     .optional(),
 });
 
@@ -122,6 +121,31 @@ export const stokRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
     return c.json(await hitungSaldoCabang(auth.company_id!, branchId));
+  })
+  /**
+   * NILAI RUPIAH stok di rak — agregat, bukan harga per bahan.
+   *
+   * Terbuka semua peran, dan itu keputusan: kartu "Nilai stok" memang sengaja
+   * ditampilkan ke siapa pun yang membuka layar Stok di KEDUA klien, dan ia
+   * menjawab "modal saya yang mengendap di gudang berapa?" — bukan "bahan itu
+   * dibeli berapa".
+   *
+   * Rumusnya `ringkasNilaiStok` dari `@kakarut/shared` — RUMAH YANG SUDAH ADA,
+   * dipakai web `StokPage` dan dicerminkan Dart `nilai_stok.dart`. Menyusun
+   * ulang di sini akan melahirkan rumus kedua yang bisa menyimpang diam-diam,
+   * kelas yang sudah sekali menggigit repo ini pada PB1.
+   *
+   * KENAPA RUTE INI ADA. Sampai sekarang totalnya dihitung KLIEN dari
+   * `harga_per_unit` tiap baris `GET /stok` — jadi selama kartunya hidup,
+   * harga beli tiap bahan wajib ikut terkirim ke semua peran. Rute ini
+   * memisahkan keduanya: totalnya boleh dilihat siapa pun, harga per bahannya
+   * tidak.
+   */
+  .get("/nilai", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const baris = await hitungSaldoCabang(auth.company_id!, branchId);
+    return c.json(ringkasNilaiStok(baris));
   })
   /** Kartu stok: buku besar mutasi satu bahan (halaman terpisah di web). */
   .get("/kartu/:ingredientId", async (c) => {
@@ -149,14 +173,10 @@ export const stokRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     const tz = company?.timezone ?? "Asia/Jakarta";
-    const tanggalValid = /^\d{4}-\d{2}-\d{2}$/;
-    const sampaiQ = c.req.query("sampai");
-    const dariQ = c.req.query("dari");
-    const sampai = sampaiQ && tanggalValid.test(sampaiQ) ? sampaiQ : tanggalDi(tz);
+    const sampai = tanggalQuery(c, "sampai") ?? tanggalDi(tz);
     const dari =
-      dariQ && tanggalValid.test(dariQ)
-        ? dariQ
-        : tanggalDi(tz, new Date(Date.now() - 29 * 24 * 3600 * 1000));
+      tanggalQuery(c, "dari") ??
+      tanggalDi(tz, new Date(Date.now() - 29 * 24 * 3600 * 1000));
 
     return c.json(
       await kartuStok({

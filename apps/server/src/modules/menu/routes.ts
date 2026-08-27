@@ -7,7 +7,13 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
   PANDUAN_MARKUP,
+  bagiAtauNull,
+  bolehLihatBiaya,
+  tanpaBiayaMenu,
   type AnalisisHargaRow,
+  type MenuDto,
+  type MenuDtoPenuh,
+  type UserRole,
   type MenuPriceLogRow,
   type PenyumbangHpp,
   type SebabHargaMenu,
@@ -278,8 +284,31 @@ async function catatHargaMenu(
   await tx.insert(menuPriceLogs).values(row);
 }
 
+/**
+ * Angka biaya menu hanya untuk manajemen.
+ *
+ * Dipanggil di TIAP situs keluaran `MenuDto`, termasuk balasan rute tulis yang
+ * sudah owner/admin — di sana ia no-op, dan satu jalan yang sama membuat
+ * sapuan `biaya-hanya-manajemen.test.ts` bisa menuntut KELENGKAPAN alih-alih
+ * menghafal situs mana yang dikecualikan. Gerbang itu langsung menangkap dua
+ * situs yang semula kulewati.
+ */
+function saringMenu(role: UserRole | null, d: MenuDtoPenuh): MenuDto {
+  return bolehLihatBiaya(role) ? d : tanpaBiayaMenu(d);
+}
+
 export const menuRoutes = new Hono<AppEnv>()
-  .get("/panduan-markup", (c) => c.json(PANDUAN_MARKUP))
+  /**
+   * KEBIJAKAN MARKUP perusahaan — persen per jenis kategori.
+   *
+   * Terukur 2026-08-26 dengan token peran `bar`: 200, dan seluruh tabelnya
+   * terbaca. Rute ini punya **NOL konsumen**: web (`MenuFormPage`) dan ponsel
+   * sama-sama mengimpor konstanta `PANDUAN_MARKUP` dari `@kakarut/shared`
+   * secara langsung, tak satu pun lewat HTTP. Jadi menutupnya tak bisa
+   * mematahkan layar mana pun — dan yang tersisa hanya keuntungannya:
+   * kebijakan harga tak lagi terbaca peran mana pun yang punya token.
+   */
+  .get("/panduan-markup", requireRole("owner", "admin"), (c) => c.json(PANDUAN_MARKUP))
   .get("/", async (c) => {
     const auth = c.get("auth");
     const katalog = await loadKatalog(db, auth.company_id!);
@@ -295,7 +324,12 @@ export const menuRoutes = new Hono<AppEnv>()
       .filter((r) => (kategoriFilter ? r.categoryId === kategoriFilter : true))
       .filter((r) => (branchFilter ? tampilDiCabang(katalog, r.id, branchFilter) : true))
       .map((r) => toMenuDto(r, katalog));
-    return c.json(dtos);
+    // Angka biaya hanya untuk manajemen — disaring DI SINI, di batas rute.
+    // `toMenuDto` dipakai juga `laporan/routes.ts` (analisis harga) dan dua
+    // situs di berkas ini yang MEMBACA `harga_jual_bulat` untuk menghitung
+    // saran harga; menihilkan di dalamnya akan merusak perhitungan itu,
+    // bukan menjaga apa pun.
+    return c.json(dtos.map((d) => saringMenu(auth.role, d)));
   })
   // Sisa porsi tiap menu di cabang aktif (untuk info kasir "sisa 2 lagi").
   // Branch-scoped: kasir → cabangnya; owner/admin bisa pilih via ?branch_id.
@@ -377,10 +411,18 @@ export const menuRoutes = new Hono<AppEnv>()
           });
         }
         const penyumbang = [...gabung.values()]
-          .map((p) => ({
-            ...p,
-            persen_hpp: dto.hpp > 0 ? (p.kontribusi / dto.hpp) * 100 : 0,
-          }))
+          .map((p) => {
+            // `null`, bukan 0: HPP nol berarti tak ada biaya untuk dibagi.
+            // "0%" di sana menjawab pertanyaan yang tak pernah bisa dijawab —
+            // dan menyembunyikan bahwa seluruh resepnya berbahan nol rupiah.
+            //
+            // Rasionya dihitung dulu, dikali 100 SESUDAHNYA: mengoper
+            // `kontribusi * 100` sebagai argumen berarti menyusun angka di JS
+            // lalu menyerahkannya ke fungsi yang memutuskan — kelas yang sudah
+            // dipaku `diadili-lintas-fungsi`.
+            const rasio = bagiAtauNull(p.kontribusi, dto.hpp);
+            return { ...p, persen_hpp: rasio === null ? null : rasio * 100 };
+          })
           .sort((a, b) => b.kontribusi - a.kontribusi)
           .slice(0, 5);
         return {
@@ -390,8 +432,25 @@ export const menuRoutes = new Hono<AppEnv>()
           penyumbang,
         };
       })
-      // Food cost tertinggi dulu — yang paling perlu dijelaskan ada di atas.
-      .sort((a, b) => b.food_cost_persen - a.food_cost_persen);
+      /*
+       * Food cost tertinggi dulu — yang paling perlu dijelaskan ada di atas.
+       *
+       * Yang TAK BISA dihitung (menu komplimen, harga jual nol) diurut TERPISAH
+       * di ekor, bukan diperlakukan sebagai 0%. Menyamakannya dengan nol
+       * membuatnya mengendap di antara menu-menu tersehat — terukur: posisi 77
+       * dari 93 — padahal ia justru menu yang biayanya keluar tanpa pemasukan.
+       * Ia ditaruh di ekor karena memang tak punya tempat dalam urutan "paling
+       * perlu dijelaskan menurut angkanya"; yang membuatnya terlihat adalah
+       * `food_cost_persen: null` yang dirender "—", bukan posisinya.
+       */
+      .sort((a, b) => {
+        const x = a.food_cost_persen;
+        const y = b.food_cost_persen;
+        if (x === null && y === null) return 0;
+        if (x === null) return 1;
+        if (y === null) return -1;
+        return y - x;
+      });
     return c.json(rows);
   })
   /**
@@ -458,7 +517,8 @@ export const menuRoutes = new Hono<AppEnv>()
     const katalog = await loadKatalog(db, auth.company_id!);
     const row = katalog.rows.find((r) => r.id === c.req.param("id"));
     if (!row) throw new HTTPException(404, { message: "Menu tidak ditemukan" });
-    return c.json(toMenuDto(row, katalog));
+    const dto = toMenuDto(row, katalog);
+    return c.json(saringMenu(auth.role, dto));
   })
   /** Riwayat perubahan harga jual satu menu (terbaru dulu). owner/admin. */
   .get("/:id/riwayat-harga", requireRole("owner", "admin"), async (c) => {
@@ -587,7 +647,10 @@ export const menuRoutes = new Hono<AppEnv>()
       return menu;
     });
     const katalog = await loadKatalog(db, auth.company_id!);
-    return c.json(toMenuDto(katalog.rows.find((r) => r.id === row.id)!, katalog), 201);
+    return c.json(
+      saringMenu(auth.role, toMenuDto(katalog.rows.find((r) => r.id === row.id)!, katalog)),
+      201,
+    );
   })
   .put(
     "/:id",
@@ -698,7 +761,9 @@ export const menuRoutes = new Hono<AppEnv>()
         return menu;
       });
       const katalog = await loadKatalog(db, auth.company_id!);
-      return c.json(toMenuDto(katalog.rows.find((r) => r.id === row.id)!, katalog));
+      return c.json(
+        saringMenu(auth.role, toMenuDto(katalog.rows.find((r) => r.id === row.id)!, katalog)),
+      );
     },
   )
   .delete("/:id", requireRole("owner", "admin"), async (c) => {

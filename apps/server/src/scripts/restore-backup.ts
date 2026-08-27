@@ -93,6 +93,8 @@ async function main() {
     await client.query("COMMIT");
     console.log(`Selesai: ${tabel.length} tabel, ${total} baris dipulihkan.`);
   } catch (e) {
+    // ROLLBACK atas koneksi yang mungkin sudah rusak; galat aslinya dicetak
+    // tepat di bawah, jadi tak ada kegagalan yang hilang di sini.
     await client.query("ROLLBACK").catch(() => {});
     console.error("Restore GAGAL (di-rollback):", e instanceof Error ? e.message : String(e));
     process.exitCode = 1;

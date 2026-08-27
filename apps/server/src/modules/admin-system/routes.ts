@@ -193,26 +193,43 @@ export const adminSystemRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     const [row] = await db.select().from(backupRuns).where(eq(backupRuns.id, id));
     if (!row) throw new HTTPException(404, { message: "Cadangan tidak ditemukan" });
+    // Baris riwayat adalah SATU-SATUNYA catatan yang menamai objeknya. Kalau
+    // objeknya gagal dihapus dan barisnya tetap dibuang, yang tersisa adalah
+    // objek berbayar yang tak bisa ditemukan siapa pun lagi — retensi tak akan
+    // melihatnya, dan sapuan yatim hanya menyapu bucket unggahan. Terukur
+    // sebelum penjaga ini: 200 `{ok:true}` dengan berkasnya masih di disk.
+    //
+    // "Sudah tidak ada" tetap DIAM: itu ditangani `hapusBerkasLokal`/R2 di
+    // driver, jadi yang sampai ke sini hanya kegagalan sungguhan.
     if (row.objectKey) {
-      await getCadanganStorage()
-        .hapus(row.objectKey)
-        .catch(() => {
-          /* objek mungkin sudah hilang — tetap hapus barisnya */
+      try {
+        await getCadanganStorage().hapus(row.objectKey);
+      } catch (e) {
+        // Galat aslinya ke log server saja — bukan ke penyewa.
+        console.error("Hapus objek cadangan gagal:", e instanceof Error ? e.message : String(e));
+        throw new HTTPException(502, {
+          message:
+            "Berkas cadangan gagal dihapus dari penyimpanan — baris riwayatnya dipertahankan agar objeknya tak jadi yatim. Coba lagi nanti.",
         });
+      }
     }
     await db.delete(backupRuns).where(eq(backupRuns.id, id));
     return c.json({ ok: true });
   })
   // Terapkan retensi sekarang (buang cadangan lama di luar batas simpan).
   .post("/backup/retensi", async (c) => {
-    const dibuang = await terapkanRetensi();
-    return c.json({ ok: true, dibuang });
+    const { dibuang, gagal } = await terapkanRetensi();
+    return c.json({ ok: true, dibuang, gagal });
   })
   // Sapu berkas unggahan yatim sekarang. ?hitung=1 = mode ukur (tanpa hapus).
   .post("/sapu-unggahan", async (c) => {
     try {
-      const h = await sapuUnggahanYatim({ hanyaHitung: c.req.query("hitung") === "1" });
-      return c.json({ ok: true, ...h });
+      const { diperiksa, yatim, dihapus, dirujuk, gagalHapus } = await sapuUnggahanYatim({
+        hanyaHitung: c.req.query("hitung") === "1",
+      });
+      // `gagal_hapus` ikut dikirim: hitungan yang berhenti bohong di server
+      // masih bohong di layar kalau bagian yang gagal tak pernah sampai.
+      return c.json({ ok: true, diperiksa, yatim, dihapus, dirujuk, gagal_hapus: gagalHapus });
     } catch (e) {
       // mis. advisory lock (sapuan lain sedang berjalan)
       throw new HTTPException(409, {

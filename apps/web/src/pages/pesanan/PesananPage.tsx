@@ -2,6 +2,7 @@ import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/
 import { useEffect, useState } from "react";
 import {
   durasiPesananDetik,
+  dibatalkanDapur,
   ringkasPesanan,
   sajianBedaDariNota,
   urutkanPesanan,
@@ -159,7 +160,7 @@ function BarisPesanan({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 text-sm text-stone-700">
           <span
-            className={it.status === "batal" || habisRefund ? "line-through text-stone-400" : ""}
+            className={dibatalkanDapur(it.status) || habisRefund ? "line-through text-stone-400" : ""}
           >
             <span className="font-semibold text-stone-800">{it.qty}×</span> {it.nama}
           </span>
@@ -204,7 +205,7 @@ function BarisPesanan({
           <button
             onClick={() => onStatus("dikerjakan")}
             title={
-              it.status === "batal"
+              dibatalkanDapur(it.status)
                 ? "Kembalikan ke dapur — pesanan ini dibatalkan kasir"
                 : "Belum selesai — kembalikan ke daftar kerja"
             }
@@ -280,7 +281,7 @@ function KartuPesanan({
   // "Belum dibayar" adalah AJAKAN menagih, jadi hanya untuk pesanan yang masih
   // hidup. Pada pesanan batal tak ada yang perlu ditagih — menandainya kuning
   // justru menyuruh kasir mengejar uang yang memang tak akan datang.
-  const perluDitagih = !p.dibayar && p.status !== "batal";
+  const perluDitagih = !p.dibayar && !dibatalkanDapur(p.status);
   const sisa = p.items.length - p.item_selesai - p.item_batal;
   return (
     <div

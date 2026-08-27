@@ -13,7 +13,7 @@ import type {
   Shift,
   StatusHadirDto,
 } from "@kakarut/shared";
-import { angkaDari, hitungPb1 } from "@kakarut/shared";
+import { angkaDari, dibatalkanDapur, hitungPb1 } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -104,9 +104,13 @@ function hargaBaris(l: CartLine) {
  * Ia tetap tinggal di keranjang karena `PUT /open-bill/:id` menolak pembaruan
  * yang menghilangkan baris (jejak siapa & kapan membatalkannya ada di baris
  * itu), tapi ia TIDAK ikut subtotal dan TIDAK ikut dikirim saat bayar.
+ *
+ * Aturannya sendiri tinggal di `@kakarut/shared` — pintu bayar di server
+ * menegakkan yang SAMA (409 `baris_dibatalkan`), dan dua salinan yang tak
+ * sepakat adalah kelas yang sudah berulang kali dibayar repo ini.
  */
 function dibatalkan(l: CartLine) {
-  return l.pesananStatus === "batal";
+  return dibatalkanDapur(l.pesananStatus);
 }
 
 interface Kategori {

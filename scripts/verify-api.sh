@@ -14225,6 +14225,627 @@ cek "PASANGAN: bayar PAS 12.000 diterima" "V == 1" \
 cek "PASANGAN: KURANG bayar 11.999 tetap 400" "V == 1" \
   "$(api "$JUAL257" POST /penjualan "{\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":11999,\"items\":[{\"menu_id\":\"$MW257\",\"qty\":1}]}" | jq '((.error // "") | test("kurang dari total")) | if . then 1 else 0 end')"
 
+echo "── §258 MEMBUAT master data terkunci sama seperti MENGUBAHnya ──"
+#
+# Matriks izin per rute belum pernah disapu sekali pun. Disusun dari tiga
+# sumber (penjaga prefiks `app.ts`, `requireRole` di rantai rute, dan ALIAS
+# tingkat modul), lalu DITEMBAK dengan token peran sungguhan — sebab pembacaan
+# statis membantah dirinya sendiri dua arah: empat pintu meja "terlihat
+# terbuka" padahal dijaga alias, dan dua pintu di bawah ini benar-benar
+# terbuka.
+#
+# Bentuknya tanda tangan repo ini: di KEDUA modul, `PATCH /:id` sudah
+# ber-`requireRole("owner","admin")` sejak awal, sementara pintu BUAT-nya
+# tidak.
+#
+#   SEBELUM (token peran `bar`)  POST /penyimpanan → 201, baris ADA di DB
+#                                POST /supplier    → 201, baris ADA di DB
+#   SESUDAH                      keduanya 403; owner tetap 201
+CAB258=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+api "$OWNER" POST /karyawan "{\"nama\":\"Bar Izin 258\",\"email\":\"bar258@basooopa.id\",\"password\":\"BarIzin258!\",\"role\":\"bar\",\"branch_id\":\"$CAB258\"}" > /dev/null
+BAR258=$(login "bar258@basooopa.id" "BarIzin258!")
+# premis: tokennya benar-benar berperan `bar` (kalau perannya null, SETIAP
+# `requireRole` menolak dan seluruh seksi ini tak menyatakan apa pun)
+cek "premis §258: token berperan bar" "V == 1" \
+  "$(echo "$BAR258" | cut -d. -f2 | base64 -d 2>/dev/null | jq '(.role == "bar") | if . then 1 else 0 end')"
+cek "POST /penyimpanan oleh bar → 403 (dulu 201)" "V == 403" \
+  "$(status_code_body "$BAR258" POST /penyimpanan '{"nama":"Rak 258 Bar"}')"
+cek "POST /supplier oleh bar → 403 (dulu 201)" "V == 403" \
+  "$(status_code_body "$BAR258" POST /supplier '{"nama":"Supplier 258 Bar"}')"
+# PASANGAN anti-hijau-palsu: manajemen TETAP bisa membuat keduanya
+cek "PASANGAN: owner tetap bisa membuat penyimpanan" "V == 201" \
+  "$(status_code_body "$OWNER" POST /penyimpanan '{"nama":"Rak 258 Owner"}')"
+cek "PASANGAN: owner tetap bisa membuat supplier" "V == 201" \
+  "$(status_code_body "$OWNER" POST /supplier '{"nama":"Supplier 258 Owner"}')"
+# PASANGAN: pintu yang memang terbuka untuk semua peran tetap terbuka —
+# menutupnya akan menghentikan operasional, kerusakan yang jauh lebih cepat
+# terasa daripada yang diperbaiki.
+cek "PASANGAN: bar tetap boleh absen sendiri" "V == 1" \
+  "$(status_code "$BAR258" GET /absensi/status | awk '{print ($1 == 200) ? 1 : 0}')"
+
+echo
+echo "── §259 kartu & riwayat BIAYA: pintu BACA menyusul pintu TULIS-nya ──"
+#
+# §258 menutup dua pintu BUAT lalu menulis batasnya: "60 rute BACA terbuka,
+# termasuk beberapa yang menampilkan HPP/margin, belum diadjudikasi satu per
+# satu." Ini membayarnya — ke-60 dipilah tangan, 7 ditutup, 53 didaftarkan
+# beralasan di `izin-per-rute.test.ts`.
+#
+# Tiap pintu di bawah punya pasangan di BERKAS YANG SAMA yang sudah
+# owner/admin sejak lama:
+#
+#   bahan/routes.ts         PUT  /:id/supplier   ← GET /:id/supplier (10 baris)
+#   bahan/routes.ts         POST /:id/harga      ← GET /:id/pembelian
+#   perlengkapan/routes.ts  PUT  /:id/supplier   ← GET /:id/supplier
+#   perlengkapan/routes.ts  POST /:id/harga      ← GET /:id/pembelian
+#   perlengkapan/routes.ts  GET  /belanja,/master← GET /beli
+#   supplier/routes.ts      PATCH /:id           ← GET /:id/kartu
+#
+# SEBELUM (token peran `bar`, terukur): ketujuhnya 200, dan angkanya terbaca —
+#   /bahan/:id/pembelian → harga_terkini 777,78 · /supplier/:id/kartu →
+#   total_belanja · /menu/panduan-markup → seluruh tabel kebijakan markup.
+# SESUDAH: 403. Pasangannya: owner tetap 200, `tim` tetap 200 di kedua pintu
+# bahan (layar yang membacanya memang dipasang untuk tim/tim-CK), dan pintu
+# yang WAJIB terbuka tetap terbuka.
+CAB259="$CAB258"
+api "$OWNER" POST /karyawan "{\"nama\":\"Tim Izin 259\",\"email\":\"tim259@basooopa.id\",\"password\":\"TimIzin259!\",\"role\":\"tim\",\"branch_id\":\"$CAB259\"}" > /dev/null
+TIM259=$(login "tim259@basooopa.id" "TimIzin259!")
+cek "premis §259: token berperan tim" "V == 1" \
+  "$(echo "$TIM259" | cut -d. -f2 | base64 -d 2>/dev/null | jq '(.role == "tim") | if . then 1 else 0 end')"
+# Fikstur DIBUKTIKAN TERBACA lebih dulu (aturan 6): owner harus 200 di tiap
+# pintu, kalau tidak angka 403 di bawah tak menyatakan apa-apa (404 pun 4xx).
+BH259=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+SUP259=$(api "$OWNER" GET /supplier | jq -r '.[0].id')
+PL259=$(api "$OWNER" GET /perlengkapan/master | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+cek "premis §259: fikstur bahan/supplier/perlengkapan ada" "V == 1" \
+  "$([ -n "$BH259" ] && [ "$BH259" != null ] && [ -n "$SUP259" ] && [ "$SUP259" != null ] && [ -n "$PL259" ] && [ "$PL259" != null ] && echo 1 || echo 0)"
+for J in "/menu/panduan-markup" "/supplier/$SUP259/kartu" "/bahan/$BH259/pembelian" \
+         "/bahan/$BH259/supplier" "/perlengkapan/beli" "/perlengkapan/$PL259/pembelian" \
+         "/perlengkapan/$PL259/supplier"; do
+  cek "premis §259: owner membaca $J → 200" "V == 200" "$(status_code "$OWNER" GET "$J")"
+  cek "bar → $J → 403 (dulu 200)" "V == 403" "$(status_code "$BAR258" GET "$J")"
+done
+# PASANGAN 1: `tim` TETAP masuk di kedua pintu bahan — menutupnya akan
+# mematikan `BahanPage` (web `isManajemen || isTim`, ponsel `|| isTimCk`).
+cek "PASANGAN: tim tetap membaca riwayat harga bahan" "V == 200" \
+  "$(status_code "$TIM259" GET "/bahan/$BH259/pembelian")"
+cek "PASANGAN: tim tetap membaca supplier bahan" "V == 200" \
+  "$(status_code "$TIM259" GET "/bahan/$BH259/supplier")"
+# PASANGAN 2: pintu yang WAJIB terbuka tetap terbuka untuk peran terlemah —
+# POS butuh katalog, papan butuh tiket, resep butuh pelaksana cabang, dan
+# kartu perlengkapan dibuka dari tab Stok yang tak berpenjaga peran.
+for J in "/menu" "/menu/ketersediaan" "/bahan" "/bahan/$BH259/resep" "/stok" \
+         "/perlengkapan" "/perlengkapan/$PL259/kartu" "/supplier" "/pesanan" "/meja/status"; do
+  cek "PASANGAN: bar tetap membaca $J" "V == 200" "$(status_code "$BAR258" GET "$J")"
+done
+
+echo
+echo "── §260 pengurungan tenant arah BACA: id tenant LAIN ditembak ──"
+#
+# Ledger punya entri "Isolasi tenant pada PENULISAN" (162 penulisan, BERSIH),
+# tapi arah BACA tak pernah dihitung sekali pun — dan di SaaS multi-tenant itu
+# kelas kerusakan tertinggi: satu warung membaca data warung lain.
+#
+# Sapuan statis (`kueri-terkurung-tenant.test.ts`) memilah 627 kueri; 48 di
+# antaranya tak bisa diputuskan mekanis dan dipilah tangan. Seksi ini yang
+# MEMUTUSKAN — pembacaan statis sudah dua kali membantah dirinya sendiri di
+# repo ini.
+#
+# `$UJI` = tenant KEDUA (dibuat super admin di §5). Tiap id di bawah milik
+# tenant PERTAMA dan DIBUKTIKAN TERBACA olehnya lebih dulu — tanpa itu 404
+# milik tenant kedua tak menyatakan apa pun (id yang salah juga 404).
+UJI260="$UJI"
+cek "premis §260: token tenant kedua hidup & beda perusahaan" "V == 1" \
+  "$([ -n "$UJI260" ] && [ "$(echo "$UJI260" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r .company_id)" != "$(echo "$OWNER" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r .company_id)" ] && echo 1 || echo 0)"
+B260=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+M260=$(api "$OWNER" GET /meja | jq -r '.[0].id')
+S260=$(api "$OWNER" GET /penjualan | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+P260=$(api "$OWNER" GET /perlengkapan/master | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+cek "premis §260: fikstur tenant pertama ada" "V == 1" \
+  "$([ -n "$B260" ] && [ "$B260" != null ] && [ -n "$M260" ] && [ "$M260" != null ] && [ -n "$S260" ] && [ "$S260" != null ] && [ -n "$P260" ] && [ "$P260" != null ] && echo 1 || echo 0)"
+for J260 in "/bahan/$B260/langkah" "/bahan/$B260/resep" "/bahan/$B260/detail" \
+            "/meja/$M260/log" "/stok/kartu/$B260" "/stok/fifo/$B260" \
+            "/penjualan/$S260" "/penjualan/$S260/slip" "/pesanan/penjualan/$S260/log" \
+            "/perlengkapan/$P260/kartu"; do
+  # Premis per rute: pemiliknya BENAR-BENAR membacanya. 404 tenant kedua hanya
+  # berarti sesuatu bila 200 tenant pertama lebih dulu terbukti.
+  cek "premis §260: pemilik membaca $J260 → 200" "V == 200" "$(status_code "$OWNER" GET "$J260")"
+  cek "tenant lain membaca $J260 → BUKAN 200" "V == 1" \
+    "$([ "$(status_code "$UJI260" GET "$J260")" != "200" ] && echo 1 || echo 0)"
+done
+
+echo
+echo "── §261 angka BIAYA hanya untuk manajemen ──"
+#
+# Aturannya sudah ditulis TIGA KALI di layar sebelum ada penjaganya, tiap kali
+# dengan nama sendiri: `isManajemen` (web App/Layout), `bolehUbah` (ResepPage —
+# yang bahkan tak MENGAMBIL datanya, `enabled: bolehUbah`), dan `lihatHarga`
+# (resep_page.dart ponsel). Pintunya tidak.
+#
+# SEBELUM (terukur token `bar` DAN `cashier`, DB segar): keduanya membaca
+#   /menu           hpp 5662,03 · hpp_dine_in 4732,03 · harga_saran 10820,01 ·
+#                   food_cost_persen 51,47 · komponen[].harga_per_unit 357,14
+#   /bahan          harga_beli 35.000 · harga_per_unit 777,78
+#   /penjualan/:id  totalHpp 5662,0314 · items[].hppSatuan
+#   /perlengkapan/:id/kartu  total_belanja
+# — angka yang SAMA PERSIS dengan owner.
+#
+# SESUDAH: `null` untuk keduanya, angka penuh untuk owner.
+BIA_B="$BAR258"                       # peran bar (dibuat §258)
+BIA_K=$(login "$KASIR_EMAIL" "$KASIR_PASS")
+cek "premis §261: token bar & kasir hidup" "V == 1" \
+  "$([ -n "$BIA_B" ] && [ -n "$BIA_K" ] && echo 1 || echo 0)"
+BIA_M=$(api "$OWNER" GET /menu | jq -r '.[0].id')
+BIA_BH=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+BIA_P=$(api "$OWNER" GET /perlengkapan/master | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+BIA_S=$(api "$OWNER" GET /penjualan | jq -r 'if type=="array" then .[0].id else .items[0].id end')
+cek "premis §261: fikstur ada" "V == 1" \
+  "$([ -n "$BIA_M" ] && [ "$BIA_M" != null ] && [ -n "$BIA_BH" ] && [ "$BIA_BH" != null ] && [ -n "$BIA_S" ] && [ "$BIA_S" != null ] && echo 1 || echo 0)"
+# Premis TERPENTING: owner benar-benar MENERIMA angkanya. Tanpa ini `null`
+# milik bar tak menyatakan apa pun — medan yang memang selalu kosong juga null.
+# Dilihat atas SELURUH daftar, bukan baris pertama: menu tanpa resep ber-hpp 0
+# secara sah, dan di DB verify baris pertamanya kebetulan begitu ("Luap243 a").
+# Premis yang menunjuk satu baris menguji urutan sortir, bukan kebijakan.
+cek "premis §261: owner menerima hpp menu (bukan null)" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq '([.[] | select(.hpp != null and .hpp > 0)] | length > 0) | if . then 1 else 0 end')"
+cek "premis §261: owner menerima harga bahan (bukan null)" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '(.[0].harga_beli != null) | if . then 1 else 0 end')"
+for TOK260 in "$BIA_B" "$BIA_K"; do
+  # `all`, bukan baris pertama: satu baris yang kebetulan null tak membuktikan
+  # kebijakannya berlaku untuk seluruh katalog.
+  cek "biaya /menu ditahan (hpp, hpp_dine_in, saran, food cost)" "V == 1" \
+    "$(api "$TOK260" GET /menu | jq '(all(.hpp == null and .hpp_dine_in == null and .harga_saran == null and .harga_jual_bulat == null and .food_cost_persen == null)) | if . then 1 else 0 end')"
+  cek "biaya /menu: harga komponen resep ikut ditahan" "V == 1" \
+    "$(api "$TOK260" GET /menu | jq '([.[] | select((.komponen|length) > 0)][0].komponen | all(.harga_per_unit == null)) | if . then 1 else 0 end')"
+  cek "biaya /menu/:id ditahan" "V == 1" \
+    "$(api "$TOK260" GET "/menu/$BIA_M" | jq '(.hpp == null and .food_cost_persen == null) | if . then 1 else 0 end')"
+  cek "biaya /bahan ditahan (harga_beli, harga_per_unit)" "V == 1" \
+    "$(api "$TOK260" GET /bahan | jq '(all(.harga_beli == null and .harga_per_unit == null)) | if . then 1 else 0 end')"
+  cek "biaya /penjualan/:id ditahan (totalHpp, hppSatuan)" "V == 1" \
+    "$(api "$TOK260" GET "/penjualan/$BIA_S" | jq '(.sale.totalHpp == null and (.items | all(.hppSatuan == null))) | if . then 1 else 0 end')"
+  cek "biaya kartu perlengkapan ditahan (total_belanja)" "V == 1" \
+    "$(api "$TOK260" GET "/perlengkapan/$BIA_P/kartu" | jq '(.total_belanja == null and (.mutasi | all(.total_harga == null))) | if . then 1 else 0 end')"
+  # PASANGAN: yang BUKAN biaya tetap utuh — tanpa ini pengetatan jadi kerusakan
+  cek "PASANGAN: harga JUAL & takaran resep tetap terkirim" "V == 1" \
+    "$(api "$TOK260" GET /menu | jq '(.[0].harga_jual > 0 and (.[0].nama | length) > 0) | if . then 1 else 0 end')"
+  cek "PASANGAN: nama & satuan bahan tetap terkirim" "V == 1" \
+    "$(api "$TOK260" GET /bahan | jq '((.[0].nama | length) > 0 and (.[0].satuan | length) > 0) | if . then 1 else 0 end')"
+done
+# PASANGAN: manajemen tetap menerima angka penuh
+cek "PASANGAN: owner tetap menerima hpp & harga bahan" "V == 1" \
+  "$(api "$OWNER" GET /bahan | jq '(.[0].harga_per_unit != null) | if . then 1 else 0 end')"
+# PASANGAN: kartu "Nilai stok" tetap hidup — agregatnya SAMA untuk semua peran
+NIL_O=$(api "$OWNER" GET /stok/nilai | jq -r '.nilai')
+NIL_B=$(api "$BIA_B" GET /stok/nilai | jq -r '.nilai')
+cek "PASANGAN: /stok/nilai identik untuk owner & bar" "V == 1" \
+  "$([ "$NIL_O" = "$NIL_B" ] && [ "$NIL_O" != "null" ] && echo 1 || echo 0)"
+cek "/stok/nilai memuat kelima medan ringkasannya" "V == 1" \
+  "$(api "$BIA_B" GET /stok/nilai | jq '(has("nilai") and has("bahan_bernilai") and has("minus_bahan") and has("minus_nilai") and has("tanpa_harga_bahan")) | if . then 1 else 0 end')"
+# UTANG BERSYARAT yang DIUJI, bukan cuma dikomentari: `/stok` masih mengirim
+# harga per bahan sampai build ponsel ber-`/stok/nilai` tayang (kartu Nilai
+# stok di tablet 1.0.0+10 menghitungnya sendiri dari baris).
+cek "utang bersyarat: /stok MASIH mengirim harga per bahan" "V == 1" \
+  "$(api "$BIA_B" GET /stok | jq '(.[0].harga_per_unit != null) | if . then 1 else 0 end')"
+
+echo
+echo "── §262 tanggal dari query: cabang GAGALNYA punya pemilik ──"
+#
+# Terukur atas 36 pembacaan param tanggal: 29 memeriksa keabsahannya lalu
+# GAGAL DIAM, 5 tak memeriksa, 2 menolak. Aturannya ada dan dipanggil; yang tak
+# pernah ada: apa yang terjadi saat ia bilang "tidak sah". Dan sebabnya satu —
+# aturan "tanggal ini sah" punya LIMA salinan yang tak sepakat (tiga regex-saja,
+# dua regex + tanggalnya benar-benar ada).
+#
+# SEBELUM:
+#   GET /laporan?dari=2026-02-30   → 500 "Terjadi kesalahan pada server"
+#                                    (bentuk lolos regex, isinya ditolak Postgres)
+#   GET /pengajuan?dari=BUKAN      → 200 dengan SELURUH tabel (4 baris → 13),
+#                                    dan `sampai=BUKAN` membuang KEDUA saringannya
+#   POST /stok/awal tanggal=2026-02-30 → 500 (badan pun regex-saja)
+# SESUDAH: 400 yang MENYEBUT paramnya, di ketiganya.
+cek "premis §262: rentang SAH tetap 200" "V == 200" \
+  "$(status_code "$OWNER" GET "/laporan?dari=2026-08-01&sampai=2026-08-26")"
+# TEMUAN 1 — tanggal yang BENTUKNYA benar tapi tak ada
+for T262 in "2026-02-30" "2026-13-45" "9999-99-99" "2026-02-29"; do
+  cek "tanggal mustahil $T262 → 400 (dulu 500)" "V == 400" \
+    "$(status_code "$OWNER" GET "/laporan?dari=$T262")"
+done
+cek "galatnya MENYEBUT nama paramnya" "V == 1" \
+  "$(api "$OWNER" GET "/laporan?dari=2026-02-30" | jq '((.error // "") | test("dari")) | if . then 1 else 0 end')"
+# TEMUAN 2 — saringan tak lagi dibuang diam-diam
+N262A=$(api "$OWNER" GET "/pengajuan?dari=2026-01-01&sampai=2026-12-31" | jq 'length')
+N262B=$(api "$OWNER" GET "/pengajuan" | jq 'length')
+cek "premis §262: rentang sah menyaring (lebih sedikit dari tanpa rentang)" "V == 1" \
+  "$([ "$N262A" -le "$N262B" ] && echo 1 || echo 0)"
+cek "pengajuan ?dari=BUKAN → 400 (dulu 200 + seluruh tabel)" "V == 400" \
+  "$(status_code "$OWNER" GET "/pengajuan?dari=BUKAN&sampai=xxx")"
+cek "satu paruh ngawur pun ditolak (dulu membuang KEDUA saringan)" "V == 400" \
+  "$(status_code "$OWNER" GET "/pengajuan?dari=2026-08-01&sampai=BUKAN")"
+# TEMUAN 3 — permukaan BADAN
+BC262=$(api "$OWNER" GET /cabang | jq -r '.[0].id')
+BB262=$(api "$OWNER" GET /bahan | jq -r '.[0].id')
+cek "badan: POST /stok/awal tanggal mustahil → 400 (dulu 500)" "V == 400" \
+  "$(status_code_body "$OWNER" POST /stok/awal "{\"branch_id\":\"$BC262\",\"tanggal\":\"2026-02-30\",\"items\":[{\"ingredient_id\":\"$BB262\",\"qty\":1}]}")"
+# PASANGAN 1: param KOSONG tetap berarti "tanpa rentang" — form yang belum
+# diisi mengirim `?dari=&sampai=`, dan menolaknya mematahkan layar yang jalan.
+cek "PASANGAN: ?dari=&sampai= (kosong) tetap 200" "V == 200" \
+  "$(status_code "$OWNER" GET "/pengajuan?dari=&sampai=")"
+cek "PASANGAN: kosong = TANPA rentang (jumlahnya sama dgn tanpa param)" "V == 1" \
+  "$([ "$(api "$OWNER" GET "/pengajuan?dari=&sampai=" | jq 'length')" = "$N262B" ] && echo 1 || echo 0)"
+# PASANGAN 2: seluruh rute berentang tetap hidup, dengan & tanpa rentang
+for R262 in "/laporan" "/laporan/pembelian" "/laporan/menu-laris" "/laporan/durasi-pesanan" \
+            "/pengajuan" "/kebersihan" "/absensi" "/penerimaan/riwayat"; do
+  cek "PASANGAN: $R262 tanpa rentang → 200" "V == 200" "$(status_code "$OWNER" GET "$R262")"
+  cek "PASANGAN: $R262 rentang sah → 200" "V == 200" \
+    "$(status_code "$OWNER" GET "$R262?dari=2026-08-01&sampai=2026-08-26")"
+done
+# BULAN sengaja TETAP jatuh ke bawaan, dan itu keputusan berdasar: balasan
+# rekap MENYEBUT `bulan`/`dari`/`sampai` yang benar-benar dipakai, jadi layar
+# merender dari nilai itu — bukan dari yang diketik orang. Bawaan yang jujur.
+# Pengetatanku ke 400 sempat mematahkan empat asersi lama yang memakukannya;
+# gerbang lama menahan perbaikan yang berlebihan, persis seperti §191.
+cek "PASANGAN: rekap ?bulan= sah tetap 200" "V == 200" \
+  "$(status_code "$OWNER" GET "/absensi/rekap?bulan=2026-08")"
+cek "bulan tak sah JATUH ke bawaan — dan balasannya MENYEBUTnya" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=NGAWUR" | jq '((.bulan | test("^\\d{4}-\\d{2}$")) and (.dari | test("^\\d{4}-\\d{2}-01$"))) | if . then 1 else 0 end')"
+# Rentang TERBALIK sengaja BUKAN galat: nol baris adalah jawaban yang benar
+# untuk rentang kosong.
+cek "rentang terbalik tetap 200 (nol baris = jawaban benar)" "V == 200" \
+  "$(status_code "$OWNER" GET "/laporan?dari=2026-12-31&sampai=2026-01-01")"
+
+echo
+echo "── §263 tautan email tak lahir dari header peminta ──"
+#
+# TEREPRODUKSI, dan ini pengambilalihan akun — bukan phishing:
+#   POST /api/auth/forgot-password  Host: penyerang.example
+#   → {"dev_reset_url":"http://penyerang.example/reset-password?token=a9c078…"}
+# Tokennya HIDUP dan milik korban; surat mendarat di kotak masuknya, tampak
+# sah, dan sekali diklik tokennya berpindah tangan. Sama lewat
+# `X-Forwarded-Host`, dengan protonya ikut ditempa jadi `https`.
+#
+# Penawarnya konfigurasi, dan kode membuat konfigurasi berkuasa. Seksi ini
+# menembak keadaan yang BERLAKU saat verify berjalan: `APP_BASE_URL` kosong,
+# jadi yang diuji lapis pelaporannya — temuan `kritis` di panel super admin.
+# Perilaku daftar-izin & APP_BASE_URL dipaku uji unit
+# (`tautan-email-tak-dari-header.test.ts`), sebab keduanya butuh proses
+# ber-env berbeda yang tak bisa dinyalakan dari dalam satu run.
+cek "keadaan berbahaya dilaporkan ke panel super admin" "V == 1" \
+  "$(api "$SA" GET /admin/sistem | jq '[.pemeriksaan[]|select(.kode=="tautan_email_dari_header" and .tingkat=="kritis")]|length')"
+cek "temuannya menyebut env yang harus disetel" "V == 1" \
+  "$(api "$SA" GET /admin/sistem | jq '[.pemeriksaan[]|select(.kode=="tautan_email_dari_header")][0].tindakan | test("APP_BASE_URL") | if . then 1 else 0 end')"
+# Bukti bahwa lubangnya NYATA di keadaan ini — dan bukan cuma prosa: tautan
+# yang dipulangkan benar-benar mengikuti Host yang dikirim.
+FP263=$(curl -s -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' \
+  -H 'X-Forwarded-Host: penyerang.example' -d '{"email":"'"$OWNER_EMAIL"'"}')
+cek "premis §263: tanpa setelan, tautan MEMANG ikut header" "V == 1" \
+  "$(echo "$FP263" | jq '((.dev_reset_url // "") | test("penyerang.example")) | if . then 1 else 0 end')"
+# PASANGAN: alurnya sendiri tetap hidup — reset password yang SAH tak boleh
+# ikut mati oleh perbaikan ini.
+cek "PASANGAN: forgot-password tetap 200 & menerbitkan token" "V == 1" \
+  "$(echo "$FP263" | jq '((.ok == true) and ((.dev_reset_url // "") | test("token="))) | if . then 1 else 0 end')"
+
+echo
+echo "── §264 HTML surat dirakit dari data pengguna ──"
+#
+# Nama perusahaan divalidasi `z.string().trim().min(1)` — TANPA batasan aksara —
+# lalu dulu disisipkan mentah ke badan HTML surat undangan. Terukur dari keluaran
+# perakit yang sungguhan (`html-surat-dilolos.test.ts`), nama perusahaan
+# `</b></p><p><a href="https://penyerang.example">…</a></p><p>` membuat suratnya
+# memuat DUA `<a`: satu milik Kakarut, satu milik penyerang. Di jalur ini
+# penyerang memilih KEDUANYA — isi yang disuntik (nama perusahaannya sendiri)
+# dan penerimanya (`body.email`) — dan suratnya berangkat dari domain produk,
+# lolos SPF/DKIM.
+#
+# Beratnya ditulis apa adanya: transport (nodemailer & Resend) menyandikan
+# header, jadi injeksi `Subject` TIDAK terjangkau; klien surat menyaring skrip,
+# jadi ini BUKAN XSS. Yang nyata: penyuntikan tautan & pemalsuan isi.
+#
+# Badan suratnya sendiri tak bisa ditembak dari luar (di dev tak ada SMTP/Resend,
+# `kirimEmail` melempar dan ditangkap diam-diam) — itu dipaku uji unit. Yang
+# DIUJI di sini dua hal yang menentukan benar-tidaknya perbaikan: alurnya tetap
+# hidup, dan pelolosan tidak merembes ke PENYIMPANAN.
+NAMA264_ASLI=$(api "$OWNER" GET /company | jq -r '.nama')
+NAMA264='</b></p><p><a href="https://penyerang.example">Klik</a></p><p>'
+api "$OWNER" PATCH /company "$(jq -nc --arg n "$NAMA264" '{nama:$n}')" > /dev/null
+cek "nama perusahaan ber-HTML diterima apa adanya (tak ditolak, tak dipotong)" "V == 1" \
+  "$(api "$OWNER" GET /company | jq --arg n "$NAMA264" '(.nama == $n) | if . then 1 else 0 end')"
+UND264=$(api "$OWNER" POST /karyawan/undang '{"email":"suntik264@example.com","role":"admin"}')
+cek "PASANGAN: undangan tetap dibuat meski nama perusahaan ber-HTML" "V == 1" \
+  "$(echo "$UND264" | jq '((.id|length)>0)|if . then 1 else 0 end')"
+cek "PASANGAN: undangannya benar-benar ada di daftar pending" "V == 1" \
+  "$(api "$OWNER" GET /karyawan/undangan | jq '[.[]|select(.email=="suntik264@example.com")]|length')"
+# Pelolosan milik tempat data DIRENDER, bukan tempat data DISIMPAN. Menyimpan
+# bentuk terlolos akan memajang `&amp;` di layar dan di CSV — menukar satu bug
+# dengan bug yang lebih sunyi. Karena itu nama sah ber-`&` diperiksa tetap mentah.
+api "$OWNER" PATCH /company '{"nama":"Warung Bu Ani & Anak"}' > /dev/null
+cek "nama ber-& tersimpan MENTAH — pelolosan bukan milik penyimpanan" "V == 1" \
+  "$(api "$OWNER" GET /company | jq '((.nama == "Warung Bu Ani & Anak") and ((.nama|test("&amp;"))|not)) | if . then 1 else 0 end')"
+api "$OWNER" PATCH /company "$(jq -nc --arg n "$NAMA264_ASLI" '{nama:$n}')" > /dev/null
+cek "nama perusahaan dipulihkan seperti semula" "V == 1" \
+  "$(api "$OWNER" GET /company | jq --arg n "$NAMA264_ASLI" '(.nama == $n) | if . then 1 else 0 end')"
+
+echo
+echo "── §265 baris yang sudah dinyatakan TIDAK BERLAKU ──"
+#
+# Aturan "anggota = keanggotaan yang BELUM diarsipkan" ditulis eksplisit di
+# `auth/session.ts` dan ditegakkan di sebelas tempat. EMPAT pintu memakai
+# aturan yang sama tanpa bagian "belum diarsipkan" — dan keempatnya bukan
+# pintu BACA melainkan pintu yang MENUGASKAN PEKERJAAN. Terukur lewat HTTP
+# sebelum diperbaiki:
+#
+#   POST  /produksi/faktur          worker = karyawan yang sudah keluar → 201
+#   PATCH /produksi/faktur/:key                                         → 200
+#   POST  /rekomendasi/menu/faktur                                      → 201
+#   PUT   /penyimpanan/:id/petugas                                      → 200
+#
+# Yang terakhir paling telanjang: balasannya sendiri memuat `"aktif": false`
+# tepat di sebelah penugasan yang baru saja diterimanya. Layarnya tahu;
+# pintunya tidak.
+#
+# Yang rusak BUKAN aksesnya — orang itu sudah tak bisa login (§54 memakukannya).
+# Yang rusak PEMBUKUANNYA: faktur yang lahir sesudah ia berhenti menyebut
+# namanya sebagai pelaksana, dan tak ada satu pun galat yang muncul.
+api "$OWNER" POST /karyawan "{\"nama\":\"Petugas Keluar 265\",\"email\":\"keluar265@basooopa.id\",\"password\":\"PwKeluar265!\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT51_ID\"}" > /dev/null
+U265=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="keluar265@basooopa.id")][0].user_id')
+RAK265=$(api "$OWNER" POST /penyimpanan "{\"nama\":\"Rak Keluar 265\",\"branch_id\":\"$PUSAT51_ID\"}" | jq -r .id)
+cek "premis §265: karyawan uji & raknya ada" "V == 1" \
+  "$([ -n "$U265" ] && [ "$U265" != "null" ] && [ -n "$RAK265" ] && [ "$RAK265" != "null" ] && echo 1 || echo 0)"
+# PASANGAN dijalankan SAAT MASIH AKTIF: ketiga pintunya memang menerima orang
+# yang masih bekerja, jadi 400 nanti benar-benar datang dari arsipnya.
+FK265=$(api "$OWNER" POST /produksi/faktur "{\"worker_id\":\"$U265\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")
+cek "PASANGAN: karyawan AKTIF jadi pelaksana produksi → faktur terbit" "V == 1" \
+  "$(echo "$FK265" | jq '((.faktur_id // "") | length > 0) | if . then 1 else 0 end')"
+FK265_ID=$(echo "$FK265" | jq -r .faktur_id)
+cek "PASANGAN: karyawan AKTIF jadi petugas opname (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RAK265/petugas" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"user_ids\":[\"$U265\"]}")"
+cek "PASANGAN: karyawan AKTIF ditugaskan tempat SO (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U265/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tempat_ids\":[\"$RAK265\"]}")"
+# … lalu dia KELUAR.
+api "$OWNER" PATCH "/karyawan/$U265" '{"arsip":true}' > /dev/null
+cek "premis §265: dia benar-benar terarsip" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U265" '([.[] | select(.user_id==$id)][0] | (.archived_at != null)) | if . then 1 else 0 end')"
+cek "pelaksana produksi yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"$U265\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")"
+# Dua sebab, dua kalimat: "bukan anggota" menuntut tindakan yang berbeda dari
+# "sudah keluar", dan layar yang menjawab keduanya sama tak bisa ditindaklanjuti.
+cek "galatnya menyebut ARSIPNYA, bukan 'bukan anggota'" "V == 1" \
+  "$(curl -s -X POST "$BASE/api/produksi/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"worker_id\":\"$U265\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}" | jq '(.error | test("diarsipkan")) | if . then 1 else 0 end')"
+cek "ganti pelaksana faktur lama ke yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/produksi/faktur/$FK265_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"password\":\"$OWNER_PASS\",\"worker_id\":\"$U265\"}")"
+cek "pelaksana rencana (dari menu) yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/rekomendasi/menu/faktur" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"menu_id\":\"$PBA_ID\",\"porsi\":500}],\"worker_id\":\"$U265\"}")"
+cek "petugas opname yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RAK265/petugas" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"user_ids\":[\"$U265\"]}")"
+cek "tempat SO untuk yang sudah keluar → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U265/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tempat_ids\":[\"$RAK265\"]}")"
+# PASANGAN yang menentukan: mengarsipkan karyawan TIDAK menghapus penugasan
+# tempat SO-nya, dan pintu ini satu-satunya cara membersihkannya dari sisi
+# karyawan. Pengetatan yang mengunci daftarnya selamanya bukan pengetatan —
+# ia bug kedua.
+cek "PASANGAN: MENGOSONGKAN tempat SO orang yang sudah keluar tetap 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/karyawan/$U265/tempat" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"tempat_ids":[]}')"
+cek "PASANGAN: petugas opname bisa DIGANTI ke daftar kosong (200)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/penyimpanan/$RAK265/petugas" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"user_ids":[]}')"
+# Arsip adalah CATATAN, bukan penghapusan — dan faktur yang terlanjur dibuat
+# saat dia masih bekerja tetap menyebut namanya. Yang ditutup pintunya, bukan
+# masa lalunya.
+cek "arsip tetap terbaca di ?arsip=true sesudah semua penolakan" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq --arg id "$U265" '[.[] | select(.user_id==$id)] | length')"
+cek "faktur lama TETAP menyebut pelaksananya (riwayat tak dihapus)" "V == 1" \
+  "$(api "$OWNER" GET /produksi | jq --arg f "$FK265_ID" '[.rows[] | select(.faktur_id==$f and .dikerjakan_oleh=="Petugas Keluar 265")] | length > 0 | if . then 1 else 0 end')"
+# Yang DIHAPUS ke Tempat Sampah juga berhenti dihitung — sisi kedua bendera
+# yang sama, dan sapuan mekaniknya dipaku `bendera-hapus-disaring.test.ts`.
+cek "premis §265: /sampah memang melihat baris yang dibuang" "V == 200" \
+  "$(status_code "$OWNER" GET /sampah)"
+
+echo
+echo "── §266 sajian yang DIBATALKAN dapur tak boleh DITAGIH ──"
+#
+# Aturannya sudah ditulis panjang di `open-bill/routes.ts`, tepat di atas
+# penyaring bon: "Di slip, membawa baris batal berarti menyuruh dapur
+# memasaknya lagi. Di sini artinya MENAGIH TAMU untuk makanan yang tak pernah
+# datang." Ia lalu ditegakkan di EMPAT tempat — slip dapur, bon tagihan,
+# keranjang kasir web, keranjang ponsel — dan TIDAK di pintu yang benar-benar
+# MENGAMBIL UANGNYA. §229 memaku bahwa BON-nya turun; yang tak pernah diuji:
+# apakah PEMBAYARANNYA menghormati bon itu.
+#
+# TERUKUR lewat HTTP sebelum penjaganya ada, satu bill dua baris yang salah
+# satunya dibatalkan dapur:
+#
+#   bon sesudah pembatalan   Rp1.000
+#   penjualan yang terbit    Rp6.000   (201)
+#   sale_items               "Nasi Putih" Rp5.000  pesanan_status="batal"
+#   stok bahannya            50 → 49
+#
+# Satu baris yang sekaligus `batal` DAN ditagih, plus stok terpotong untuk
+# masakan yang tak pernah dibuat.
+#
+# Tanpa meja: "satu meja satu bill" sudah dipakai §229, dan seksi ini tak
+# butuh mejanya.
+BILL266=$(api "$REISS105" POST /open-bill \
+  "{\"customer_nama\":\"Uji 266\",\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":1},{\"menu_id\":\"$MENU229B\",\"qty\":1}]}")
+BID266=$(echo "$BILL266" | jq -r '.id // empty')
+IT266A=$(echo "$BILL266" | jq -r --arg m "$MENU228" '[.items[]|select(.menu_id==$m)][0].id')
+IT266B=$(echo "$BILL266" | jq -r --arg m "$MENU229B" '[.items[]|select(.menu_id==$m)][0].id')
+cek "premis §266: bill dua baris terbentuk" "V == 1" \
+  "$([ -n "$BID266" ] && [ -n "$IT266A" ] && [ -n "$IT266B" ] && echo 1 || echo 0)"
+BON266A=$(api "$REISS105" GET "/open-bill/$BID266/bon" | jq -r '.teks' \
+  | grep -o 'TOTAL *Rp[0-9.]*' | grep -o '[0-9.]*$' | tr -d '.')
+HRG266B=$(api "$REISS105" GET /menu | jq -r --arg m "$MENU229B" '[.[]|select(.id==$m)][0].harga_jual')
+cek "premis §266: bon MEMANG menagih kedua baris" "V == 1" \
+  "$(python3 -c "print(1 if int('${BON266A:-0}' or 0) >= int(float('$HRG266B')) + int(float('$HRG229')) else 0)")"
+# Dapur membatalkan baris kedua.
+api "$TKIT154" POST "/pesanan/open_bill/$BID266/item/$IT266B/status" '{"status":"batal"}' > /dev/null
+BON266B=$(api "$REISS105" GET "/open-bill/$BID266/bon" | jq -r '.teks' \
+  | grep -o 'TOTAL *Rp[0-9.]*' | grep -o '[0-9.]*$' | tr -d '.')
+cek "premis §266: bon TURUN sesudah pembatalan" "V == 1" \
+  "$(python3 -c "
+a, b = int('${BON266A:-0}' or 0), int('${BON266B:-0}' or 0)
+print(1 if a > b > 0 else 0)")"
+# Baris yang dibatalkan tetap TERCATAT di bill-nya — yang ditutup pintunya,
+# bukan jejaknya. Papan dapur & riwayat membacanya, dan §154 memakukannya.
+cek "baris batal tetap tercatat di bill (jejak, bukan dihapus)" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$BID266" | jq --arg i "$IT266B" '[.items[]|select(.id==$i and .pesanan_status=="batal")]|length')"
+# INTI: pintu bayar menolak baris yang sudah dibatalkan — DI KEDUA PINTU.
+BYR266=$(curl -s -w '\n%{http_code}' -X POST "$BASE/api/penjualan" -H "Authorization: Bearer $REISS105" \
+  -H 'Content-Type: application/json' \
+  -d "{\"open_bill_id\":\"$BID266\",\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":1000000,\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":1,\"open_bill_item_id\":\"$IT266A\"},{\"menu_id\":\"$MENU229B\",\"qty\":1,\"open_bill_item_id\":\"$IT266B\"}]}")
+cek "INTI: menagih baris yang dibatalkan → 409" "V == 409" "$(printf '%s' "${BYR266##*$'\n'}")"
+cek "INTI: galatnya berkode 'baris_dibatalkan'" "V == 1" \
+  "$(printf '%s' "${BYR266%$'\n'*}" | jq '((.sebab // "") == "baris_dibatalkan") | if . then 1 else 0 end')"
+# Layar yang cuma bilang "gagal" tak bisa ditindaklanjuti kasir yang sedang
+# berdiri di depan tamunya: galatnya wajib MENYEBUT sajian yang mana.
+cek "INTI: galatnya MENYEBUT nama sajiannya" "V == 1" \
+  "$(printf '%s' "${BYR266%$'\n'*}" | jq --arg n "$(api "$REISS105" GET /menu | jq -r --arg m "$MENU229B" '[.[]|select(.id==$m)][0].nama')" \
+     '((.error // "") | contains($n)) | if . then 1 else 0 end')"
+# Pintu KEDUA: pemutaran ulang antrean offline lewat /sync memakai `createSale`
+# yang sama, jadi penjaganya satu. Diuji, bukan disimpulkan.
+SY266=$(jq -nc --arg r "$(uuid99)" --arg w "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --arg b "$BID266" \
+  --arg m1 "$MENU228" --arg m2 "$MENU229B" --arg i1 "$IT266A" --arg i2 "$IT266B" \
+  '{device_id:"dev266",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:{open_bill_id:$b,is_dine_in:true,metode_bayar:"tunai",uang_diterima:1000000,items:[{menu_id:$m1,qty:1,open_bill_item_id:$i1},{menu_id:$m2,qty:1,open_bill_item_id:$i2}]}}]}')
+cek "INTI: pintu /sync menolak dengan sebab yang SAMA" "V == 1" \
+  "$(api "$REISS105" POST /sync "$SY266" | jq '((.hasil[0].kode == 409) and (.hasil[0].sebab == "baris_dibatalkan")) | if . then 1 else 0 end')"
+# PASANGAN: alurnya tetap hidup — bayar HANYA baris yang sah.
+BYR266B=$(api "$REISS105" POST /penjualan \
+  "{\"open_bill_id\":\"$BID266\",\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":1000000,\"items\":[{\"menu_id\":\"$MENU228\",\"qty\":1,\"open_bill_item_id\":\"$IT266A\"}]}")
+SID266=$(echo "$BYR266B" | jq -r '.sale.id // empty')
+cek "PASANGAN: bayar baris SAH saja tetap terbit" "V == 1" \
+  "$([ -n "$SID266" ] && echo 1 || echo 0)"
+cek "PASANGAN: totalnya PERSIS sama dengan bon sesudah pembatalan" "V == 1" \
+  "$(python3 -c "
+import json,sys
+print(1 if int(float('$(echo "$BYR266B" | jq -r '.sale.total')')) == int('${BON266B:-0}' or 0) else 0)")"
+cek "PASANGAN: penjualannya hanya berisi baris yang SAH" "V == 1" \
+  "$(api "$REISS105" GET "/penjualan/$SID266" | jq '(([.items[]] | length) == 1) | if . then 1 else 0 end')"
+
+echo
+echo "── §267 pembagi nol dijawab NOL, dan nol itu dipercaya ──"
+#
+# Aturan "`null`, bukan 0" sudah dinamai & dibayar vena biaya: "nol tercetak
+# 'Rp 0' dan dipercaya". Ia ditegakkan di DTO dan di layar (`TAK_DIKETAHUI`),
+# dan TIDAK di rumus intinya — `foodCostPersen` memulangkan 0 saat harga
+# jualnya nol.
+#
+# Lencana penerimanya SUDAH menuliskan kerusakannya lebih dulu
+# (`MenuListPage.tsx`): "'—' adalah jawaban yang benar, dan 0% akan terbaca
+# sebagai food cost sempurna."
+#
+# TERUKUR lewat HTTP sebelum diperbaiki — menu komplimen (harga jual 0, sah
+# menurut skemanya) ber-HPP Rp2.083:
+#
+#   food_cost_persen            0     → layar HIJAU "0,0%", paling sehat
+#   posisi di Analisis Harga    77/93 → mengendap di antara menu tersehat
+#   persen_hpp saat HPP nol     0     → "bahan ini menyumbang 0% biaya"
+#
+# Kau mengeluarkan Rp2.083 per porsi dan tak menerima apa pun, dan layarnya
+# memuji menu itu.
+KAT267=$(api "$OWNER" POST /kategori '{"nama":"Kategori Nol 267","sort_order":95}' | jq -r .id)
+BHR267=$(api "$OWNER" POST /bahan '{"nama":"air kemasan 267","harga_beli":24000,"isi":12,"satuan":"pcs","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+BH0267=$(api "$OWNER" POST /bahan '{"nama":"bahan gratis 267","harga_beli":0,"isi":10,"satuan":"gr","pengadaan":"beli","kategori":"lain"}' | jq -r .id)
+cek "premis §267: kategori & dua bahan uji terbentuk" "V == 1" \
+  "$([ -n "$KAT267" ] && [ -n "$BHR267" ] && [ -n "$BH0267" ] && [ "$KAT267" != "null" ] && echo 1 || echo 0)"
+# (a) menu KOMPLIMEN: harga jual 0, tapi bahannya berharga.
+MK267=$(api "$OWNER" POST /menu "{\"nama\":\"Air Komplimen 267\",\"category_id\":\"$KAT267\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":0,\"komponen\":[{\"ingredient_id\":\"$BHR267\",\"qty\":1}]}" | jq -r .id)
+# (b) menu ber-HPP NOL yang tetap DIJUAL — pasangan yang menentukan.
+MN267=$(api "$OWNER" POST /menu "{\"nama\":\"Menu HPP Nol 267\",\"category_id\":\"$KAT267\",\"tipe\":\"regular\",\"mult\":3,\"harga_jual\":15000,\"komponen\":[{\"ingredient_id\":\"$BH0267\",\"qty\":2}]}" | jq -r .id)
+cek "premis §267: kedua menu uji terbentuk" "V == 1" \
+  "$([ -n "$MK267" ] && [ -n "$MN267" ] && [ "$MK267" != "null" ] && [ "$MN267" != "null" ] && echo 1 || echo 0)"
+MENU267=$(api "$OWNER" GET /menu)
+# Premisnya: biayanya memang KELUAR — HPP-nya bukan nol.
+cek "premis §267: menu komplimen memang ber-HPP > 0" "V == 1" \
+  "$(echo "$MENU267" | jq --arg m "$MK267" '([.[]|select(.id==$m)][0].hpp > 0) | if . then 1 else 0 end')"
+cek "INTI: food cost menu komplimen NULL, bukan 0" "V == 1" \
+  "$(echo "$MENU267" | jq --arg m "$MK267" '([.[]|select(.id==$m)][0].food_cost_persen == null) | if . then 1 else 0 end')"
+# PASANGAN yang menentukan: nol yang SAH tetap nol. HPP nol dengan harga jual
+# wajar memang 0% — mengubahnya jadi "—" akan menukar satu kebohongan dengan
+# kebohongan yang berlawanan arah.
+cek "PASANGAN: menu ber-HPP nol yang DIJUAL tetap 0 (bukan null)" "V == 1" \
+  "$(echo "$MENU267" | jq --arg m "$MN267" '([.[]|select(.id==$m)][0].food_cost_persen == 0) | if . then 1 else 0 end')"
+cek "PASANGAN: menu berharga wajar tetap berangka > 0" "V == 1" \
+  "$(echo "$MENU267" | jq '[.[]|select(.harga_jual > 0 and (.hpp // 0) > 0 and .food_cost_persen != null and .food_cost_persen > 0)] | length > 0 | if . then 1 else 0 end')"
+# Analisis Harga mengurutkan food cost TERTINGGI dulu. Yang tak terhitung tak
+# boleh menyamar sebagai 0% di antara menu tersehat: ia diurut terpisah di ekor
+# dan dirender "—".
+AN267=$(api "$OWNER" GET /menu/analisis-harga)
+cek "INTI: menu komplimen tetap ADA di analisis (bukan hilang)" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MK267" '[.[]|select(.id==$m)]|length')"
+cek "INTI: yang tak terhitung diurut di EKOR, bukan di antara yang sehat" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MK267" '((map(.id)|index($m)) == (length - 1)) | if . then 1 else 0 end')"
+cek "INTI: porsi penyumbang NULL saat HPP menunya nol" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MN267" '([.[]|select(.id==$m)][0].penyumbang[0].persen_hpp == null) | if . then 1 else 0 end')"
+# …dan porsi yang SAH tetap terbaca: ketidaktahuan tak menular.
+cek "PASANGAN: porsi penyumbang menu komplimen tetap 100%" "V == 1" \
+  "$(echo "$AN267" | jq --arg m "$MK267" '([.[]|select(.id==$m)][0].penyumbang[0].persen_hpp == 100) | if . then 1 else 0 end')"
+
+echo "── §268 penghapusan yang GAGAL tak boleh dihitung sebagai berhasil ──"
+#
+# Kedua driver penyimpanan LOKAL dulu menulis hapusnya sebagai
+# `unlink(...).catch(() => {})` — menelan `EPERM`/`EISDIR`/`EACCES`/`EROFS`
+# padahal kontraknya cuma menjanjikan "berkas yang sudah tak ada bukan galat".
+# Saudara kandungnya di R2 melempar. Tiga pintu memanggilnya, dan ketiganya
+# membuang BARIS yang menamai objeknya tanpa tahu objeknya masih ada.
+#
+# Terukur sebelum perbaikan (2026-08-26, DB dev + disk sungguhan):
+#   DELETE /admin/sistem/backup/:id     → 200 {"ok":true}, baris 1→0, objek TETAP
+#   POST   /admin/sistem/backup/retensi → {"dibuang":1},   baris 1→0, objek TETAP
+#   POST   /admin/sistem/sapu-unggahan  → dihapus:3 padahal hanya 2 hilang
+#
+# Kegagalan hapusnya dipaksa TANPA main izin: objeknya diganti DIREKTORI
+# bernama sama — `unlink` atas direktori gagal bahkan untuk root, jadi seksi ini
+# berlaku sama di mesin pengembang maupun di CI (yang berjalan non-root).
+BDIR268="$(cd "$(dirname "$0")/.." && pwd)/apps/server/backups"
+B268=$(api "$SA" POST /admin/sistem/backup '{}')
+ID268=$(echo "$B268" | jq -r '.id // ""')
+KEY268=$(echo "$B268" | jq -r '.object_key // ""')
+cek "premis §268: cadangan uji terbentuk & ber-objek" "V == 1" \
+  "$( [ -n "$ID268" ] && [ -n "$KEY268" ] && echo 1 || echo 0 )"
+cek "premis §268: berkasnya benar ada di disk" "V == 1" \
+  "$( [ -f "$BDIR268/$KEY268" ] && echo 1 || echo 0 )"
+# Objeknya dibuat TAK BISA dihapus.
+rm -f "$BDIR268/$KEY268"; mkdir -p "$BDIR268/$KEY268"; : > "$BDIR268/$KEY268/.jaga"
+cek "premis §268: objeknya kini tak bisa di-unlink" "V == 1" \
+  "$( rm "$BDIR268/$KEY268" 2>/dev/null && echo 0 || echo 1 )"
+cek "INTI: hapus cadangan yang objeknya gagal dibuang → 502, bukan 200 ok" "V == 502" \
+  "$(status_code "$SA" DELETE "/admin/sistem/backup/$ID268")"
+cek "INTI: barisnya DIPERTAHANKAN (objeknya tak jadi yatim tanpa catatan)" "V == 1" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$ID268" '[.riwayat[]|select(.id==$i)]|length')"
+cek "…dan pesan galat sistemnya TIDAK bocor ke pemanggil" "V == 0" \
+  "$(api "$SA" DELETE "/admin/sistem/backup/$ID268" | jq -r '.error // ""' | grep -ci 'EPERM\|EISDIR\|ENOTEMPTY\|illegal operation' || true)"
+# PASANGAN 1 — begitu objeknya bisa dihapus lagi, pintunya kembali normal.
+rm -rf "$BDIR268/$KEY268"; : > "$BDIR268/$KEY268"
+cek "PASANGAN: objek wajar → 200 dan barisnya benar-benar hilang" "V == 200" \
+  "$(status_code "$SA" DELETE "/admin/sistem/backup/$ID268")"
+cek "…barisnya hilang" "V == 0" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$ID268" '[.riwayat[]|select(.id==$i)]|length')"
+cek "…berkasnya ikut hilang" "V == 0" \
+  "$( [ -e "$BDIR268/$KEY268" ] && echo 1 || echo 0 )"
+# PASANGAN 2 — IDEMPOTENSI tak ikut ditutup: objek yang MEMANG sudah hilang
+# tetap boleh dihapus barisnya. Ini yang membedakan penjaga ini dari sekadar
+# "melempar apa saja".
+B268B=$(api "$SA" POST /admin/sistem/backup '{}')
+ID268B=$(echo "$B268B" | jq -r '.id // ""')
+KEY268B=$(echo "$B268B" | jq -r '.object_key // ""')
+rm -f "$BDIR268/$KEY268B"
+cek "premis §268: objek cadangan kedua sudah tak ada" "V == 0" \
+  "$( [ -e "$BDIR268/$KEY268B" ] && echo 1 || echo 0 )"
+cek "PASANGAN: objek yang MEMANG hilang → tetap 200 (idempoten)" "V == 200" \
+  "$(status_code "$SA" DELETE "/admin/sistem/backup/$ID268B")"
+cek "…dan barisnya ikut dibuang" "V == 0" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$ID268B" '[.riwayat[]|select(.id==$i)]|length')"
+# Retensi & sapuan kini MELAPORKAN bagian yang gagal, bukan menelannya ke dalam
+# angka keberhasilan. Nilainya nol di sini — yang dijaga adalah medannya ADA,
+# sebab tanpa medan itu kegagalan kembali tak punya tempat untuk muncul.
+RET268=$(api "$SA" POST /admin/sistem/backup/retensi)
+cek "retensi melaporkan medan gagal tersendiri" "V == 1" \
+  "$(echo "$RET268" | jq 'has("gagal") | if . then 1 else 0 end')"
+cek "…dan medan dibuang tetap ada" "V == 1" \
+  "$(echo "$RET268" | jq 'has("dibuang") | if . then 1 else 0 end')"
+SAPU268=$(api "$SA" POST "/admin/sistem/sapu-unggahan?hitung=1")
+cek "sapuan unggahan melaporkan medan gagal_hapus tersendiri" "V == 1" \
+  "$(echo "$SAPU268" | jq 'has("gagal_hapus") | if . then 1 else 0 end')"
+cek "…mode hitung tetap tak menghapus apa pun" "V == 0" \
+  "$(echo "$SAPU268" | jq -r '.dihapus')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

@@ -1,3 +1,4 @@
+import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_BARIS, BATAS_UANG } from "../../lib/batas-angka";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -6,7 +7,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
 import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
-import { qtyDitagih, waktuKertas } from "@kakarut/shared";
+import { bolehLihatBiaya, qtyDitagih, waktuKertas } from "@kakarut/shared";
 import { opsiKertasDariQuery, responsSlip } from "../print/kertas";
 import {
   branchUntukTulis,
@@ -137,11 +138,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .select({ timezone: companies.timezone })
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
-    const tanggalQ = c.req.query("tanggal");
-    if (tanggalQ && !/^\d{4}-\d{2}-\d{2}$/.test(tanggalQ)) {
-      throw new HTTPException(400, { message: "Format tanggal tidak valid (YYYY-MM-DD)" });
-    }
-    const tanggal = tanggalQ ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    // Satu-satunya situs (dari 36) yang sudah MENOLAK sejak awal — tapi
+    // regex-saja, jadi `2026-02-30` tetap lolos ke SQL. Rumahnya disatukan.
+    const tanggal =
+      tanggalQuery(c, "tanggal") ?? tanggalDi(company?.timezone ?? "Asia/Jakarta");
     // Riwayat transaksi untuk kasir: cek pesanan / cetak ulang struk.
     const rows = await db
       .select({
@@ -258,7 +258,24 @@ export const penjualanRoutes = new Hono<AppEnv>()
       .select({ nama: users.nama })
       .from(users)
       .where(eq(users.id, sale.cashierUserId));
-    return c.json({ sale, items, branch_nama: branch?.nama ?? "", kasir: kasirUser?.nama ?? null });
+    /*
+     * BIAYA hanya untuk manajemen. Balasan ini membawa `sale.totalHpp` dan
+     * `items[].hppSatuan` — terukur 2026-08-26 dengan token `bar` dan
+     * `cashier`: keduanya membaca 5662,0314, angka yang sama persis dengan
+     * owner. Barisnya sendiri (`hppSatuan`) ikut dinihilkan; menutup totalnya
+     * saja adalah pagar yang bisa dilangkahi dari balasan yang sama.
+     *
+     * Papan pesanan TIDAK tersentuh: SnackBar "HPP transaksi dihitung ulang"
+     * di ponsel membaca `total_hpp` dari balasan POST
+     * `/pesanan/:jenis/:id/item/:itemId/sajian`, bukan dari sini.
+     */
+    const lihatBiaya = bolehLihatBiaya(auth.role);
+    return c.json({
+      sale: lihatBiaya ? sale : { ...sale, totalHpp: null },
+      items: lihatBiaya ? items : items.map((it) => ({ ...it, hppSatuan: null })),
+      branch_nama: branch?.nama ?? "",
+      kasir: kasirUser?.nama ?? null,
+    });
   })
   /**
    * SLIP PESANAN penjualan ini — menu & jumlah saja, TANPA HARGA.

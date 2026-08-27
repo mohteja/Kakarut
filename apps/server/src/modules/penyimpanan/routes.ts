@@ -1,5 +1,5 @@
 import { zValidator } from "../../lib/validator";
-import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -150,7 +150,26 @@ export const penyimpananRoutes = new Hono<AppEnv>()
     );
   })
   // POST boleh semua peran — dipakai quick-add saat mengisi faktur
-  .post("/", zValidator("json", PenyimpananBody), async (c) => {
+  /*
+   * MEMBUAT master data terkunci sama seperti MENGUBAHnya.
+   *
+   * `PATCH /:id` dan `PUT /:id/petugas` di bawah sudah ber-`requireRole("owner",
+   * "admin")` sejak awal; pintu BUAT-nya tidak. Terukur lewat HTTP dengan token
+   * peran `bar` (2026-08-25): `POST /penyimpanan` → **201**, dan barisnya
+   * benar-benar ada di `storage_locations`.
+   *
+   * KASIR sengaja tetap boleh, dan itu BUKAN kelalaian: §191 verify-api sudah
+   * memaku kontraknya berpasangan — "kasir → POST /penyimpanan cabang SENDIRI
+   * tetap boleh" & "cabang lain = 403". Pengetatan pertamaku ke owner/admin
+   * saja MEMATAHKAN asersi itu, dan gerbang lamanya yang menahannya. Himpunan
+   * di bawah karena itu mencerminkan `bolehAturMeja` di modul meja — peran yang
+   * mengatur lantai — sambil tetap menutup `tim`/`kitchen`/`bar`.
+   */
+  .post(
+    "/",
+    requireRole("owner", "admin", "cashier"),
+    zValidator("json", PenyimpananBody),
+    async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const branchId = await branchUntukTulis(
@@ -237,6 +256,20 @@ export const penyimpananRoutes = new Hono<AppEnv>()
 
       const uniqueIds = [...new Set(body.user_ids)];
       if (uniqueIds.length > 0) {
+        /*
+         * ANGGOTA yang MASIH BEKERJA — dulu cuma "anggota".
+         *
+         * Terukur lewat HTTP: karyawan yang sudah diarsipkan (keluar) diterima
+         * sebagai petugas opname dengan 200, dan balasan rutenya sendiri
+         * memuat `"aktif": false` tepat di sebelah penugasan yang baru saja
+         * diterimanya — layar tahu, pintunya tidak.
+         *
+         * Yang diperiksa hanya nama yang DIMASUKKAN. Menghapus penugasan
+         * berarti namanya tak ada di daftar ini, jadi membersihkan petugas
+         * yang sudah keluar tetap bisa dilakukan — pengetatan yang mengunci
+         * daftarnya selamanya akan menukar satu bug dengan bug yang lebih
+         * menjengkelkan.
+         */
         const members = await db
           .select({ userId: memberships.userId })
           .from(memberships)
@@ -244,11 +277,12 @@ export const penyimpananRoutes = new Hono<AppEnv>()
             and(
               eq(memberships.companyId, auth.company_id!),
               inArray(memberships.userId, uniqueIds),
+              isNull(memberships.archivedAt),
             ),
           );
         if (members.length !== uniqueIds.length) {
           throw new HTTPException(400, {
-            message: "Ada akun yang bukan anggota perusahaan",
+            message: "Ada akun yang bukan anggota aktif perusahaan (bukan anggota / sudah keluar)",
           });
         }
       }

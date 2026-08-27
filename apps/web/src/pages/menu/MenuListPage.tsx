@@ -22,7 +22,11 @@ import { formatRupiah } from "../../lib/format";
  * ke atas ambang tanpa ada yang mengubah harga jualnya — kalau itu terjadi,
  * tanda ⚠ di sini yang pertama memberi tahu.
  */
-function FoodCost({ persen, maks }: { persen: number; maks: number }) {
+function FoodCost({ persen, maks }: { persen: number | null; maks: number }) {
+  // null = biaya ditahan server untuk peran ini. Halaman ini memang
+  // isManajemen, jadi hari ini tak terjangkau — tapi "—" adalah jawaban yang
+  // benar, dan 0% akan terbaca sebagai food cost sempurna.
+  if (persen == null) return <span className="text-stone-400">—</span>;
   const lewat = persen > maks;
   const warna = lewat
     ? "text-red-600"

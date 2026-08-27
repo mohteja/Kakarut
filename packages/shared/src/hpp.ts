@@ -1,3 +1,4 @@
+import { bagiAtauNull } from "./angka";
 import { keSkalaKolom, SKALA_QTY_STOK_KOLOM } from "./skala";
 import { STOK_MENIPIS_THRESHOLD, type StokStatus } from "./constants";
 
@@ -51,8 +52,21 @@ export function hargaJualBulat(saran: number): number {
   return Math.round(saran / 1000) * 1000;
 }
 
-export function foodCostPersen(hpp: number, hargaJual: number): number {
-  return hargaJual > 0 ? (hpp / hargaJual) * 100 : 0;
+/**
+ * Food cost (%) = HPP ÷ harga jual. `null` bila TAK BISA dihitung.
+ *
+ * Dulu memulangkan **0** saat harga jualnya nol — dan nol itu dipercaya. Menu
+ * komplimen (`harga_jual = 0`, sah menurut skemanya) ber-HPP Rp2.083 karena itu
+ * dinilai `0,0%` HIJAU: paling sehat di katalog, sementara kebenarannya kau
+ * mengeluarkan Rp2.083 dan tak menerima apa pun. Di halaman Analisis Harga —
+ * yang mengurutkan food cost TERTINGGI dulu — ia mengendap di posisi 77 dari
+ * 93, di antara menu-menu tersehat.
+ *
+ * Nol yang SAH tetap nol: HPP 0 dengan harga jual wajar memang 0%.
+ */
+export function foodCostPersen(hpp: number, hargaJual: number): number | null {
+  const rasio = bagiAtauNull(hpp, hargaJual);
+  return rasio === null ? null : rasio * 100;
 }
 
 /**

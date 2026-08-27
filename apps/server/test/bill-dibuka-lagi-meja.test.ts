@@ -50,7 +50,11 @@ describe("premis: begitulah dua bill bisa hidup di satu meja", () => {
   it("dan bill yang dibatalkan MEMANG bisa hidup lagi dari papan", () => {
     // Ini juga disengaja: "dibatalkan lalu ternyata jadi" tak boleh mustahil
     // ditagih selamanya. Yang kurang bukan aturannya, melainkan akibatnya.
-    expect(FN).toContain('closedAt: kartu === "batal" ? sekarang : null');
+    // Dipaku NIATNYA, bukan bentuknya: bill tertutup TEPAT saat kartunya batal.
+    // Perbandingannya sendiri pindah ke `dibatalkanDapur()` di @kakarut/shared
+    // saat aturan "batal" disatukan (vena 2026-08-26) — dan gerbang yang
+    // memaku ejaan lama akan menahan penyatuan itu tanpa alasan.
+    expect(FN).toContain("closedAt: dibatalkanDapur(kartu) ? sekarang : null");
   });
 
   it("bill yang sudah DIBAYAR tetap tak bisa dibuka papan", () => {
@@ -69,7 +73,7 @@ describe("dibuka kembali ke meja yang sudah terisi → dilepas dari mejanya", ()
   });
 
   it("digerbang TIGA syarat — transisi, bukan batal, dan punya meja", () => {
-    expect(FN).toContain('if (sebelum?.closedAt && kartu !== "batal" && sebelum.mejaId)');
+    expect(FN).toContain("if (sebelum?.closedAt && !dibatalkanDapur(kartu) && sebelum.mejaId)");
   });
 
   it("hanya meja dine_in — takeaway memang dikecualikan dari aturannya", () => {

@@ -24,6 +24,7 @@ import { type AppEnv } from "../../middleware/auth";
 import { emailDariBody, lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { env } from "../../config/env";
 import { kirimEmail } from "../mail/service";
+import { suratUndangan } from "../mail/surat";
 import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
 
 /**
@@ -326,8 +327,10 @@ export const karyawanRoutes = new Hono<AppEnv>()
       const url = `${appBaseUrl(c)}/daftar`;
       await kirimEmail({
         to: body.email,
+        // `subject` sengaja TIDAK dilolos: ia teks biasa, bukan HTML — dan
+        // transport (nodemailer/Resend) sudah menyandikan headernya.
         subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Terakasir`,
-        html: `<p>Anda diundang bergabung ke <b>${co?.nama ?? "sebuah perusahaan"}</b> di Terakasir.</p><p>Daftar dengan email ini untuk otomatis bergabung: <a href="${url}">${url}</a></p><p>Bila sudah punya akun, cukup login — undangan muncul untuk diterima.</p>`,
+        html: suratUndangan(co?.nama ?? "sebuah perusahaan", url),
       });
     } catch {
       /* abaikan kegagalan email */
@@ -456,10 +459,25 @@ export const karyawanRoutes = new Hono<AppEnv>()
       const userId = c.req.param("userId");
       const body = c.req.valid("json");
       const [member] = await db
-        .select({ branchId: memberships.branchId })
+        .select({ branchId: memberships.branchId, archivedAt: memberships.archivedAt })
         .from(memberships)
         .where(and(eq(memberships.userId, userId), eq(memberships.companyId, auth.company_id!)));
       if (!member) throw new HTTPException(404, { message: "Karyawan tidak ditemukan" });
+      /*
+       * MEMBERI tugas kepada karyawan yang sudah keluar ditolak; MENGOSONGKAN
+       * daftarnya tidak.
+       *
+       * Mengarsipkan karyawan TIDAK menghapus penugasan tempat SO-nya, dan
+       * pintu inilah satu-satunya cara membersihkannya dari sisi karyawan.
+       * Menolak seluruh permintaan akan mengunci penugasan orang yang sudah
+       * berhenti di sana selamanya — pengetatan yang menciptakan keadaan buntu
+       * bukan pengetatan, ia bug kedua.
+       */
+      if (member.archivedAt && body.tempat_ids.length > 0) {
+        throw new HTTPException(400, {
+          message: "Karyawan sudah diarsipkan (keluar) — tak bisa ditugaskan tempat SO",
+        });
+      }
       if (!member.branchId) {
         throw new HTTPException(400, {
           message: "Karyawan tanpa cabang tak bisa ditugaskan tempat SO",

@@ -1,3 +1,4 @@
+import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -240,9 +241,10 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     // Disaring dulu: nilainya dipakai menyusun batas waktu, dan teks yang
     // bukan tanggal menghasilkan Invalid Date yang diam-diam ikut ke
     // pembanding — bukan penolakan yang bisa dibaca pemakainya.
-    const tglValid = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
-    const dari = tglValid(c.req.query("dari"));
-    const sampai = tglValid(c.req.query("sampai"));
+    // Pemeriksa lokal regex-saja dihapus: `2026-02-30` lolos bentuknya lalu
+    // ditolak Postgres. Satu rumah, dan tanggal tak sah dibalas 400 bernama.
+    const dari = tanggalQuery(c, "dari");
+    const sampai = tanggalQuery(c, "sampai");
     // Tanggalnya dipilih orang di zona perusahaan, sedangkan `confirmed_at`
     // adalah `timestamptz`. Membatasinya di tengah malam UTC menggeser
     // jendelanya tujuh jam di WIB: kiriman yang diterima subuh — jam sibuk

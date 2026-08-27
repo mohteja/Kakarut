@@ -50,8 +50,19 @@ export function KartuPerlengkapanModal({
         {data && (
           <div className="ml-auto text-right text-xs text-stone-500">
             Periode {formatTanggal(data.periode.dari)} – {formatTanggal(data.periode.sampai)}
-            <br />
-            Belanja: <b className="text-stone-700">{formatRupiah(data.total_belanja)}</b>
+            {/*
+              Angka belanja hanya untuk manajemen — server MENAHANNYA (`null`)
+              untuk peran lain, jadi barisnya dihilangkan alih-alih memajang
+              "—" yang tak berarti apa-apa. Modal ini sengaja tetap dibuka dari
+              tab Stok → Perlengkapan untuk semua peran: pakai & opname
+              dikerjakan tiap hari oleh mereka.
+            */}
+            {data.total_belanja != null && (
+              <>
+                <br />
+                Belanja: <b className="text-stone-700">{formatRupiah(data.total_belanja)}</b>
+              </>
+            )}
           </div>
         )}
       </div>

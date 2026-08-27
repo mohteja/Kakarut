@@ -7,6 +7,7 @@ import { env, r2Configured } from "../config/env";
 import { getStorage } from "../modules/upload/storage";
 import { getCadanganStorage } from "../modules/upload/backup-storage";
 import { getSmtpRow, penyediaEmail } from "../modules/mail/service";
+import { tautanEmailDariHeader } from "./base-url";
 import { pengamatanProxy, type PengamatanProxy } from "./pengamatan-proxy";
 
 /**
@@ -196,7 +197,34 @@ export async function periksaSetelan(): Promise<TemuanSetelanDto[]> {
     });
   }
 
-  /* 6. Setelan proxy versus yang benar-benar datang. */
+  /*
+   * 6. TAUTAN EMAIL DIBANGUN DARI HEADER PERMINTAAN.
+   *
+   * Tereproduksi 2026-08-26 lewat HTTP: `POST /api/auth/forgot-password`
+   * dengan `Host: penyerang.example` memulangkan tautan reset yang menunjuk
+   * domain itu — BERIKUT token hidup milik korban. Sama lewat
+   * `X-Forwarded-Host`, dengan protonya ikut ditempa jadi `https`.
+   *
+   * Surat mendarat di kotak masuk korban, tampak sah, dan sekali diklik
+   * tokennya berpindah tangan. Itu pengambilalihan akun, bukan phishing.
+   */
+  if (tautanEmailDariHeader()) {
+    temuan.push({
+      kode: "tautan_email_dari_header",
+      tingkat: "kritis",
+      judul: "Tautan email diturunkan dari header permintaan",
+      rincian:
+        "APP_BASE_URL dan APP_HOST_DIPERCAYA sama-sama kosong, jadi tautan reset password " +
+        "dan verifikasi email memakai host dari header permintaan — yang dikendalikan " +
+        "peminta. Permintaan reset ber-Host palsu membuat surat korban menunjuk domain " +
+        "penyerang, lengkap dengan token yang masih hidup.",
+      tindakan:
+        "Set APP_BASE_URL ke domain publik aplikasi (mis. https://app.contoh.id), lalu restart. " +
+        "Untuk multi-domain, set APP_HOST_DIPERCAYA berisi daftar host yang sah, dipisah koma.",
+    });
+  }
+
+  /* 7. Setelan proxy versus yang benar-benar datang. */
   const proxy = nilaiProxy(env.TRUST_PROXY_HOPS, pengamatanProxy());
   if (proxy) {
     temuan.push({

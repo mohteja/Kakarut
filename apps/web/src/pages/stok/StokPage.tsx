@@ -2,7 +2,23 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { qtyTeks, ringkasNilaiStok } from "@kakarut/shared";
-import type { ExpLotRow, MenuDto, MenuStokDto, PenyimpananDto, StokRowDto } from "@kakarut/shared";
+import type {
+  ExpLotRow,
+  MenuDto,
+  MenuStokDto,
+  NilaiStokRingkas,
+  PenyimpananDto,
+  StokRowDto,
+} from "@kakarut/shared";
+
+/** Ringkasan kosong — dipakai selagi `GET /stok/nilai` belum tiba. */
+const KOSONG_NILAI: NilaiStokRingkas = {
+  nilai: 0,
+  bahan_bernilai: 0,
+  minus_bahan: 0,
+  minus_nilai: 0,
+  tanpa_harga_bahan: 0,
+};
 import {
   Card,
   ErrorText,
@@ -105,8 +121,21 @@ export function StokPage() {
   // `terfilter`); ringkasan yang diam-diam ikut menyempit adalah ringkasan yang
   // salah dibaca sebagai total.
   const terfilter = cari.trim() !== "" || filterTempat !== "semua";
-  const nilai = ringkasNilaiStok(tampil);
-  const nilaiSemua = ringkasNilaiStok(stok ?? []);
+  /*
+   * Bila server MENAHAN harga per bahan (peran non-manajemen —
+   * `bolehLihatBiaya`), totalnya tak bisa disusun dari baris: yang tersisa
+   * cuma agregat `GET /stok/nilai`, dihitung server SEBELUM harganya ditahan.
+   * Konsekuensinya jujur dan disebut di layar: angkanya SELURUH cabang, tak
+   * ikut menyempit saat kotak cari terisi.
+   */
+  const hargaDitahan = (stok ?? []).some((r) => r.harga_per_unit == null);
+  const { data: nilaiServer } = useQuery({
+    queryKey: ["stok-nilai", branchQuery],
+    queryFn: () => api<NilaiStokRingkas>(`/stok/nilai${branchQuery}`),
+    enabled: hargaDitahan,
+  });
+  const nilai = hargaDitahan ? (nilaiServer ?? KOSONG_NILAI) : ringkasNilaiStok(tampil);
+  const nilaiSemua = hargaDitahan ? (nilaiServer ?? KOSONG_NILAI) : ringkasNilaiStok(stok ?? []);
 
   // Stok Menu: gabungkan katalog menu aktif dengan sisa porsi + bahan pembatas
   const porsiByMenu = new Map(ketersediaan.map((k) => [k.menu_id, k]));
@@ -386,15 +415,16 @@ export function StokPage() {
       {!stokGagal && (stok?.length ?? 0) > 0 && (
         <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <StatCard
-            label={terfilter ? "Nilai Stok (terfilter)" : "Nilai Stok"}
+            label={terfilter && !hargaDitahan ? "Nilai Stok (terfilter)" : "Nilai Stok"}
             value={formatRupiah(nilai.nilai)}
             warna="text-orange-600"
             sub={
               <>
                 {nilai.bahan_bernilai} bahan · dinilai dengan harga beli terkini
-                {terfilter && (
+                {terfilter && !hargaDitahan && (
                   <> · seluruh bahan {formatRupiah(nilaiSemua.nilai)}</>
                 )}
+                {hargaDitahan && <> · seluruh cabang (harga per bahan tak ditampilkan)</>}
               </>
             }
           />

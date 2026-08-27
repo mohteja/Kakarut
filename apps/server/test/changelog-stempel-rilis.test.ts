@@ -47,6 +47,8 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // masih di cabang `claude`, belum di-merge
+  "## Angka BIAYA hanya untuk manajemen (owner/admin)",
   // bukan rilis
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",

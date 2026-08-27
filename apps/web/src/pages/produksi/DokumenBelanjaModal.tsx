@@ -4,6 +4,7 @@ import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "..
 import { unduhPdf } from "../../lib/pdf";
 import { badgeFaktur, labelTahapRingkas, type FakturGroup, type StokMasukRow } from "./TambahStokPage";
 import { AreaCetak } from "../../components/AreaCetak";
+import { lolosHtml as esc } from "@kakarut/shared";
 
 /** Stylesheet dokumen — DI-SCOPE ke `.dok` agar aman dipakai saat buat PDF. */
 const DOK_CSS = `.dok{font-family:system-ui,-apple-system,Arial,sans-serif;color:#111;max-width:640px;margin:0 auto;padding:0 4px;font-size:13px;line-height:1.45;background:#fff}
@@ -222,11 +223,6 @@ export function DokumenBelanjaModal({
   // ===== Bangun dokumen HTML mandiri (inline style). Tidak lagi diunduh
   // sebagai berkas .html — hanya dipakai jalur cadangan jendela cetak bila
   // pembuatan PDF gagal.
-  const esc = (s: unknown) =>
-    String(s ?? "").replace(
-      /[&<>"]/g,
-      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c,
-    );
   const buildBody = () => {
     const tujuanBlok = grup.tujuanCabang
       ? `<div class="tujuan">📦 Barang untuk: → ${esc(grup.tujuanCabang)}${

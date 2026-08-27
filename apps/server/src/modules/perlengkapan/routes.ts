@@ -5,6 +5,7 @@
  * Semua peran boleh lihat & mencatat pemakaian (kasir/tim terkunci cabang);
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
+import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { keSkalaKolom, SKALA_QTY_PERLENGKAPAN } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
@@ -12,7 +13,12 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { RiwayatHargaDto, RiwayatHargaLot } from "@kakarut/shared";
+import {
+  bolehLihatBiaya,
+  tanpaBiayaKartuPerlengkapan,
+  type RiwayatHargaDto,
+  type RiwayatHargaLot,
+} from "@kakarut/shared";
 import { statistikHargaLots, hargaPerSatuanLot, lotStatistik, BATAS_LOT_RIWAYAT } from "../../lib/harga-stats";
 import { db } from "../../db/client";
 import {
@@ -64,7 +70,6 @@ import {
   tibaFakturBeliPerlengkapan,
 } from "./service";
 
-const TANGGAL_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const ItemBody = z.object({
   nama: z.string().trim().min(1).max(60),
@@ -193,7 +198,7 @@ const MasukBody = z.object({
   qty: z.number().positive().max(BATAS_QTY_STOK),
   total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
   catatan: z.string().max(300).nullish(),
-  tanggal: z.string().regex(TANGGAL_RE).optional(),
+  tanggal: zTanggal.optional(),
 }).strict();
 
 const PakaiBody = z.object({
@@ -224,7 +229,7 @@ const AturanBody = z.object({
   qty: z.number().min(0).max(BATAS_QTY_STOK).default(0),
   per_hari: z.number().int().min(1).max(365).default(1),
   aktif: z.boolean().default(true),
-  mulai: z.string().regex(TANGGAL_RE).optional(),
+  mulai: zTanggal.optional(),
 }).strict();
 
 const OpnameBody = z.object({
@@ -267,13 +272,9 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     const hariIni = await tanggalPerusahaan(auth.company_id!);
     const dari =
-      c.req.query("dari") && TANGGAL_RE.test(c.req.query("dari")!)
-        ? c.req.query("dari")!
-        : `${hariIni.slice(0, 8)}01`;
+      tanggalQuery(c, "dari") ?? `${hariIni.slice(0, 8)}01`;
     const sampai =
-      c.req.query("sampai") && TANGGAL_RE.test(c.req.query("sampai")!)
-        ? c.req.query("sampai")!
-        : hariIni;
+      tanggalQuery(c, "sampai") ?? hariIni;
     return c.json(
       await belanjaPerlengkapan({
         companyId: auth.company_id!,
@@ -500,10 +501,20 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     return c.json(hasil);
   })
   /**
-   * Daftar FAKTUR BELI perlengkapan ke CK. owner/admin lihat semua (atau filter
-   * ?branch_id = CK); peran terikat cabang hanya faktur di CK-nya.
+   * Daftar FAKTUR BELI perlengkapan ke CK — berikut harga & totalnya.
+   *
+   * Komentarnya sudah menulis "owner/admin lihat semua … peran terikat cabang
+   * hanya faktur di CK-nya", jadi pembatasannya dipikirkan — sebagai penyaring
+   * BARIS, bukan sebagai penjaga PINTU. Terukur 2026-08-26 token peran `bar`:
+   * 200. Dua saudaranya di berkas yang SAMA — `GET /belanja` dan `GET /master`
+   * — sudah `requireRole("owner","admin")`.
+   *
+   * Pasangannya diperiksa: pembacanya `BeliPerlengkapanPage` (rute web
+   * `isManajemen`), badge nav `Layout` (query-nya ber-`enabled: manajemenGuard`),
+   * dan `beli_perlengkapan_page` ponsel (laci `isManajemen`). Tak ada layar
+   * peran lain yang memanggilnya.
    */
-  .get("/beli", async (c) => {
+  .get("/beli", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     let ckFilter: string | undefined;
     if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
@@ -872,8 +883,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
       return c.json({ ok: true });
     },
   )
-  /* ===== SUPPLIER per perlengkapan (pola persis /bahan/:id/supplier) ===== */
-  .get("/:id/supplier", async (c) => {
+  /* ===== SUPPLIER per perlengkapan (pola persis /bahan/:id/supplier) =====
+   *
+   * "Pola persis" itu ikut menyalin celahnya: GET tanpa penjaga, `PUT` di
+   * bawahnya `requireRole("owner","admin")`. Terukur token `bar`: 200.
+   * Di sini owner/admin saja (bukan +tim seperti bahan) sebab kedua pembacanya
+   * — `PerlengkapanPage` web dan `perlengkapan_master_page` ponsel — memang
+   * cuma dipasang untuk manajemen.
+   */
+  .get("/:id/supplier", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
     if (!item)
@@ -988,9 +1006,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   )
   /**
    * RIWAYAT HARGA beli perlengkapan: daftar lot (stok masuk) + harga terkini &
-   * rata-rata tertimbang (fondasi HPP). Terbuka semua peran (info harga).
+   * rata-rata tertimbang (fondasi HPP).
+   *
+   * DULU "terbuka semua peran (info harga)" — kalimat yang sama persis dengan
+   * kembarannya di `bahan/routes.ts`, dan celahnya juga sama. Pintu yang
+   * MENULIS harga itu (`POST /:id/harga`) sudah owner/admin. Pembacanya
+   * `RiwayatHargaModal` web, dibuka HANYA dari `PerlengkapanPage`
+   * (rute `isManajemen`); ponsel tak memanggilnya.
    */
-  .get("/:id/pembelian", async (c) => {
+  .get("/:id/pembelian", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     const item = await muatSupplyAktif(auth.company_id!, c.req.param("id"));
     if (!item)
@@ -1317,10 +1341,7 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
     const hariIni = await tanggalPerusahaan(auth.company_id!);
-    const q = (nama: string) =>
-      c.req.query(nama) && TANGGAL_RE.test(c.req.query(nama)!)
-        ? c.req.query(nama)!
-        : null;
+    const q = (nama: string) => tanggalQuery(c, nama) ?? null;
     const sampai = q("sampai") ?? hariIni;
     const dari =
       q("dari") ??
@@ -1336,5 +1357,11 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     });
     if (!kartu)
       throw new HTTPException(404, { message: "Perlengkapan tidak ditemukan" });
-    return c.json(kartu);
+    /*
+     * PINTUNYA sengaja tetap terbuka — `KartuPerlengkapanModal` web dibuka
+     * dari tab Stok → Perlengkapan yang dipakai semua peran untuk pakai &
+     * opname, dan menutupnya menghentikan pekerjaan harian. Yang ditutup
+     * ANGKA belanjanya.
+     */
+    return c.json(bolehLihatBiaya(auth.role) ? kartu : tanpaBiayaKartuPerlengkapan(kartu));
   });

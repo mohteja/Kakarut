@@ -1,3 +1,4 @@
+import { tanggalQuery, tanggalSah } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { aliasedTable, and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -26,11 +27,8 @@ import { requireRole, terikatCabang, type AppEnv, cabangDariQuery} from "../../m
 const MAKS_HARI = 100;
 
 /** Validasi tanggal YYYY-MM-DD yang benar (menolak 2026-13-40). */
-function tanggalValid(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-}
+// Salinan lokal dihapus — aturannya kini satu rumah (`lib/tanggal-query`).
+const tanggalValid = tanggalSah;
 
 /** Selisih hari INKLUSIF antara dua tanggal YYYY-MM-DD (1 = hari yang sama). */
 export function jumlahHari(mulai: string, selesai: string): number {
@@ -164,10 +162,18 @@ export const pengajuanRoutes = new Hono<AppEnv>()
     }
     // Rentang: ambil yang BERTINDIH, bukan yang termuat seluruhnya — cuti
     // 28 Jul–3 Agu harus muncul saat menyaring bulan Juli maupun Agustus.
-    const dari = c.req.query("dari");
-    const sampai = c.req.query("sampai");
-    if (dari && tanggalValid(dari)) syarat.push(gte(leaveRequests.tanggalSelesai, dari));
-    if (sampai && tanggalValid(sampai)) syarat.push(lte(leaveRequests.tanggalMulai, sampai));
+    /*
+     * DULU `if (dari && tanggalValid(dari))` — cabang gagalnya MELEWATI
+     * saringannya, dan balasannya larik telanjang tanpa menyebut rentang yang
+     * dipakai. Terukur: `?dari=2026-08-01&sampai=2026-08-26` → **4** baris;
+     * `?dari=BUKAN&sampai=xxx` → **13** (seluruh tabel); dan satu paruh yang
+     * ngawur membuang KEDUA saringannya (`sampai=BUKAN` → 13 juga). Layar
+     * tetap memajang pilihan tanggal yang tak pernah dipakai.
+     */
+    const dari = tanggalQuery(c, "dari");
+    const sampai = tanggalQuery(c, "sampai");
+    if (dari) syarat.push(gte(leaveRequests.tanggalSelesai, dari));
+    if (sampai) syarat.push(lte(leaveRequests.tanggalMulai, sampai));
 
     const rows = await db
       .select(kolomDto)

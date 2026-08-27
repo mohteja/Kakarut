@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hitungHpp, qtyEfektif, type KomponenDto } from "@kakarut/shared";
+import { hitungHpp, qtyEfektif, type KomponenDtoPenuh } from "@kakarut/shared";
 import { komponenEfektif, type KatalogMenu } from "../src/modules/menu/service";
 
 /**
@@ -61,7 +61,7 @@ describe("kemasan take away menggerakkan HPP & konsumsi", () => {
 
 /** Katalog tiruan seminimal mungkin — cukup untuk menguji penggabungan resep. */
 function katalog(
-  komponen: Record<string, KomponenDto[]>,
+  komponen: Record<string, KomponenDtoPenuh[]>,
   menus: { id: string; tipe: "regular" | "paket"; baseMenuId: string | null }[],
 ): { katalog: KatalogMenu; menuById: Map<string, (typeof menus)[number]> } {
   return {
@@ -75,7 +75,7 @@ function katalog(
   };
 }
 
-function komp(ingredientId: string, qty: number): KomponenDto {
+function komp(ingredientId: string, qty: number): KomponenDtoPenuh {
   return {
     ingredient_id: ingredientId,
     slug: ingredientId,

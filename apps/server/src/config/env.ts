@@ -54,6 +54,16 @@ const EnvSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.trim() ? v.trim() : undefined)),
+  /**
+   * Host yang BOLEH dipakai membangun tautan email, dipisah koma — untuk
+   * pemasangan multi-domain yang tak bisa memaku satu `APP_BASE_URL`.
+   * Host dari header yang tak ada di daftar ini diabaikan; entri PERTAMA
+   * dipakai sebagai domain kanonik. Lihat `lib/base-url.ts`.
+   */
+  APP_HOST_DIPERCAYA: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() ? v.trim() : undefined)),
   /** Fallback pengirim email bila SMTP belum diatur (opsional). */
   RESEND_API_KEY: z.string().optional(),
 

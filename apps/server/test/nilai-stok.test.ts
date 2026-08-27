@@ -140,7 +140,23 @@ describe("kartu ringkasan di halaman Stok", () => {
     // Ringkasan yang diam-diam ikut menyempit saat orang mengetik di kotak
     // cari adalah ringkasan yang dibaca sebagai total seluruh gudang.
     const hal = baca("pages/stok/StokPage.tsx", WEB);
-    expect(hal).toContain('terfilter ? "Nilai Stok (terfilter)" : "Nilai Stok"');
+    expect(hal).toContain('"Nilai Stok (terfilter)"');
+    expect(hal, "label kartunya tak lagi bergantung `terfilter`").toMatch(
+      /terfilter[^\n]*\?\s*"Nilai Stok \(terfilter\)"/,
+    );
+  });
+
+  it("cakupan yang BERBEDA juga disebut, bukan cuma filternya", () => {
+    /*
+     * Sejak kebijakan biaya ditegakkan (2026-08-26), peran non-manajemen tak
+     * lagi menerima `harga_per_unit` per baris, jadi totalnya datang dari
+     * agregat `GET /stok/nilai` — angka SELURUH CABANG yang tak ikut menyempit
+     * saat kotak cari terisi. Ringkasan yang cakupannya diam-diam berbeda dari
+     * tabel di bawahnya persis kelas yang uji di atas ini lahir untuk menahan.
+     */
+    const hal = baca("pages/stok/StokPage.tsx", WEB);
+    expect(hal).toContain("hargaDitahan");
+    expect(hal, "cakupan yang berbeda tak disebut di layar").toContain("seluruh cabang");
   });
 
   it("dasar penilaian disebut di layar", () => {

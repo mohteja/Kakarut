@@ -22,6 +22,35 @@ export const PANDUAN_MARKUP: { kategori: string; persen: string; keterangan: str
 
 export type StokStatus = "habis" | "menipis" | "aman";
 export type UserRole = "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
+
+/**
+ * SIAPA BOLEH MELIHAT ANGKA BIAYA — HPP menu, harga beli bahan, biaya resep.
+ *
+ * Aturannya sudah ditulis TIGA KALI di layar, dengan nama, sebelum ada di
+ * sini: `isManajemen` (`App.tsx`, `Layout.tsx`), `bolehUbah` (`ResepPage`,
+ * yang bahkan tak MENGAMBIL datanya lewat `enabled: bolehUbah`), dan
+ * `lihatHarga` (`resep_page.dart`). Yang tak pernah ada: penjaganya di pintu.
+ *
+ * Terukur 2026-08-26 dengan token peran `bar` dan `cashier` sungguhan, DB
+ * segar — keduanya membaca angka yang SAMA PERSIS dengan owner:
+ *
+ *   GET /menu           hpp 5662,03 · hpp_dine_in 4732,03 · harga_saran
+ *                       10820,01 · food_cost_persen 51,47 ·
+ *                       komponen[].harga_per_unit 357,14
+ *   GET /bahan          harga_beli 35.000 · harga_per_unit 777,78
+ *   GET /penjualan/:id  totalHpp 5662,0314 · items[].hppSatuan
+ *
+ * Ini rumahnya sekarang, dan `biaya-hanya-manajemen.test.ts` memaku ketiga
+ * definisi klien tetap sepakat dengannya — supaya tak lahir aturan keempat
+ * yang menyimpang diam-diam, kelas yang sudah sekali menggigit repo ini pada
+ * rumus PB1.
+ *
+ * BUKAN kebijakan tentang siapa boleh MENGUBAH harga (itu `requireRole` di
+ * pintunya masing-masing), melainkan siapa boleh MELIHAT biayanya.
+ */
+export function bolehLihatBiaya(role: UserRole | null | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
 export type MenuTipe = "regular" | "paket";
 /**
  * Kategori bahan = teks bebas dari master `ingredient_categories` (bisa

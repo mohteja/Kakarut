@@ -62,7 +62,12 @@ const DIKETUK = new Set(
 const DILUAR_JANGKAUAN: Record<string, string> = {
   "POST /api/admin/sistem/migrate": "menjalankan migrasi sungguhan pada basis data yang sedang diuji",
   "POST /api/admin/sistem/smtp/test": "mengirim email sungguhan ke luar",
-  "POST /api/admin/sistem/backup/retensi": "mengubah retensi cadangan mesin yang menjalankannya",
+  // `POST /admin/sistem/backup/retensi` DULU di sini ("mengubah retensi
+  // cadangan mesin yang menjalankannya"). Alasannya ternyata terlalu takut:
+  // dengan `BACKUP_KEEP` bawaan 14 dan cadangan uji yang bisa dihitung jari,
+  // retensi tak membuang apa pun — §268 mengetuknya dan memeriksa BENTUK
+  // balasannya (medan `dibuang` & `gagal` ada). Satu pintu keluar dari daftar
+  // "tak terjangkau", bukan masuk.
 };
 
 /**

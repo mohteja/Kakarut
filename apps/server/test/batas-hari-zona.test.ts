@@ -219,14 +219,13 @@ describe("tak ada jembatan tanggal→instant baru yang lewat UTC", () => {
    */
   const DIIZINKAN: { berkas: string; potongan: string; alasan: string }[] = [
     {
-      berkas: "modules/absensi/routes.ts",
+      berkas: "lib/tanggal-query.ts",
       potongan: "const d = new Date(`${s}T00:00:00Z`);",
-      alasan: "validasi teks: dibulatkan balik ke string dan dibandingkan dengan aslinya",
-    },
-    {
-      berkas: "modules/pengajuan/routes.ts",
-      potongan: "const d = new Date(`${s}T00:00:00Z`);",
-      alasan: "validasi teks, sama seperti absensi",
+      alasan:
+        "validasi teks: dibulatkan balik ke string dan dibandingkan dengan " +
+        "aslinya — hasilnya TAK PERNAH dipakai sebagai batas jendela, cuma " +
+        "menjawab 'tanggal ini ada atau tidak'. Ia menggantikan DUA entri " +
+        "sebelumnya (absensi & pengajuan) yang kini satu rumah",
     },
     {
       berkas: "modules/pengajuan/routes.ts",

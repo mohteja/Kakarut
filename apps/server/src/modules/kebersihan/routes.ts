@@ -1,3 +1,4 @@
+import { bulanQueryAtau, tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { aliasedTable, and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -431,8 +432,8 @@ export const kebersihanRoutes = new Hono<AppEnv>()
     // yang lalu dirakit jadi tanggal mustahil ("2026-13-01") dan membuat
     // Postgres melempar → 500, padahal kontraknya menjanjikan jatuh ke bulan
     // berjalan. Pola ketat ini sama dengan rekap absensi (absensi/routes.ts).
-    const bulanQ = c.req.query("bulan");
-    const bulan = bulanQ && /^\d{4}-(0[1-9]|1[0-2])$/.test(bulanQ) ? bulanQ : hariIni.slice(0, 7);
+    // Sama seperti rekap absensi: balasannya menyebut bulan yang dipakai.
+    const bulan = bulanQueryAtau(c, "bulan", hariIni.slice(0, 7));
     const dari = `${bulan}-01`;
     const [th, bl] = bulan.split("-").map(Number);
     const akhirBulan = new Date(Date.UTC(th, bl, 0)).toISOString().slice(0, 10);
@@ -550,12 +551,13 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       const branchId = await cabangDariQuery(c);
       if (branchId) syarat.push(eq(cleaningReports.branchId, branchId));
     }
-    const dari = c.req.query("dari");
-    const sampai = c.req.query("sampai");
-    if (dari && /^\d{4}-\d{2}-\d{2}$/.test(dari)) syarat.push(gte(cleaningReports.tanggal, dari));
-    if (sampai && /^\d{4}-\d{2}-\d{2}$/.test(sampai)) {
-      syarat.push(lte(cleaningReports.tanggal, sampai));
-    }
+    // Cabang gagalnya dulu MELEWATI saringannya — sama seperti `/pengajuan`,
+    // yang terukur memulangkan seluruh tabel (4 → 13 baris) tanpa satu pun
+    // tanda bahwa rentangnya diabaikan.
+    const dari = tanggalQuery(c, "dari");
+    const sampai = tanggalQuery(c, "sampai");
+    if (dari) syarat.push(gte(cleaningReports.tanggal, dari));
+    if (sampai) syarat.push(lte(cleaningReports.tanggal, sampai));
     const sesi = c.req.query("sesi");
     if (sesi === "pagi" || sesi === "siang" || sesi === "malam") {
       syarat.push(eq(cleaningReports.sesi, sesi));

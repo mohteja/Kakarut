@@ -53,7 +53,9 @@ function Rincian({ row }: { row: AnalisisHargaRow }) {
                   <span className="font-semibold text-stone-700">
                     {formatRupiah(p.kontribusi)}
                   </span>
-                  <span className="text-xs text-stone-400">({p.persen_hpp.toFixed(0)}%)</span>
+                  <span className="text-xs text-stone-400">
+                    ({p.persen_hpp == null ? "—" : `${p.persen_hpp.toFixed(0)}%`})
+                  </span>
                   <span
                     className={`w-full text-xs ${setelahMenu ? "font-medium text-red-600" : "text-stone-400"}`}
                   >
@@ -154,7 +156,10 @@ export function AnalisisHargaPage() {
   if (isLoading) return <Spinner />;
   const semua = rows ?? [];
   const ambang = semua[0]?.food_cost_maks ?? 40;
-  const lewat = semua.filter((r) => r.food_cost_persen > ambang);
+  // Food cost yang TAK BISA dihitung (menu komplimen, harga jual nol) tidak
+  // bisa "melewati ambang": tak ada angka untuk dibandingkan. Ia tetap ada di
+  // daftar penuh dengan "—", bukan dipaksa jadi 0 yang terbaca sempurna.
+  const lewat = semua.filter((r) => r.food_cost_persen != null && r.food_cost_persen > ambang);
   // Chip kategori dari SELURUH baris supaya daftarnya tidak menyusut saat
   // mengetik di kotak cari / berpindah tab ambang.
   const kategoriList = [...new Set(semua.map((r) => r.kategori))];
@@ -326,7 +331,8 @@ export function AnalisisHargaPage() {
       ) : (
         <div className="space-y-2">
           {tampil.map((r) => {
-            const lewatAmbang = r.food_cost_persen > ambang;
+            const lewatAmbang = r.food_cost_persen != null && r.food_cost_persen > ambang;
+            const takTerhitung = r.food_cost_persen == null;
             const terbuka = buka === r.id;
             return (
               <Card key={r.id} className="p-3">
@@ -354,11 +360,20 @@ export function AnalisisHargaPage() {
                       <span>HPP {formatRupiah(r.hpp)}</span>
                       <span
                         className={
-                          lewatAmbang ? "font-bold text-red-600" : "font-semibold text-green-600"
+                          takTerhitung
+                            ? "font-semibold text-stone-400"
+                            : lewatAmbang
+                              ? "font-bold text-red-600"
+                              : "font-semibold text-green-600"
+                        }
+                        title={
+                          takTerhitung
+                            ? "Harga jual 0 — food cost tak bisa dihitung"
+                            : undefined
                         }
                       >
                         {lewatAmbang && "⚠ "}
-                        {r.food_cost_persen.toFixed(1)}%
+                        {takTerhitung ? "—" : `${r.food_cost_persen!.toFixed(1)}%`}
                       </span>
                       {r.harga_jual_bulat !== r.harga_jual && (
                         <span className="text-xs text-stone-400">
