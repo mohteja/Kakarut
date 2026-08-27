@@ -50,6 +50,99 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## SIAPA yang melakukannya: ruas ketiga, dan `diubah_oleh` yang menyebut orang keliru — server — 2026-08-27
+
+- **Kenapa vena ini ada**: tiga kolom menentukan sebuah baris milik siapa dan
+  lahir dari siapa. `companyId` dijaga dua arah (putaran 13 & 14), `branchId`
+  sejak putaran 16. Yang ketiga — **`userId`/pelaku** — menopang SELURUH jejak
+  audit aplikasi ini (`pesananLogs`, `fakturLogs`, `stockOpnames.disetujuiBy`,
+  `shifts.openedBy`, `productions.updatedBy`) dan tak satu pun uji pernah
+  menagihnya.
+
+- **Populasi, dihitung**: 59 tabel → **24 ber-kolom pelaku**, **30 kolom**.
+  Penulisannya (`insert` + `update`) **96**:
+  `TOKEN` 56 · `PARAMETER` 20 · `E` 14 · `NULL` 3 · `TURUNAN` 2 · `KLIEN` **1**.
+
+- **Arah pertama BERSIH, dan bersihnya berangka**: tak ada pelaku yang dipungut
+  dari permintaan kecuali **satu** yang memang harus — `PUT /penyimpanan/:id`
+  menugaskan PETUGAS rak, dan daftar orangnya memang dipilih manajemen. Ia
+  terdaftar beralasan, dan **alasannya dipaku ke kodenya**: uji memeriksa bahwa
+  tiap id divalidasi `memberships` seperusahaan + belum diarsip + jumlahnya
+  cocok. Kalau validasi itu hilang, alasannya berhenti benar dan gerbangnya
+  merah — bukan alasan tulisan tangan yang basi diam-diam.
+  Dari 14 pembantu pembawa pelaku, **13 DIBUKTIKAN** lewat graf panggilan; satu
+  (`catatAbsen`) terdaftar beralasan dan alasannya menarik: absensi KIOS memang
+  mencatat atas nama karyawan yang **kode**-nya diketik di perangkat bersama,
+  bukan atas nama pemegang token. Grafnya tak dipaksa mengatakan sebaliknya.
+
+- **TEMUAN — arah kedua, dan ia menyentuh uang.** `updatedBy` **dilihat
+  manusia**: `produksi/routes.ts:2626` memulangkannya sebagai `diubah_oleh` dan
+  `apps/web/src/pages/produksi/TambahStokPage.tsx` merendernya. Aturannya
+  ditulis di satu pintu — `PATCH /pembelian/faktur/:key` membuka `set`-nya
+  dengan `updatedBy: auth.sub`, dengan komentar yang menjelaskan kenapa —
+  **dan pintu lain ke keadaan yang sama tidak**.
+
+  Terukur lewat HTTP, dua pengguna sungguhan, bukti dari DTO yang dirender:
+
+  | | qty | total_harga | harga_tebakan | diubah_oleh |
+  |---|---|---|---|---|
+  | owner buat + PATCH | 10 | 50.000 | false | **Owner Basooopa** |
+  | pengguna KEDUA naikkan tahap qty 14 | **14** | **70.000** | **true** | **Owner Basooopa** ← |
+
+  Layar menyebut orang yang menulis Rp50.000 sebagai penulis Rp70.000. Dan
+  `harga_tebakan` yang ikut berbalik menentukan apakah angka itu masuk kolam
+  median harga acuan perusahaan — jadi yang salah nama bukan catatan sepele.
+  Sistemnya bahkan **tahu** siapa pelakunya: `diterima_oleh` (`confirmedBy`)
+  menyebutnya dengan benar di kolom sebelahnya.
+
+  Dua pintu diperbaiki — tahap "maju" (`produksi/routes.ts:989`) dan
+  `POST /penerimaan/:fakturId/terima-sebagian` (`:725`, memprorata harga).
+  `confirmedBy` **tetap** ditulis: "siapa menerima" dan "siapa menulis
+  angkanya" dua fakta berbeda, dan menyatukannya menghapus satu.
+  **9 → 5** pintu tak menyegarkan pelaku; yang menyentuh **ANGKA: 2 → 0**.
+
+- **Instrumen**: `test/util/pelaku.ts` (AST). Graf panggilan
+  **diparameterkan** — `panggilan.ts` dulu dipaku ke tenant (`TENANT_PROP`,
+  `AUTH_RE`); mesinnya (titik-tetap, korespondensi argumen, penolakan nama
+  bertabrakan) tak pernah tenant-spesifik. Kini `Dimensi` (`TENANT` | `PELAKU`)
+  membawa keempat nilai yang berbeda, dan bukti tak-bergesernya perilaku:
+  suite tenant tetap hijau dengan **angka yang sama** (101 situs, AUTH 48 /
+  PARAMETER 25 / TURUNAN 1 / E 27, daftar tangan kosong). Perakit baris
+  (`objekBaris`, `konteks`) **dipakai ulang** dari `tenant-tulis.ts`, tidak
+  disalin.
+
+- **Tiga kebutaan detektorku sendiri, semuanya ditemukan sebelum satu tuduhan
+  ditulis**:
+  1. **Sebar bersyarat.** `produksi/routes.ts:989` menulis seluruh
+     perubahannya sebagai `...(lebih ? { qty } : {})`, jadi objeknya tak punya
+     satu pun properti bernama — versi pertama melaporkannya `ubah{}` dan
+     **pintu uangnya tak terlihat sama sekali**.
+  2. **Kolom yang salah alamat.** Menuntut `deletedBy` pada pembaruan biasa
+     menuduh `refund.ts` & `rekalkulasi.ts` yang menulis ulang total penjualan
+     — padahal `sales` tak punya `updatedBy`, jadi tak ada tempat mencatatnya.
+     Arahnya dipecah dua (`UBAH` / `HAPUS`); tuduhan itu dicabut, dan
+     ketiadaan kolomnya **ditulis sebagai batas**, bukan ditambal migrasi.
+  3. **Callback `.map` dan pewarisan kolom.** `uniqueIds.map((uid) => ({ userId:
+     uid }))` terbaca `PARAMETER` padahal `uniqueIds` lahir dari badan
+     permintaan; dan `b.userId → userId` saat memecah baris adalah **warisan**,
+     bukan parameter. Dua kelas yang tadinya bersembunyi di `PARAMETER` kini
+     punya nama sendiri — kelas yang salah menyembunyikan pertanyaan.
+
+- **Negatif bersih yang layak dicatat**: **0** penghapusan lunak yang lupa
+  menyebut penghapusnya (tiap `update` pengisi `deletedAt` pada tabel
+  ber-`deletedBy` mengisi keduanya). Dan, diukur sambil jalan: daftar rute yang
+  dipakai TIGA gerbang diadu dengan **tabel rute Hono sendiri** — 276 vs 275,
+  satu-satunya beda `GET /health` (di luar lingkup tenant). Sapuan teks
+  `rute.ts` **tidak buta**; utang "naikkan ke AST" untuk berkas itu **dicabut,
+  berangka**.
+
+- **Gerbang**: `typecheck` bersih (server+web) · `npm test` **2.456** (207
+  berkas) · `verify-api` **3.219 lolos, 0 gagal** (§270 8 asersi + 1 asersi
+  baru di §52b) · rekaman cakupan rute **identik, 274** · `audit:invarian`
+  26/26 · build web ✔ · Playwright e2e **6/6**.
+
+---
+
 ## Pengurungan CABANG: saudara kandung tenant yang tak pernah punya gerbang — server — 2026-08-27
 
 - **Kenapa vena ini ada**: pengurungan TENANT sudah dijaga dua arah — baca (626

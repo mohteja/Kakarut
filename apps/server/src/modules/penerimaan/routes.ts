@@ -734,6 +734,20 @@ export const penerimaanRoutes = new Hono<AppEnv>()
                   confirmedBy: auth.sub,
                   confirmedAt: now,
                   waktu: now,
+                  /*
+                   * Pintu ini mengubah `qty` DAN memprorata `totalHarga`, jadi
+                   * ia menulis angka yang dilihat manusia — dan `diubah_oleh`
+                   * (yakni `updatedBy`) yang tampil di sebelahnya harus
+                   * menyebut penulisnya, bukan orang sebelumnya.
+                   *
+                   * `confirmedBy` di atas TETAP: "siapa menerima" dan "siapa
+                   * menulis angkanya" dua fakta berbeda; menyatukannya
+                   * menghapus satu. Saudara-saudaranya di berkas ini (`/terima`,
+                   * `/tolak`, `/batal-tolak`) TIDAK ikut: ketiganya hanya
+                   * memindahkan status, tak menyentuh satu pun angka.
+                   */
+                  updatedBy: auth.sub,
+                  updatedAt: now,
                 })
                 .where(
                   and(

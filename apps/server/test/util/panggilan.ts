@@ -33,9 +33,49 @@ import { daftarSumber } from "./kueri-terkurung";
  * justru cara kelas ini tumbuh kembali.
  */
 
-const TENANT_PROP = new Set(["companyId", "company_id"]);
-const AUTH_RE = /auth\.company_id/;
+/**
+ * DIMENSI yang ditelusuri graf ini.
+ *
+ * Mesinnya — titik-tetap, korespondensi argumen, penolakan nama bertabrakan —
+ * tak pernah tenant-spesifik; yang tenant-spesifik cuma EMPAT nilai di bawah.
+ * Diparameterkan saat dimensi ketiga (**pelaku**) membutuhkan mesin yang sama:
+ * `companyId` (putaran 14) dan `branchId` (putaran 16) sudah punya gerbang,
+ * `userId` belum, dan menyalin 400 baris graf untuk itu adalah persis kelas
+ * yang ledger ini berulang kali menemukan membusuk.
+ *
+ * Bukti bahwa parameterisasi ini tak menggeser apa pun: suite tenant tetap
+ * hijau dengan ANGKA yang sama (20/20 pembantu terbukti, daftar tangan kosong).
+ */
+export interface Dimensi {
+  nama: string;
+  /** nama properti/parameter yang MEMBAWA nilai dimensi ini */
+  prop: Set<string>;
+  /** properti yang dipakai bila slotnya ditemukan lewat tipe/pemakaian */
+  propBaku: string;
+  /** penanda "nilainya lahir dari TOKEN" */
+  auth: RegExp;
+  /** penanda "nilainya lahir dari PERMINTAAN" */
+  klien: RegExp;
+}
+
 const KLIEN_RE = /\bbody\b|\bpayload\b|c\.req|valid\(|\binput\b|\bquery\(/;
+
+export const TENANT: Dimensi = {
+  nama: "tenant",
+  prop: new Set(["companyId", "company_id"]),
+  propBaku: "companyId",
+  auth: /auth\.company_id/,
+  klien: KLIEN_RE,
+};
+
+/** Siapa yang melakukannya — ruas ketiga, sesudah `companyId` dan `branchId`. */
+export const PELAKU: Dimensi = {
+  nama: "pelaku",
+  prop: new Set(["userId", "user_id"]),
+  propBaku: "userId",
+  auth: /auth\.sub/,
+  klien: KLIEN_RE,
+};
 /** Saringan tenant yang terbaca di dalam sebuah kondisi yang dioper. */
 const TENANT_TEKS = /companyId|company_id|companies\.id/;
 
@@ -123,14 +163,14 @@ function pembantuPemuat(n: Simpul, b: Berkas): string | null {
 }
 
 /** Apakah anotasi tipe sebuah parameter MENYATAKAN properti tenant. */
-function tipePunyaTenant(p: Simpul): boolean {
+function tipePunyaTenant(p: Simpul, dim: Dimensi): boolean {
   const anot = p.typeAnnotation?.typeAnnotation ?? p.typeAnnotation;
   if (!anot) return false;
   let punya = false;
   jelajah(anot, (n) => {
     if (punya) return;
     if (n.type !== "TSPropertySignature") return;
-    if (n.key?.type === "Identifier" && TENANT_PROP.has(n.key.name)) punya = true;
+    if (n.key?.type === "Identifier" && dim.prop.has(n.key.name)) punya = true;
   });
   return punya;
 }
@@ -146,15 +186,16 @@ function tipePunyaTenant(p: Simpul): boolean {
  * panggilnya lalu tak pernah diperiksa sama sekali. Tipenya ada di pohon; di
  * situlah slotnya dinyatakan.
  */
-function letakTenant(fn: Simpul, b: Berkas): LetakTenant | null {
+function letakTenant(fn: Simpul, b: Berkas, dim: Dimensi): LetakTenant | null {
   const params = (fn.params ?? []) as Simpul[];
   for (let i = 0; i < params.length; i += 1) {
     const p = params[i];
-    if (p.type === "Identifier" && TENANT_PROP.has(p.name as string)) return { indeks: i };
-    if (p.type === "Identifier" && tipePunyaTenant(p)) return { indeks: i, properti: "companyId" };
+    if (p.type === "Identifier" && dim.prop.has(p.name as string)) return { indeks: i };
+    if (p.type === "Identifier" && tipePunyaTenant(p, dim))
+      return { indeks: i, properti: dim.propBaku };
     if (p.type === "ObjectPattern") {
       for (const prop of p.properties ?? []) {
-        if (prop.key?.type === "Identifier" && TENANT_PROP.has(prop.key.name)) {
+        if (prop.key?.type === "Identifier" && dim.prop.has(prop.key.name)) {
           return { indeks: i, properti: prop.key.name as string };
         }
       }
@@ -166,24 +207,29 @@ function letakTenant(fn: Simpul, b: Berkas): LetakTenant | null {
       jelajah(fn.body, (n) => {
         if (pakai || n.type !== "MemberExpression" || n.computed) return;
         if (n.object?.type === "Identifier" && n.object.name === nama) {
-          if (n.property?.type === "Identifier" && TENANT_PROP.has(n.property.name)) pakai = true;
+          if (n.property?.type === "Identifier" && dim.prop.has(n.property.name)) pakai = true;
         }
       });
-      if (pakai) return { indeks: i, properti: "companyId" };
+      if (pakai) return { indeks: i, properti: dim.propBaku };
     }
   }
   return null;
 }
 
 /** Ekspresi tenant yang dioper di satu situs panggil, menurut `letak`. */
-function argumenTenant(panggil: Simpul, letak: LetakTenant, b: Berkas): Simpul | undefined {
+function argumenTenant(
+  panggil: Simpul,
+  letak: LetakTenant,
+  b: Berkas,
+  dim: Dimensi,
+): Simpul | undefined {
   const args = (panggil.arguments ?? []) as Simpul[];
   const a = args[letak.indeks];
   if (!a) return undefined;
   if (!letak.properti) return a;
   if (a.type === "ObjectExpression") {
     for (const p of a.properties ?? []) {
-      if (p.key?.type === "Identifier" && TENANT_PROP.has(p.key.name)) return p.value ?? p.key;
+      if (p.key?.type === "Identifier" && dim.prop.has(p.key.name)) return p.value ?? p.key;
     }
     return undefined;
   }
@@ -199,7 +245,7 @@ function argumenTenant(panggil: Simpul, letak: LetakTenant, b: Berkas): Simpul |
  * satu lompatan lagi ke dalam. Tanpa ini dua pembantu produksi menggantung
  * "belum terbukti" padahal buktinya ada, cuma satu tingkat lebih dalam.
  */
-function asalTeks(n: Simpul, b: Berkas, dalam = 0): string {
+function asalTeks(n: Simpul, b: Berkas, dim: Dimensi, dalam = 0): string {
   const teks = b.isi.slice(n.start, n.end);
   // Enam lompatan, bukan empat: rantai terpanjang yang NYATA di repo ini ada
   // enam — `konteks` → objek literalnya → properti ringkas `conds` → deklarasi
@@ -214,16 +260,16 @@ function asalTeks(n: Simpul, b: Berkas, dalam = 0): string {
   // `companyId`-nya diambil lebih dulu, jadi objek utuh tak pernah ditelusuri.
   if (n.type === "ObjectExpression") {
     const bagian = (n.properties ?? [])
-      .map((p: Simpul) => (p.value ? asalTeks(p.value, b, dalam + 1) : ""))
+      .map((p: Simpul) => (p.value ? asalTeks(p.value, b, dim, dalam + 1) : ""))
       .join(" , ");
     return `${teks} , ${bagian}`;
   }
-  if (AUTH_RE.test(teks) || KLIEN_RE.test(teks)) return teks;
+  if (dim.auth.test(teks) || dim.klien.test(teks)) return teks;
   const pangkal = n.type === "MemberExpression" ? n.object : n;
   if (pangkal?.type !== "Identifier") return teks;
   const d = deklarasiTerlihat(pangkal, pangkal.name as string, b.induk, b.lingkup);
   if (!d?.nilai) return teks;
-  return asalTeks(d.nilai, b, dalam + 1);
+  return asalTeks(d.nilai, b, dim, dalam + 1);
 }
 
 export interface SitusKondisi {
@@ -243,6 +289,8 @@ export interface Graf {
   /** nama yang dideklarasikan di lebih dari satu berkas — tak boleh jadi bukti */
   bertabrakan: string[];
   jumlahBerkas: number;
+  /** dimensi yang ditelusuri graf ini — `buktikan` tak boleh mencampurnya */
+  dim: Dimensi;
 }
 
 /**
@@ -250,7 +298,10 @@ export interface Graf {
  * pemanggil baru yang mengoper tenant dari permintaan harus membuat pembantunya
  * berhenti terbukti.
  */
-export function grafPanggilan(tambahan?: { nama: string; isi: string }[]): Graf {
+export function grafPanggilan(
+  tambahan?: { nama: string; isi: string }[],
+  dim: Dimensi = TENANT,
+): Graf {
   const berkas = bacaBerkas(tambahan ? [...daftarSumber(), ...tambahan] : undefined);
   const pembantu = new Map<string, Pembantu[]>();
   for (const b of berkas) {
@@ -274,7 +325,7 @@ export function grafPanggilan(tambahan?: { nama: string; isi: string }[]): Graf 
         nama,
         berkas: b.nama,
         baris: barisDi(b.isi, n.start),
-        letak: letakTenant(fn, b),
+        letak: letakTenant(fn, b, dim),
       });
       pembantu.set(nama, daftar);
     });
@@ -288,14 +339,14 @@ export function grafPanggilan(tambahan?: { nama: string; isi: string }[]): Graf 
       const dek = pembantu.get(nama);
       if (!dek?.length) return;
       const letak = dek[0].letak;
-      const arg = letak ? argumenTenant(n, letak, b) : undefined;
+      const arg = letak ? argumenTenant(n, letak, b, dim) : undefined;
       const teks = arg ? b.isi.slice(arg.start, arg.end) : "";
-      const jejak = arg ? asalTeks(arg, b) : "";
+      const jejak = arg ? asalTeks(arg, b, dim) : "";
       const kelas: KelasArgumen = !arg
         ? "LAIN"
-        : AUTH_RE.test(jejak) || AUTH_RE.test(teks)
+        : dim.auth.test(jejak) || dim.auth.test(teks)
           ? "AUTH"
-          : KLIEN_RE.test(jejak) || KLIEN_RE.test(teks)
+          : dim.klien.test(jejak) || dim.klien.test(teks)
             ? "KLIEN"
             : "LEWAT";
       const daftar = panggilan.get(nama) ?? [];
@@ -325,7 +376,7 @@ export function grafPanggilan(tambahan?: { nama: string; isi: string }[]): Graf 
           indeks: i,
           dalam: pembantuPemuat(n, b),
           teks: b.isi.slice(a.start, a.end).replace(/\s+/g, " ").slice(0, 70),
-          jejak: asalTeks(a, b).replace(/\s+/g, " ").slice(0, 200),
+          jejak: asalTeks(a, b, dim).replace(/\s+/g, " ").slice(0, 200),
         });
       });
       kondisi.set(nama, daftar);
@@ -336,7 +387,7 @@ export function grafPanggilan(tambahan?: { nama: string; isi: string }[]): Graf 
     .filter(([, d]) => new Set(d.map((x) => x.berkas)).size > 1)
     .map(([n]) => n);
 
-  return { pembantu, panggilan, kondisi, bertabrakan, jumlahBerkas: berkas.length };
+  return { pembantu, panggilan, kondisi, bertabrakan, jumlahBerkas: berkas.length, dim };
 }
 
 export interface HasilBukti {

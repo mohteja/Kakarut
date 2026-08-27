@@ -57,13 +57,13 @@ export interface SitusTulis {
 }
 
 /** Berkas yang memang bekerja LINTAS perusahaan (cermin daftar sapuan BACA). */
-const GLOBAL = [
+export const GLOBAL = [
   /^lib\//, /^seed\//, /^db\//, /^scripts\//, /^app\.ts$/, /^index\.ts$/,
   /^middleware\/auth\.ts$/, /^modules\/auth\//, /^modules\/onboarding\//,
   /^modules\/admin-/, /^modules\/mail\//, /^modules\/users\//,
 ];
 
-const PANGKAL = new Set(["db", "tx", "trx"]);
+export const PANGKAL = new Set(["db", "tx", "trx"]);
 const FUNGSI = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
 
 /** Pembantu bernama TERLUAR yang memuat simpul ini. */
@@ -83,7 +83,7 @@ function pembantuPemuat(n: Simpul, k: Konteks): string | undefined {
   return nama;
 }
 
-interface Konteks {
+export interface Konteks {
   nama: string;
   isi: string;
   prog: Simpul;
@@ -91,7 +91,7 @@ interface Konteks {
   lingkup: Map<Simpul, Map<string, Deklarasi>>;
 }
 
-function konteks(nama: string, isi: string): Konteks {
+export function konteks(nama: string, isi: string): Konteks {
   const prog = uraikan(nama.endsWith(".ts") ? nama : `${nama}.ts`, isi);
   const induk = petaInduk(prog);
   return { nama, isi, prog, induk, lingkup: petaLingkup(prog, induk) };
@@ -142,7 +142,7 @@ function bukaBungkus(x: Simpul | undefined): Simpul | undefined {
 }
 
 /** Objek-objek baris yang benar-benar ditulis oleh `.values(<x>)`. */
-function objekBaris(mentah: Simpul | undefined, k: Konteks, dalam = 0): Simpul[] {
+export function objekBaris(mentah: Simpul | undefined, k: Konteks, dalam = 0): Simpul[] {
   const x = bukaBungkus(mentah);
   if (!x || dalam > 4) return [];
   if (x.type === "ObjectExpression") return [x];

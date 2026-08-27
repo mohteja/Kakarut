@@ -1010,6 +1010,27 @@ async function tahapSebagian(k: KonteksTahap) {
             ...(item.harga != null ? { totalHarga: item.harga, hargaTebakan: false } : {}),
             // exp lot saat masuk stok (otomatis dari masa simpan / override)
             ...(masukStok ? { expDate: expBaris(b, item.exp) } : {}),
+            /*
+             * SIAPA yang menulis angka yang kini tampil.
+             *
+             * `updatedBy` dilihat manusia: ia dipulangkan sebagai `diubah_oleh`
+             * dan dirender layar Tambah Stok. Aturannya sudah ditulis di pintu
+             * sebelah — `PATCH /faktur/:key` membuka `set`-nya dengan
+             * `updatedBy: auth.sub` — tapi pintu INI, yang mengubah `qty`,
+             * `totalHarga`, DAN `hargaTebakan`, tak ikut.
+             *
+             * Terukur (2026-08-27): owner membuat faktur 10 pcs Rp50.000 lalu
+             * menyuntingnya (⇒ `diubah_oleh` = Owner); pengguna KEDUA menaikkan
+             * tahap dengan qty 14 ⇒ `qty=14`, `total_harga=70000`,
+             * `harga_tebakan=true` — dan `diubah_oleh` **masih Owner**. Layar
+             * menyebut orang yang menulis 50.000 sebagai penulis 70.000.
+             *
+             * `confirmedBy` TETAP ditulis di tempatnya: ia menjawab pertanyaan
+             * lain ("siapa menerima"), dan menyatukan keduanya menghapus satu
+             * fakta.
+             */
+            updatedBy: auth.sub,
+            updatedAt: now,
           })
           .where(kunci)
           .returning({ id: productions.id });

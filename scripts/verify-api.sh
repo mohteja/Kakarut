@@ -1909,6 +1909,13 @@ cek "kasir terima-sebagian 6 ok (200)" "V == 200" \
 cek "saldo +6 (bukan +10) setelah terima sebagian" "abs(V - ($S52B + 6)) < 0.001" "$(saldo_pusat "$BELI52B")"
 cek "baris: qty=6, dipesan=10, harga prorata 600, dikonfirmasi" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FA52_ID" '([.rows[]|select(.faktur_id==$f)][0] | (.qty==6 and .qty_dipesan==10 and .total_harga==600 and .status=="dikonfirmasi")) | if . then 1 else 0 end')"
+# Barisnya baru saja BERUBAH ANGKANYA (10 -> 6, 1000 -> 600), jadi `diubah_oleh`
+# yang tampil di sebelahnya harus menyebut yang mengubahnya. Sebelum vena
+# "pelaku" ia menyebut pembuat faktur — orang yang menulis 1000, bukan 600.
+# `diterima_oleh` TETAP diperiksa: "siapa menerima" fakta lain, dan menyatukan
+# keduanya menghapus satu.
+cek "terima-sebagian: diubah_oleh = penerima, bukan penulis angka lama" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FA52_ID" '([.rows[]|select(.faktur_id==$f)][0] | (.diubah_oleh != null and .diubah_oleh == .diterima_oleh)) | if . then 1 else 0 end')"
 
 # B) TOLAK (alasan) → batal-tolak (salah cek) → masuk stok
 FB52=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BELI52B\",\"mode\":\"pcs\",\"jumlah\":5,\"total_harga\":500}]}")
@@ -14934,6 +14941,48 @@ cek "…dan fakturnya MASIH ADA, tak ikut terhapus" "V == 1" \
 # hampir dicabut diam-diam.
 cek "PASANGAN: CK tetap boleh pratinjau dampak faktur cabang lain" "V == 200" \
   "$(status_code_body "$TCK58" POST "/pembelian/laporan-harga/$FKL93_ID/dampak" "{\"items\":[{\"id\":\"$ROWL93\",\"total_harga\":42000}]}")"
+
+echo "── §270 SIAPA yang menulis angka yang tampil ──"
+#
+# `updatedBy` dilihat manusia: ia dipulangkan sebagai `diubah_oleh` dan
+# dirender layar Tambah Stok. Aturannya sudah ditulis di satu pintu —
+# `PATCH /pembelian/faktur/:key` membuka `set`-nya dengan `updatedBy: auth.sub`
+# — sementara pintu yang MENAIKKAN TAHAP mengubah `qty`, `total_harga`, dan
+# `harga_tebakan` tanpa menyentuhnya.
+#
+# Terukur sebelum perbaikan (2026-08-27, dua pengguna sungguhan):
+#   owner buat faktur 10 pcs Rp50.000, lalu PATCH  -> diubah_oleh = Owner
+#   pengguna KEDUA naikkan tahap dgn qty 14        -> qty=14, total_harga=70000,
+#                                                     harga_tebakan=true
+#   dan diubah_oleh MASIH Owner — layar menyebut penulis 50.000 sebagai
+#   penulis 70.000.
+ING270=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
+FK270=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$ING270\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":50000}]}")
+FK270_ID=$(echo "$FK270" | jq -r '.faktur_id // ""')
+cek "premis §270: faktur uji terbentuk" "V == 1" \
+  "$([ -n "$FK270_ID" ] && [ "$FK270_ID" != "null" ] && echo 1 || echo 0)"
+baris270() { api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq -r --arg f "$FK270_ID" "[.rows[]|select(.faktur_id==\$f)][0] | $1"; }
+R270=$(baris270 '.id')
+api "$OWNER" PATCH "/pembelian/faktur/$FK270_ID" "{\"password\":\"$OWNER_PASS\",\"catatan\":\"ditulis owner\"}" > /dev/null
+cek "premis §270: sesudah PATCH owner, diubah_oleh = owner" "V == 1" \
+  "$(baris270 '(.diubah_oleh != null) | if . then 1 else 0 end')"
+OWNAMA270=$(baris270 '.diubah_oleh')
+cek "premis §270: angkanya masih 10 / 50000" "V == 1" \
+  "$(baris270 '((.qty==10) and (.total_harga==50000)) | if . then 1 else 0 end')"
+
+# Pengguna KEDUA (karyawan Central Kitchen) menaikkan tahap dgn qty LEBIH BESAR.
+api "$TCK58" POST "/pembelian/tahap/$FK270_ID" '{"ke":"dikerjakan","dana_cair":50000}' > /dev/null
+cek "pengguna kedua menaikkan tahap dgn qty 14" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK270_ID" -H "Authorization: Bearer $TCK58" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$R270\",\"qty\":14}]}")"
+cek "premis §270: angkanya MEMANG berubah (14 / 70000 / tebakan)" "V == 1" \
+  "$(baris270 '((.qty==14) and (.total_harga==70000) and (.harga_tebakan==true)) | if . then 1 else 0 end')"
+cek "INTI: diubah_oleh berpindah ke penulis angka BARU" "V == 0" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FK270_ID" --arg o "$OWNAMA270" '([.rows[]|select(.faktur_id==$f)][0].diubah_oleh == $o) | if . then 1 else 0 end')"
+cek "…dan ia menyebut SESEORANG, bukan kosong" "V == 1" \
+  "$(baris270 '(.diubah_oleh != null) | if . then 1 else 0 end')"
+# PASANGAN: `diterima_oleh` (confirmedBy) tetap fakta tersendiri, tak ditelan.
+cek "PASANGAN: diterima_oleh tetap terisi dan tetap fakta sendiri" "V == 1" \
+  "$(baris270 '(.diterima_oleh != null) | if . then 1 else 0 end')"
 
 if [ "$FAIL" -gt 0 ]; then
   echo
