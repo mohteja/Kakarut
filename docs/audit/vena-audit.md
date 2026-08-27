@@ -50,6 +50,92 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Bacaan gagal yang MENGISI FORMULIR — dan spinner yang tak pernah berhenti — web — 2026-08-27
+
+- **Kenapa vena ini ada**: putaran lalu menutup bentuk ANGKA dan menyisakan
+  utang yang kucatat sendiri, berangka — **47 situs `LAIN`**, *"dicatat
+  berangka, bukan diklaim bersih."* Putaran ini membayarnya, dan di dalamnya
+  ada dua kelas yang keduanya nyata; satu di antaranya **merusak**, bukan
+  sekadar menyesatkan.
+
+- **Pola yang pantas dinamai, sebab ini kali KETIGA berturut-turut**: sebuah
+  gerbang yang JUJUR — batasnya tertulis — ternyata buta pada bentuk yang
+  justru dilewatkan oleh catatan pengecualiannya sendiri. Kali ini
+  `spinner-abadi.test.ts`, yang menulis:
+
+  > `// Bukan dari useQuery (mis. state lokal) → bukan urusan penjaga ini.`
+
+  Pengecualian itu benar untuk state yang benar-benar lokal, dan **keliru
+  justru ketika state itu hanya pernah diisi dari data kueri**. Gerbang yang
+  sama sudah menuliskan pelajarannya dua paragraf di atas baris tersebut:
+  *"penjaga yang cuma mengunci SATU penulisan dari sebuah kesalahan memberi
+  rasa aman yang lebih berbahaya daripada tak ada penjaga sama sekali."*
+
+- **TEMUAN 1 — formulir terisi dari bacaan yang gagal (MERUSAK).**
+  `StokAwalPage` memuat saldo pembuka ke formulir lewat efek; bacaan gagal ⇒
+  efek tak jalan ⇒ formulir **kosong**, tak terbedakan dari "belum pernah
+  diisi". Terukur di peramban:
+
+  | | |
+  |---|---|
+  | tersimpan di basis data | **90 baris** saldo pembuka |
+  | `GET /stok/awal` dibalas 500 | **0 input terisi** |
+  | kalimat kegagalan di layar | **tak satu pun** |
+  | tombol simpan | **tetap ada** |
+
+  Yang terjadi berikutnya bukan kebingungan melainkan **pekerjaan**: orang
+  mengetik ulang saldo yang sudah ada, dan `POST /stok/awal` mengganti baris
+  lama beserta tanggalnya — baseline yang putaran 18 sudah tunjukkan menyetir
+  seluruh pelaporan stok. Tiga saudaranya sekelas: `SupplierBahanModal`
+  (simpan melepas SELURUH supplier bahan), `ResepPage` (efeknya **aktif**
+  memanggil `setLangkah([])` saat bacaan gagal, lalu Simpan Resep menulis
+  kosong itu), `MenuFormPage`/`LihatMenuPage`.
+
+- **TEMUAN 2 — spinner abadi lewat dua bentuk yang tak terlihat.**
+  `UbahBahanBakuPage:137` — `if (isLoading || rows === null) return <Spinner/>`
+  dengan `rows` hanya diisi efek dari `bahan`: bacaan gagal ⇒ berputar
+  selamanya, tanpa kalimat dan tanpa apa pun yang bisa ditekan.
+  Dan `MenuFormPage:289` — `if (!bahan || !kategori || (id && !menuEdit))` —
+  regex gerbang lama memakai `[^)]*`, yang **tak bisa melewati kurung dalam**,
+  jadi barisnya **tak pernah COCOK**: bukan diloloskan beralasan, melainkan
+  tak terlihat sama sekali.
+
+- **Tuduhan yang DICABUT**: `SmtpPage:102` (`!form`) tertangkap pemindai, lalu
+  dibaca tangan — ia didahului `if (!data) return <SpinnerAtauGalat …/>` dua
+  baris di atasnya, dan komentarnya menjelaskan penantian itu memang berakhir
+  dalam satu render. Bukan temuan.
+
+- **Angka sebelum → sesudah**: `ISI_FORM` **5 → 0** · penjaga spinner
+  tertuduh **3 → 0** · `GALAT` **101 → 107** · `LAIN` **47 → 43** ·
+  `PILIHAN` 15 → 10.
+
+- **Batas yang ditulis, dan ia penting**: `LAIN` berarti *"tak cocok dengan
+  satu pun bentuk klaim yang DIKENAL"* (kalimat, angka, formulir) — **bukan**
+  "terbukti tak berbahaya". Angkanya dipaku uji supaya penyusutannya terlihat
+  dan pertumbuhannya ditanyai, bukan supaya ia dianggap beres. Badan
+  `useEffect` dibaca sebagai TEKS, bukan pohon — cukup untuk bentuk "setter
+  dipanggil di efek yang bergantung pada data", dan tak lebih.
+
+- **Menahan simpan adalah perbaikannya, bukan kelonggaran**: menyimpan DI ATAS
+  bacaan yang gagal persis kerusakan yang dicegah. `StokAwalPage` dan
+  `SupplierBahanModal` menahan tombolnya; `ReceiptModal` **tidak** — menolak
+  mencetak struk karena kopnya gagal dimuat akan menahan transaksi yang
+  uangnya sudah diterima, jadi yang dipasang peringatan di layar, memakai
+  aturan yang sudah bernama di ledger ini: *"jatuh ke bawaan itu jujur HANYA
+  bila balasannya menyebut apa yang dipakai."*
+
+- **Gerbang keempat ikut menangkap perubahanku**: `semai-sekali.test.ts`
+  menuntut efek penyemai terdaftar; menambahkan `langkahGagal` ke deps
+  `ResepPage` memerahkannya sampai entrinya diperbarui **beserta alasannya**.
+
+- **Gerbang**: `typecheck` bersih (server+web) · `npm test` **2.485** (208
+  berkas) · build web ✔ · Playwright e2e **10/10** (dua uji baru: gagal &
+  PASANGAN-nya) · `audit:invarian` 26/26. **`verify-api` tidak dijalankan** —
+  `apps/server/src` tak tersentuh satu baris pun (`git status` sebagai
+  buktinya).
+
+---
+
 ## Gagal memuat ≠ NOL: bentuk ketiga yang tak pernah dipertimbangkan — web — 2026-08-27
 
 - **Kenapa vena ini ada**: `gagal-muat-bukan-kosong.test.ts` sudah ada, dan ia

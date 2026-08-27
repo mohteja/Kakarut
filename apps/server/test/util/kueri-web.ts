@@ -35,7 +35,7 @@ import { barisDi, jelajah, petaInduk, uraikan, type Simpul } from "./ast";
 
 const AKAR = fileURLToPath(new URL("../../../../apps/web/src/", import.meta.url));
 
-export type KelasKueri = "GALAT" | "ANGKA" | "KALIMAT" | "PILIHAN" | "LAIN";
+export type KelasKueri = "GALAT" | "ANGKA" | "KALIMAT" | "ISI_FORM" | "PILIHAN" | "LAIN";
 
 export interface SitusKueri {
   berkas: string;
@@ -279,11 +279,147 @@ export function situsKueriWeb(kode?: { nama: string; isi: string }[]): SitusKuer
         ? "KALIMAT"
         : a.keAngka && terlihat
           ? "ANGKA"
-          : a.keMap
-            ? "PILIHAN"
-            : "LAIN";
+          : mengisiFormulir(namaData, isi)
+            ? "ISI_FORM"
+            : a.keMap
+              ? "PILIHAN"
+              : "LAIN";
       keluar.push({ berkas, baris, data: namaData, kelas });
     });
+  }
+  return keluar;
+}
+
+/**
+ * Datanya MENGISI FORMULIR, dan formulirnya bisa disimpan.
+ *
+ * Bentuk yang merusak, bukan sekadar menyesatkan: nilai tersimpan dituang ke
+ * state lewat `useEffect`, jadi bacaan yang GAGAL membuat efeknya tak pernah
+ * jalan dan formulirnya terbuka KOSONG — tak terbedakan dari "belum pernah
+ * diisi". Lalu tombol simpannya menulis kekosongan itu ke atas data nyata.
+ *
+ * Terukur di peramban (2026-08-27) pada `StokAwalPage`: 90 baris saldo pembuka
+ * tersimpan di basis data, `GET /stok/awal` dibalas 500 → **0 input terisi**,
+ * **tak satu pun kalimat kegagalan**, dan tombol simpannya tetap ada.
+ *
+ * BATAS, ditulis: badan `useEffect` dibaca sebagai TEKS, bukan pohon —
+ * cukup untuk bentuk "setter dipanggil di efek yang bergantung pada data",
+ * dan tak lebih.
+ */
+function mengisiFormulir(nama: string, isi: string): boolean {
+  if (!/useMutation\s*\(/.test(isi)) return false;
+  const efek = [...isi.matchAll(/useEffect\(\(\)\s*=>\s*\{([\s\S]*?)\}\s*,\s*\[([^\]]*)\]/g)];
+  return efek.some(
+    (e) =>
+      new RegExp(`\\b${nama}\\b`).test(e[2]) &&
+      /\bset[A-Z][A-Za-z0-9_]*\s*\(/.test(e[1]),
+  );
+}
+
+/**
+ * Penjaga `<Spinner/>` yang bergantung KEADAAN TURUNAN dari data kueri.
+ *
+ * `spinner-abadi.test.ts` menjaga bentuk `!data` dan bernalar BENAR soal
+ * `isLoading` sendirian. Pengecualiannya pun tertulis — *"Bukan dari useQuery
+ * (mis. state lokal) → bukan urusan penjaga ini."* Pengecualian itu benar
+ * untuk state yang benar-benar lokal, dan **keliru justru ketika state itu
+ * hanya pernah diisi dari data kueri**: `if (isLoading || rows === null)
+ * return <Spinner/>` dengan `rows` yang diisi efek dari `bahan` berputar
+ * selamanya begitu bacaannya gagal.
+ */
+export interface SitusSpinner {
+  berkas: string;
+  baris: number;
+  syarat: string;
+  /** nama state turunan yang membuatnya abadi */
+  state: string;
+  /** kueri yang memberi makan state itu MEMBACA galatnya? */
+  bacaGalat: boolean;
+}
+
+export function spinnerTurunan(kode?: { nama: string; isi: string }[]): SitusSpinner[] {
+  const sumber =
+    kode ??
+    berkasTsx().map((p) => ({ nama: p.slice(AKAR.length), isi: readFileSync(p, "utf8") }));
+  /*
+   * Syaratnya diambil dengan KURUNG SEIMBANG, bukan `[^)]*`.
+   *
+   * `if (!bahan || !kategori || (id && !menuEdit)) return <Spinner />` —
+   * bentuk nyata di `MenuFormPage`. Regex gerbang lama memakai `[^)]*`, yang
+   * tak bisa melewati kurung dalam, jadi baris itu **tak cocok sama sekali**:
+   * bukan diloloskan dengan alasan, melainkan tak pernah terlihat. Dan
+   * `menuEdit` tak membaca galatnya — mode sunting berputar selamanya.
+   */
+  const syaratSpinner = (isi: string) => {
+    const keluar: { syarat: string; index: number }[] = [];
+    for (const m of isi.matchAll(/if\s*\(/g)) {
+      const buka = m.index! + m[0].length - 1;
+      let d = 0;
+      let i = buka;
+      for (; i < isi.length; i += 1) {
+        if (isi[i] === "(") d += 1;
+        else if (isi[i] === ")") {
+          d -= 1;
+          if (d === 0) break;
+        }
+      }
+      if (!/^\s*return\s*<Spinner\s*\/>/.test(isi.slice(i + 1, i + 40))) continue;
+      keluar.push({ syarat: isi.slice(buka + 1, i), index: m.index! });
+    }
+    for (const m of isi.matchAll(/\(([^)]{0,80}?)\)\s*\?\s*\(?\s*\n?\s*<Spinner\s*\/>/g)) {
+      keluar.push({ syarat: m[1], index: m.index! });
+    }
+    return keluar;
+  };
+  const keluar: SitusSpinner[] = [];
+  for (const { nama: berkas, isi } of sumber) {
+    if (!isi.includes("<Spinner")) continue;
+    const data = new Map<string, boolean>();
+    for (const m of isi.matchAll(/(?:const|let)\s*\{([^}]*)\}\s*=\s*useQuery/g)) {
+      const dm = /\bdata\s*(?::\s*(\w+))?/.exec(m[1]);
+      if (dm) data.set(dm[1] ?? "data", /\b(error|isError)\b/.test(m[1]));
+    }
+    for (const m of syaratSpinner(isi)) {
+      {
+        const syarat = m.syarat;
+        for (const id of syarat.matchAll(/\b([A-Za-z_]\w*)\b/g)) {
+          const nm = id[1];
+          if (data.has(nm)) {
+            // Nama kueri LANGSUNG: abadi bila galatnya tak dibaca.
+            if (!data.get(nm)) {
+              keluar.push({
+                berkas,
+                baris: isi.slice(0, m.index).split("\n").length,
+                syarat: syarat.replace(/\s+/g, " ").slice(0, 70),
+                state: nm,
+                bacaGalat: false,
+              });
+            }
+            continue;
+          }
+          const setter = `set${nm[0].toUpperCase()}${nm.slice(1)}`;
+          if (!new RegExp(`\\b${setter}\\b`).test(isi)) continue;
+          const efek = [
+            ...isi.matchAll(/useEffect\(\(\)\s*=>\s*\{([\s\S]*?)\}\s*,\s*\[([^\]]*)\]/g),
+          ];
+          const asal = [...data.keys()].find((d) =>
+            efek.some(
+              (e) =>
+                new RegExp(`\\b${setter}\\s*\\(`).test(e[1]) &&
+                new RegExp(`\\b${d}\\b`).test(e[1] + e[2]),
+            ),
+          );
+          if (!asal) continue;
+          keluar.push({
+            berkas,
+            baris: isi.slice(0, m.index).split("\n").length,
+            syarat: syarat.replace(/\s+/g, " ").slice(0, 70),
+            state: nm,
+            bacaGalat: data.get(asal) ?? false,
+          });
+        }
+      }
+    }
   }
   return keluar;
 }

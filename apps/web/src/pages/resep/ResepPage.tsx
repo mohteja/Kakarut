@@ -251,7 +251,7 @@ export function ResepPage() {
   }, [resepServer, selectedId]);
 
   // CARA MASAK: langkah berurutan + foto proses per langkah.
-  const { data: langkahServer } = useQuery({
+  const { data: langkahServer, error: langkahGagal } = useQuery({
     queryKey: ["bahan-langkah", selectedId],
     enabled: !!selectedId,
     queryFn: () => api<BahanLangkahRow[]>(`/bahan/${selectedId}/langkah`),
@@ -262,6 +262,7 @@ export function ResepPage() {
   // menyemai ulang juga memberi `_id` baru sehingga fotonya ikut terlepas.
   const langkahTersemai = useRef<string | null>(null);
   useEffect(() => {
+    if (langkahGagal) return; // gagal baca ≠ "resepnya tak punya langkah"
     if (!langkahServer) {
       setLangkah([]);
       langkahTersemai.current = null;
@@ -270,7 +271,7 @@ export function ResepPage() {
     if (langkahTersemai.current === selectedId) return;
     langkahTersemai.current = selectedId;
     setLangkah(langkahServer.map((l) => ({ _id: idLangkah(), teks: l.teks, foto_url: l.foto_url })));
-  }, [langkahServer, selectedId]);
+  }, [langkahServer, langkahGagal, selectedId]);
 
   // Pengaturan batch & harga + foto hasil/packing, di-seed dari bahan terpilih
   // (ikut ter-reset saat master di-refresh — pola sama dgn draft resep).

@@ -78,7 +78,7 @@ export function LihatMenuPage() {
   // Menu per lokasi: tampilkan hanya menu yang tersedia di cabang aktif.
   // Kantor = pusat: katalog PENUH (menu terbatas lokasi tidak boleh hilang).
   const q = divisi === "kantor" ? "" : branchQuery;
-  const { data: menus, isLoading } = useQuery({
+  const { data: menus, isLoading, error: menuGagal } = useQuery({
     queryKey: ["menu", q],
     queryFn: () => api<MenuDto[]>(`/menu${q}`),
   });
@@ -157,6 +157,13 @@ export function LihatMenuPage() {
     simpan.mutate(items);
   }
 
+  /*
+   * `isLoading` sendirian memang BERHENTI saat bacaannya gagal — dan justru
+   * itu masalahnya di sini: yang muncul sesudahnya katalog KOSONG, sementara
+   * urutan kategori di layar ini bisa diseret lalu disimpan. Galatnya
+   * dikatakan, bukan cuma diikat.
+   */
+  if (menuGagal) return <ErrorText error={menuGagal} />;
   if (isLoading) return <Spinner />;
 
   const kosong = grup.length === 0;

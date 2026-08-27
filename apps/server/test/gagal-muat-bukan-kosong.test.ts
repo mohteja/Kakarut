@@ -115,6 +115,36 @@ describe("daftar kosong tak pernah mengaku kosong saat pemuatannya gagal", () =>
     ).toEqual([]);
   });
 
+  it("INTI formulir: bacaan gagal tak boleh jadi formulir kosong yang bisa disimpan", () => {
+    /*
+     * Bentuk KEEMPAT, dan satu-satunya yang MERUSAK, bukan sekadar
+     * menyesatkan: nilai tersimpan dituang ke state lewat `useEffect`, jadi
+     * bacaan yang gagal membuat formulirnya terbuka KOSONG — lalu tombol
+     * simpannya menulis kekosongan itu ke atas data nyata.
+     *
+     * Terukur di peramban pada `StokAwalPage`: 90 baris saldo pembuka
+     * tersimpan di basis data, `GET /stok/awal` dibalas 500 → 0 input terisi,
+     * tak satu pun kalimat kegagalan, dan tombol simpannya tetap ada.
+     */
+    const asing = situs
+      .filter((k) => k.kelas === "ISI_FORM")
+      .map((k) => `${k.berkas}:${k.baris} (${k.data})`);
+    expect(
+      asing,
+      `data mengisi formulir yang bisa disimpan, tanpa pernah membaca galatnya:\n${asing.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("BATAS ditulis: `LAIN` bukan klaim bersih", () => {
+    /*
+     * `LAIN` berarti "tak cocok dengan satu pun bentuk klaim yang DIKENAL"
+     * (kalimat, angka, formulir) — bukan "terbukti tak berbahaya". Angkanya
+     * dipaku supaya penyusutannya terlihat dan pertumbuhannya ditanyai, bukan
+     * supaya ia dianggap beres.
+     */
+    expect(peta.get("LAIN") ?? 0).toBeLessThanOrEqual(45);
+  });
+
   it("daftar internal ditagih dua arah", () => {
     const ada = new Set(
       situs.filter((k) => k.kelas === "ANGKA").map((k) => `${k.berkas}:${k.data}`),
