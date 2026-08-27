@@ -1,12 +1,17 @@
-import { butaKomentar } from "../../src/scripts/buta-komentar";
 import {
-  awalPernyataan,
-  badanPembantu,
-  ekorPernyataan,
-  sumberServer,
-  tanpaSubkueri,
-  templateSql,
-} from "./sql-mentah";
+  barisDi,
+  deklarasiTerlihat,
+  jelajah,
+  menyentuhProperti,
+  namaProperti,
+  petaInduk,
+  petaLingkup,
+  rantaiPenuh,
+  uraikan,
+  type Deklarasi,
+  type Simpul,
+} from "./ast";
+import { sumberServer, tanpaSubkueri } from "./sql-mentah";
 
 /**
  * BENDERA "BARIS INI TIDAK BERLAKU LAGI" — instrumen sapuan.
@@ -27,6 +32,30 @@ import {
  * di situ menyaring justru SALAH: riwayat yang menghilangkan barisnya sendiri
  * lebih buruk daripada riwayat tanpa nama, dan komentar `laporan/routes.ts`
  * sudah menuliskan aturan itu lebih dulu.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * DITULIS ULANG DI ATAS POHON SINTAKS (2026-08-27), dan alasannya tercatat.
+ *
+ * Versi pertama menebak batas sintaks dengan hitungan kurung, dan salah TIGA
+ * KALI sebelum satu tuduhan pun boleh ditulis:
+ *
+ * 1. **Pembantu bernama** tak diikuti → dua pintu penerimaan yang saringannya
+ *    hidup di `kondisiFaktur()` tertuduh keliru.
+ * 2. **Literal larik**: `ekorPernyataan` hanya menghitung KURUNG, jadi
+ *    `const conds = [a, b]` terpotong di koma pertama — sepuluh pintu produksi
+ *    tertuduh keliru.
+ * 3. **Batas pernyataan** berhenti di `{` mana pun, memotong daftar SELECT-nya
+ *    sendiri: `db.select({ archivedAt: memberships.archivedAt })` terbaca
+ *    telanjang padahal benderanya ada di kepala kueri.
+ *
+ * Ketiganya lenyap secara konstruksi di sini: "rantai penuh" adalah simpul,
+ * bukan potongan teks. Yang keempat tak pernah bisa ditambal teks sama sekali
+ * dan itulah untung terbesarnya — **LINGKUP**. Aturan lama memakai "deklarasi
+ * TERDEKAT SEBELUM situsnya di berkas yang sama", padahal `conds`
+ * dideklarasikan sembilan kali di satu berkas: dua kueri yang bentuk teksnya
+ * identik bisa memakai `conds` yang BERBEDA, dan hanya rantai lingkup yang
+ * tahu yang mana.
+ * ─────────────────────────────────────────────────────────────────────────
  */
 export interface Bendera {
   /** properti drizzle, mis. `deletedAt` */
@@ -75,151 +104,147 @@ export interface Situs {
   potongan: string;
 }
 
-/**
- * Nama yang MEMBAWA saringannya sendiri: `const filter = and(…isNull(x)…)`,
- * `const conds = [ … isNull(x) … ]`, MAUPUN
- * `function kondisiFaktur(…) { … isNull(x) … }`.
- *
- * Tiga jebakan yang sudah menggigit sapuan-sapuan sebelum ini, ditutup di muka:
- *
- * 1. **Pembantu bernama.** Tanpa cabang `function`, dua pintu penerimaan yang
- *    saringannya hidup di `kondisiFaktur()` tertuduh keliru. Kelas yang sama
- *    memakan 26 tuduhan pada sapuan tanggal putaran lalu.
- * 2. **Literal larik.** `ekorPernyataan` hanya menghitung KURUNG, jadi
- *    `const conds = [a, b]` terpotong di koma pertama dan `isNull(...)` di
- *    baris berikutnya tak terlihat — sepuluh pintu produksi tertuduh keliru.
- *    Nilai deklarasi karena itu dibaca dengan `[`/`{`/`(` sekaligus.
- * 3. **Nama yang dipakai ulang.** `conds` dideklarasikan sembilan kali di satu
- *    berkas. Satu deklarasi bersaringan tak boleh memaafkan delapan lainnya,
- *    jadi yang dipakai adalah deklarasi TERDEKAT SEBELUM situsnya (fungsi
- *    di-hoist, jadi ia berlaku di mana pun di berkasnya).
- */
-interface Deklarasi {
+/** Satu berkas yang sudah diurai, beserta peta induk & lingkupnya. */
+interface Konteks {
   nama: string;
-  pos: number;
-  fungsi: boolean;
-  menyaring: boolean;
+  isi: string;
+  prog: Simpul;
+  induk: Map<Simpul, Simpul>;
+  lingkup: Map<Simpul, Map<string, Deklarasi>>;
 }
 
-/** Nilai deklarasi: seimbang `(`/`[`/`{`, berhenti di `;` atau `,` kedalaman 0. */
-function nilaiDeklarasi(s: string, mulai: number, maks = 2000): string {
-  let d = 0;
-  let keluar = "";
-  for (let j = mulai; j < s.length && keluar.length < maks; j += 1) {
-    const c = s[j];
-    if (c === "(" || c === "[" || c === "{") d += 1;
-    else if (c === ")" || c === "]" || c === "}") {
-      d -= 1;
-      if (d < 0) break;
-    } else if ((c === ";" || c === ",") && d === 0) break;
-    keluar += c;
-  }
+function konteks(nama: string, isi: string): Konteks {
+  const prog = uraikan(nama.endsWith(".tsx") ? nama : `${nama}.ts`, isi);
+  const induk = petaInduk(prog);
+  return { nama, isi, prog, induk, lingkup: petaLingkup(prog, induk) };
+}
+
+const AMBIL = new Set(["from", "innerJoin", "leftJoin", "rightJoin"]);
+const MENULIS_DRIZZLE = new Set(["update", "insert", "delete"]);
+
+/** Identifier yang benar-benar RUJUKAN nama — bukan nama properti / kunci objek. */
+function rujukan(akar: Simpul, induk: Map<Simpul, Simpul>): Simpul[] {
+  const keluar: Simpul[] = [];
+  jelajah(akar, (n) => {
+    if (n.type !== "Identifier") return;
+    const atas = induk.get(n);
+    if (!atas) return;
+    if (atas.type === "MemberExpression" && !atas.computed && atas.property === n) return;
+    if (atas.type === "Property" && atas.key === n && !atas.computed) return;
+    keluar.push(n);
+  });
   return keluar;
 }
 
-/** Badan `function` berimbang kurawal, dari posisi kata kuncinya. */
-function badanFungsi(s: string, i: number): string {
-  const buka = s.indexOf("{", s.indexOf("(", i));
-  if (buka < 0) return "";
-  let d = 0;
-  for (let j = buka; j < s.length; j += 1) {
-    if (s[j] === "{") d += 1;
-    else if (s[j] === "}") {
-      d -= 1;
-      if (d === 0) return s.slice(buka, j + 1);
-    }
-  }
-  return s.slice(buka);
-}
-
-function deklarasiPenyaring(s: string, b: Bendera): Deklarasi[] {
-  const keluar: Deklarasi[] = [];
-  for (const m of s.matchAll(/\b(?:const|let)\s+(\w+)\s*=\s*/g)) {
-    const nilai = nilaiDeklarasi(s, m.index! + m[0].length);
-    keluar.push({ nama: m[1], pos: m.index!, fungsi: false, menyaring: nilai.includes(`.${b.kolom}`) });
-  }
-  for (const m of s.matchAll(/\bfunction\s+(\w+)\s*\(/g)) {
-    const badan = badanFungsi(s, m.index!);
-    keluar.push({ nama: m[1], pos: m.index!, fungsi: true, menyaring: badan.includes(`.${b.kolom}`) });
-  }
-  return keluar;
-}
-
-/** Deklarasi yang BERLAKU untuk `nama` di posisi `pos` (fungsi di-hoist). */
-function berlaku(deks: Deklarasi[], nama: string, pos: number): Deklarasi | undefined {
-  const f = deks.find((d) => d.fungsi && d.nama === nama);
-  if (f) return f;
-  let pilih: Deklarasi | undefined;
-  for (const d of deks) {
-    if (d.nama !== nama || d.pos >= pos) continue;
-    if (!pilih || d.pos > pilih.pos) pilih = d;
-  }
-  return pilih;
-}
-
-function kelasDrizzle(
-  rantai: string,
-  pos: number,
-  b: Bendera,
-  deks: Deklarasi[],
-): KelasBendera {
-  if (/\.(update|insert|delete)\s*\(/.test(rantai)) return "MENULIS";
-  if (rantai.includes(`.${b.kolom}`)) return "MENYARING";
-  for (const m of rantai.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
-    if (berlaku(deks, m[1], pos)?.menyaring) return "LEWAT_VARIABEL";
+function kelasDrizzle(rantai: Simpul, b: Bendera, k: Konteks): KelasBendera {
+  let menulis = false;
+  jelajah(rantai, (n) => {
+    if (n.type !== "CallExpression") return;
+    const p = n.callee ? namaProperti(n.callee) : undefined;
+    if (p && MENULIS_DRIZZLE.has(p)) menulis = true;
+  });
+  if (menulis) return "MENULIS";
+  if (menyentuhProperti(rantai, b.kolom)) return "MENYARING";
+  for (const id of rujukan(rantai, k.induk)) {
+    const d = deklarasiTerlihat(id, id.name as string, k.induk, k.lingkup);
+    if (d && menyentuhProperti(d.nilai, b.kolom)) return "LEWAT_VARIABEL";
   }
   return "TELANJANG";
 }
 
 /** Rantai drizzle yang menyentuh tabel berbendera (atau anaknya). */
-function situsDrizzle(nama: string, mentah: string): Situs[] {
-  const s = butaKomentar(mentah);
+function situsDrizzle(k: Konteks): Situs[] {
   const keluar: Situs[] = [];
-  for (const [induk, b] of Object.entries(BENDERA)) {
-    const deks = deklarasiPenyaring(s, b);
-    const tabelDicari = [induk, ...b.anak];
-    // Satu PERNYATAAN dinilai sekali: `.from(saleItems).innerJoin(sales, …)`
-    // adalah satu kueri, bukan dua situs.
-    const sudah = new Set<number>();
-    for (const m of s.matchAll(/\.(from|innerJoin|leftJoin|rightJoin)\(\s*(\w+)\s*[,)]/g)) {
-      const tabel = m[2];
-      if (!tabelDicari.includes(tabel)) continue;
-      const awal = awalPernyataan(s, m.index!);
-      if (sudah.has(awal)) continue;
-      sudah.add(awal);
-      const rantai = s.slice(awal, m.index!) + ekorPernyataan(s, m.index!, 3000);
+  for (const [indukNama, b] of Object.entries(BENDERA)) {
+    const dicari = [indukNama, ...b.anak];
+    // Satu RANTAI dinilai sekali: `.from(saleItems).innerJoin(sales, …)` adalah
+    // satu kueri, bukan dua situs. Kuncinya simpul rantainya, bukan offset.
+    // Satu rantai dicatat sekali, dan DINAMAI oleh sentuhan yang paling awal
+    // secara tekstual — yaitu `.from(...)`-nya, bukan `.innerJoin(...)` yang
+    // kebetulan dikunjungi lebih dulu oleh penjelajah (rantai luar dulu).
+    // Tanpa ini, sebelas kueri `laporan/routes.ts` berpindah label dari
+    // `saleItems` ke `sales` tanpa satu pun kueri berubah.
+    const perRantai = new Map<Simpul, Simpul>();
+    jelajah(k.prog, (n) => {
+      if (n.type !== "CallExpression") return;
+      const prop = n.callee ? namaProperti(n.callee) : undefined;
+      if (!prop || !AMBIL.has(prop)) return;
+      const arg0 = n.arguments?.[0];
+      if (arg0?.type !== "Identifier" || !dicari.includes(arg0.name)) return;
+      const rantai = rantaiPenuh(n, k.induk);
+      const ada = perRantai.get(rantai);
+      if (!ada || n.start < ada.start) perRantai.set(rantai, n);
+    });
+    for (const [rantai, n] of perRantai) {
       keluar.push({
-        berkas: nama,
-        baris: s.slice(0, m.index!).split("\n").length,
-        induk,
-        tabel,
+        berkas: k.nama,
+        baris: barisDi(k.isi, n.start),
+        induk: indukNama,
+        tabel: (n.arguments[0].name as string),
         bentuk: "drizzle",
-        kelas: kelasDrizzle(rantai, m.index!, b, deks),
-        potongan: rantai.replace(/\s+/g, " ").slice(0, 220),
+        kelas: kelasDrizzle(rantai, b, k),
+        potongan: k.isi.slice(rantai.start, rantai.end).replace(/\s+/g, " ").slice(0, 220),
       });
     }
   }
   return keluar;
 }
 
-/** Pernyataan SQL mentah yang dijalankan (`.execute(sql`…`)`). */
-function situsSqlMentah(nama: string, mentah: string): Situs[] {
-  const s = butaKomentar(mentah);
+/** Isi template `sql` PERTAMA di dalam badan sebuah pembantu bernama. */
+function badanPembantu(nama: string, dari: Simpul, k: Konteks): string {
+  const d = deklarasiTerlihat(dari, nama, k.induk, k.lingkup);
+  if (!d?.nilai) return "";
+  let isi = "";
+  jelajah(d.nilai, (n) => {
+    if (isi) return;
+    if (n.type !== "TaggedTemplateExpression") return;
+    let tag = n.tag;
+    if (tag?.type === "TSInstantiationExpression") tag = tag.expression;
+    if (tag?.type !== "Identifier" || tag.name !== "sql") return;
+    isi = k.isi.slice(n.quasi.start + 1, n.quasi.end - 1);
+  });
+  return isi;
+}
+
+/**
+ * Pernyataan SQL mentah yang DIJALANKAN (`.execute(sql`…`)`).
+ *
+ * Versi lama mengenali "dijalankan" dengan menengok 40 aksara ke belakang
+ * mencari `.execute(`. Di pohon, "argumen sebuah panggilan `.execute`" adalah
+ * fakta — tak ada jendela yang bisa kependekan atau kepanjangan.
+ */
+function situsSqlMentah(k: Konteks): Situs[] {
   const keluar: Situs[] = [];
-  for (const { pos, isi } of templateSql(s)) {
-    if (!/\.execute\(\s*$/.test(s.slice(Math.max(0, pos - 40), pos))) continue;
-    let penuh = isi;
-    for (const m of isi.matchAll(/\$\{\s*(\w+)\s*\(/g)) penuh += `\n${badanPembantu(s, m[1])}`;
+  jelajah(k.prog, (n) => {
+    if (n.type !== "TaggedTemplateExpression") return;
+    let tag = n.tag;
+    if (tag?.type === "TSInstantiationExpression") tag = tag.expression;
+    if (tag?.type !== "Identifier" || tag.name !== "sql") return;
+    const atas = k.induk.get(n);
+    if (atas?.type !== "CallExpression") return;
+    if (namaProperti(atas.callee) !== "execute") return;
+    if (!atas.arguments?.includes(n)) return;
+
+    let penuh = k.isi.slice(n.quasi.start + 1, n.quasi.end - 1);
+    // `${pembantu(...)}` di dalam templat: badannya ikut dibaca, sebab
+    // saringannya bisa hidup di sana.
+    for (const ekspr of n.quasi.expressions ?? []) {
+      if (ekspr.type === "CallExpression" && ekspr.callee?.type === "Identifier") {
+        penuh += `\n${badanPembantu(ekspr.callee.name as string, ekspr, k)}`;
+      }
+    }
     const rata = tanpaSubkueri(penuh);
     const menulis = /^\s*(?:\$\{[^}]*\}\s*)*(INSERT|UPDATE|DELETE)\b/i.test(rata);
-    for (const [induk, b] of Object.entries(BENDERA)) {
+    for (const [indukNama, b] of Object.entries(BENDERA)) {
       const dicari = [b.tabelSnake, ...b.anakSnake];
-      const kena = dicari.find((t) => new RegExp(`\\b(?:FROM|JOIN|INTO|UPDATE)\\s+${t}\\b`, "i").test(penuh));
+      const kena = dicari.find((t) =>
+        new RegExp(`\\b(?:FROM|JOIN|INTO|UPDATE)\\s+${t}\\b`, "i").test(penuh),
+      );
       if (!kena) continue;
       keluar.push({
-        berkas: nama,
-        baris: s.slice(0, pos).split("\n").length,
-        induk,
+        berkas: k.nama,
+        baris: barisDi(k.isi, n.start),
+        induk: indukNama,
         tabel: kena,
         bentuk: "sql",
         kelas: menulis
@@ -230,7 +255,7 @@ function situsSqlMentah(nama: string, mentah: string): Situs[] {
         potongan: penuh.replace(/\s+/g, " ").slice(0, 220),
       });
     }
-  }
+  });
   return keluar;
 }
 
@@ -238,7 +263,8 @@ export function situsBendera(kode?: { nama: string; isi: string }[]): Situs[] {
   const berkas = kode ?? sumberServer();
   const keluar: Situs[] = [];
   for (const { nama, isi } of berkas) {
-    keluar.push(...situsDrizzle(nama, isi), ...situsSqlMentah(nama, isi));
+    const k = konteks(nama, isi);
+    keluar.push(...situsDrizzle(k), ...situsSqlMentah(k));
   }
   return keluar;
 }

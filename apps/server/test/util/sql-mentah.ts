@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { jelajah, uraikan } from "./ast";
 
 /**
  * PEMINDAI SQL MENTAH — rumah bersama.
@@ -88,7 +89,15 @@ export function awalPernyataan(s: string, i: number): number {
   return 0;
 }
 
-/** Akhir template literal yang dimulai TEPAT SESUDAH backtick pembukanya. */
+/**
+ * Akhir template literal yang dimulai TEPAT SESUDAH backtick pembukanya.
+ *
+ * SATU-SATUNYA pemakainya kini `ast-instrumen.test.ts`, yang merekonstruksi
+ * pencari templat versi TEKS untuk membuktikan penggantinya lebih baik
+ * (prosa `sql<number>` di komentar terbaca sebagai templat: 6 vs 4 di
+ * `lib/porsi-ditagih.ts`). Dipertahankan DENGAN SENGAJA — menghapusnya
+ * menghapus buktinya, bukan cuma kodenya.
+ */
 export function akhirTemplate(s: string, mulai: number): number {
   let j = mulai;
   while (j < s.length) {
@@ -119,13 +128,33 @@ export function akhirTemplate(s: string, mulai: number): number {
   return j;
 }
 
-/** Tiap template `sql`…`` / `sql<T>`…`` beserta posisinya. Menghormati `${}` bersarang. */
+/**
+ * Tiap template `sql`…`` / `sql<T>`…`` beserta posisinya — DARI POHON SINTAKS.
+ *
+ * Versi regex-nya (`/\bsql(?:<[^`>]*>)?\s*`/` + penelusur backtick tulisan
+ * tangan) punya satu kegagalan yang tercatat mahal: literal REGEX di dalam kode
+ * dibaca sebagai pembuka string, dan satu "templat" di `lib/backup.ts` menelan
+ * **141 baris** gara-gara `name.replace(/"/g, '""')`. Penambalnya dulu daftar
+ * pola "lewati regex" — tambalan atas tebakan.
+ *
+ * Parser tak perlu menebak: `TaggedTemplateExpression` bertanda `sql` adalah
+ * fakta sintaks. `pos` tetap awal tanda `sql`-nya dan `isi` tetap teks mentah di
+ * antara backtick, jadi kedua pemanggilnya tak berubah sama sekali.
+ */
 export function templateSql(s: string): { pos: number; isi: string }[] {
+  // Nama berkas cuma dipakai parser untuk memilih dialek; `.tsx` supaya JSX
+  // di berkas web pun terurai bila kelak dipanggil dari sana.
+  const prog = uraikan("templat.tsx", s);
   const keluar: { pos: number; isi: string }[] = [];
-  for (const m of s.matchAll(/\bsql(?:<[^`>]*>)?\s*`/g)) {
-    const awal = m.index! + m[0].length;
-    keluar.push({ pos: m.index!, isi: s.slice(awal, akhirTemplate(s, awal)) });
-  }
+  jelajah(prog, (n) => {
+    if (n.type !== "TaggedTemplateExpression") return;
+    let tag = n.tag;
+    // `sql<number>`…`` → tag-nya TSInstantiationExpression yang membungkusnya.
+    if (tag?.type === "TSInstantiationExpression") tag = tag.expression;
+    if (tag?.type !== "Identifier" || tag.name !== "sql") return;
+    const q = n.quasi;
+    keluar.push({ pos: n.start, isi: s.slice(q.start + 1, q.end - 1) });
+  });
   return keluar;
 }
 

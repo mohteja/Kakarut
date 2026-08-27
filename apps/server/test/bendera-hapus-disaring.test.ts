@@ -125,10 +125,15 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
   [
     "modules/pesanan/routes.ts",
     {
-      situs: 3,
+      situs: 7,
       alasan:
         "papan pesanan: seluruhnya lewat pastikanKartu() yang memuat isNull(sales.deletedAt) " +
-        "di baris 303 — kartu yang sudah dibuang dibalas 404 sebelum barisnya dibaca",
+        "— kartu yang sudah dibuang dibalas 404 sebelum barisnya dibaca. EMPAT di antaranya " +
+        "baru terlihat sejak pemindainya memakai pohon sintaks: jendela teks lamanya menelan " +
+        "`tx.insert(pesananLogs)` di pernyataan SEBELUMNYA lalu melabelinya MENULIS. Keempatnya " +
+        "SELECT `.from(saleItems).where(eq(saleItems.saleId, id))` atas SATU id yang sudah " +
+        "diresolusi pintunya, di dalam transaksi yang sama — tak ada agregat lintas penjualan " +
+        "yang bisa kemasukan baris terbuang",
     },
   ],
   [
@@ -241,8 +246,15 @@ describe("bendera 'tidak berlaku lagi': tiap pintu menyaring atau terdaftar", ()
     expect(tertuduh.length).toBeGreaterThanOrEqual(8);
     expect(tertuduh.every((x) => x.baris > 0)).toBe(true);
     // Anaknya ikut tertuduh, bukan cuma induknya — di sanalah uang & stoknya.
-    expect(tertuduh.map((x) => x.tabel)).toContain("saleItems");
-    expect(tertuduh.map((x) => x.tabel)).toContain("saleConsumptions");
+    //
+    // Dipaku pada RANTAINYA, bukan pada medan `tabel`: sejak pemindainya
+    // memakai pohon sintaks, satu rantai dinamai oleh `.from(...)`-nya (di sini
+    // `sales`) sementara `saleItems`/`saleConsumptions` masuk lewat `innerJoin`.
+    // Yang harus benar adalah kueri anaknya IKUT tertuduh — bukan label mana
+    // yang kebetulan tercatat.
+    const rantai = tertuduh.map((x) => x.potongan).join("\n");
+    expect(rantai).toContain("saleItems");
+    expect(rantai).toContain("saleConsumptions");
   });
 
   it("BUKTI MERAH kelas PEMBANTU: saringan dicabut dari kondisiFaktur → tetap tertuduh", () => {

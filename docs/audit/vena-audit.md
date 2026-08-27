@@ -50,6 +50,117 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Instrumennya naik ke POHON SINTAKS — server (uji) — 2026-08-27
+
+- **Kenapa vena ini ada**: enam kelas kusapu hari ini dan **semuanya bersih**
+  (angkanya di bawah). Yang TIDAK bersih instrumennya sendiri. Ledger ini
+  mencatat detektor regex meleset hampir tiap putaran, dan tiap kali dengan
+  nama: **26** tuduhan palsu (sapuan tanggal) · satu "templat" menelan **141
+  baris** `lib/backup.ts` (literal regex `/"/g`) · **14 dari 22** tuduhan cacat
+  karena `rfind` −1 di kepala berkas · **99 dari 101** panggilan async tertuduh
+  palsu (argumen `Promise.all`) · **empat generasi** pemindai telanan galat
+  dalam satu putaran. Sebabnya satu: **pengurai yang dikira-kira**.
+  `butaKomentar` ada persis karena itu — ia menambal gejala.
+
+- **Yang berubah**: `rolldown/experimental` → `parseSync` mengurai TypeScript
+  sungguhan dan sudah ada di lockfile (v1.1.5, transitif lewat `vite`).
+  Dideklarasikan eksplisit sebagai `devDependencies` `@kakarut/server` dipatok
+  di versi yang sama — **+1 baris di `package.json`, +1 di lockfile**, tanpa
+  unduhan baru. Jalur pengecek TIPE tetap tertutup dan itu ditulis apa adanya:
+  **TypeScript 7.0.2 yang terpasang adalah port Go**, dan API JS-nya hanya
+  `version` + `versionMajorMinor`.
+
+- **Yang dipindah**: `templateSql` (pencari templat `sql`) dan seluruh
+  `situsBendera` (penyapu bendera "baris ini tidak berlaku lagi"). Sasarannya
+  dipilih bukan karena termudah melainkan karena **paling mahal bila salah** —
+  yang ikut terhitung kalau ia meleset adalah UANG, STOK, dan ATRIBUSI KERJA.
+
+- **DIADU, bukan diganti diam-diam** — klasifikasi lama vs baru atas populasi
+  yang sama:
+
+  | | lama | baru |
+  |---|---|---|
+  | situs | 134 | **136** |
+  | MENYARING | 71 | 71 |
+  | LEWAT_VARIABEL | 31 | **33** |
+  | MENULIS | 7 | **3** |
+  | TELANJANG | 25 | **29** |
+
+  **111 situs cocok persis**; 12 diadjudikasi tangan, dan ketiga kelompoknya
+  ternyata KEBUTAAN YANG LAMA, bukan kelonggaran yang baru.
+
+- **Buta #1 — prosa dibaca sebagai SQL.** `lib/porsi-ditagih.ts` menulis
+  `` `sql<number>` `` sebagai prosa Markdown di komentarnya; regexnya
+  (`\bsql(?:<…>)?\s*` + backtick`) melihat backtick penutup Markdown sebagai
+  pembuka templat. Lama **6** templat, pohon **4**. Kelas yang sama di
+  `modules/penjualan/routes.ts` (`` `sql<...>` ``): lama 7, pohon 6. Kedua
+  pemanggilnya kebetulan membutakan komentar lebih dulu, jadi **tak ada gerbang
+  yang tertipu** — dan itu justru intinya: kebenarannya bergantung pada tiap
+  pemanggil ingat menambal. Di pohon, prosa memang tak pernah masuk.
+
+- **Buta #2 — SELECT dimaafkan sebagai TULISAN.** `modules/pesanan/routes.ts`:
+  **empat** kueri `tx.select(...).from(saleItems).where(eq(saleItems.saleId, id))`
+  dilabeli **MENULIS** oleh aturan lama, karena jendela teksnya menelan
+  `tx.insert(pesananLogs)` di pernyataan SEBELUMNYA. Situs berlabel MENULIS
+  **tak pernah ditagih keputusan apa pun**. Di pohon keempatnya TELANJANG →
+  masuk daftar pilah-tangan beralasan (25 → 29). Diperiksa satu per satu:
+  keempatnya membaca SATU `saleId` yang sudah diresolusi pintunya di dalam
+  transaksi yang sama, tanpa agregat lintas penjualan — **sah**, tapi sekarang
+  sah *karena diputuskan*, bukan karena tak terlihat.
+
+- **Buta #3 — dua kueri dihitung satu.** `Promise.all([db…, db…])`: kedua kueri
+  berbagi "awal pernyataan" yang sama, jadi dedup berbasis offset menelan yang
+  kedua. Terbukti di dua berkas nyata — `modules/bahan/routes.ts` 3 → **4**,
+  `modules/customer/routes.ts` 2 → **3**. Kelas ini bahkan sudah tertulis di
+  komentar `sql-mentah.ts` sendiri sebagai bahaya yang diketahui.
+
+- **Kemampuan yang tak bisa ditiru teks: LINGKUP.** Aturan lama memakai
+  "deklarasi TERDEKAT SEBELUM situsnya di berkas yang sama", dan berkas itu
+  sendiri menulis kenapa itu rapuh: `conds` dideklarasikan sembilan kali di satu
+  berkas. Diuji dan dibuktikan dua arah: dua kueri yang bentuk teksnya IDENTIK
+  memakai `conds` berbeda → pohon menjawab `LEWAT_VARIABEL` dan `TELANJANG`,
+  sementara aturan teks menjawab keduanya sama (posisi deklarasinya dihitung di
+  dalam ujinya, bukan diklaim). Uji ini **ditandai sebagai uji KEMAMPUAN** —
+  bentuknya disusun, bukan dipungut dari repo, dan itu ditulis di komentarnya.
+
+- **Enam negatif bersih hari ini, semuanya berangka**:
+  · promise mengambang di server **0** (15 pernyataan ber-Promise: 12 ber-`void`,
+    2 ber-`.catch`; satu tuduhan **dicabut** — `tulis` ternyata `console.warn`,
+    tertukar dengan `tulis` async di `backup.ts`)
+  · rantai `db`/`tx` tanpa `await` **0**
+  · `catch` yang hanya `console.*` **5** dari 93 blok — semuanya jalur
+    boot/penjadwal yang memang tak punya pemanggil
+  · `auth.company_id!` **589**, seluruhnya di balik SATU pintu `requireCompany`
+    (`app.ts:151`); `auth.branch_id!` & `auth.role!` **0**
+  · tes kebenaran atas nama ber-nuansa angka **69** di 30 berkas — yang
+    benar-benar numerik semuanya sudah berpasangan `> 0`/epsilon
+  · `as`-cast **277** & `!` **754**: dihitung, tak diusulkan — tanpa tipe,
+    keduanya tak bisa dinilai, dan itu ditulis sebagai utang
+
+- **Batas & utang, ditulis jujur**:
+  - `parseSync` hidup di jalur `/experimental`. Satu uji PREMIS menjaga
+    bentuknya, dan `uraikan` **melempar** untuk berkas yang ditolak parser —
+    sapuan yang diam-diam memulangkan nol adalah kebutaan yang menyamar jadi
+    kebersihan;
+  - `akhirTemplate` kini hanya dipakai uji yang merekonstruksi pemindai lama.
+    Dipertahankan dengan sengaja, dan alasannya ditulis di kodenya: menghapusnya
+    menghapus buktinya;
+  - **penyapu yang MASIH berbasis teks** dicatat sebagai utang yang diukur,
+    bukan dinyatakan bersih: `galat-ditelan.ts`, `templat-html.ts`,
+    `kueri-terkurung.ts`, dan sisa `daftar-tanpa-langit-langit.test.ts`
+    (`awalPernyataan`/`ekorPernyataan`/`badanPembantu` masih hidup di sana);
+  - putaran ini **tak menyentuh satu baris pun** `apps/server/src` atau
+    `apps/web/src` — jadi `verify-api` & cakupan rute tak bisa terpengaruh, dan
+    tidak dijalankan. Itu penerapan aturannya ("wajib bila menyentuh rute"),
+    bukan jalan pintasnya.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.408** (204 berkas, +12 uji
+  instrumen) · gerbang `bendera-hapus-disaring` tetap hijau dengan kontrak yang
+  sama, dua pinnya ditulis ulang ke MAKSUDNYA (jumlah `pesanan/routes.ts` 3 → 7
+  beralasan; bukti merah dipaku pada rantainya, bukan pada label `tabel`).
+
+---
+
 ## Penghapusan yang GAGAL, dihitung sebagai berhasil — server+web+mobile — 2026-08-27
 
 - **Kenapa vena ini ada**: antrean formal ledger habis di ANTREAN KESEBELAS,
