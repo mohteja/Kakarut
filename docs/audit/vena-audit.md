@@ -50,6 +50,149 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Daftar yang DIPOTONG, dan terbaca sebagai lengkap — server + web — 2026-08-27
+
+- **Kenapa vena ini ada**: empat putaran terakhir mengejar satu kelas di tiga
+  permukaan klien — **bacaan yang GAGAL menyamar jadi "tidak ada"**. Saudara
+  kandungnya hidup satu lapis lebih hulu, di kontrak server→klien, dan belum
+  pernah disapu sama sekali: **bacaan yang TERPOTONG menyamar jadi LENGKAP.**
+
+- **Aturannya bukan karanganku — ia sudah ditulis panjang**, di
+  `modules/customer/routes.ts:50`, dan menyebut dua sisi:
+
+  > *"`.limit(300)` yang polos akan menjawab 'Total belanja Rp 3.000.000'
+  > untuk member yang sebenarnya sudah belanja Rp 40.000.000 — angka salah
+  > yang kelihatan wajar. … Memotong daftar TANPA menyediakan pencarian di
+  > server membuat member ke-301 tak bisa ditemukan sama sekali."*
+
+  Penjaganya dipasang di **satu** pintu. Pintu lain ke keadaan yang sama
+  dibiarkan terbuka — tanda tangan sesi ini, untuk kesekian kalinya.
+
+- **Populasi** (`.limit()` Drizzle **dan** `LIMIT` di templat `sql`):
+  **86 situs di 36 berkas** · `SATU` (ambil satu baris) **46** ·
+  `BERPENANDA` **11** · `HALAMAN` **2** · **`SENYAP` 27**.
+
+- **PEMINDAINYA SALAH LIMA KALI SEBELUM BENAR SEKALI**, dan tiap kesalahan
+  akan mengirimku memperbaiki kode yang sudah benar. Ini bagian paling
+  berguna dari putaran ini, jadi ditulis lengkap:
+
+  | # | cacat | akibatnya kalau dipercaya |
+  |---|---|---|
+  | 1 | `namaProperti()` dari `ast.ts` sengaja hanya melayani `MemberExpression`; kupanggil untuk `Property` → `undefined` | **BERPENANDA = 0** padahal enam pintu memakai idiomnya |
+  | 2 | `CallExpression` `.limit()` membentang SELURUH rantai, jadi `n.start` menunjuk `db.select(` | tiap baris meleset **10–20 baris** ke atas |
+  | 3 | `LIMIT` di SQL mentah tak disapu | `stok/service.ts` terbaca **tak punya pemotongan sama sekali**, padahal ada tiga — satu di antaranya 20.000 event FIFO |
+  | 4 | kunci `total` dihitung sebagai tanda paginasi | **pembebasan palsu**: `sampah` memotong 300 lalu memulangkan kunci `total` yang di situ berarti **rupiah** |
+  | 5 | hanya kenal SATU cara mengatakan "terpotong" | menuduh `sampah`, yang mengabarkannya lewat **header** `X-Kakarut-Terpotong` — dan header itu **dibaca kedua klien** |
+
+  Yang membetulkan (5) bukan pembacaan melainkan satu pertanyaan: *kalau
+  memang senyap, kenapa dua klien punya kode untuk membacanya?* Tiap kali,
+  yang menangkap cacatnya adalah **ketidakcocokan angka antara dua cara
+  hitung** — grep tangan vs AST — bukan mata.
+
+- **TIGA idiom untuk satu aturan, dan itu sendiri temuan.** Kunci badan
+  `*_terpotong` (objek), header `X-Kakarut-Terpotong` (larik telanjang), dan
+  sejak putaran ini pembantu bersama `potongLarik`. Keduanya yang pertama
+  sudah ada dan sudah dipakai; yang belum ada rumahnya. `HEADER_TERPOTONG`
+  dulu tetapan **privat** di `sampah/routes.ts` — dipindah (bukan disalin) ke
+  `src/lib/potong.ts` begitu pintu kedua membutuhkannya.
+
+- **Kenapa header, bukan kunci badan**: tiga dari empat pintu yang diperbaiki
+  memulangkan **larik telanjang**, dan bentuk itu tak boleh berubah — tujuh
+  build ponsel yang pernah rilis membacanya `as List`, dan repo ini **tak
+  punya gerbang versi klien** (pelajaran `TataLetakBody` yang sudah tercatat).
+  Header lewat begitu saja pada klien yang tak memintanya.
+
+- **PENGUKURAN lewat HTTP sungguhan, kode lama vs kode baru, DATA YANG SAMA**
+  (`GET /menu/:id/riwayat-harga`, 60 perubahan harga di basis data):
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | baris di basis data | 60 | 60 |
+  | baris terkirim | 50 | 50 |
+  | `X-Kakarut-Terpotong` | **tidak ada** | **50** |
+  | yang hilang tanpa sepatah kata | **10** | 0 |
+
+  **Premisnya dibuktikan** (Aturan 6): baris suntikan terbaca dari balasan
+  **rutenya sendiri** (`harga_baru = 10002`), bukan dari `SELECT count(*)`.
+
+- **Empat pintu diperbaiki, dan tiap satunya punya SAUDARA yang sudah benar** —
+  itulah yang membuatnya jelas bukan keputusan, melainkan kelalaian:
+
+  | pintu | saudaranya yang sudah benar | akibat potongannya |
+  |---|---|---|
+  | `GET /shift/selisih` | `GET /shift/:id` (`transaksi_terpotong`) | **antrean putusan selisih kas**: "tinggal 50" atas antrean yang lebih panjang, dan yang paling lama menunggu justru yang paling mudah terlupakan |
+  | `GET /menu/:id/riwayat-harga` | `GET /bahan/:id/riwayat-harga` (`lots_terpotong`) | riwayat harga pendek terbaca sebagai "harga menu ini tak pernah diubah sebelum itu" |
+  | `GET /stok/penyesuaian` | — | antrean tinjauan; layarnya menghitung berapa yang siap disetujui **dari daftar itu** |
+  | `GET /supplier/:id/kartu` | `GET /customer/:id` (`transaksi_terpotong`) | separuh aturannya sudah benar (`total_belanja` dihitung di SQL tanpa batas) — jadi total BENAR di atas daftar yang PENDEK, dan orang yang menjumlahkan daftarnya mengira pembukuannya yang salah |
+
+- **`/shift/selisih` butuh DUA sebab pemotongan disebutkan**, dan yang kedua
+  tak terlihat dari panjang hasilnya: penyaringan status terjadi SESUDAH
+  query, jadi baris yang lolos saring bisa tertinggal di luar `AMBIL_SELISIH`
+  dan tak pernah sampai untuk dihitung. Komentar di atas `.limit`-nya sudah
+  menalar soal itu — lalu potongan terakhirnya dibuang tanpa sepatah kata.
+
+- **Angka sebelum → sesudah**: `SENYAP` **27 → 23** · `BERPENANDA` **11 → 15**.
+  Dari 23 yang tersisa: **14 `sah`** (alasannya struktural dan bisa ditunjuk)
+  dan **9 `utang`** yang jumlahnya kini dipaku `MAKS_UTANG` dengan syarat
+  batasnya wajib TURUN begitu terbayar.
+
+- **Utang yang diakui, berangka, dengan nama** (9 situs): riwayat sesi & baris
+  opname (`stok` ×3, `perlengkapan` ×3) · riwayat shift tertutup ·
+  statistik lama-pengerjaan per menu (`laporan`) · `transfer` yang berhalaman
+  di query tapi balasannya tak memuat total.
+
+- **Satu situs dibebaskan dengan alasan yang ditulis**: `stok/service.ts:741`
+  memotong 20.000 event FIFO dengan idiom `+1` yang benar — penandanya dirakit
+  di fungsi **pemanggil** (`:833`). Pemindai ini berlingkup satu fungsi, dan
+  situs inilah yang membuat batas itu perlu ditulis.
+
+- **Bukti merah pada pohon SUNGGUHAN, dua arah**: `.limit(77)` baru yang tak
+  terdaftar → merah menyebut berkas & barisnya; entri daftar yang situsnya
+  sudah diperbaiki → merah (`sudah tak ada situsnya — hapus entrinya`).
+  **PASANGAN**: `.limit(1)`/`LIMIT 1` bukan pemotongan · ketiga idiom diterima ·
+  kunci `total` SENDIRIAN bukan tanda paginasi · `page`/`per_page` diterima ·
+  kata LIMIT di komentar bukan situs · barisnya menunjuk `.limit`, bukan awal
+  rantai. **CAKUPAN** dipaku: ≥75 situs, ≥55 Drizzle, ≥12 SQL mentah, ≥30
+  berkas, dan lima berkas ber-idiom disebut namanya.
+
+- **Tiga gerbang lain ikut menangkap perubahanku**, dan ketiganya benar:
+  `daftar-tanpa-langit-langit.test.ts` memaku teks balasan `/sampah` (jangkarnya
+  diperbarui **beserta alasannya** — menuntut ejaan `HEADER_TERPOTONG` di
+  berkas itu justru akan menghukum pemindahannya ke rumah bersama) ·
+  `lampiran-dto-utuh.test.ts` (Lampiran A disegarkan) ·
+  `kunci-satu-kontrak.test.ts` — fikstur kontrak di repo **ponsel** jadi basi
+  begitu `rows_terpotong` lahir. Fikstur itu diregenerasi; ia data kontrak,
+  bukan fitur, dan membiarkannya merah berarti mendorong gerbang merah.
+
+- **Batas detektor, ditulis jujur**: pemotongan yang terjadi murni di JS
+  (`slice`, `take`) tanpa `.limit()` maupun `LIMIT` **tidak terlihat** ·
+  lingkup pencarian penandanya satu FUNGSI, jadi penanda yang dirakit dua
+  fungsi jauh butuh adjudikasi tangan · `adaAgregat` PETUNJUK triase, bukan
+  vonis.
+
+- **Sisi ponsel dicatat sebagai utang, bukan diklaim beres**: `GET
+  /stok/penyesuaian` hanya dibaca ponsel, dan header `X-Kakarut-Terpotong`
+  yang kini dikirimnya belum dirender layar Penyesuaian Stok. `api_client.dart`
+  sudah punya jalurnya (dipakai layar Sampah), jadi yang kurang perenderannya.
+
+- **Gerbang**: `typecheck` bersih (server+web) · `npm test` **2.498**
+  (209 berkas) · build web ✔ · **`verify-api.sh` 3.245 lolos / 0 gagal**
+  (DB segar; §272 baru: 11 asersi) · `audit:invarian` **26/26** ·
+  Playwright e2e **10/10**. Repo ponsel: `flutter test --no-pub` **599 hijau**
+  sesudah fikstur kontraknya diregenerasi.
+
+- **Gerbang KELIMA menagih keputusan lintas repo, dan itu benar**:
+  `kunci_kontrak_server_test.dart` di repo ponsel menolak kunci kontrak baru
+  yang tak diurai DAN tak dicatat. `rows_terpotong` dicatat di
+  `kunci-belum-dibaca.txt` beserta alasannya — ponsel tak punya layar kartu
+  supplier sama sekali, jadi ini fitur yang belum ada, bukan kunci yang
+  dilewatkan.
+
+- **Commit**: Cabang `claude`; fikstur & catatan
+  kontrak di `mohteja/kakarut-mobile@314b521`.
+
+---
+
 ## `.value` polos: antrean offline yang tak terbaca — mobile — 2026-08-27
 
 - **Kenapa vena ini ada**: utang yang kucatat sendiri berangka putaran lalu —
@@ -6676,6 +6819,9 @@ berlaku di situ).
       101 situs / 44 ber-`??` / 40 runtuh; yang mahal justru BUKAN di situs
       itu melainkan di `catch (_) { return []; }` milik antrean offline —
       Rp150.000 pending terbaca 0 perintah dengan `hasError` tetap false
+- [ ] **Pemotongan daftar yang tak dikatakan** — 23 situs tersisa (14 `sah`,
+      **9 `utang` yang jumlahnya dipaku**), plus sisi ponsel `GET
+      /stok/penyesuaian` yang headernya dikirim tapi belum dirender
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama

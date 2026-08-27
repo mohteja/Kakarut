@@ -1,5 +1,6 @@
 import { zValidator } from "../../lib/validator";
 import { tanpaBentrok } from "../../lib/pg-galat";
+import { potongLarik } from "../../lib/potong";
 import { BATAS_FAKTOR, BATAS_HARGA, BATAS_QTY_RESEP, BATAS_QTY_STOK, BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, desc, eq, inArray, isNotNull, isNull, max, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -40,6 +41,14 @@ import {
   tampilDiCabang,
   toMenuDto,
 } from "./service";
+
+/**
+ * Langkah perubahan harga menu yang dikirim. Dicocokkan dengan
+ * `BATAS_LOT_RIWAYAT` di sisi bahan — dua layar riwayat harga yang
+ * memotong di angka berbeda hanya akan membingungkan orang yang
+ * membandingkannya.
+ */
+const BATAS_RIWAYAT_HARGA = 50;
 
 const KomponenBody = z.object({
   ingredient_id: z.string().uuid(),
@@ -544,13 +553,21 @@ export const menuRoutes = new Hono<AppEnv>()
         ),
       )
       .orderBy(desc(menuPriceLogs.createdAt))
-      .limit(50);
+      // `+ 1`: satu baris lebih untuk membedakan "tepat 50" dari "lebih".
+      .limit(BATAS_RIWAYAT_HARGA + 1);
     const hasil: MenuPriceLogRow[] = rows.map((r) => ({
       ...r,
       sebab: r.sebab as SebabHargaMenu,
       created_at: r.created_at.toISOString(),
     }));
-    return c.json(hasil);
+    // Riwayat HARGA — kembar `GET /bahan/:id/riwayat-harga`, yang sudah
+    // mengirim `lots_terpotong` dan sudah dirender `RiwayatHargaModal`. Pintu
+    // ini memotong dengan angka yang sama dan dulu tak mengatakannya:
+    // perubahan harga yang lebih lama dari 50 langkah terakhir menghilang, dan
+    // yang membacanya menyimpulkan harga menu ini memang tak pernah diubah
+    // sebelum itu. Bentuk balasannya larik telanjang (build ponsel lama
+    // membacanya `as List`), jadi penandanya lewat header.
+    return c.json(potongLarik(c, hasil, BATAS_RIWAYAT_HARGA));
   })
   // Atur urutan/posisi menu (untuk tampilan kasir & cetak daftar menu).
   // Boleh diakses semua peran (termasuk kasir); company-scoped di WHERE.

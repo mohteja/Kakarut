@@ -2623,7 +2623,20 @@ export interface SupplierKartu {
   total_belanja: number;
   /** jumlah faktur pembelian yang menyebut supplier ini */
   jumlah_transaksi: number;
+  /** maksimal 500 baris, TERBARU dulu — selebihnya `rows_terpotong` */
   rows: SupplierKartuRow[];
+  /**
+   * `rows` dipotong; masih ada transaksi yang lebih lama.
+   *
+   * Kembar `CustomerDetail.transaksi_terpotong`, dan alasannya sama. Kartu ini
+   * sudah melakukan separuh aturannya dengan benar — `total_belanja` &
+   * `jumlah_transaksi` dihitung di SQL TANPA batas, jadi angkanya tidak ikut
+   * mengecil saat daftarnya dipotong. Yang kurang separuh keduanya: yang
+   * membaca daftar sepanjang 500 tak punya cara tahu bahwa transaksi ke-501
+   * ada, dan halaman kartu supplier menyaring di peramban — jadi baris yang
+   * tak terkirim tak pernah ada baginya.
+   */
+  rows_terpotong: boolean;
   bahan: { ingredient_id: string; nama: string; is_utama: boolean }[];
 }
 

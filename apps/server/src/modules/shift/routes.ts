@@ -1,5 +1,6 @@
 import { zValidator } from "../../lib/validator";
 import { BATAS_UANG } from "../../lib/batas-angka";
+import { HEADER_TERPOTONG, potongLarik } from "../../lib/potong";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, sum } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
@@ -172,6 +173,19 @@ async function rekapWindow(
  * sedang diminta mempertanggungjawabkan uang.
  */
 const BATAS_TRANSAKSI_SHIFT = 300;
+
+/**
+ * Antrean selisih kas yang dikirim ke layar. 50 sudah lebih dari cukup untuk
+ * satu sesi pemeriksaan; yang tak boleh adalah memotongnya tanpa berkata apa-apa.
+ */
+const BATAS_SELISIH = 50;
+
+/**
+ * Berapa banyak yang DIAMBIL saat statusnya masih harus dihitung di JS.
+ * Lebih besar dari [BATAS_SELISIH] karena penyaringannya terjadi sesudah
+ * query — memotong di 50 lebih dulu membuang baris yang justru diminta.
+ */
+const AMBIL_SELISIH = 200;
 
 /**
  * Daftar transaksi individual sebuah shift (untuk detail).
@@ -680,8 +694,11 @@ export const shiftRoutes = new Hono<AppEnv>()
         .orderBy(desc(shifts.closedAt))
         // Ambil lebih banyak saat statusnya harus dihitung: penyaringan terjadi
         // SESUDAH query, jadi memotong di 50 lebih dulu bisa membuang baris
-        // yang justru diminta. Dipangkas kembali ke 50 di bawah.
-        .limit(perluHitung ? 200 : 50);
+        // yang justru diminta. Dipangkas kembali ke BATAS_SELISIH di bawah.
+        //
+        // `+ 1` pada kedua cabang: satu baris lebih itulah yang membedakan
+        // "tepat sejumlah batas" dari "lebih banyak dari batas".
+        .limit((perluHitung ? AMBIL_SELISIH : BATAS_SELISIH) + 1);
       const semua: SelisihKasRow[] = await Promise.all(
         rows.map(async (r) => {
           const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
@@ -708,10 +725,29 @@ export const shiftRoutes = new Hono<AppEnv>()
           };
         }),
       );
-      const hasil = perluHitung
-        ? semua.filter((x) => x.status_selisih === q.status).slice(0, 50)
+      /**
+       * INI ANTREAN PUTUSAN, bukan sekadar daftar — dan antrean yang memotong
+       * diam-diam mengatakan hal yang tidak benar: "sudah tak ada lagi yang
+       * menunggu keputusanmu."
+       *
+       * Dua sebab pemotongan, dan KEDUANYA harus dikatakan:
+       *
+       * 1. hasil penyaringan lebih panjang dari `BATAS_SELISIH`; atau
+       * 2. kuerinya sendiri sudah menyentuh langit-langit `AMBIL_SELISIH` —
+       *    penyaringan terjadi SESUDAH query, jadi baris yang lolos saring
+       *    bisa saja tertinggal di luar `AMBIL_SELISIH` dan tak pernah
+       *    sampai ke sini untuk dihitung.
+       *
+       * Sebab kedua tak terlihat dari panjang `hasil`, jadi ia tak bisa
+       * diserahkan ke `potongLarik` sendirian.
+       */
+      const disaring = perluHitung
+        ? semua.filter((x) => x.status_selisih === q.status)
         : semua;
-      return c.json(hasil);
+      if (perluHitung && rows.length > AMBIL_SELISIH) {
+        c.header(HEADER_TERPOTONG, String(BATAS_SELISIH));
+      }
+      return c.json(potongLarik(c, disaring, BATAS_SELISIH));
     },
   )
   // detail satu shift = ringkasan + daftar transaksinya (kasir terkunci cabang)

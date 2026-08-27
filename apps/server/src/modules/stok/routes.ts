@@ -4,6 +4,7 @@ import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { randomUUID } from "node:crypto";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
+import { potongLarik } from "../../lib/potong";
 import { alias } from "drizzle-orm/pg-core";
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -37,6 +38,11 @@ import { hargaPerUnit, ringkasNilaiStok } from "@kakarut/shared";
 import { awalHariDi, tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { fifoBahan, hitungSaldoCabang, kartuStok, qtyDiJalan } from "./service";
+
+/**
+ * Baris penyesuaian stok yang dikirim ke layar antrean putusan.
+ */
+const BATAS_PENYESUAIAN = 300;
 
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -781,12 +787,24 @@ export const stokRoutes = new Hono<AppEnv>()
       .leftJoin(setujuUser, eq(stockOpnames.disetujuiBy, setujuUser.id))
       .where(and(...conds))
       .orderBy(desc(stockOpnames.createdAt))
-      .limit(300);
+      // `+ 1`: pembeda "tepat sejumlah batas" dari "lebih dari batas".
+      .limit(BATAS_PENYESUAIAN + 1);
+    /**
+     * ANTREAN PUTUSAN, sama seperti selisih kas: layar Penyesuaian Stok
+     * menghitung berapa yang `siapDisetujui` dari daftar INI. Potongan yang
+     * senyap membuat penghitung itu berkata "tinggal segini" atas antrean
+     * yang sebenarnya lebih panjang — dan yang tak terkirim tak akan pernah
+     * disetujui siapa pun. Larik telanjang, jadi penandanya lewat header.
+     */
     return c.json(
-      rows.map((r) => ({
-        ...r,
-        klarifikasi_status: r.klarifikasi_status ?? "belum",
-      })),
+      potongLarik(
+        c,
+        rows.map((r) => ({
+          ...r,
+          klarifikasi_status: r.klarifikasi_status ?? "belum",
+        })),
+        BATAS_PENYESUAIAN,
+      ),
     );
   })
   /**

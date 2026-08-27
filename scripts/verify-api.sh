@@ -15058,6 +15058,92 @@ cek "PASANGAN: exp SETAHUN KE DEPAN tetap 200 (rencana, bukan kejadian)" "V == 2
 cek "PASANGAN: kalimat penolakan /sync tak berubah oleh pemindahan rumah" "V == 1" \
   "$(echo "$RES_T" | jq '(((.hasil[0].error // "") | test("masa depan")) and ((.hasil[1].error // "") | test("hari lalu"))) | if . then 1 else 0 end')"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §272 — DAFTAR YANG DIPOTONG WAJIB MENGATAKANNYA
+#
+# Empat putaran menutup satu kelas di klien: bacaan yang GAGAL menyamar jadi
+# "tidak ada". Ini saudara kandungnya di kontrak server→klien: bacaan yang
+# TERPOTONG menyamar jadi LENGKAP. Aturannya sudah ditulis panjang di
+# `modules/customer/routes.ts:50` dan idiomnya sudah dipakai — yang kurang,
+# ia hanya dipasang di sebagian pintu.
+#
+# Yang dipaku di sini PERILAKUNYA lewat HTTP; bentuk kodenya diurus gerbang
+# statis `potong-berpenanda.test.ts`.
+#
+# Datanya DIBUAT LEWAT RUTE, bukan disuntik ke basis data — skrip ini memang
+# tak pernah menyentuh psql, dan justru itu yang membuat premisnya otomatis
+# terbukti: 51 perubahan harga yang tercatat adalah 51 perubahan harga yang
+# benar-benar dilakukan pintunya sendiri.
+echo
+echo "── §272 daftar yang dipotong mengatakannya ──"
+
+MENU272="$(api "$OWNER" GET "/menu" | jq -r '.[0].id // empty')"
+if [ -n "$MENU272" ]; then
+  H272A="$(curl -s -D - -o /tmp/verify272a.json -H "Authorization: Bearer $OWNER" "$BASE/api/menu/$MENU272/riwayat-harga")"
+  AWAL272="$(jq 'length' /tmp/verify272a.json)"
+  cek "PASANGAN: riwayat yang MUAT tak dituduh terpotong" "V == 0" \
+    "$(echo "$H272A" | grep -ci '^x-kakarut-terpotong' || true)"
+
+  # Naikkan harga 51 kali → 51 baris riwayat baru. Melewati batas 50 dengan
+  # selisih yang cukup supaya lolos berapa pun riwayat awalnya.
+  for i in $(seq 1 51); do
+    api "$OWNER" PUT "/menu/$MENU272" "{\"harga_jual\": $((20000 + i))}" > /dev/null
+  done
+
+  H272="$(curl -s -D - -o /tmp/verify272.json -H "Authorization: Bearer $OWNER" "$BASE/api/menu/$MENU272/riwayat-harga")"
+
+  # PREMIS (Aturan 6): perubahan yang barusan dibuat benar-benar TERBACA oleh
+  # rutenya sendiri. Tanpa ini, "50 baris" bisa saja berarti kuerinya tak
+  # pernah melihat satu pun baris yang kubuat.
+  cek "PREMIS: perubahan harga yang dibuat terbaca oleh rutenya sendiri" "V == 1" \
+    "$(jq '[.[] | select(.harga_baru >= 20001 and .harga_baru <= 20051)] | length | if . > 0 then 1 else 0 end' /tmp/verify272.json)"
+
+  cek "riwayat harga menu dipotong di 50" "V == 50" "$(jq 'length' /tmp/verify272.json)"
+
+  # INI temuannya: lebih dari 50 ada, 50 terkirim, dan dulu tak ada yang
+  # mengatakannya — riwayat harga yang pendek terbaca sebagai "harga menu ini
+  # tak pernah diubah sebelum itu".
+  cek "pemotongannya DIKATAKAN lewat X-Kakarut-Terpotong" "V == 1" \
+    "$(echo "$H272" | grep -ci '^x-kakarut-terpotong: 50' || true)"
+
+  # PASANGAN yang menentukan: bentuk balasannya TIDAK boleh berubah jadi objek.
+  # Tujuh build ponsel yang pernah rilis membacanya `as List`, dan repo ini tak
+  # punya gerbang versi klien — mengubah bentuknya mematikan layar yang hari
+  # ini jalan. Itulah kenapa penandanya di header, bukan di badan.
+  cek "PASANGAN: bentuknya tetap LARIK telanjang" "V == 1" \
+    "$(jq 'if type == "array" then 1 else 0 end' /tmp/verify272.json)"
+  cek "PASANGAN: isinya masih baris riwayat, bukan pembungkus" "V == 1" \
+    "$(jq 'if (.[0] | has("harga_baru")) then 1 else 0 end' /tmp/verify272.json)"
+fi
+
+# Kartu supplier memakai idiom yang BERBEDA — kunci badan, bukan header —
+# karena balasannya memang objek. Yang dipaku: kuncinya ADA dan bernilai
+# `false` saat tak terpotong, supaya klien membacanya sebagai "tidak
+# terpotong" alih-alih `undefined`.
+SUP272="$(api "$OWNER" GET "/supplier" | jq -r '.[0].id // empty')"
+if [ -n "$SUP272" ]; then
+  KARTU272="$(api "$OWNER" GET "/supplier/$SUP272/kartu")"
+  cek "kartu supplier membawa rows_terpotong (objek, bukan header)" "V == 1" \
+    "$(echo "$KARTU272" | jq 'if has("rows_terpotong") then 1 else 0 end')"
+  cek "PASANGAN: supplier tanpa 500 transaksi → rows_terpotong false" "V == 1" \
+    "$(echo "$KARTU272" | jq 'if .rows_terpotong == false then 1 else 0 end')"
+  # Separuh aturan yang SUDAH benar sejak dulu, dipaku supaya tak hilang:
+  # total_belanja dihitung di SQL tanpa batas, jadi ia tak boleh ikut mengecil
+  # saat daftarnya dipotong.
+  cek "total_belanja tetap dihitung terpisah dari daftar" "V == 1" \
+    "$(echo "$KARTU272" | jq 'if has("total_belanja") and has("jumlah_transaksi") then 1 else 0 end')"
+fi
+
+# Antrean putusan selisih kas: larik telanjang, jadi idiomnya header. Tanpa
+# lebih dari 50 shift bershortfall di data uji, yang bisa dipaku adalah sisi
+# PASANGAN-nya — dan itu justru sisi yang paling mudah rusak saat penanda
+# dipasang: peringatan yang menyala tanpa sebab.
+H272S="$(curl -s -D - -o /tmp/verify272s.json -H "Authorization: Bearer $OWNER" "$BASE/api/shift/selisih?status=menunggu")"
+cek "PASANGAN: antrean selisih yang MUAT tak dituduh terpotong" "V == 0" \
+  "$(echo "$H272S" | grep -ci '^x-kakarut-terpotong' || true)"
+cek "PASANGAN: bentuk antrean selisih tetap LARIK" "V == 1" \
+  "$(jq 'if type == "array" then 1 else 0 end' /tmp/verify272s.json)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

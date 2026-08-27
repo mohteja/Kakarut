@@ -22,9 +22,16 @@ const SEBAB_LABEL: Record<MenuPriceLogRow["sebab"], string> = {
 
 /** Rincian satu menu: penyumbang HPP + riwayat perubahan harga jualnya. */
 function Rincian({ row }: { row: AnalisisHargaRow }) {
+  const [terpotong, setTerpotong] = useState<number | null>(null);
   const { data: riwayat, error: riwayatGagal } = useQuery({
     queryKey: ["menu-riwayat-harga", row.id],
-    queryFn: () => api<MenuPriceLogRow[]>(`/menu/${row.id}/riwayat-harga`),
+    queryFn: () =>
+      api<MenuPriceLogRow[]>(`/menu/${row.id}/riwayat-harga`, {
+        bacaHeader: (h) => {
+          const n = Number(h.get("X-Kakarut-Terpotong"));
+          setTerpotong(Number.isFinite(n) && n > 0 ? n : null);
+        },
+      }),
   });
 
   return (

@@ -465,10 +465,24 @@ describe("SQL mentah: bacaan daftar tanpa langit-langit", () => {
     );
     // Ketujuh build ponsel yang pernah rilis membaca balasan ini `as List`.
     // `c.json({ items, terpotong })` akan MELEMPAR di aplikasi terpasang.
+    //
+    // Pemotongannya kini lewat `potongLarik` (`src/lib/potong.ts`) — pembantu
+    // bersama yang lahir saat pintu KEDUA membutuhkan header yang sama.
+    // Yang dijaga di sini tetap sama persis: bentuknya larik, bukan objek.
     expect(s, "balasan /sampah harus tetap larik telanjang").toMatch(
-      /return c\.json\(terpotong \? rows\.slice\(0, BATAS_SAMPAH\) : rows\)/,
+      /return c\.json\(potongLarik\(c, rows, BATAS_SAMPAH\)\)/,
     );
-    expect(s, "pemotongannya harus diberitahukan lewat header").toContain("HEADER_TERPOTONG");
+    // Headernya sendiri kini dipasang `potongLarik`, jadi yang dijaga di sini
+    // adalah bahwa pintu ini memakai pembantu itu — dan `src/lib/potong.ts`
+    // yang dijaga memasang headernya. Menuntut ejaan `HEADER_TERPOTONG` di
+    // berkas ini justru akan menghukum pemindahannya ke rumah bersama.
+    const potong = readFileSync(join(SRC, "lib/potong.ts"), "utf8");
+    expect(potong, "rumah bersama harus memasang headernya").toContain(
+      'c.header(HEADER_TERPOTONG',
+    );
+    expect(potong, "nama headernya tak boleh berubah — klien membacanya").toContain(
+      '"X-Kakarut-Terpotong"',
+    );
   });
 
   it("GET /penerimaan/anomali: agregat & tanda faktur tetap atas populasi penuh", () => {

@@ -146,6 +146,23 @@ export function KartuSupplierPage() {
                 <td className={`${tdClass} text-xs text-stone-500`}>{r.cabang ?? "—"}</td>
               </tr>
             ))}
+            {/*
+              Kartu ini menagih & mencocokkan pembelian, dan `total_belanja` di
+              atasnya dihitung di SQL TANPA batas — jadi angkanya BENAR
+              sementara daftar di bawahnya bisa pendek. Justru itu yang
+              berbahaya: orang mencocokkan totalnya dengan baris yang
+              terlihat, tak menemukan selisihnya, lalu mengira pembukuannya
+              yang salah.
+            */}
+            {data.rows_terpotong && (
+              <tr>
+                <td colSpan={7} className="bg-stone-50 px-3 py-2 text-xs text-stone-600">
+                  Menampilkan <b>{data.rows.length} transaksi terbaru</b>. Supplier ini punya
+                  transaksi yang lebih lama — <b>Total belanja</b> di atas sudah menghitung
+                  semuanya, jadi ia tidak akan cocok bila dijumlahkan dari daftar ini saja.
+                </td>
+              </tr>
+            )}
             {data.rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-8 text-center text-sm text-stone-400">
