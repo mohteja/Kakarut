@@ -131,6 +131,13 @@ export async function pangkasErrorLog(): Promise<number> {
 
 /** Jadwalkan pemangkasan berkala (sekali saat boot, lalu tiap 6 jam). */
 export function jadwalkanPangkasErrorLog(): void {
-  void pangkasErrorLog().catch(() => {});
-  setInterval(() => void pangkasErrorLog().catch(() => {}), 6 * 60 * 60_000).unref();
+  // Pemangkasan yang gagal TIDAK boleh menjatuhkan proses — tapi juga tak boleh
+  // hilang tanpa jejak: kalau ia gagal terus, tabel log galat tumbuh tanpa batas
+  // dan tak ada satu pun tanda kenapa. Dicatat, bukan ditelan.
+  const jalankan = () =>
+    void pangkasErrorLog().catch((e) =>
+      console.warn("Pemangkasan log galat gagal:", e instanceof Error ? e.message : String(e)),
+    );
+  jalankan();
+  setInterval(jalankan, 6 * 60 * 60_000).unref();
 }

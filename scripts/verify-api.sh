@@ -14777,6 +14777,75 @@ cek "INTI: porsi penyumbang NULL saat HPP menunya nol" "V == 1" \
 cek "PASANGAN: porsi penyumbang menu komplimen tetap 100%" "V == 1" \
   "$(echo "$AN267" | jq --arg m "$MK267" '([.[]|select(.id==$m)][0].penyumbang[0].persen_hpp == 100) | if . then 1 else 0 end')"
 
+echo "── §268 penghapusan yang GAGAL tak boleh dihitung sebagai berhasil ──"
+#
+# Kedua driver penyimpanan LOKAL dulu menulis hapusnya sebagai
+# `unlink(...).catch(() => {})` — menelan `EPERM`/`EISDIR`/`EACCES`/`EROFS`
+# padahal kontraknya cuma menjanjikan "berkas yang sudah tak ada bukan galat".
+# Saudara kandungnya di R2 melempar. Tiga pintu memanggilnya, dan ketiganya
+# membuang BARIS yang menamai objeknya tanpa tahu objeknya masih ada.
+#
+# Terukur sebelum perbaikan (2026-08-26, DB dev + disk sungguhan):
+#   DELETE /admin/sistem/backup/:id     → 200 {"ok":true}, baris 1→0, objek TETAP
+#   POST   /admin/sistem/backup/retensi → {"dibuang":1},   baris 1→0, objek TETAP
+#   POST   /admin/sistem/sapu-unggahan  → dihapus:3 padahal hanya 2 hilang
+#
+# Kegagalan hapusnya dipaksa TANPA main izin: objeknya diganti DIREKTORI
+# bernama sama — `unlink` atas direktori gagal bahkan untuk root, jadi seksi ini
+# berlaku sama di mesin pengembang maupun di CI (yang berjalan non-root).
+BDIR268="$(cd "$(dirname "$0")/.." && pwd)/apps/server/backups"
+B268=$(api "$SA" POST /admin/sistem/backup '{}')
+ID268=$(echo "$B268" | jq -r '.id // ""')
+KEY268=$(echo "$B268" | jq -r '.object_key // ""')
+cek "premis §268: cadangan uji terbentuk & ber-objek" "V == 1" \
+  "$( [ -n "$ID268" ] && [ -n "$KEY268" ] && echo 1 || echo 0 )"
+cek "premis §268: berkasnya benar ada di disk" "V == 1" \
+  "$( [ -f "$BDIR268/$KEY268" ] && echo 1 || echo 0 )"
+# Objeknya dibuat TAK BISA dihapus.
+rm -f "$BDIR268/$KEY268"; mkdir -p "$BDIR268/$KEY268"; : > "$BDIR268/$KEY268/.jaga"
+cek "premis §268: objeknya kini tak bisa di-unlink" "V == 1" \
+  "$( rm "$BDIR268/$KEY268" 2>/dev/null && echo 0 || echo 1 )"
+cek "INTI: hapus cadangan yang objeknya gagal dibuang → 502, bukan 200 ok" "V == 502" \
+  "$(status_code "$SA" DELETE "/admin/sistem/backup/$ID268")"
+cek "INTI: barisnya DIPERTAHANKAN (objeknya tak jadi yatim tanpa catatan)" "V == 1" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$ID268" '[.riwayat[]|select(.id==$i)]|length')"
+cek "…dan pesan galat sistemnya TIDAK bocor ke pemanggil" "V == 0" \
+  "$(api "$SA" DELETE "/admin/sistem/backup/$ID268" | jq -r '.error // ""' | grep -ci 'EPERM\|EISDIR\|ENOTEMPTY\|illegal operation' || true)"
+# PASANGAN 1 — begitu objeknya bisa dihapus lagi, pintunya kembali normal.
+rm -rf "$BDIR268/$KEY268"; : > "$BDIR268/$KEY268"
+cek "PASANGAN: objek wajar → 200 dan barisnya benar-benar hilang" "V == 200" \
+  "$(status_code "$SA" DELETE "/admin/sistem/backup/$ID268")"
+cek "…barisnya hilang" "V == 0" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$ID268" '[.riwayat[]|select(.id==$i)]|length')"
+cek "…berkasnya ikut hilang" "V == 0" \
+  "$( [ -e "$BDIR268/$KEY268" ] && echo 1 || echo 0 )"
+# PASANGAN 2 — IDEMPOTENSI tak ikut ditutup: objek yang MEMANG sudah hilang
+# tetap boleh dihapus barisnya. Ini yang membedakan penjaga ini dari sekadar
+# "melempar apa saja".
+B268B=$(api "$SA" POST /admin/sistem/backup '{}')
+ID268B=$(echo "$B268B" | jq -r '.id // ""')
+KEY268B=$(echo "$B268B" | jq -r '.object_key // ""')
+rm -f "$BDIR268/$KEY268B"
+cek "premis §268: objek cadangan kedua sudah tak ada" "V == 0" \
+  "$( [ -e "$BDIR268/$KEY268B" ] && echo 1 || echo 0 )"
+cek "PASANGAN: objek yang MEMANG hilang → tetap 200 (idempoten)" "V == 200" \
+  "$(status_code "$SA" DELETE "/admin/sistem/backup/$ID268B")"
+cek "…dan barisnya ikut dibuang" "V == 0" \
+  "$(api "$SA" GET /admin/sistem/backup | jq --arg i "$ID268B" '[.riwayat[]|select(.id==$i)]|length')"
+# Retensi & sapuan kini MELAPORKAN bagian yang gagal, bukan menelannya ke dalam
+# angka keberhasilan. Nilainya nol di sini — yang dijaga adalah medannya ADA,
+# sebab tanpa medan itu kegagalan kembali tak punya tempat untuk muncul.
+RET268=$(api "$SA" POST /admin/sistem/backup/retensi)
+cek "retensi melaporkan medan gagal tersendiri" "V == 1" \
+  "$(echo "$RET268" | jq 'has("gagal") | if . then 1 else 0 end')"
+cek "…dan medan dibuang tetap ada" "V == 1" \
+  "$(echo "$RET268" | jq 'has("dibuang") | if . then 1 else 0 end')"
+SAPU268=$(api "$SA" POST "/admin/sistem/sapu-unggahan?hitung=1")
+cek "sapuan unggahan melaporkan medan gagal_hapus tersendiri" "V == 1" \
+  "$(echo "$SAPU268" | jq 'has("gagal_hapus") | if . then 1 else 0 end')"
+cek "…mode hitung tetap tak menghapus apa pun" "V == 0" \
+  "$(echo "$SAPU268" | jq -r '.dihapus')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

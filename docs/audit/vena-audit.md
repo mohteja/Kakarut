@@ -50,6 +50,135 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Penghapusan yang GAGAL, dihitung sebagai berhasil — server+web+mobile — 2026-08-27
+
+- **Kenapa vena ini ada**: antrean formal ledger habis di ANTREAN KESEBELAS,
+  jadi putaran ini lahir dari sensus baru atas kelas yang **belum pernah disapu
+  sekali pun** — dan yang gerbang repo ini sendiri sudah namai, di kepala
+  `verify-api.sh`: *"galat yang ditelan lalu muncul sebagai kebingungan di
+  tempat lain."*
+
+- **Populasi, terhitung baca-saja**: **270 blok `catch`** (server 69 · web 45 ·
+  mobile 156) → **24 berbadan KOSONG** → **12 tanpa satu kata pun alasan**
+  (server 5 · mobile 7). Sepuluh di antaranya BENAR dan cuma perlu alasannya
+  ditulis; dua sisanya satu bentuk, dan bentuk itulah temuannya.
+
+- **Aturan yang dinamai**: *menghapus boleh diam HANYA untuk "sudah tidak ada";
+  kegagalan lain tak boleh dihitung sebagai berhasil — dan tak boleh membuang
+  catatan yang menamai objeknya.* Aturan sapuannya: **menelan galat itu jujur
+  HANYA bila alasannya tertulis.**
+
+- **Bentuknya**: kontrak `StorageDriver.hapus` menuliskan batasnya sendiri —
+  *"berkas yang sudah tak ada bukan galat"* — sementara kedua driver LOKAL
+  menulisnya `unlink(...).catch(() => {})`, menelan `EPERM`/`EISDIR`/`EACCES`/
+  `EROFS` juga. Saudara kandungnya di R2 melempar (`DeleteObject` idempoten
+  untuk kunci hilang). **Satu antarmuka, dua kejujuran yang berlawanan** — dan
+  yang lokal itulah yang dipakai pemasangan tanpa R2. Tiga pintu memanggilnya,
+  dan ketiganya membuang baris/hitungan yang MENAMAI objeknya tanpa tahu
+  objeknya masih ada; satu di antaranya bahkan menuliskan alasannya **lebih
+  sempit daripada yang dilakukannya** (`/* objek mungkin sudah hilang */`).
+
+- **TERUKUR lewat HTTP** (DB dev segar + disk sungguhan; baris suntikan
+  dibuktikan terbaca lewat `GET /admin/sistem/backup` lebih dulu; kegagalan
+  hapus dipaksa dengan mengganti objeknya jadi DIREKTORI bernama sama —
+  `unlink` atas direktori gagal bahkan untuk root):
+
+  | pintu | sebelum | sesudah |
+  |---|---|---|
+  | `DELETE /admin/sistem/backup/:id` | **200 `{"ok":true}`** · baris 1 → 0 · objek **tetap ada** | **502** bernama · baris **dipertahankan** · objek tetap ada |
+  | `POST /admin/sistem/backup/retensi` | **`{"dibuang":1}`** · baris 1 → 0 · objek **tetap ada** | `{"dibuang":0,"gagal":1}` · baris **dipertahankan** (retensi berikutnya mencoba lagi) |
+  | `POST /admin/sistem/sapu-unggahan` | **`dihapus: 3`** padahal hanya **2** hilang (yang gagal masih dilayani **HTTP 200**) | `dihapus` hanya yang benar terhapus + medan `gagal_hapus` tersendiri |
+
+  Retensi diukur dengan `BACKUP_KEEP=1` pada mesin ukur, dan sapuan dengan satu
+  berkas ber-`chattr +i`. Keduanya cara ukur, bukan cara uji — §268 memakai
+  trik direktori yang tak butuh hak istimewa sama sekali.
+
+- **Tindak**: `hapusBerkasLokal(baseDir, key)` lahir di
+  `modules/upload/jalur-aman.ts` (tetangga `jalurDalam`, yang sudah dipakai
+  kedua driver lokal) — menelan **hanya `ENOENT`**, melempar sisanya; komentar
+  `/* sudah tidak ada — idempoten */` **pindah ke sana**, tempat ia benar.
+  `LocalDriver` & `LocalCadanganStorage` memanggilnya; **driver R2 tak
+  disentuh** — ia sudah persis kontraknya. Lalu ketiga pintu memutuskan sendiri:
+  DELETE melempar 502 bernama (galat aslinya **hanya ke log**, tidak ke
+  penyewa); retensi **melewati** barisnya dan menghitung `gagal` terpisah;
+  sapuan `try/catch` per berkas agar satu berkas bandel tak menghentikan
+  pembersihan ribuan lainnya. Sepuluh telanan yang BENAR diberi alasan tertulis,
+  dan `jadwalkanPangkasErrorLog` naik satu tingkat: dari menelan jadi
+  **mencatat** (kalau ia gagal terus, tabel log tumbuh tanpa batas dan tak ada
+  satu pun tanda kenapa).
+
+- **Detektor DIBUKTIKAN bisa menuduh — sesudah EMPAT generasi**, dan tiap
+  generasi diperbaiki karena satu kesalahan yang bisa ditunjuk:
+
+  | generasi | cacatnya | akibat |
+  |---|---|---|
+  | 1 | komentar tak dibutakan | pemindainya menuduh **prosa di komentarnya sendiri** (`hapusBerkasLokal` mengutip bentuk lamanya) |
+  | 2 | "komentar mana pun dalam 6 baris ke atas" | **JSDoc sebuah fungsi memaafkan telanan di baris pertama badannya** (`jadwalkanPangkasErrorLog`) |
+  | 3 | ditelusuri dari token `.catch`, bukan awal pernyataannya | 2 tuduhan palsu (`app.ts`, `sync/idempoten.ts` — `.catch` mendarat di baris keempat rantai yang sama) |
+  | 4 | "sebelum situs" dihitung sampai awal pernyataan **juga untuk bentuk blok** | komentar yang menjelaskan ISI `try` memaafkan telanannya (`api_client.dart:185` & `:704`) |
+
+  Yang berlaku sekarang: situs dicari di sumber yang **komentarnya dibutakan**;
+  alasan dicari di sumber **mentah** — di dalam badan `catch`, di tengah rantai
+  tepat sebelum `.catch`, atau pada baris komentar tepat di atas pernyataannya
+  (bentuk blok: di atas kata `try`-nya) — dan komentar di atas `{` sebuah blok
+  **tidak** dihitung, sebab itu doc deklarasinya. Keempat kelolosan itu dipaku
+  jadi uji PREMIS di kedua gerbang.
+
+- **Bukti merah**: bentuk lama (`unlink(...).catch(() => {})`) direkonstruksi di
+  dalam uji dan terbukti **memulangkan sukses** untuk direktori yang sama yang
+  ditolak `hapusBerkasLokal`. Ketiga pin pintu diadu dengan kode yang
+  dikembalikan ke bentuk lamanya: **5 dari 13 uji memerah**, dan hijau lagi
+  begitu dipulihkan.
+
+- **Pasangan yang menentukan**: idempotensi TIDAK ikut ditutup — cadangan yang
+  objeknya **memang sudah hilang** tetap **200** dan barisnya tetap dibuang;
+  cadangan wajar tetap **200** dan berkasnya ikut hilang; keempat pernyataan
+  §253 (dirujuk selamat · yatim tua terhapus · yatim segar selamat · mode hitung
+  tak menghapus) tetap hijau.
+
+- **Dua ralat rencana, dicatat bukan disembunyikan**: (1) rencananya menuduh
+  `BackupPage.tsx` tak menyampaikan penolakan 502 — dibaca sampai habis,
+  `<ErrorText error={hapus.error} />` sudah merendernya merah apa adanya;
+  cabang `onError` yang sempat kutulis **dicabut** sebagai mubazir. (2) yang
+  ternyata memang salah di halaman itu hal lain: kotak kabarnya `string | null`
+  yang **selalu dirender hijau**, jadi *"Gagal mengunduh cadangan."* tampil
+  sebagai kabar baik. Diberi nada (`{teks, gagal}`) — kegagalan yang dicetak
+  hijau adalah kegagalan yang dipercaya sebagai keberhasilan.
+
+- **Satu pintu KELUAR dari daftar "tak terjangkau"**:
+  `POST /admin/sistem/backup/retensi` selama ini terdaftar `DILUAR_JANGKAUAN`
+  ("mengubah retensi cadangan mesin yang menjalankannya"). Alasannya terlalu
+  takut: dengan `BACKUP_KEEP` bawaan 14 ia tak membuang apa pun pada suite.
+  Cakupan rute **273 → 274**.
+
+- **Batas detektor, ditulis jujur**:
+  - hanya `catch` **berbadan kosong** yang terhitung. `catch` yang cuma
+    `console.warn` lalu membuang kegagalannya **di luar populasi ini** — kelas
+    tetangga yang dinyatakan **belum disapu**, bukan bersih;
+  - komentar tepat di atas dihitung sebagai alasan tertulis, dan **mutunya tak
+    diperiksa**: komentar yang membicarakan hal lain tetap lolos. Yang dijaga
+    adanya KEPUTUSAN tertulis, bukan mutunya;
+  - retensi & sapuan yatim **tak** diukur ulang CI dengan kegagalan yang
+    dipaksa: keduanya butuh DB, dan memaksa `unlink` gagal atas berkas yang
+    di-`list` menuntut `chattr +i` (butuh CAP_LINUX_IMMUTABLE — tak ada di CI).
+    Yang dijaga gerbang adalah **bentuknya** (`continue` sebelum `db.delete`,
+    penghitung `gagalHapus` terpisah) berikut bukti merahnya; angka
+    ujung-ke-ujungnya adalah pengukuran tangan di atas;
+  - **`await` yang hilang (promise mengambang) diperiksa dan TIDAK diusulkan**:
+    repo ini tak punya ESLint sama sekali, jadi kelasnya memang terbuka — tapi
+    detektor TEKS menuduh **99 dari 101** panggilan async di posisi pernyataan,
+    hampir semuanya argumen `Promise.all([...])` atau `mutationFn: () => api(…)`.
+    Kelas itu butuh **tipe**, bukan teks. Diusulkan untuk putaran lain, dengan
+    angkanya.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.396** (203 berkas) ·
+  `verify-api` **3.189 lolos, 0 gagal** vs Postgres **segar** (§268: 16
+  pernyataan) · cakupan rute **273 → 274** (satu pintu yang dulu "tak
+  terjangkau") · `audit:invarian` 26/26 · build web · Playwright e2e 6/6 ·
+  `flutter analyze` bersih · `flutter test` **564** (+7).
+
+---
+
 ## Pembagi nol dijawab NOL, dan nol itu dipercaya — server+web+mobile — 2026-08-26
 
 - **Kenapa**: sembilan putaran menyapu *siapa yang boleh*, *punya siapa*, *apa

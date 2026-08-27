@@ -62,6 +62,32 @@ export function ekorPernyataan(s: string, mulai: number, maks = 4000): string {
   return ekor;
 }
 
+/**
+ * Awal PERNYATAAN yang memuat posisi `i`.
+ *
+ * Versi pertama cuma mengambil 500 aksara ke belakang, dan itu bukan sekadar
+ * jelek dibaca: potongan tetangga ikut terbaca sebagai bagian kuerinya, jadi
+ * `isNull(...)` milik kueri SEBELUMNYA bisa memaafkan kueri yang telanjang.
+ *
+ * Versi kedua berhenti di `{` mana pun — dan itu MEMOTONG DAFTAR SELECT-nya
+ * sendiri: `db.select({ archivedAt: memberships.archivedAt }).from(memberships)`
+ * jadi terbaca telanjang padahal benderanya ada di kepala kueri. Kurungnya
+ * karena itu diseimbangkan MUNDUR: hanya pembuka yang TAK berpasangan yang
+ * jadi batas.
+ */
+export function awalPernyataan(s: string, i: number): number {
+  let d = 0;
+  for (let j = i - 1; j >= 0; j -= 1) {
+    const c = s[j];
+    if (c === ")" || c === "]" || c === "}") d += 1;
+    else if (c === "(" || c === "[" || c === "{") {
+      if (d === 0) return j + 1; // pembuka tak berpasangan = batas pernyataan
+      d -= 1;
+    } else if (d === 0 && c === ";") return j + 1;
+  }
+  return 0;
+}
+
 /** Akhir template literal yang dimulai TEPAT SESUDAH backtick pembukanya. */
 export function akhirTemplate(s: string, mulai: number): number {
   let j = mulai;

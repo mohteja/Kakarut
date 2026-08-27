@@ -192,9 +192,15 @@ export async function jalankanBackup(opts: {
 
     // Retensi: simpan N cadangan sukses terakhir, buang selebihnya (objek +
     // baris riwayat). Kegagalan retensi tak boleh menggagalkan cadangan.
-    await terapkanRetensi().catch((e) =>
-      console.warn("Retensi cadangan gagal:", e instanceof Error ? e.message : String(e)),
-    );
+    const retensi = await terapkanRetensi().catch((e) => {
+      console.warn("Retensi cadangan gagal:", e instanceof Error ? e.message : String(e));
+      return { dibuang: 0, gagal: 0 };
+    });
+    if (retensi.gagal > 0) {
+      console.warn(
+        `Retensi cadangan: ${retensi.gagal} objek gagal dihapus — barisnya dipertahankan untuk dicoba lagi.`,
+      );
+    }
 
     return {
       id: run.id,
@@ -212,6 +218,9 @@ export async function jalankanBackup(opts: {
       .update(backupRuns)
       .set({ status: "gagal", error: pesan, durasiMs: Date.now() - mulai })
       .where(eq(backupRuns.id, run.id))
+      // Kegagalan MENCATAT kegagalan tak boleh menimpa kegagalan aslinya:
+      // `pesan` sudah dipulangkan ke pemanggil di bawah, jadi tak ada yang
+      // hilang selain baris riwayatnya.
       .catch(() => {});
     return {
       id: run.id,
@@ -227,12 +236,17 @@ export async function jalankanBackup(opts: {
     // Transaksi snapshot yang masih menggantung (gagal di tengah ekspor)
     // di-ROLLBACK dulu — koneksi ini dipakai lagi untuk unlock di bawah.
     if (dalamTx) {
+      // ROLLBACK atas koneksi yang mungkin sudah rusak; kalau ia pun gagal,
+      // `lockClient.release()` di bawah membuang koneksinya dari pool — dan
+      // dengan begitu transaksi & lock-nya ikut lepas.
       await lockClient.query("ROLLBACK").catch(() => {});
     }
     // Lepas lock di KONEKSI YANG SAMA lalu kembalikan koneksinya ke pool.
     if (punyaLock) {
       await lockClient
         .query(`SELECT pg_advisory_unlock($1)`, [LOCK_KEY])
+        // Advisory lock SESI lepas sendiri saat koneksinya ditutup/dikembalikan
+        // rusak, jadi gagal unlock di sini tak meninggalkan lock menggantung.
         .catch(() => {});
     }
     lockClient.release();
@@ -247,8 +261,20 @@ function quoteIdent(name: string): string {
 /**
  * Buang cadangan sukses lama di luar `BACKUP_KEEP`: hapus objek storage lalu
  * baris riwayat. Baris 'gagal'/'berjalan' tidak dihitung sebagai cadangan.
+ *
+ * URUTANNYA MENGIKAT: baris riwayat adalah satu-satunya catatan yang MENAMAI
+ * objeknya. Bentuk lama menghapus objeknya dengan `.catch(() => {})` lalu
+ * membuang barisnya TANPA SYARAT dan menghitungnya sebagai dibuang — terukur
+ * lewat `POST /admin/sistem/backup/retensi` (2026-08-26): balasan
+ * `{"dibuang":1}` untuk objek yang tetap ada di disk, dan barisnya lenyap.
+ * Objeknya jadi berbayar selamanya tanpa satu pun rujukan: retensi berikutnya
+ * tak akan melihatnya, dan sapuan yatim hanya menyapu bucket unggahan.
+ *
+ * Sekarang: gagal hapus → barisnya DIPERTAHANKAN, tidak dihitung `dibuang`,
+ * dan retensi berikutnya mencobanya lagi — sembuh sendiri begitu storage pulih.
+ * Satu objek yang bandel tak boleh menghentikan pembuangan sisanya.
  */
-export async function terapkanRetensi(): Promise<number> {
+export async function terapkanRetensi(): Promise<{ dibuang: number; gagal: number }> {
   const storage = getCadanganStorage();
   const sukses = await db
     .select({ id: backupRuns.id, objectKey: backupRuns.objectKey })
@@ -257,12 +283,24 @@ export async function terapkanRetensi(): Promise<number> {
     .orderBy(desc(backupRuns.waktu));
   const berlebih = sukses.slice(env.BACKUP_KEEP);
   let dibuang = 0;
+  let gagal = 0;
   for (const r of berlebih) {
-    if (r.objectKey) await storage.hapus(r.objectKey).catch(() => {});
+    if (r.objectKey) {
+      try {
+        await storage.hapus(r.objectKey);
+      } catch (e) {
+        gagal++;
+        console.warn(
+          `Retensi: objek ${r.objectKey} gagal dihapus — baris riwayatnya dipertahankan:`,
+          e instanceof Error ? e.message : String(e),
+        );
+        continue;
+      }
+    }
     await db.delete(backupRuns).where(eq(backupRuns.id, r.id));
     dibuang++;
   }
-  return dibuang;
+  return { dibuang, gagal };
 }
 
 /** Waktu cadangan SUKSES terakhir (untuk penjadwal), atau null. */

@@ -1,7 +1,7 @@
-import { mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { ObjekUnggahan, StorageDriver } from "./storage";
-import { jalurDalam } from "./jalur-aman";
+import { hapusBerkasLokal, jalurDalam } from "./jalur-aman";
 
 /** Fallback development: simpan ke disk lokal, disajikan via /uploads/*. */
 export class LocalDriver implements StorageDriver {
@@ -44,6 +44,6 @@ export class LocalDriver implements StorageDriver {
   }
 
   async hapus(key: string): Promise<void> {
-    await unlink(jalurDalam(this.baseDir, key)).catch(() => {});
+    await hapusBerkasLokal(this.baseDir, key);
   }
 }

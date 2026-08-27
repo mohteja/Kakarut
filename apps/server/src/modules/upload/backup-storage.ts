@@ -1,6 +1,6 @@
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { jalurDalam } from "./jalur-aman";
+import { hapusBerkasLokal, jalurDalam } from "./jalur-aman";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -146,9 +146,7 @@ class LocalCadanganStorage implements CadanganStorage {
   }
 
   async hapus(key: string): Promise<void> {
-    await unlink(this.jalur(key)).catch(() => {
-      /* sudah tidak ada — idempoten */
-    });
+    await hapusBerkasLokal(this.baseDir, key);
   }
 }
 

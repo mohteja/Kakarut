@@ -62,7 +62,13 @@ function InfoCard({
 
 export function BackupPage() {
   const queryClient = useQueryClient();
-  const [pesan, setPesan] = useState<string | null>(null);
+  // Kotak kabar membawa NADA-nya sendiri. Bentuk lamanya `string | null` yang
+  // selalu dirender hijau — jadi "Gagal mengunduh cadangan." pun tampil sebagai
+  // kabar baik. Kegagalan yang dicetak hijau adalah kegagalan yang dipercaya
+  // sebagai keberhasilan.
+  const [pesan, setPesan] = useState<{ teks: string; gagal: boolean } | null>(null);
+  const kabar = (teks: string) => setPesan({ teks, gagal: false });
+  const kabarGagal = (teks: string) => setPesan({ teks, gagal: true });
   const { data, isLoading, error } = useQuery({
     queryKey: ["admin-backup"],
     queryFn: () => api<BackupStatusDto>("/admin/sistem/backup"),
@@ -72,11 +78,14 @@ export function BackupPage() {
   const backupSekarang = useMutation({
     mutationFn: () => api("/admin/sistem/backup", { method: "POST" }),
     onSuccess: () => {
-      setPesan("Cadangan berhasil dibuat.");
+      kabar("Cadangan berhasil dibuat.");
       queryClient.invalidateQueries({ queryKey: ["admin-backup"] });
     },
   });
 
+  // Penolakan 502 "berkas gagal dihapus" tak perlu cabang sendiri di sini:
+  // `<ErrorText error={hapus.error} />` di bawah sudah merender pesan server
+  // apa adanya, dengan warna merah. Diperiksa, bukan diasumsikan.
   const hapus = useMutation({
     mutationFn: (id: string) => api(`/admin/sistem/backup/${id}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-backup"] }),
@@ -89,7 +98,7 @@ export function BackupPage() {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!res.ok) {
-      setPesan("Gagal mengunduh cadangan.");
+      kabarGagal("Gagal mengunduh cadangan.");
       return;
     }
     const blob = await res.blob();
@@ -211,7 +220,13 @@ export function BackupPage() {
       )}
 
       {pesan && (
-        <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{pesan}</div>
+        <div
+          className={`mb-3 rounded-lg px-3 py-2 text-sm ${
+            pesan.gagal ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+          }`}
+        >
+          {pesan.teks}
+        </div>
       )}
       <ErrorText error={backupSekarang.error} />
       <ErrorText error={hapus.error} />

@@ -1,5 +1,12 @@
 import { butaKomentar } from "../../src/scripts/buta-komentar";
-import { badanPembantu, ekorPernyataan, sumberServer, tanpaSubkueri, templateSql } from "./sql-mentah";
+import {
+  awalPernyataan,
+  badanPembantu,
+  ekorPernyataan,
+  sumberServer,
+  tanpaSubkueri,
+  templateSql,
+} from "./sql-mentah";
 
 /**
  * BENDERA "BARIS INI TIDAK BERLAKU LAGI" — instrumen sapuan.
@@ -148,32 +155,6 @@ function berlaku(deks: Deklarasi[], nama: string, pos: number): Deklarasi | unde
     if (!pilih || d.pos > pilih.pos) pilih = d;
   }
   return pilih;
-}
-
-/**
- * Awal PERNYATAAN yang memuat posisi `i`.
- *
- * Versi pertama cuma mengambil 500 aksara ke belakang, dan itu bukan sekadar
- * jelek dibaca: potongan tetangga ikut terbaca sebagai bagian kuerinya, jadi
- * `isNull(...)` milik kueri SEBELUMNYA bisa memaafkan kueri yang telanjang.
- *
- * Versi kedua berhenti di `{` mana pun — dan itu MEMOTONG DAFTAR SELECT-nya
- * sendiri: `db.select({ archivedAt: memberships.archivedAt }).from(memberships)`
- * jadi terbaca telanjang padahal benderanya ada di kepala kueri. Kurungnya
- * karena itu diseimbangkan MUNDUR: hanya pembuka yang TAK berpasangan yang
- * jadi batas.
- */
-function awalPernyataan(s: string, i: number): number {
-  let d = 0;
-  for (let j = i - 1; j >= 0; j -= 1) {
-    const c = s[j];
-    if (c === ")" || c === "]" || c === "}") d += 1;
-    else if (c === "(" || c === "[" || c === "{") {
-      if (d === 0) return j + 1; // pembuka tak berpasangan = batas pernyataan
-      d -= 1;
-    } else if (d === 0 && c === ";") return j + 1;
-  }
-  return 0;
 }
 
 function kelasDrizzle(

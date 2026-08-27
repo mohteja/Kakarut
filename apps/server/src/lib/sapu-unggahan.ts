@@ -83,6 +83,14 @@ export interface HasilSapuan {
   yatim: number;
   dihapus: number;
   dirujuk: number;
+  /**
+   * Yatim lewat-tenggang yang GAGAL dihapus. Dipisahkan dari `dihapus` karena
+   * hitungan yang memuat kegagalan bukan sekadar kurang teliti — ia melaporkan
+   * pekerjaan yang tak dikerjakan. Terukur sebelum pemisahan ini (2026-08-26):
+   * `POST /admin/sistem/sapu-unggahan` membalas `dihapus: 3` sementara hanya
+   * DUA berkas benar-benar hilang; yang ketiga masih dilayani HTTP 200.
+   */
+  gagalHapus: number;
 }
 
 /**
@@ -121,6 +129,7 @@ export async function sapuUnggahanYatim(opts?: {
       const batas = sekarang.getTime() - TENGGANG_HARI * 86_400_000;
       let yatim = 0;
       let dihapus = 0;
+      let gagalHapus = 0;
       for (const o of objek) {
         if (dirujuk.has(namaBasis(o.key))) continue;
         yatim++;
@@ -128,12 +137,27 @@ export async function sapuUnggahanYatim(opts?: {
         // daripada berkas hidup terhapus karena metadata gagal terbaca.
         if (o.waktu === null || o.waktu.getTime() > batas) continue;
         if (!opts?.hanyaHitung) {
-          await storage.hapus(o.key);
-          dihapus++;
+          // Satu berkas yang bandel (izin, berkas terkunci, disk baca-saja) tak
+          // boleh menghentikan pembersihan ribuan lainnya — tapi ia juga tak
+          // boleh ikut terhitung sebagai terhapus. Alasannya ditulis, bukan
+          // ditelan: driver lokal DULU menelannya sendiri dan sapuan ini
+          // menghitung kegagalan itu sebagai keberhasilan.
+          try {
+            await storage.hapus(o.key);
+            dihapus++;
+          } catch (e) {
+            gagalHapus++;
+            console.warn(
+              `Sapuan unggahan: ${o.key} gagal dihapus:`,
+              e instanceof Error ? e.message : String(e),
+            );
+          }
         }
       }
-      return { diperiksa: objek.length, yatim, dihapus, dirujuk: dirujuk.size };
+      return { diperiksa: objek.length, yatim, dihapus, dirujuk: dirujuk.size, gagalHapus };
     } finally {
+      // Advisory lock SESI lepas sendiri begitu koneksinya dilepas di `finally`
+      // luar, jadi gagal unlock di sini tak meninggalkan sapuan terkunci.
       await lockClient.query(`SELECT pg_advisory_unlock($1)`, [LOCK_KEY]).catch(() => {});
     }
   } finally {
@@ -158,8 +182,11 @@ export function jadwalkanSapuUnggahan(jamJalan: number): void {
     try {
       const h = await sapuUnggahanYatim();
       sapuTerakhirTanggal = tanggal;
-      if (h.dihapus > 0) {
-        console.log(`Sapuan unggahan: ${h.dihapus} berkas yatim dihapus (${h.diperiksa} diperiksa).`);
+      if (h.dihapus > 0 || h.gagalHapus > 0) {
+        const gagal = h.gagalHapus > 0 ? `, ${h.gagalHapus} GAGAL dihapus` : "";
+        console.log(
+          `Sapuan unggahan: ${h.dihapus} berkas yatim dihapus${gagal} (${h.diperiksa} diperiksa).`,
+        );
       }
     } catch {
       // advisory lock kalah / storage sedang bermasalah — coba lagi tick berikutnya
