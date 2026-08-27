@@ -4,6 +4,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { SEPULUH_TAHUN, zStempelRencana } from "../../lib/waktu-kejadian";
 import { db } from "../../db/client";
 import { bentrokUnikPada } from "../../lib/pg-galat";
 import { branches, companies, memberships, users } from "../../db/schema";
@@ -48,7 +49,13 @@ const CreateTenantBody = z.object({
 const PatchTenantBody = z.object({
   nama: z.string().trim().min(1).optional(),
   plan: PLAN.optional(),
-  plan_expires_at: z.string().datetime().nullish(),
+  /*
+   * Masa berlaku paket = RENCANA milik super admin, jadi ia MEMANG menunjuk
+   * ke depan — `null` sudah berarti "tanpa kedaluwarsa", sehingga tak ada
+   * alasan sah untuk tahun 9999. Langit-langitnya dipasang, bukan dibiarkan
+   * bebas lalu didaftarkan sebagai pengecualian.
+   */
+  plan_expires_at: zStempelRencana(SEPULUH_TAHUN).nullish(),
   is_active: z.boolean().optional(),
 }).strict();
 

@@ -56,13 +56,32 @@ const BELUM_TERBUKTI = new Map<string, string>([
   ],
 ]);
 
-/** Pintu yang mengubah baris tanpa menyegarkan `updatedBy`, beserta alasannya. */
+/**
+ * Pintu yang mengubah baris tanpa menyegarkan `updatedBy`, beserta alasannya.
+ *
+ * Dikunci per BERKAS + kolom yang diubahnya, bukan per NOMOR BARIS. Versi
+ * pertama memakai nomor baris dan langsung membusuk: menambahkan satu komentar
+ * di atas situsnya sudah cukup membuat entri yang benar tampak asing. Kunci
+ * yang menyebut APA yang diubah bertahan terhadap pergeseran baris dan tetap
+ * menunjuk situs yang sama.
+ */
 const TAK_MENYEGARKAN = new Map<string, string>([
-  ["modules/penerimaan/routes.ts:642", "hanya memindahkan STATUS ke 'dikonfirmasi'; pelakunya tercatat di `confirmedBy` yang ditulis pernyataan yang sama"],
-  ["modules/penerimaan/routes.ts:881", "hanya status + `alasanTolak`; pelakunya `confirmedBy`"],
-  ["modules/produksi/routes.ts:1272", "hanya status; pelakunya `confirmedBy`"],
-  ["modules/produksi/routes.ts:2132", "hanya status; pelakunya `confirmedBy`"],
-  ["modules/penyimpanan/autoFile.ts:44", "pengarsipan rak OTOMATIS saat barang tiba — tak ada manusia yang bisa disebut, dan menyebut penerima sebagai 'pengubah' justru menambah fakta yang salah"],
+  [
+    "modules/penerimaan/routes.ts confirmedAt,confirmedBy,status,waktu",
+    "hanya memindahkan STATUS ke 'dikonfirmasi'; pelakunya tercatat di `confirmedBy` yang ditulis pernyataan yang sama",
+  ],
+  [
+    "modules/penerimaan/routes.ts alasanTolak,confirmedAt,confirmedBy,status,waktu",
+    "hanya status + `alasanTolak`; pelakunya `confirmedBy`",
+  ],
+  [
+    "modules/produksi/routes.ts confirmedAt,confirmedBy,status,waktu",
+    "hanya status; pelakunya `confirmedBy` (dua situs: jalur produksi & jalur beli)",
+  ],
+  [
+    "modules/penyimpanan/autoFile.ts storageLocationId",
+    "pengarsipan rak OTOMATIS saat barang tiba — tak ada manusia yang bisa disebut, dan menyebut penerima sebagai 'pengubah' justru menambah fakta yang salah",
+  ],
 ]);
 
 describe("pelaku: dari token, bukan dari permintaan", () => {
@@ -148,9 +167,9 @@ describe("perubahan yang MENYEGARKAN pelakunya", () => {
   });
 
   it("sisanya terdaftar beralasan — dan daftarnya ditagih dua arah", () => {
-    const kunci = (x: (typeof tanpa)[number]) => `${x.berkas}:${x.baris}`;
+    const kunci = (x: (typeof tanpa)[number]) => `${x.berkas} ${x.diubah.join(",")}`;
     const asing = tanpa.filter((x) => !TAK_MENYEGARKAN.has(kunci(x))).map(kunci);
-    expect(asing, `belum diadjudikasi:\n${asing.join("\n")}`).toEqual([]);
+    expect(asing, `belum diadjudikasi:\n${[...new Set(asing)].join("\n")}`).toEqual([]);
     const ada = new Set(tanpa.map(kunci));
     const usang = [...TAK_MENYEGARKAN.keys()].filter((k) => !ada.has(k));
     expect(usang, `entri sudah menyegarkan pelakunya — hapus: ${usang.join(", ")}`).toEqual([]);

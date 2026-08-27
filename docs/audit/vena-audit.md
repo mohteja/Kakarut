@@ -50,6 +50,94 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## KAPAN: ruas keempat, dan aturan yang hidup di satu pintu saja — server — 2026-08-27
+
+- **Kenapa vena ini ada**: tiga ruas sudah punya gerbang — `companyId`
+  (putaran 13 & 14), `branchId` (16), `userId` (17). Yang keempat menentukan di
+  PERIODE mana sebuah baris hidup, dan ia punya bentuk paling telanjang dari
+  tanda tangan sesi ini: **aturannya sudah dipikirkan, ditulis, dan
+  dikomentari — di SATU pintu.** `modules/sync/routes.ts` menolak waktu
+  kejadian yang tak masuk akal dengan angka dan alasan (`SKEW_MENIT` 5,
+  `MAKS_UMUR_HARI` 30/7, *"mengubah stok jauh ke belakang justru berbahaya"*);
+  `MAKS_UMUR_HARI`, `SKEW_MENIT`, dan kalimat "waktu kejadian di masa depan"
+  **tak muncul di satu berkas lain pun**, sementara istilah "waktu kejadian"
+  dipakai empat berkas lain yang MENGONSUMSInya tanpa membatasinya.
+
+  Dan `verify-api` sendiri sudah menuliskan pengakuannya, bertahun jauh sebelum
+  putaran ini: *"tanggal masa depan ditolak? tidak — hanya format divalidasi"*.
+
+- **Populasi**: 59 tabel → **49 ber-kolom waktu**, **102 kolom**, **150
+  penulisan** (105 dari jam server). Yang datang dari KLIEN: **10 medan**, dan
+  **tepat 1** yang benar-benar dibatasi. Sesudah: `KEJADIAN` 3 · `RENCANA` 5 ·
+  `TERDAFTAR` 2 · **`TELANJANG` 9 → 0**.
+
+- **TEMUAN — tiga akibat, diukur lewat HTTP + DB sebelum satu baris diubah**:
+
+  | | sebelum |
+  |---|---|
+  | `POST /stok/awal` `tanggal:"2099-01-01"` | **201**. Layar Stok melaporkan saldo **500**; kartu stok hari yang sama melaporkan **saldo_awal 0, saldo_akhir 0** |
+  | `PATCH faktur` `prod_date:"2099-06-01"` + `exp:"1900-01-01"` | **200**. Lot yang tiba hari ini tercatat diproduksi 2099 dan kedaluwarsa 1900 |
+  | `GET /pesanan?tanggal=bukan-tanggal` | **500** "Terjadi kesalahan pada server" |
+
+  Yang pertama adalah yang paling tenang: **dua tampilan stok yang sama
+  berselisih seluruh saldonya, dan tak ada yang memberi tahu siapa pun** —
+  baseline dicari `opname_date < ${dari}`, dan tahun 2099 tak pernah cocok.
+  Sesudah: ketiganya **400 bernama** (`"tanggal: Tanggal kejadian tidak boleh
+  di masa depan"`), dan jalur sah tetap 201/200 dengan kedua tampilan stok
+  yang kini SEPAKAT.
+
+- **Perbaikan — rumah untuk aturan yang sudah ada**:
+  `lib/waktu-kejadian.ts`. `/sync` **memakainya**, bukan menyimpan salinan.
+  Dua bentuk, sebab ada DUA jenis waktu dan menyamakannya akan salah:
+  **KEJADIAN** (sudah terjadi — tak boleh maju) dan **RENCANA** (berlaku ke
+  depan — justru harus boleh maju, yang dijaga langit-langitnya).
+
+- **Dua kali uji PASANGAN menangkap batas yang KETERLALUAN — dan keduanya
+  bukan hasil pembacaan ulang melainkan gerbang yang menyala**:
+  1. `stok/awal` dibatasi setahun ke belakang → §"stok awal" yang sudah lama
+     menembak saldo pembuka bertanggal **2020-01-01** jadi merah. Sisi lampau
+     dilonggarkan jadi sepuluh tahun; yang terukur rusak sisi masa depannya,
+     dan mengetatkan sisi yang tak rusak hanya memutus alur nyata.
+  2. Cuti dibatasi setahun ke depan → §212 yang mengajukan cuti bertanggal
+     **2027** jadi merah. Langit-langitnya dinaikkan; yang dijaga "1970" dan
+     "9999", bukan kebijakan cuti.
+
+- **Batas yang ditulis**: saringan ini berjalan di **Zod — sebelum
+  `company_id`, apalagi zona waktunya, diketahui**. Zona nyata membentang
+  UTC−12..+14, jadi batasnya diberi **slack satu hari** di kedua ujung, dan
+  penyimpangan satu hari memang lolos. Yang dijaga di sini "2099" dan "1900",
+  bukan "besok". Gerbang `batas-hari-zona` menuntut alasan untuk jembatan
+  UTC-nya, dan alasan itu ditulis di daftar `DIIZINKAN`-nya — bukan
+  didiamkan.
+
+- **Dua medan tetap TERDAFTAR beralasan, dan alasannya dipaku ke kode**:
+  `pesanan.tanggal` (SARINGAN papan, bukan nilai tersimpan — melihat papan
+  kemarin itu wajar) dan `sync.waktu` (dibatasi di HANDLER-nya oleh
+  `pastikanWaktuKejadian`, sebab batasnya bergantung `tipe` perintah yang tak
+  terlihat dari skema medannya — dan uji memeriksa panggilan itu masih ada).
+
+- **Pemindahan rumah TIDAK melonggarkan apa pun, dan itu dipaku dua kali**:
+  angka 5 menit / 30 hari / 7 hari diuji langsung, dan §271 memaku **KALIMAT**
+  penolakan `/sync` pada balasan §99 yang sudah ada — kontrak ponsel
+  membacanya, dan memindahkan aturan adalah tempat paling mudah untuk
+  diam-diam mengubah katanya.
+
+- **Satu pin yang terbukti rapuh, diperbaiki sekalian**: daftar adjudikasi
+  putaran lalu (`TAK_MENYEGARKAN`) dikunci per NOMOR BARIS, dan menambahkan
+  satu komentar di atas situsnya sudah cukup membuat entri yang benar tampak
+  asing. Kini dikunci per **berkas + kolom yang diubahnya** — kunci yang
+  menyebut APA, bukan DI MANA.
+
+- **Gerbang**: `typecheck` bersih (server+web) · `npm test` **2.471** (208
+  berkas) · `verify-api` **3.234 lolos, 0 gagal** (§271, 14 asersi) · rekaman
+  cakupan rute **identik, 274** · `audit:invarian` 26/26 · build web ✔ ·
+  Playwright e2e **6/6**. Satu kesalahan proses tercatat: e2e sempat merah
+  seluruhnya karena server dijalankan SEBELUM build web terakhir — `index.html`
+  lama menunjuk aset yang sudah berganti hash (404). Urutan yang benar sudah
+  tertulis di ledger ini dan tetap terlanggar; bukan kode, tapi dicatat.
+
+---
+
 ## SIAPA yang melakukannya: ruas ketiga, dan `diubah_oleh` yang menyebut orang keliru — server — 2026-08-27
 
 - **Kenapa vena ini ada**: tiga kolom menentukan sebuah baris milik siapa dan

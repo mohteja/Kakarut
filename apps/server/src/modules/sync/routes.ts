@@ -16,18 +16,18 @@ import { bukaShift } from "../shift/routes";
 import { pangkasLedgerSync } from "./idempoten";
 import { SaleBody } from "../penjualan/routes";
 import { catatAbsen, cekRadius, ClockBody, SelfBody } from "../absensi/routes";
+import { pastikanWaktuKejadian, SKEW_MENIT } from "../../lib/waktu-kejadian";
 
 /** Batas antrean & usia perintah (disepakati dgn tim mobile). */
 const MAKS_PERINTAH = 100;
-/**
- * Usia maksimal perintah, per tipe. `penjualan` sengaja jauh lebih longgar:
- * uangnya sudah diterima kasir, jadi menolak antrean lama = transaksi hilang
- * permanen. Perangkat cadangan / outlet event bisa offline berminggu-minggu.
- * Tipe lain tetap 7 hari — mengubah stok jauh ke belakang justru berbahaya.
+/*
+ * Batas usia & skew perintah PINDAH RUMAH ke `lib/waktu-kejadian.ts` — bukan
+ * disalin. Aturannya sudah lengkap dan beralasan di sini, dan justru itu
+ * masalahnya: ia hidup di SATU pintu sementara sembilan medan waktu lain yang
+ * datang dari klien cuma memvalidasi bentuknya. Angkanya tak berubah, dan
+ * `waktu-klien.test.ts` memakunya supaya pemindahan ini tak diam-diam
+ * melonggarkan apa pun.
  */
-const MAKS_UMUR_HARI: Record<string, number> = { penjualan: 30 };
-const MAKS_UMUR_HARI_DEFAULT = 7;
-const SKEW_MENIT = 5;
 /**
  * Toleransi transaksi susulan: sale yang `waktu`-nya jatuh SETELAH sebuah shift
  * ditutup masih dibukukan ke shift itu selama tidak lebih dari sekian jam dan
@@ -781,15 +781,7 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
     let simpanKode: number;
     let simpanHasil: unknown;
     try {
-      const t = waktu.getTime();
-      if (Number.isNaN(t)) throw new HTTPException(400, { message: "waktu tidak valid" });
-      if (t > sekarang + SKEW_MENIT * 60_000) {
-        throw new HTTPException(400, { message: "waktu kejadian di masa depan" });
-      }
-      const maksUmur = MAKS_UMUR_HARI[cmd.tipe] ?? MAKS_UMUR_HARI_DEFAULT;
-      if (t < sekarang - maksUmur * 86_400_000) {
-        throw new HTTPException(400, { message: `waktu kejadian lebih dari ${maksUmur} hari lalu` });
-      }
+      pastikanWaktuKejadian(waktu.getTime(), cmd.tipe, sekarang);
       const exec = EKSEKUTOR[cmd.tipe];
       const { kode, data } = await exec({ auth, authHeader }, cmd.payload, waktu);
       if (kode >= 400) {

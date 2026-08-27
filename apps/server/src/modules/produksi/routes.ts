@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
+import { SEPULUH_TAHUN, SETAHUN, zTanggalKejadian, zTanggalRencana } from "../../lib/waktu-kejadian";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import {
@@ -117,7 +118,13 @@ const FakturEditBody = z.object({
   storage_location_id: z.string().uuid().nullish(),
   /** ganti pelaksana karyawan (khusus jalur produksi); null = kosongkan */
   worker_id: z.string().uuid().nullish(),
-  prod_date: zTanggal
+  /*
+   * Tanggal PRODUKSI/BELANJA baris ini — kejadian, jadi tak boleh maju.
+   * Terukur: `prod_date: "2099-06-01"` diterima 200, dan saldo menjumlah
+   * `pr.prod_date < ${dari}` — stok masuknya tak pernah terhitung di jendela
+   * mana pun sampai tahun itu tiba.
+   */
+  prod_date: zTanggalKejadian(SETAHUN)
     .optional(),
 }).strict();
 
@@ -172,7 +179,13 @@ const TahapBody = z.object({
          * masa simpan bahan (tanggal masuk + masa_simpan_hari); diabaikan
          * untuk target tahap lain.
          */
-        exp: zTanggal
+        /*
+         * Kedaluwarsa = RENCANA: ia memang menunjuk masa depan. Yang dijaga
+         * kedua ujungnya — terukur `exp: "1900-01-01"` diterima, membuat lot
+         * yang baru tiba kedaluwarsa seketika; tanpa batas atas tak ada yang
+         * menghalangi tahun 9999.
+         */
+        exp: zTanggalRencana(SEPULUH_TAHUN, SETAHUN)
           .nullish(),
       }),
     )

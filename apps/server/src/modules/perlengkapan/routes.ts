@@ -6,6 +6,7 @@
  * owner/admin mengelola item, stok masuk, koreksi, aturan, dan belanja.
  */
 import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
+import { SETAHUN, zTanggalKejadian, zTanggalRencana } from "../../lib/waktu-kejadian";
 import { keSkalaKolom, SKALA_QTY_PERLENGKAPAN } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
@@ -199,7 +200,8 @@ const MasukBody = z.object({
   qty: z.number().positive().max(BATAS_QTY_STOK),
   total_harga: z.number().min(0).max(BATAS_UANG).nullish(),
   catatan: z.string().max(300).nullish(),
-  tanggal: zTanggal.optional(),
+  /** Tanggal mutasi = kejadian: mundur boleh (nota menyusul), maju tidak. */
+  tanggal: zTanggalKejadian(SETAHUN).optional(),
 }).strict();
 
 const PakaiBody = z.object({
@@ -230,7 +232,8 @@ const AturanBody = z.object({
   qty: z.number().min(0).max(BATAS_QTY_STOK).default(0),
   per_hari: z.number().int().min(1).max(365).default(1),
   aktif: z.boolean().default(true),
-  mulai: zTanggal.optional(),
+  /** Mulai berlakunya aturan = RENCANA: justru boleh menunjuk ke depan. */
+  mulai: zTanggalRencana(SETAHUN, SETAHUN).optional(),
 }).strict();
 
 const OpnameBody = z.object({

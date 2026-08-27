@@ -1,4 +1,5 @@
 import { tanggalQuery, tanggalSah } from "../../lib/tanggal-query";
+import { SEPULUH_TAHUN, SETAHUN, zTanggalRencana } from "../../lib/waktu-kejadian";
 import { zValidator } from "../../lib/validator";
 import { aliasedTable, and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -40,8 +41,19 @@ export function jumlahHari(mulai: string, selesai: string): number {
 const BuatBody = z.object({
   // `jenis` SENGAJA tidak diterima dari klien — selalu diturunkan dari kategori.
   kategori: z.enum(KODE_KATEGORI_PENGAJUAN),
-  tanggal_mulai: z.string().refine(tanggalValid, "Tanggal mulai tidak valid"),
-  tanggal_selesai: z.string().refine(tanggalValid, "Tanggal selesai tidak valid"),
+  /*
+   * Cuti = RENCANA: ia memang menunjuk ke depan, jadi aturan "kejadian tak
+   * terjadi di masa depan" TIDAK berlaku di sini. Yang dijaga langit-langitnya
+   * di kedua sisi — rentangnya sudah dibatasi `MAKS_HARI`, tapi POSISINYA
+   * tidak: pengajuan cuti bertanggal 1970 atau 2099 lolos utuh.
+   *
+   * Langit-langit DEPAN sengaja jauh (sepuluh tahun), dan itu bukan tebakan:
+   * §212 di `verify-api` sudah lama mengajukan cuti bertanggal **2027** —
+   * lebih dari setahun ke depan — sebagai jalur yang sah, dan batas setahun
+   * memutusnya. Yang dijaga di sini "1970" dan "9999", bukan kebijakan cuti.
+   */
+  tanggal_mulai: zTanggalRencana(SEPULUH_TAHUN, SETAHUN),
+  tanggal_selesai: zTanggalRencana(SEPULUH_TAHUN, SETAHUN),
   alasan: z.string().trim().max(500).nullish(),
   lampiran_url: z.string().trim().max(500).nullish(),
 }).strict();

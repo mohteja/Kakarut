@@ -2364,7 +2364,9 @@ cek "stok awal tanggal lampau: saldo jadi 500 (bahan baru tanpa riwayat)" "abs(V
   "$(api "$OWNER" GET /stok | jq --arg i "$SA_ING2" '[.[] | select(.ingredient_id==$i)][0].saldo')"
 cek "GET stok awal: tanggal terkunci == 2020-01-01" "V == 1" \
   "$(api "$OWNER" GET /stok/awal | jq --arg i "$SA_ING2" '([.items[] | select(.ingredient_id==$i)][0].tanggal == "2020-01-01") | if . then 1 else 0 end')"
-# tanggal masa depan ditolak? tidak — hanya format divalidasi; format salah → 400
+# Dulu berbunyi: "tanggal masa depan ditolak? tidak — hanya format divalidasi".
+# Sekarang ditolak (§271); sisi LAMPAU sengaja tetap longgar supaya saldo
+# pembuka bertanggal 2020 di atas tetap jalur yang sah. Format salah → 400.
 cek "stok awal format tanggal salah → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"items\":[{\"ingredient_id\":\"$SA_ING\",\"qty\":1}],\"tanggal\":\"01-01-2020\"}")"
 cek "stok awal oleh KASIR ditolak (403)" "V == 403" \
@@ -14983,6 +14985,78 @@ cek "…dan ia menyebut SESEORANG, bukan kosong" "V == 1" \
 # PASANGAN: `diterima_oleh` (confirmedBy) tetap fakta tersendiri, tak ditelan.
 cek "PASANGAN: diterima_oleh tetap terisi dan tetap fakta sendiri" "V == 1" \
   "$(baris270 '(.diterima_oleh != null) | if . then 1 else 0 end')"
+
+echo "── §271 KAPAN: medan waktu dari klien punya batas ──"
+#
+# Aturan batas waktu sudah ada sejak lama, lengkap dengan angka dan alasannya —
+# dan ia hidup di SATU pintu: /sync (skew 5 menit, usia 30/7 hari). Sembilan
+# medan waktu lain yang datang dari klien hanya memvalidasi BENTUKNYA. Uji di
+# §"stok awal" di atas bahkan menuliskan pengakuannya: "tanggal masa depan
+# ditolak? tidak".
+#
+# Terukur sebelum perbaikan (2026-08-27, HTTP + DB sungguhan):
+#   POST /stok/awal tanggal=2099-01-01 -> 201. Layar Stok melaporkan saldo 500;
+#     kartu stok hari yang sama melaporkan saldo_awal 0 / saldo_akhir 0. Dua
+#     tampilan stok yang sama berselisih seluruh saldonya, diam-diam — baseline
+#     dicari `opname_date < dari` dan tahun 2099 tak pernah cocok.
+#   PATCH faktur prod_date=2099-06-01 + exp=1900-01-01 -> 200. Lot yang tiba
+#     hari ini tercatat diproduksi 2099 dan kedaluwarsa 1900.
+#   GET /pesanan?tanggal=bukan-tanggal -> 500 "Terjadi kesalahan pada server".
+# Token `$KASIR` dari kepala skrip sudah BASI di ekor (token_version akun itu
+# naik beberapa kali sepanjang jalannya) — login ulang, bukan membaca 401
+# sebagai "penjaga bekerja". Pelajaran yang sama sudah dibayar §269/§270.
+KASIR271=$(login "$KASIR_EMAIL" "$KASIR_PASS")
+cek "premis §271: kasir bisa login ulang" "V == 1" \
+  "$([ -n "$KASIR271" ] && [ "$KASIR271" != "null" ] && echo 1 || echo 0)"
+ING271=$(api "$OWNER" GET /bahan | jq -r '[.[] | select(.pengadaan=="beli" and .track_stok==true)][0].id')
+cek "premis §271: bahan uji ada" "V == 1" \
+  "$([ -n "$ING271" ] && [ "$ING271" != "null" ] && echo 1 || echo 0)"
+HARI271=$(date -u +%Y-%m-%d)
+
+cek "stok awal bertanggal MASA DEPAN → 400" "V == 400" \
+  "$(curl -s -o /tmp/v271.json -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tanggal\":\"2099-01-01\",\"items\":[{\"ingredient_id\":\"$ING271\",\"qty\":5}]}")"
+cek "…dan galatnya MENYEBUT medannya, bukan 500 telanjang" "V == 1" \
+  "$(jq -r '(.error | test("tanggal") and test("masa depan")) | if . then 1 else 0 end' /tmp/v271.json)"
+cek "stok awal bertanggal 1900 → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tanggal\":\"1900-01-01\",\"items\":[{\"ingredient_id\":\"$ING271\",\"qty\":5}]}")"
+# PASANGAN: sisi lampau sengaja longgar — saldo pembuka bertanggal 2020 di
+# seksi stok awal di atas TETAP 201, dan hari ini tentu saja juga.
+cek "PASANGAN: stok awal HARI INI tetap 201" "V == 201" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/stok/awal" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"tanggal\":\"$HARI271\",\"items\":[{\"ingredient_id\":\"$ING271\",\"qty\":5}]}")"
+
+cek "papan pesanan tanggal NGAWUR → 400 bernama, bukan 500" "V == 400" \
+  "$(curl -s -o /tmp/v271b.json -w '%{http_code}' "$BASE/api/pesanan?tanggal=bukan-tanggal" -H "Authorization: Bearer $KASIR271")"
+cek "…dan pesannya menyebut bentuk yang diminta" "V == 1" \
+  "$(jq -r '(.error | test("YYYY-MM-DD")) | if . then 1 else 0 end' /tmp/v271b.json)"
+cek "PASANGAN: papan pesanan tanggal WAJAR tetap 200" "V == 200" \
+  "$(status_code "$KASIR271" GET "/pesanan?tanggal=$HARI271")"
+
+FK271=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$ING271\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":10000}]}")
+FK271_ID=$(echo "$FK271" | jq -r '.faktur_id // ""')
+R271=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$FK271_ID" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "premis §271: faktur uji terbentuk" "V == 1" \
+  "$([ -n "$R271" ] && [ "$R271" != "null" ] && echo 1 || echo 0)"
+cek "prod_date MASA DEPAN → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/pembelian/faktur/$FK271_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"password\":\"$OWNER_PASS\",\"prod_date\":\"2099-06-01\"}")"
+cek "PASANGAN: prod_date HARI INI tetap 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/pembelian/faktur/$FK271_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"password\":\"$OWNER_PASS\",\"prod_date\":\"$HARI271\"}")"
+api "$OWNER" POST "/pembelian/tahap/$FK271_ID" '{"ke":"dikerjakan","dana_cair":10000}' > /dev/null
+cek "exp tahun 1900 → 400" "V == 400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK271_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$R271\",\"qty\":10,\"exp\":\"1900-01-01\"}]}")"
+# PASANGAN yang PALING penting: `exp` adalah RENCANA — ia justru HARUS boleh
+# menunjuk ke depan. Memaksa aturan "kejadian" ke sana akan merusak fitur yang
+# benar, dan hanya pasangan seperti ini yang menangkapnya.
+cek "PASANGAN: exp SETAHUN KE DEPAN tetap 200 (rencana, bukan kejadian)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/pembelian/tahap/$FK271_ID" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"ke\":\"menunggu\",\"items\":[{\"id\":\"$R271\",\"qty\":10,\"exp\":\"$(date -u -d '300 days' +%Y-%m-%d)\"}]}")"
+
+# PASANGAN untuk pemindahan rumah: /sync tetap memakai aturan yang SAMA,
+# dengan KALIMAT yang sama — kontrak ponsel membacanya, dan memindahkan aturan
+# ke rumah bersama adalah tempat paling mudah untuk diam-diam mengubah katanya.
+#
+# Dipakai ulang balasan §99 yang sudah menembaknya (`$RES_T`), bukan permintaan
+# baru: seksi itu sudah memaku KODE-nya (400), yang belum dipaku KATANYA.
+cek "PASANGAN: kalimat penolakan /sync tak berubah oleh pemindahan rumah" "V == 1" \
+  "$(echo "$RES_T" | jq '(((.hasil[0].error // "") | test("masa depan")) and ((.hasil[1].error // "") | test("hari lalu"))) | if . then 1 else 0 end')"
 
 if [ "$FAIL" -gt 0 ]; then
   echo

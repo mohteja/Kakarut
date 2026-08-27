@@ -25,11 +25,20 @@ const IDEMPOTEN = butaKomentar(
 const RUTE = butaKomentar(
   readFileSync(fileURLToPath(new URL("../src/modules/sync/routes.ts", import.meta.url)), "utf8"),
 );
+/**
+ * Batas usia perintah PINDAH RUMAH ke `lib/waktu-kejadian.ts` saat aturan
+ * batas waktu disatukan — dulu ia hidup hanya di `/sync` sementara sembilan
+ * medan waktu lain dari klien tak dibatasi sama sekali. Yang dipaku uji ini
+ * tetap ANGKANYA, bukan alamatnya.
+ */
+const BATAS_WAKTU = butaKomentar(
+  readFileSync(fileURLToPath(new URL("../src/lib/waktu-kejadian.ts", import.meta.url)), "utf8"),
+);
 
 describe("retensi ledger sinkron", () => {
   it("PREMIS + rasio: retensi ≥ 2× usia perintah terpanjang", () => {
-    const m = RUTE.match(/MAKS_UMUR_HARI[^=]*=\s*\{\s*penjualan:\s*(\d+)/);
-    expect(m, "usia maksimum penjualan tak terbaca dari sync/routes.ts").not.toBeNull();
+    const m = BATAS_WAKTU.match(/MAKS_UMUR_HARI[^=]*=\s*\{\s*penjualan:\s*(\d+)/);
+    expect(m, "usia maksimum penjualan tak terbaca dari lib/waktu-kejadian.ts").not.toBeNull();
     const maksUmur = Number(m![1]);
     expect(maksUmur).toBeGreaterThan(0);
     expect(

@@ -1,4 +1,5 @@
 import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
+import { SEPULUH_TAHUN, zTanggalKejadian } from "../../lib/waktu-kejadian";
 import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { randomUUID } from "node:crypto";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
@@ -97,7 +98,20 @@ const StokAwalBody = OpnameBody.omit({ client_ref: true, device_id: true }).exte
    * ditambahkan BERSAMA penanganannya — bukan mendahului.
    */
   /** tanggal berlaku saldo pembuka (YYYY-MM-DD, zona perusahaan). Default hari ini. */
-  tanggal: zTanggal
+  /*
+   * Saldo pembuka boleh MUNDUR jauh — onboarding wajar mencatat "stok awal per
+   * 1 Januari" — tapi tak boleh MAJU: hitungan stok tak pernah terjadi besok.
+   * Dan itu yang terukur rusak: `tanggal: "2099-01-01"` diterima 201, layar
+   * Stok melaporkan saldo 500 sementara kartu stok hari yang sama melaporkan
+   * 0 — baseline dicari `opname_date < ${dari}` dan tahun 2099 tak pernah
+   * cocok. Dua tampilan stok yang sama berselisih seluruh saldonya, diam-diam.
+   *
+   * Sisi LAMPAU-nya sengaja longgar (sepuluh tahun), dan itu bukan tebakan:
+   * `verify-api` sendiri sudah lama menembak saldo pembuka bertanggal
+   * **2020-01-01** sebagai jalur yang sah. Yang terukur rusak sisi masa
+   * depannya; mengetatkan sisi yang tak rusak hanya akan memutus alur nyata.
+   */
+  tanggal: zTanggalKejadian(SEPULUH_TAHUN)
     .optional(),
 });
 
