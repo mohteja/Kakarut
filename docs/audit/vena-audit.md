@@ -50,6 +50,158 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## `asData`: pintu keluar yang membuang galat — mobile — 2026-08-27
+
+- **Kenapa vena ini ada**: tiga putaran terakhir menutup satu kelas di web —
+  bacaan yang gagal menyamar jadi "tidak ada", sebagai kalimat, sebagai angka
+  & lencana, lalu sebagai formulir kosong yang bisa disimpan. Permukaan
+  ketiga, **aplikasi ponsel**, belum pernah disapu instrumen sesi ini sama
+  sekali. Kelasnya ada di sana, dengan bentuk yang khas Dart.
+
+- **Bentuknya, dan kenapa ia berbeda dari saudaranya di web**: aplikasi ini
+  memakai idiom yang **terstruktur**. `AsyncValue.when(data:, loading:,
+  error:)` MEMAKSA cabang galat ditulis, dan idiom itu dihormati **69 kali**
+  (hanya 2 di antaranya merender `SizedBox.shrink`, dan keduanya hiasan layar:
+  baris chip kategori, pemilih cabang). Yang bocor bukan jalan utamanya
+  melainkan **pintu keluarnya**:
+
+  ```dart
+  ref.watch(pengajuanMenungguProvider).asData?.value ?? 0
+  ```
+
+  `asData` bernilai `null` pada **loading MAUPUN error**. Satu `?? 0` di situ
+  menghapus perbedaan antara "tak ada yang menunggu" dan "tak berhasil
+  ditanya" — kembaran Dart persis dari `(data ?? []).length` yang putaran 19
+  tutup di `Layout.tsx`.
+
+- **PENGUKURAN (Aturan 6 di permukaan ini)**: bukan status internal
+  `AsyncValue`, melainkan **teks yang muncul di layar**, dibaca dengan
+  memompa widget-nya. Ekspresi yang dipakai `kasir_page.dart` saat itu, apa
+  adanya:
+
+  | provider | teks di layar | lencana |
+  |---|---|---|
+  | SEHAT | `[Pengajuan, 3]` | 1 |
+  | GAGAL | `[Pengajuan]` | **0** |
+
+  Pembandingnya disimpan permanen di `test/lencana_gagal_test.dart` sebagai
+  `_LencanaLama` — tanpa itu, "sudah diperbaiki" tak punya angka.
+
+- **Populasi**: `asData` **40 situs di 12 berkas** · ber-`??` **36** ·
+  bawaannya **runtuh** (tak terbedakan dari bacaan sehat yang memang kosong:
+  `0`, `const []`, `''`, `false`) **35** · runtuh **dan** tanpa keadaan gagal
+  yang terbaca di mana pun: **13**. Sebarannya: `kasir_page.dart` 17 ·
+  `dashboard_page.dart` 9 · `dashboard_tim.dart` 4.
+
+- **TEMUAN 1 — kelompok notifikasi beranda kasir & manajemen (12 situs).**
+  Kembar persis lencana `Layout.tsx`: penerimaan menunggu, kiriman
+  perlengkapan, SO menunggu ACC, permintaan berjalan, pengajuan cuti, selisih
+  kas, area kotor, pesanan dikerjakan. Semuanya lenyap tanpa sepatah kata.
+  Di `dashboard_page`/`dashboard_tim` bentuknya lebih buruk: `BarisAksi`
+  melukis **"—"** untuk nol MAUPUN gagal, jadi layarnya secara aktif
+  menyatakan "tak ada".
+
+- **TEMUAN 2 — status absen, di DUA beranda.** `asData?.value ?? const []`
+  ⇒ daftar kosong ⇒ `sudahAbsen = false` ⇒ kartu amber **"Anda belum absen
+  masuk"**, sama persis dengan keadaan sehat. Bukan lencana yang hilang
+  melainkan pernyataan yang salah tentang orang yang sedang membacanya.
+
+- **TEMUAN 3 — spanduk kiriman perlengkapan** (`perlengkapan_stok_page`).
+  Hilang tanpa sepatah kata, dan badan layarnya milik provider **LAIN**
+  (`perlengkapanListProvider`), jadi galatnya tak muncul di mana pun di layar
+  itu.
+
+- **TEMUAN 4 — ditemukan oleh gerbangnya sendiri, bukan oleh mata.**
+  `selisihMenunggu` sudah kubetulkan pembacaannya, tapi `gagal:`-nya tak
+  kusalurkan ke lencananya. Yang menunjuknya rancangan aturan pasangan
+  (`hasError` penerima yang sama) saat gerbangnya ditulis — 13 tertuduh, dan
+  satu di antaranya perbaikanku sendiri yang setengah jadi.
+
+- **Perbaikannya, dan kenapa BUKAN nol**: `badgeAsync` / `badgeAsyncDari` di
+  `core/widgets/badge_angka.dart` — SATU tempat yang membedakan "tak ada yang
+  menunggu" dari "belum tahu". Saat gagal yang dilukis **pil abu bertanda
+  `!`**, sengaja bukan `BadgeAngka(angka: 0)`: aturan yang sudah bernama di
+  ledger ini, *"lencana gagal ≠ lencana nol"* — menampilkan nol saat gagal
+  justru memperkuat kebohongan yang sedang diperbaiki. `loading` tetap
+  memulangkan `null`: lencana yang berkedip tiap penyegaran 30 detik akan
+  mengajari orang mengabaikannya.
+
+- **Angka sebelum → sesudah**: situs runtuh-tanpa-pasangan **13 → 10** ·
+  situs yang kini menyalurkan `hasError`-nya ke layar **0 → 15** ·
+  populasi `asData` tetap **40** (yang berubah bukan jumlahnya, melainkan
+  apakah kegagalannya sampai ke mata).
+
+- **Sepuluh yang TETAP runtuh, didaftarkan beralasan — bukan disembunyikan.**
+  Tiap satunya dibaca tangan; alasannya tertulis di `test/as_data_test.dart`
+  dan ditagih dua arah:
+  `ref.read(menuListProvider)`/`(mejaListProvider)` ×4 — tabel pencarian untuk
+  MELENGKAPI nama; `muatBill` sengaja jatuh ke nama & harga yang TERKUNCI di
+  bill-nya sendiri, dan komentarnya menjelaskan kenapa (baris yang hilang dari
+  keranjang akan terhapus dari bill saat disimpan) · `tempatAsync`/`rakAsync`
+  ×2 di dua layar opname — `_itemVisible` jatuh **terbuka** dan kartu "Semua
+  tempat" tetap membawa jumlah item PENUH, jadi layarnya tak pernah terbaca
+  sepi · `penyesuaian_page` — hanya menyetir penghitung di bilah judul,
+  sedangkan badan layarnya `async.when` atas provider yang SAMA melukis
+  galatnya tepat di bawahnya · `kategoriBahanProvider` — chip SARAN untuk
+  kolom yang tetap diketik bebas · `penyimpananProvider` — dropdown yang
+  kosongnya sudah punya arti tertulis di `helperText`-nya sendiri ("Biarkan
+  kosong = rak yang sudah ada TIDAK diubah") · `analisis_harga_page` —
+  tombolnya hanya ada bila ada pilihan, dan pilihan cuma bisa lahir dari
+  cabang `data:` provider yang sama.
+
+- **Detektor**: `test/util/as_data.dart` + `test/as_data_test.dart`, mengikuti
+  konvensi yang sudah ada di repo ponsel (`galat_ditelan`: sapuan teks atas
+  sumber yang komentarnya dibutakan `buta_komentar`, daftar per-berkas
+  beralasan, ditagih dua arah). Yang dituduh bukan `asData`-nya melainkan
+  **pasangan bawaan-yang-runtuh TANPA `hasError` penerima yang sama** di
+  berkas itu.
+
+- **Bukti merah, pada pohon SUNGGUHAN** (bukan hanya fikstur suntikan):
+  1. situs `?? 0` baru yang tak terdaftar → merah, menyebut berkas & barisnya;
+  2. salinan **KETIGA** dari penerima yang terdaftar 2 kali → merah
+     (`terdaftar 2, sekarang 3`) — **pendaftaran bukan amnesti**.
+  **PASANGAN**: idiom `.when(error:)` yang benar tak tersentuh sama sekali ·
+  situs yang membawa `hasError`-nya tetap hijau (lewat `.`, `?.`, dan `!.`) ·
+  bawaan yang MENYEBUTKAN dirinya (`-1`, sebuah pesan) bukan keruntuhan ·
+  `asData?.value` tanpa `??` tak meruntuhkan apa pun · prosa di komentar bukan
+  situs. **CAKUPAN** dipaku: pemindai wajib menemukan ≥30 situs di ≥8 berkas.
+
+- **Batas yang ditulis, dan ketiganya penting**:
+  1. pencarian `hasError` berlingkup **satu BERKAS**, bukan satu fungsi —
+     penerima bernama pendek (`v`, `async`) bisa berpasangan dengan `hasError`
+     milik blok lain di berkas yang sama;
+  2. hanya bentuk `?? …` yang dituduh — `asData?.value` yang dipakai sebagai
+     nilai nullable dilewati, begitu pula `…asData?.value != null`;
+  3. **`.value` polos pada `AsyncValue`** (tanpa `asData`) membuang galat
+     dengan cara yang persis sama dan **belum disapu** — **102 situs di 39
+     berkas**. Dicatat berangka sebagai utang, bukan diklaim bersih.
+  Satu lagi yang jujur disebut: bawaan `const NilaiStokRingkas(nilai: 0, …)`
+  di `stok_page.dart:136` **lolos** pola "runtuh" karena ia sebuah objek —
+  padahal Rp0 di layar juga tak terbedakan dari sehat. Aturannya sengaja tidak
+  dilebarkan ke sembarang objek; situs itu dicatat di sini.
+
+- **Negatif bersih yang diukur putaran ini dan layak dicatat**, supaya tak
+  disapu ulang: cabang `error:` mobile (69, hanya 2 senyap dan keduanya
+  hiasan) · kedaluwarsa cache mobile (kriterianya **tertulis** — "cache
+  dipakai sebagai IZIN bertransaksi wajib kedaluwarsa" — dan diterapkan pada
+  `/shift/aktif` dengan angka yang dicocokkan ke toleransi susulan server) ·
+  daftar putih cache disk (6 endpoint, tiap pengecualian beralasan) ·
+  `config/env.ts` (divalidasi zod saat boot) · `kolom-numerik.ts`
+  (kelengkapannya ditagih dua arah, entri basi ditolak) · SQL mentah (60
+  pernyataan, 26 tanpa `company_id`, semuanya terkurung transitif lewat
+  `branchId` atau infrastruktur global) · `rute.ts` vs tabel Hono sendiri
+  (276 vs 275, bedanya hanya `GET /health` — utang AST itu **dicabut**,
+  berangka).
+
+- **Gerbang**: `flutter analyze lib test` **bersih** · `flutter test --no-pub`
+  **585 hijau**. **Repo server tak tersentuh** kecuali ledger ini — jadi
+  `typecheck`, `npm test`, dan `verify-api` tidak dijalankan, dengan
+  `git status` sebagai buktinya.
+
+- **Commit**: `mohteja/kakarut-mobile@62709b2` di cabang `claude`.
+
+---
+
 ## Bacaan gagal yang MENGISI FORMULIR — dan spinner yang tak pernah berhenti — web — 2026-08-27
 
 - **Kenapa vena ini ada**: putaran lalu menutup bentuk ANGKA dan menyisakan
@@ -6347,3 +6499,11 @@ berlaku di situ).
       `durasi_detik` & `masuk_pada` dibuang mentah-mentah (terukur: server
       kirim 2 detik, ponsel tak menampilkan apa pun). Tersisa: target per
       menu & laporan durasi — keduanya LAYAR BARU, bukan medan tak terurai
+- [x] ~~**`asData` sebagai pintu keluar `AsyncValue`**~~ — TEMUAN, lihat entri
+      di atas. 40 situs / 12 berkas; 35 berbawaan yang runtuh, 13 tanpa
+      keadaan gagal yang terbaca → 10 terdaftar beralasan. Terukur di layar:
+      provider gagal → teks `[Pengajuan]`, NOL lencana
+- [ ] **`.value` polos pada `AsyncValue`** (tanpa `asData`) — membuang galat
+      dengan cara yang persis sama, dan gerbang `as_data.dart` sengaja tidak
+      melihatnya. **102 situs di 39 berkas** (`ref.watch(…).value` /
+      `ref.read(…).value`). Dicatat berangka sebagai utang, bukan diklaim bersih
