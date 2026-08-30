@@ -1,3 +1,4 @@
+import { halamanQuery } from "../../lib/halaman-query";
 import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
@@ -242,8 +243,10 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
     const branchId = semuaCabang ? null : await resolveBranchId(c);
-    const perPage = Math.min(Math.max(Number(c.req.query("per_page")) || 20, 1), 100);
-    const page = Math.max(Number(c.req.query("page")) || 1, 1);
+    // Batas 100 dipertahankan apa adanya: menaikkannya mengubah apa yang
+    // dilihat klien, dan itu keputusan tersendiri. Yang berubah cuma cara
+    // membacanya — satu rumah, `lib/halaman-query.ts`.
+    const { page, perPage, offset } = halamanQuery(c, { bawaan: 20, maks: 100 });
     // Disaring dulu: nilainya dipakai menyusun batas waktu, dan teks yang
     // bukan tanggal menghasilkan Invalid Date yang diam-diam ikut ke
     // pembanding — bukan penolakan yang bisa dibaca pemakainya.
@@ -307,7 +310,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
        */
       .orderBy(desc(sql`MAX(${productions.confirmedAt})`), desc(productions.fakturId))
       .limit(perPage)
-      .offset((page - 1) * perPage);
+      .offset(offset);
 
     const [{ total } = { total: 0 }] = await db
       .select({ total: sql<number>`COUNT(DISTINCT ${productions.fakturId})::int` })

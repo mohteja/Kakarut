@@ -15184,6 +15184,50 @@ if echo "$SMTP273" | jq -e 'has("has_password")' > /dev/null 2>&1; then
     "$(echo "$SMTP273" | jq 'if has("has_password") and (has("password") | not) then 1 else 0 end')"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §274 — HALAMAN DARI QUERY PUNYA SATU RUMAH
+#
+# Repo ini menghabiskan satu vena penuh menertibkan masukan dari BADAN (97
+# `zValidator("json")`, 112 skema `.strict()`, batas angka bersama, gerbang,
+# dan §240). Pintu QUERY tak pernah kebagian: NOL `zValidator("query")`, dan
+# 47 pembacaan `c.req.query(...)` yang masing-masing menjaga dirinya sendiri.
+#
+# Sebagian besar menjaga diri dengan benar — dan itu yang menyamarkannya:
+# aturan yang dipegang tiga penulis akan jadi tiga aturan. TERUKUR: satu
+# permintaan `per_page=500` mendapat tiga jawaban berbeda.
+echo
+echo "── §274 halaman dari query punya satu rumah ──"
+
+# Tiap pintu tetap menyebut batasnya sendiri (menaikkannya mengubah apa yang
+# dilihat klien), tapi CARA membacanya kini satu. Yang dipaku: batasnya
+# berlaku, dan pintunya MENGATAKAN batas yang dipakainya.
+cek "penerimaan: per_page=500 dibatasi 100 dan dikatakan" "V == 100" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?per_page=500" | jq '.per_page')"
+cek "produksi: per_page=500 dibatasi 200 dan dikatakan" "V == 200" \
+  "$(api "$OWNER" GET "/produksi?per_page=500" | jq '.per_page')"
+
+# PASANGAN: masukan yang ngawur tak boleh melempar 500 maupun lolos jadi batas
+# raksasa — ia mendarat di bawaan/batas yang masuk akal.
+cek "PASANGAN: per_page=abc → jatuh ke bawaan, bukan 500" "V == 20" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?per_page=abc" | jq '.per_page')"
+cek "PASANGAN: per_page=-5 → minimal 1, bukan negatif" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?per_page=-5" | jq '.per_page')"
+cek "PASANGAN: page=0 → minimal 1" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?page=0" | jq '.page')"
+cek "PASANGAN: page=abc → jatuh ke 1, tetap 200" "V == 1" \
+  "$(api "$OWNER" GET "/penerimaan/riwayat?page=abc" | jq '.page')"
+
+# Transfer stok: pintu itu menerima `per_page` tapi TIDAK berhalaman — ia
+# daftar ber-langit-langit. Sampai putaran ini ia memotong TANPA mengatakannya
+# (salah satu utang yang dicatat §272). Kini penandanya ada.
+TR274="$(api "$OWNER" GET "/transfer-stok?per_page=500")"
+cek "transfer: balasannya membawa rows_terpotong" "V == 1" \
+  "$(echo "$TR274" | jq 'if has("rows_terpotong") then 1 else 0 end')"
+cek "PASANGAN: daftar yang MUAT tak dituduh terpotong" "V == 1" \
+  "$(echo "$TR274" | jq 'if .rows_terpotong == false then 1 else 0 end')"
+cek "PASANGAN: bentuk balasannya tetap objek ber-rows" "V == 1" \
+  "$(echo "$TR274" | jq 'if (.rows | type) == "array" then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

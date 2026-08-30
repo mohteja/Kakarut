@@ -40,7 +40,7 @@ interface Alasan {
 }
 
 /** Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar. */
-const MAKS_UTANG = 9;
+const MAKS_UTANG = 8;
 
 /** kunci: `berkas` → teks argumen `.limit(…)` → alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
@@ -216,16 +216,11 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "dan situs inilah yang membuatnya perlu ditulis.",
     },
   },
-  "modules/transfer/routes.ts": {
-    perPage: {
-      kelas: "utang",
-      jumlah: 1,
-      teks:
-        "UTANG. Berhalaman lewat `page`/`per_page` di QUERY, tapi balasannya " +
-        "tak memuat total maupun penanda — klien tak punya cara tahu ada " +
-        "halaman berikutnya. Kembar `penerimaan` yang mengirim `total`.",
-    },
-  },
+  // `modules/transfer/routes.ts` DULU di sini sebagai UTANG: "berhalaman lewat
+  // per_page di query, tapi balasannya tak memuat total maupun penanda".
+  // Dibayar 2026-08-27 — pintu itu ternyata tidak berhalaman sama sekali
+  // melainkan daftar ber-langit-langit, jadi yang benar penanda pemotongan
+  // (`rows_terpotong`), bukan nomor halaman. Batasnya ikut turun.
   "modules/users/routes.ts": {
     "100": {
       kelas: "sah",

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { halamanQuery } from "../../lib/halaman-query";
 import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { SEPULUH_TAHUN, SETAHUN, zTanggalKejadian, zTanggalRencana } from "../../lib/waktu-kejadian";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
@@ -2503,8 +2504,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const sampai = tanggalQuery(c, "sampai");
       // dukung juga ?tanggal= (satu hari) demi kompatibilitas
       const satuHari = tanggalQuery(c, "tanggal");
-      const page = Math.max(1, Number(c.req.query("page") ?? "1") || 1);
-      const perPage = Math.min(200, Math.max(1, Number(c.req.query("per_page") ?? "20") || 20));
+      const { page, perPage, offset } = halamanQuery(c, { bawaan: 20, maks: 200 });
 
       // Cabang PENGIRIM tetap melihat faktur yang sudah terkirim: baris yang
       // pindah ke cabang tujuan menyimpan jejak dari/asal — tanpa ini tim CK
@@ -2596,7 +2596,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           sql`MIN(${productions.waktu}) DESC`,
         )
         .limit(perPage)
-        .offset((page - 1) * perPage);
+        .offset(offset);
       const keys = keyRows.map((r) => r.key);
 
       const select = {

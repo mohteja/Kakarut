@@ -50,6 +50,101 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Masukan dari QUERY tak punya rumah — server — 2026-08-27
+
+- **Kenapa vena ini ada**: repo ini sudah menghabiskan satu vena penuh
+  menertibkan masukan dari **BADAN** — 97 `zValidator("json", …)`, 112 skema
+  `.strict()`, batas angka bersama di `lib/batas-angka.ts`, gerbangnya sendiri
+  (`badan-tak-menerima-kunci-asing.test.ts`), dan seksi verify-api §240 yang
+  memakunya. Pintu **QUERY** tak pernah kebagian.
+
+  | pintu masuk | skema | gerbang | batas bersama |
+  |---|---|---|---|
+  | badan (`json`) | **97** `zValidator` | ya | ya |
+  | **query** | **0** `zValidator` | tidak | tidak |
+
+  Dan query di aplikasi ini menyetir hal yang mahal: `branch_id`, rentang
+  tanggal, `page`/`per_page`, `status`, `limit`.
+
+- **Populasi**: **47 pembacaan `c.req.query(...)`**. Dua di antaranya sudah
+  punya rumah — `branch_id` lewat `resolveBranchId` (putaran 16) dan tanggal
+  lewat `lib/tanggal-query.ts` (venanya sendiri, dengan komentar yang mengukur
+  36 pembacaan). Sisanya menjaga dirinya sendiri, **sebagian besar dengan
+  BENAR** — dan justru itu yang menyamarkan masalahnya: aturan yang dipegang
+  tiga penulis berbeda akan menjadi tiga aturan.
+
+- **TERUKUR lewat HTTP — satu permintaan yang sama, `per_page=500`, ke tiga
+  pintu berhalaman:**
+
+  | pintu | dibatasi di | dikatakan? |
+  |---|---|---|
+  | `GET /penerimaan/riwayat` | **100** | ya (`per_page: 100`) |
+  | `GET /produksi` | **200** | ya (`per_page: 200`) |
+  | `GET /transfer-stok` | **200** | **tidak** — balasannya tak memuat `per_page` |
+
+  Bawaannya pun bertiga sendiri-sendiri: **20, 20, 50**.
+
+- **Rumah baru `lib/halaman-query.ts`, dan ia SENGAJA tidak menyeragamkan
+  angkanya.** Menaikkan batas sebuah pintu mengubah apa yang dilihat klien,
+  dan itu keputusan pemilik pintunya — bukan efek samping sebuah refaktor.
+  Yang diseragamkan **cara membacanya**: satu tempat yang tahu bahwa
+  `per_page=abc`, `per_page=-5`, `per_page=1e9`, dan `per_page` yang hilang
+  semuanya harus mendarat di angka yang masuk akal. Tiap pintu tetap
+  **menyebut** `bawaan` & `maks`-nya — dan gerbangnya menuntut keduanya
+  disebut, sebab batas yang tak terlihat adalah batas yang pelan-pelan berbeda
+  dari batas tetangganya. Kembarannya `lib/tanggal-query.ts`, yang membuktikan
+  bentuk ini benar.
+
+- **Satu UTANG putaran 23 dibayar sekalian**: `GET /transfer-stok` ternyata
+  **tidak berhalaman sama sekali** — ia menerima `per_page` tapi tak punya
+  `offset`; ia daftar ber-langit-langit. Jadi yang benar di situ bukan nomor
+  halaman melainkan **penanda pemotongan** (idiom putaran 23): ambil
+  `perPage + 1`, potong, kirim `rows_terpotong`. `MAKS_UTANG` gerbang
+  pemotongan turun **9 → 8** — batas yang tak pernah turun berhenti jadi batas.
+
+- **Angka sebelum → sesudah**: tiga salinan aturan halaman **3 → 1 rumah** ·
+  pintu yang memotong tanpa mengatakannya **1 → 0** · `Number(c.req.query(…))`
+  telanjang: **4**, semuanya terdaftar beralasan dan tiap alasannya bisa
+  ditunjuk (klem ada, hanya di baris/objek berikutnya — di luar jangkauan
+  pemindai yang berlingkup satu pernyataan).
+
+- **Gerbang lama menangkap perubahanku TIGA kali, dan ketiganya benar**:
+  `potong-berpenanda` menuntut entri `transfer` dihapus begitu dibayar ·
+  `bendera-hapus-disaring` memerah **dua kali** karena entrinya dikunci
+  `berkas:baris`, dan satu baris `import` yang kutambahkan menggeser 1228 jadi
+  1229. Kuncinya diganti jadi `berkas tabel<induk>` — **pembusukan kunci
+  bernomor baris sudah dibayar sekali di `pelaku.test.ts`, dan sekali cukup**.
+
+- **Bukti merah pada pohon SUNGGUHAN, dua arah**: `Number(c.req.query("ambil"))`
+  baru tanpa klem → merah menyebut berkas & barisnya; mengembalikan klem
+  sebaris di `transfer` (menggantikan rumahnya) → **dua** premis merah
+  sekaligus. **PASANGAN**: param query yang bukan angka (`q`, `status`, `sesi`)
+  tak ikut dituduh — bahaya sebuah ANGKA adalah besarnya, dan menuduh semuanya
+  akan membuat gerbang ini ditutup orang alih-alih dipatuhi.
+
+- **Premisnya dibuktikan di FIKSTUR, bukan di pohon**: sesudah halaman pindah
+  ke rumahnya, tak ada lagi klem sebaris di `modules/` — dan itu memang
+  tujuannya. Premis yang bersandar pada "kebetulan masih ada contohnya" akan
+  diam-diam berhenti membuktikan apa pun begitu contohnya diperbaiki.
+
+- **Batas detektor, ditulis jujur**: hanya angka yang disapu (`Number(...)` di
+  sekitar `c.req.query`); teks & enum sengaja di luar populasi · lingkupnya
+  satu PERNYATAAN, jadi klem di baris berikutnya tak terlihat — dan keempat
+  entri daftarnya persis kasus itu · `zValidator("query")` tetap nol, dan itu
+  pilihan: rumah kecil yang dipakai lebih murah daripada skema yang tak dipakai.
+
+- **§274 verify-api**: batas tiap pintu berlaku DAN dikatakan · `per_page=abc`
+  jatuh ke bawaan bukan 500 · `per_page=-5` → 1 · `page=0` → 1 · `page=abc`
+  → 1 · `transfer` membawa `rows_terpotong`, dan daftar yang muat tak dituduh
+  terpotong.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.535** (212 berkas) ·
+  **`verify-api.sh` 3.274 lolos / 0 gagal** (DB segar; §274 baru: 9 asersi) ·
+  `audit:invarian` **26/26**. **Playwright e2e tidak dijalankan** — `apps/web`
+  tak tersentuh satu baris pun (`git status` sebagai buktinya).
+
+---
+
 ## Bentuk balasan yang ditentukan TABELNYA, bukan penulisnya — server — 2026-08-27
 
 - **Kenapa vena ini ada**: enam putaran menutup satu keluarga di sisi
@@ -7116,6 +7211,10 @@ berlaku di situ).
       101 situs / 44 ber-`??` / 40 runtuh; yang mahal justru BUKAN di situs
       itu melainkan di `catch (_) { return []; }` milik antrean offline —
       Rp150.000 pending terbaca 0 perintah dengan `hasError` tetap false
+- [x] ~~**Masukan dari query tak punya rumah**~~ — TEMUAN, lihat entri di
+      atas. 47 pembacaan, 0 `zValidator("query")`; `per_page=500` mendapat
+      TIGA jawaban berbeda dari tiga pintu (100/200/200, bawaan 20/20/50).
+      Satu utang putaran 23 ikut dibayar (`transfer` kini `rows_terpotong`)
 - [x] ~~**Bentuk balasan ditentukan tabelnya**~~ — TEMUAN LATEN, lihat entri
       di atas. 298 situs `c.json`; `BARIS_PENUH` 6 → 0; aturan "rahasia tak
       pernah dikirim utuh" 0 pelanggaran dan kini DIJAGA. Pemindainya salah

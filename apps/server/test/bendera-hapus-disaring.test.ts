@@ -309,9 +309,14 @@ describe("bendera 'tidak berlaku lagi': tiap pintu menyaring atau terdaftar", ()
   // IKUT MENGHITUNG baris yang sudah dibuang; penulisan yang lupa menyaring
   // MENGUBAH baris yang sudah dibuang — tak ada angka yang terlihat salah,
   // hanya transaksi di Tempat Sampah yang diam-diam bergerak.
+  // Kunci daftar ini SENGAJA bukan nomor baris. Versi pertamanya memakai
+  // `berkas:baris`, dan langsung membusuk pada putaran berikutnya: satu baris
+  // `import` yang ditambahkan di berkas lain menggeser 1228 jadi 1229, dan
+  // gerbangnya menuduh situs yang sama yang sudah diadjudikasi. Pelajaran yang
+  // sama sudah dibayar `pelaku.test.ts` sekali; sekali cukup.
   const TULIS_DIPILAH = new Map<string, string>([
     [
-      "modules/produksi/routes.ts:1228",
+      "modules/produksi/routes.ts productions<productions>",
       "Syaratnya ADA dan justru paling teliti di berkas itu — `conds` " +
         "(dirakit di :1691 & :1719) memuat `isNull(productions.deletedAt)` " +
         "dan dipakai `.where(and(...conds, …))`. Yang tak terlihat pemindai " +
@@ -335,7 +340,7 @@ describe("bendera 'tidak berlaku lagi': tiap pintu menyaring atau terdaftar", ()
   it("tiap penulisan ke baris terbuang menyaring, dijaga, atau terdaftar", () => {
     const liar = semua
       .filter((x) => x.kelas === "TULIS_TELANJANG")
-      .map((x) => `${x.berkas}:${x.baris}`)
+      .map((x) => `${x.berkas} ${x.tabel}<${x.induk}>`)
       .filter((kunci) => !TULIS_DIPILAH.has(kunci));
     expect(
       liar,
@@ -351,7 +356,9 @@ describe("bendera 'tidak berlaku lagi': tiap pintu menyaring atau terdaftar", ()
 
   it("anti-kuburan: tiap entri TULIS_DIPILAH masih punya situsnya", () => {
     const nyata = new Set(
-      semua.filter((x) => x.kelas === "TULIS_TELANJANG").map((x) => `${x.berkas}:${x.baris}`),
+      semua
+        .filter((x) => x.kelas === "TULIS_TELANJANG")
+        .map((x) => `${x.berkas} ${x.tabel}<${x.induk}>`),
     );
     const basi = [...TULIS_DIPILAH.keys()].filter((k) => !nyata.has(k));
     expect(basi, `entri ini sudah tak tertuduh — hapus:\n${basi.join("\n")}`).toEqual([]);
