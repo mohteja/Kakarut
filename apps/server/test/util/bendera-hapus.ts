@@ -92,7 +92,50 @@ export const BENDERA: Record<string, Bendera> = {
   },
 };
 
-export type KelasBendera = "MENYARING" | "LEWAT_VARIABEL" | "MENULIS" | "TELANJANG";
+/**
+ * `MENULIS` DULU ADALAH PEMBEBASAN YANG BISU, DAN ITU TEMUANNYA SENDIRI.
+ *
+ * Sampai 2026-08-27 `kelasDrizzle` memulangkan `MENULIS` untuk rantai apa pun
+ * yang menulis, lalu gerbangnya hanya menuduh `TELANJANG` — jadi penulisan
+ * tak pernah ditagih, dan tak ada satu kalimat pun yang menjelaskan kenapa
+ * boleh begitu. Kali KELIMA berturut-turut pola yang sama muncul di audit ini:
+ * gerbang jujur, buta pada bentuk yang justru dilewatkan catatan
+ * pengecualiannya sendiri — dan kali ini gerbangnya lahir dari audit ini juga.
+ *
+ * Lebih buruk: `MENULIS` cuma melihat rantai yang JUGA membaca (`situsDrizzle`
+ * berangkat dari `.from()`/`.join()`), jadi `db.update(productions).where(…)`
+ * polos tak pernah jadi situs sama sekali. Terukur: `MENULIS` = 3 (dua di
+ * antaranya modul Tempat Sampah, yang memang pekerjaannya), sementara
+ * `update`/`delete` pada tabel berbendera ada **36**, dan **19** di antaranya
+ * `WHERE`-nya tak menyebut benderanya sekali pun.
+ *
+ * Karena itu penulisan kini punya kelasnya sendiri — lihat [KelasTulis].
+ */
+export type KelasBendera =
+  | "MENYARING"
+  | "LEWAT_VARIABEL"
+  | "MENULIS"
+  | "TELANJANG"
+  | KelasTulis;
+
+/**
+ * Kelas untuk PENULISAN (`update`/`delete`) pada tabel berbendera.
+ *
+ * Taruhannya sama dengan sisi bacaan, tapi arahnya berlawanan: bacaan yang
+ * lupa menyaring IKUT MENGHITUNG baris yang sudah dibuang; penulisan yang lupa
+ * menyaring MENGUBAH baris yang sudah dibuang. Yang kedua lebih sunyi — tak
+ * ada angka yang terlihat salah, hanya transaksi di Tempat Sampah yang
+ * diam-diam bergerak.
+ */
+export type KelasTulis =
+  /** `WHERE`-nya sendiri menyebut benderanya. */
+  | "TULIS_MENYARING"
+  /** Barisnya dimuat lebih dulu DENGAN saringan, di fungsi yang sama. */
+  | "TULIS_DIJAGA"
+  /** Modul yang memang berwenang atas baris terbuang (Tempat Sampah, backfill). */
+  | "TULIS_SAMPAH"
+  /** Tak satu pun — tertuduh. */
+  | "TULIS_TELANJANG";
 
 export interface Situs {
   berkas: string;
@@ -259,12 +302,208 @@ function situsSqlMentah(k: Konteks): Situs[] {
   return keluar;
 }
 
+/**
+ * Modul yang BERWENANG menulis ke baris terbuang.
+ *
+ * Tempat Sampah bukan pelanggar: memulihkan dan menghapus-permanen adalah
+ * pekerjaannya, dan gerbang yang menuduhnya adalah gerbang yang salah paham
+ * soal apa itu Tempat Sampah. Backfill menyentuh baris lama tanpa memandang
+ * statusnya — itu juga sengaja.
+ */
+const BERWENANG = [/^modules\/sampah\//, /^seed\//, /backfill/i];
+
+/** Nama fungsi pembungkus mana pun mengandung "backfill". */
+function dalamBackfill(n: Simpul, induk: Map<Simpul, Simpul>, isi: string): boolean {
+  let k: Simpul | undefined = induk.get(n);
+  while (k) {
+    if (k.type === "FunctionDeclaration" && k.id?.type === "Identifier") {
+      if (/backfill/i.test(k.id.name as string)) return true;
+    }
+    if (k.type === "VariableDeclarator" && k.id?.type === "Identifier") {
+      if (/backfill/i.test(k.id.name as string)) return true;
+    }
+    k = induk.get(k);
+  }
+  return false;
+}
+
+/**
+ * Fungsi pembungkus TERLUAR — lingkup tempat saringan hulu boleh berdiri.
+ *
+ * Sengaja yang terluar, bukan yang terdekat. Penulisan di repo ini hampir
+ * selalu bersarang beberapa lapis di dalam handler-nya
+ * (`db.transaction(async (tx) => … items.map(async (b) => …))`), sementara
+ * saringan `isNull(deletedAt)` yang memuat fakturnya berdiri di badan
+ * handler-nya. Generasi pertama sapuan ini memakai fungsi TERDEKAT dan karena
+ * itu menuduh lima penulisan `produksi/routes.ts` yang fakturnya sudah dimuat
+ * berfilter belasan baris di atasnya.
+ *
+ * Harganya ditulis: saringan atas baris LAIN di handler yang sama ikut
+ * membebaskan. Karena itu pembebasan ini bukan vonis "aman" melainkan
+ * "tak bisa dituduh dari sini" — dan sisanya dipilah tangan.
+ */
+function fungsiSekitar(n: Simpul, induk: Map<Simpul, Simpul>): Simpul | undefined {
+  let k: Simpul | undefined = induk.get(n);
+  let terluar: Simpul | undefined;
+  while (k) {
+    if (
+      k.type === "ArrowFunctionExpression" ||
+      k.type === "FunctionExpression" ||
+      k.type === "FunctionDeclaration"
+    ) {
+      terluar = k;
+    }
+    k = induk.get(k);
+  }
+  return terluar;
+}
+
+/** Syarat benderanya dirakit di sebuah variabel yang dipakai rantai ini. */
+function lewatVariabel(rantai: Simpul, b: Bendera, k: Konteks): boolean {
+  for (const id of rujukan(rantai, k.induk)) {
+    const d = deklarasiTerlihat(id, id.name as string, k.induk, k.lingkup);
+    if (d && menyentuhProperti(d.nilai, b.kolom)) return true;
+  }
+  return false;
+}
+
+/**
+ * Fungsi tingkat-berkas yang BADANNYA menyaring bendera ini atas tabel yang
+ * sama — yaitu penjaga bersama seperti `pastikanKartu` di `pesanan/routes.ts`.
+ *
+ * Idiomnya baku di repo ini: satu penjaga, dipanggil sebagai baris PERTAMA
+ * tiap handler yang mengubah sesuatu (`pastikanKartu` dipanggil di :571, :682,
+ * :766, :835, :889). Pemindai yang tak mengenalinya menuduh keempat pintu
+ * papan dapur — dan tuduhan itu SALAH, terbukti lewat HTTP: menekan tombol
+ * dapur pada baris penjualan yang sudah dibuang dijawab **404**, statusnya tak
+ * berubah, dan nol baris log tertulis.
+ */
+function penjagaBerkas(k: Konteks, b: Bendera, dicari: string[]): Set<string> {
+  const nama = new Set<string>();
+  jelajah(k.prog, (n) => {
+    const id =
+      n.type === "FunctionDeclaration" && n.id?.type === "Identifier"
+        ? (n.id.name as string)
+        : undefined;
+    if (!id) return;
+    let saring = false;
+    jelajah(n, (x) => {
+      if (saring || x.type !== "CallExpression") return;
+      const prop = x.callee ? namaProperti(x.callee) : undefined;
+      if (!prop || !AMBIL.has(prop)) return;
+      const arg0 = x.arguments?.[0];
+      if (arg0?.type !== "Identifier" || !dicari.includes(arg0.name)) return;
+      if (menyentuhProperti(rantaiPenuh(x, k.induk), b.kolom)) saring = true;
+    });
+    if (saring) nama.add(id);
+  });
+  return nama;
+}
+
+/** Apakah `fn` memanggil salah satu penjaga bersama itu. */
+function memanggilPenjaga(fn: Simpul, penjaga: Set<string>): boolean {
+  if (penjaga.size === 0) return false;
+  let ada = false;
+  jelajah(fn, (n) => {
+    if (ada || n.type !== "CallExpression") return;
+    const c = n.callee;
+    if (c?.type === "Identifier" && penjaga.has(c.name as string)) ada = true;
+  });
+  return ada;
+}
+
+/**
+ * Apakah di dalam `fn` ada BACAAN atas tabel yang sama yang menyaring
+ * benderanya — yaitu "barisnya sudah dipastikan hidup sebelum ditulis".
+ *
+ * Ini pembebasan yang sama bentuknya dengan yang dipakai putaran 24
+ * ("dijaga pemanggilnya"), dan ia PUNYA HARGA: lingkupnya satu fungsi, jadi
+ * saringan yang dilakukan pemanggil tak terlihat. Terbukti sekali di
+ * pengintaian — `penjualan/refund.ts` memuat penjualannya di `:75` dengan
+ * `isNull(sales.deletedAt)` lalu menulis dua kali tanpa mengulang syaratnya.
+ */
+function dijagaBacaan(fn: Simpul, b: Bendera, k: Konteks, dicari: string[]): boolean {
+  let jaga = false;
+  jelajah(fn, (n) => {
+    if (jaga || n.type !== "CallExpression") return;
+    const prop = n.callee ? namaProperti(n.callee) : undefined;
+    if (!prop || !AMBIL.has(prop)) return;
+    const arg0 = n.arguments?.[0];
+    if (arg0?.type !== "Identifier" || !dicari.includes(arg0.name)) return;
+    const rantai = rantaiPenuh(n, k.induk);
+    if (menyentuhProperti(rantai, b.kolom)) {
+      jaga = true;
+      return;
+    }
+    for (const id of rujukan(rantai, k.induk)) {
+      const d = deklarasiTerlihat(id, id.name as string, k.induk, k.lingkup);
+      if (d && menyentuhProperti(d.nilai, b.kolom)) jaga = true;
+    }
+  });
+  return jaga;
+}
+
+/**
+ * PENULISAN pada tabel berbendera — `update`/`delete`, termasuk yang sama
+ * sekali tak membaca apa pun.
+ *
+ * Sengaja TIDAK berangkat dari `.from()` seperti [situsDrizzle]: justru
+ * penulisan yang tak membaca apa-apa yang paling mudah lupa menyaring, dan
+ * itulah yang selama ini tak terlihat.
+ */
+function situsTulis(k: Konteks): Situs[] {
+  const keluar: Situs[] = [];
+  const berwenang = BERWENANG.some((re) => re.test(k.nama));
+
+  for (const [indukNama, b] of Object.entries(BENDERA)) {
+    const dicari = [indukNama, ...b.anak];
+    const penjaga = penjagaBerkas(k, b, dicari);
+    jelajah(k.prog, (n) => {
+      if (n.type !== "CallExpression") return;
+      const prop = n.callee ? namaProperti(n.callee) : undefined;
+      if (prop !== "update" && prop !== "delete") return;
+      const arg0 = n.arguments?.[0];
+      if (arg0?.type !== "Identifier" || !dicari.includes(arg0.name)) return;
+
+      const rantai = rantaiPenuh(n, k.induk);
+      let kelas: KelasTulis;
+      // Syaratnya boleh berdiri LANGSUNG di `.where(...)`, atau lewat sebuah
+      // variabel — `const kunci = and(eq(id, …), isNull(deletedAt))` lalu
+      // `.where(kunci)`. Sisi BACAAN gerbang ini sudah menelusuri variabel
+      // sejak lama (`LEWAT_VARIABEL`); sisi penulisan harus memakai mata yang
+      // sama, atau ia menuduh lima penulisan `produksi/routes.ts` yang
+      // syaratnya justru paling teliti di seluruh berkas itu.
+      if (menyentuhProperti(rantai, b.kolom) || lewatVariabel(rantai, b, k)) {
+        kelas = "TULIS_MENYARING";
+      } else if (berwenang || dalamBackfill(n, k.induk, k.isi)) kelas = "TULIS_SAMPAH";
+      else {
+        const fn = fungsiSekitar(n, k.induk);
+        kelas =
+          fn && (dijagaBacaan(fn, b, k, dicari) || memanggilPenjaga(fn, penjaga))
+            ? "TULIS_DIJAGA"
+            : "TULIS_TELANJANG";
+      }
+
+      keluar.push({
+        berkas: k.nama,
+        baris: barisDi(k.isi, (k.induk.get(n)?.property ?? n).start ?? n.start),
+        induk: indukNama,
+        tabel: arg0.name as string,
+        bentuk: "drizzle",
+        kelas,
+        potongan: k.isi.slice(rantai.start, rantai.end).replace(/\s+/g, " ").slice(0, 220),
+      });
+    });
+  }
+  return keluar;
+}
+
 export function situsBendera(kode?: { nama: string; isi: string }[]): Situs[] {
   const berkas = kode ?? sumberServer();
   const keluar: Situs[] = [];
   for (const { nama, isi } of berkas) {
     const k = konteks(nama, isi);
-    keluar.push(...situsDrizzle(k), ...situsSqlMentah(k));
+    keluar.push(...situsDrizzle(k), ...situsTulis(k), ...situsSqlMentah(k));
   }
   return keluar;
 }

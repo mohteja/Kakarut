@@ -50,6 +50,96 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Menulis ke baris yang sudah DIBUANG — server — 2026-08-27
+
+- **Kenapa vena ini ada, dan ini yang paling pantas dicatat**: gerbang audit
+  ini SENDIRI punya pintu yang dilewatinya tanpa alasan tertulis.
+  `test/util/bendera-hapus.ts` menyapu bendera "baris ini tidak berlaku lagi"
+  dan doc-nya menyebut taruhannya terang-terangan — *"yang ikut terhitung
+  adalah UANG …, STOK …, dan ATRIBUSI KERJA"* — lalu di baris 146:
+
+  ```ts
+  if (menulis) return "MENULIS";   // ← rantai yang menulis: berhenti di sini
+  ```
+
+  `MENULIS` tak pernah dituduh, dan **tak ada satu kalimat pun** yang
+  menjelaskan kenapa boleh begitu. Kali **KELIMA** berturut-turut pola yang
+  sama muncul — gerbang jujur, buta pada bentuk yang justru dilewatkan catatan
+  pengecualiannya sendiri — dan kali ini gerbangnya lahir dari audit ini juga.
+
+- **Angka pengecualian itu sendiri menyesatkan**: `MENULIS` = **3**, dan dua di
+  antaranya modul Tempat Sampah yang memang pekerjaannya. Terlihat sepele —
+  sampai disadari bahwa `situsDrizzle` berangkat dari `.from()`/`.join()`, jadi
+  `db.update(productions).where(…)` polos **tak pernah jadi situs sama sekali**.
+  Yang dilewatkan bukan 3, melainkan **36 penulisan**, **19** di antaranya
+  tanpa satu sebutan pun benderanya.
+
+- **Populasi sesudah sisi penulisan disapu**: **40 situs tulis** —
+  `TULIS_MENYARING` **20** · `TULIS_DIJAGA` **14** · `TULIS_SAMPAH` **2** ·
+  **`TULIS_TELANJANG` 1**. Sisi bacaan ikut membaik: `MENYARING` 71 → **72**,
+  `TELANJANG` 29 → **28**.
+
+- **HASILNYA BERSIH, dan itu kesimpulan yang harus dibayar mahal.** Empat
+  tuduhan berturut-turut dicabut sesudah ditelusuri — tiap pencabutan
+  mengajari pemindainya satu bentuk penjagaan yang memang dipakai repo ini:
+
+  | tuduhan | kenapa salah | yang dipelajari |
+  |---|---|---|
+  | 5 penulisan `produksi/routes.ts` | syaratnya dirakit di `const kunci = and(…, isNull(deletedAt))` lalu `.where(kunci)` | telusuri variabel — mata yang **sudah** dipakai sisi bacaan (`LEWAT_VARIABEL`) |
+  | penulisan bersarang di `produksi` | saringannya di badan handler, penulisannya beberapa lapis di dalam `transaction(…map(…))` | lingkupnya fungsi **TERLUAR**, bukan terdekat |
+  | `users/service.ts`, `seed/guest.ts` | backfill & seed memang menyentuh baris lama apa adanya | wewenang dikenali dari nama FUNGSI, bukan cuma nama berkas |
+  | **4 pintu papan dapur** (`pesanan/routes.ts`) | `pastikanKartu` — penjaga bersama dengan `isNull(sales.deletedAt)` — dipanggil sebagai baris PERTAMA tiap handler yang mengubah (:571, :682, :766, :835) | kenali penjaga bersama se-berkas |
+
+- **TERUKUR lewat HTTP sungguhan** — penjualan dibuang ke Tempat Sampah, lalu
+  tombol dapur ditekan pada barisnya:
+
+  | | |
+  |---|---|
+  | papan pesanan memuatnya | **tidak** (0 kartu — sisi bacaan memang menyaring) |
+  | `POST /pesanan/penjualan/:id/item/:itemId/status` | **404** "Pesanan tidak ditemukan" |
+  | status baris sesudahnya | **tak berubah** (`dikerjakan`) |
+  | baris `pesanan_logs` tertulis | **0** |
+
+  Inilah kenapa keempat tuduhan itu dicabut, bukan diperbaiki: kodenya sudah
+  benar, dan yang salah adalah pemindaiku.
+
+- **SATU perbaikan, dan ia soal SIAPA yang memegang jaminannya**:
+  `autoFileRakCabang` menata rak untuk daftar id yang dikirim pemanggilnya.
+  Ketiga pemanggilnya hari ini mengoper id dari `.returning()` penulisan yang
+  syaratnya sudah menyaring — jadi alasannya benar, dan sudah **terdaftar
+  beralasan** di gerbang lama. Tetap dibayar: jaminannya ada di PEMANGGIL,
+  sementara fungsi itu menerima daftar id apa adanya, dan pemanggil KEEMPAT
+  yang mengambil id dari tempat lain akan diam-diam memindahkan baris terbuang
+  ke rak. Kini ia menyaring sendiri di kedua kuerinya — dan gerbang lamanya
+  langsung menuntut entri daftarnya dihapus, yang memang dilakukan.
+
+- **`TULIS_TELANJANG` yang tersisa: 1**, terdaftar beralasan.
+  `produksi/routes.ts:1228` — syaratnya ADA dan justru paling teliti di berkas
+  itu (`conds` memuat `isNull(productions.deletedAt)`), tapi sampai ke situ
+  sebagai **parameter** (`const { conds } = k`), bukan deklarasi lokal, jadi
+  penelusuran variabelnya buntu. Batas "berlingkup satu fungsi" yang sudah
+  ditulis, bekerja persis seperti yang ditulis.
+
+- **Bukti merah, pada pohon SUNGGUHAN**: mencabut `isNull(productions.deletedAt)`
+  dari `autoFile` → tertuduh; mencabut panggilan `pastikanKartu` dari papan
+  pesanan → **keempat** pintunya tertuduh sekaligus. **PASANGAN**: Tempat
+  Sampah tak pernah dituduh (memulihkan & menghapus-permanen adalah
+  pekerjaannya) · ketiga bentuk penjagaan diterima (syarat langsung, lewat
+  variabel, lewat bacaan hulu) · penulisan telanjang buatan tetap tertuduh.
+  **CAKUPAN** dipaku: ≥30 situs tulis, dan tiap kelas aman wajib berpenghuni —
+  nol di situ berarti instrumennya rusak, bukan repo-nya bersih.
+
+- **Batas detektor, ditulis jujur**: penjaga yang dipanggil dari BERKAS LAIN
+  tak terlihat · syarat yang datang sebagai parameter tak terlihat (dan itulah
+  satu-satunya entri daftarnya) · nama tabel dibandingkan sebagai teks.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.517** (210 berkas) ·
+  **`verify-api.sh` 3.245 lolos / 0 gagal** (DB segar) · `audit:invarian`
+  **26/26**. **Playwright e2e tidak dijalankan** — `apps/web` tak tersentuh
+  satu baris pun (`git status` sebagai buktinya).
+
+---
+
 ## Periksa-dulu-baru-tulis: siapa yang menahan saat dua orang bersamaan — server — 2026-08-27
 
 - **Kenapa vena ini ada**: repo ini punya **21 berkas uji** yang menyebut
@@ -6926,6 +7016,10 @@ berlaku di situ).
       101 situs / 44 ber-`??` / 40 runtuh; yang mahal justru BUKAN di situs
       itu melainkan di `catch (_) { return []; }` milik antrean offline —
       Rp150.000 pending terbaca 0 perintah dengan `hasError` tetap false
+- [x] ~~**Menulis ke baris yang sudah dibuang**~~ — BERSIH, lihat entri di
+      atas. 40 situs tulis; 4 tuduhan dicabut berturut-turut (tiap pencabutan
+      mengajari pemindainya satu bentuk penjagaan), 1 perbaikan, 1 terdaftar
+      beralasan. Terukur lewat HTTP: tombol dapur pada penjualan terbuang → 404
 - [ ] **Periksa-dulu-baru-tulis tanpa penahan** — 9 situs tersisa (4 `sah`,
       **5 `utang` yang jumlahnya dipaku**); yang paling terasa `catatAbsen`,
       karena `attendances` tak punya indeks unik apa pun
