@@ -15144,6 +15144,46 @@ cek "PASANGAN: antrean selisih yang MUAT tak dituduh terpotong" "V == 0" \
 cek "PASANGAN: bentuk antrean selisih tetap LARIK" "V == 1" \
   "$(jq 'if type == "array" then 1 else 0 end' /tmp/verify272s.json)"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §273 — BENTUK BALASAN DISEBUT PENULISNYA
+#
+# Gerbang statis `bentuk-balasan.test.ts` menjaga BENTUK kodenya. Yang dipaku
+# di sini PERILAKUNYA: balasan yang kolomnya kini disebut satu per satu harus
+# tetap membawa kunci yang SAMA — perbaikan yang mengubah balasan adalah
+# perbaikan yang salah — dan rahasia tak boleh muncul di mana pun.
+echo
+echo "── §273 bentuk balasan disebut penulisnya ──"
+
+CO273="$(api "$OWNER" GET "/company")"
+# Kunci yang memang dikirim sebelum kolomnya disebut. Bila salah satu hilang,
+# itu kunci yang selama ini terkirim lalu diam-diam dicabut.
+for K273 in id nama slug plan timezone pb1Enabled pb1Rate metodeHpp \
+            diskonMaksPersen blokirJualMinus targetPenjualan foodCostMaks \
+            receiptFooter receiptShowAlamat isActive createdAt updatedAt mode; do
+  cek "GET /company tetap membawa \`$K273\`" "V == 1" \
+    "$(echo "$CO273" | jq --arg k "$K273" 'if has($k) then 1 else 0 end')"
+done
+
+# ATURAN B lewat HTTP: tak satu pun rahasia muncul di balasan yang paling
+# mungkin membocorkannya — sesi login, dan kartu perusahaan.
+SESI273="$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")"
+cek "login: balasannya TIDAK memuat password_hash" "V == 0" \
+  "$(echo "$SESI273" | grep -ci 'password_hash\|passwordHash' || true)"
+cek "login: balasannya TIDAK memuat token_version" "V == 0" \
+  "$(echo "$SESI273" | grep -ci 'token_version\|tokenVersion' || true)"
+cek "PASANGAN: login tetap memulangkan token sesinya" "V == 1" \
+  "$(echo "$SESI273" | jq 'if (.token|length) > 20 then 1 else 0 end')"
+cek "GET /company TIDAK memuat kunci berbau rahasia" "V == 0" \
+  "$(echo "$CO273" | grep -ci 'password\|secret\|token' || true)"
+
+# SMTP: penandanya dikirim, rahasianya tidak.
+SMTP273="$(api "$SA" GET "/admin/sistem/smtp" 2>/dev/null || echo '{}')"
+if echo "$SMTP273" | jq -e 'has("has_password")' > /dev/null 2>&1; then
+  cek "SMTP: mengirim has_password (penanda), bukan password" "V == 1" \
+    "$(echo "$SMTP273" | jq 'if has("has_password") and (has("password") | not) then 1 else 0 end')"
+fi
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

@@ -50,6 +50,106 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Bentuk balasan yang ditentukan TABELNYA, bukan penulisnya — server — 2026-08-27
+
+- **Kenapa vena ini ada**: enam putaran menutup satu keluarga di sisi
+  KELUARAN — bacaan yang gagal, yang terpotong, penulisan tanpa penahan,
+  penulisan ke baris terbuang. Yang belum pernah ditanyakan sama sekali:
+  **apa yang MASUK ke balasan tanpa ada yang memilihnya?**
+
+- **Populasi**: **298 situs `c.json`** di ≥25 berkas · `DISEBUT` **220**
+  (objek literal / hasil pembantu) · `KOLOM` **72** (dari `select({ … })`
+  berkolom eksplisit) · **`BARIS_PENUH` 6** · **`RAHASIA` 0**.
+
+- **Taruhannya bukan teoretis**: basis data ini menyimpan
+  `users.password_hash`, `smtp_settings.password`, token undangan MENTAH, dan
+  dua tabel `token_hash`. Satu `c.json(user)` di rute baru mengirim hash bcrypt
+  seluruh akun. Yang menjaga hal itu tidak terjadi, sampai putaran ini:
+  **tidak ada apa-apa** — hanya kebiasaan menulis DTO dengan tangan.
+
+- **Aturan B bersih, dan itu DITELUSURI bukan dianggap.** Delapan kandidat
+  yang ditandai penelusuran kasar semuanya bermuara di `buatSesi`
+  (`auth/session.ts:42`), yang merakit `payload` kolom demi kolom; dan
+  `smtpDto` (`admin-system/routes.ts:44`) mengirim
+  `has_password: Boolean(row?.password)` — penandanya, bukan rahasianya.
+  Keduanya contoh yang benar, dan gerbangnya wajib membiarkan keduanya hijau —
+  itu salah satu uji PASANGAN-nya.
+
+- **Enam situs diperbaiki, dan semuanya jinak HARI INI**:
+  `company` ×2, `admin-tenants`, `customer` ×2, `penjualan`. `companies`,
+  `customers`, dan `sales` memang tak punya kolom rahasia. Yang diperbaiki
+  bukan kebocoran melainkan **ketiadaan keputusan**: bentuk balasannya
+  mengikuti bentuk TABEL, jadi satu kolom yang ditambahkan besok — catatan
+  internal, penanda tagihan, apa pun — ikut terkirim ke semua klien tanpa satu
+  baris kode pun berubah dan tanpa satu orang pun memutuskannya.
+
+- **PENGUKURAN yang membuktikan perbaikannya benar adalah bahwa ia TAK
+  MENGUBAH APA PUN.** `src/db/kolom-publik.ts` dibuat dari kolom yang hari ini
+  sudah terkirim, lalu dipasang lewat `.select(KOLOM_…)` / `.returning(KOLOM_…)`:
+
+  | | |
+  |---|---|
+  | kunci `GET /company` sebelum | 22 |
+  | kunci `GET /company` sesudah | **22, identik** (`diff` kosong) |
+
+  Perbaikan yang mengubah balasan adalah perbaikan yang salah. Yang berubah
+  cuma satu: mulai sekarang penambahan kolom harus **disengaja** untuk sampai
+  ke luar.
+
+- **PEMINDAINYA SALAH TIGA KALI, dan ketiganya tertangkap oleh dua cara
+  menghitung yang tak cocok** — bukan oleh membaca pemindainya:
+
+  | # | cacat | bagaimana ketahuan |
+  |---|---|---|
+  | 1 | hanya mengenal `select()` telanjang, buta pada **`returning()` telanjang** — yang sama luasnya | sapuan teks melaporkan 3 situs, AST melaporkan 2 |
+  | 2 | uji keterkandungan **terbalik**: simpul rantai membentang seluruh rantainya, jadi `.update(T)` adalah KETURUNAN `returning()`, bukan leluhurnya | jumlahnya berubah 2 → 4 sambil dua situs `select()` diam-diam pindah kelas jadi "KOLOM" |
+  | 3 | rantai yang jadi **badan callback** (`tanpaBentrok(() => …returning())`) berhenti di panahnya, barisnya tak pernah terikat nama | satu situs `customer` tetap "KOLOM" padahal bentuknya sama persis dengan tetangganya |
+
+  Angka akhirnya **6**, dan tiap angka sebelumnya (2, 4, 5) adalah pemindai
+  yang rusak dengan cara berbeda.
+
+- **Daftar kolom rahasia DIBACA DARI SKEMA, bukan diketik** — `pgTable` diurai,
+  nama kolom dicocokkan `password|secret|token|hash|apikey`. Hasilnya **5
+  tabel** (`users`, `invitations`, `smtpSettings`, `passwordResetTokens`,
+  `emailVerificationTokens`), cocok persis dengan daftar yang kubuat tangan
+  saat pengintaian — dua cara menghitung yang sepakat. Daftar yang diketik
+  adalah cara kolom rahasia BERIKUTNYA lahir tanpa dijaga; kesalahan itu sudah
+  dibayar dua putaran berturut-turut, saat gerbang menuduh `potongLarik` lalu
+  `kunciBackfillKode` karena regexnya hafal nama lama.
+
+- **Angka sebelum → sesudah**: `BARIS_PENUH` **6 → 0** · `RAHASIA` **0 → 0**,
+  dan nol yang kedua itu kini **dijaga**, bukan diharapkan. `MAKS_UTANG = 0`:
+  aturan B tak punya pengecualian yang sah.
+
+- **Bukti merah pada pohon SUNGGUHAN, dua arah**: mencabut `KOLOM_COMPANY`
+  dari `GET /company` → merah (aturan A); mengganti
+  `c.json(await buatSesi(user))` jadi `c.json(user)` di `/auth/login` → merah
+  (aturan B) **dan** uji PASANGAN-nya ikut merah, persis seperti seharusnya.
+  **PASANGAN**: `select({ … })` berkolom tak dituduh · DTO yang dirakit di
+  tempat tak dituduh · `buatSesi` & `smtpDto` yang SUNGGUHAN tetap hijau.
+  **CAKUPAN** dipaku: ≥200 situs, ≥25 berkas, ≥150 `DISEBUT`, ≥50 `KOLOM`,
+  ≥4 tabel rahasia — dan tabel biasa (`sales`, `companies`) wajib TIDAK ikut
+  tertandai, supaya polanya tak diam-diam melebar jadi menuduh semuanya.
+
+- **§273 verify-api**: 18 kunci `GET /company` dipaku satu per satu (kunci yang
+  hilang berarti kontrak yang dicabut diam-diam) · balasan login tak memuat
+  `password_hash` maupun `token_version` · **PASANGAN**: login tetap
+  memulangkan tokennya · SMTP mengirim `has_password`, bukan `password`.
+
+- **Batas detektor, ditulis jujur**: penelusuran asal berlingkup satu fungsi —
+  baris yang melewati pembantu di berkas lain tak terlihat, dan justru itulah
+  yang membuat `buatSesi` aman di matanya (yang sampai ke `c.json` hasil
+  pembantunya, bukan barisnya) · `SELECT *` di SQL mentah tak disapu aturan A ·
+  pola nama kolom rahasia adalah heuristik yang sengaja LEBAR (`token`
+  menangkap `tokenVersion` yang bukan rahasia — tabelnya memang perlu dijaga).
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.527** (211 berkas) ·
+  **`verify-api.sh` 3.265 lolos / 0 gagal** (DB segar; §273 baru: 23 asersi) ·
+  `audit:invarian` **26/26**. **Playwright e2e tidak dijalankan** — `apps/web`
+  tak tersentuh satu baris pun (`git status` sebagai buktinya).
+
+---
+
 ## Menulis ke baris yang sudah DIBUANG — server — 2026-08-27
 
 - **Kenapa vena ini ada, dan ini yang paling pantas dicatat**: gerbang audit
@@ -7016,6 +7116,10 @@ berlaku di situ).
       101 situs / 44 ber-`??` / 40 runtuh; yang mahal justru BUKAN di situs
       itu melainkan di `catch (_) { return []; }` milik antrean offline —
       Rp150.000 pending terbaca 0 perintah dengan `hasError` tetap false
+- [x] ~~**Bentuk balasan ditentukan tabelnya**~~ — TEMUAN LATEN, lihat entri
+      di atas. 298 situs `c.json`; `BARIS_PENUH` 6 → 0; aturan "rahasia tak
+      pernah dikirim utuh" 0 pelanggaran dan kini DIJAGA. Pemindainya salah
+      tiga kali, ketiganya ketahuan dari dua cara menghitung yang tak cocok
 - [x] ~~**Menulis ke baris yang sudah dibuang**~~ — BERSIH, lihat entri di
       atas. 40 situs tulis; 4 tuduhan dicabut berturut-turut (tiap pencabutan
       mengajari pemindainya satu bentuk penjagaan), 1 perbaikan, 1 terdaftar

@@ -10,6 +10,7 @@ import type {
   MemberCariRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { KOLOM_CUSTOMER } from "../../db/kolom-publik";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import { branches, customers, sales } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
@@ -197,7 +198,7 @@ export const customerRoutes = new Hono<AppEnv>()
         catatan: body.catatan ?? null,
       })
       .onConflictDoNothing()
-      .returning();
+      .returning(KOLOM_CUSTOMER);
     if (!row) throw new HTTPException(409, { message: `Member dengan WA ${wa} sudah terdaftar` });
     return c.json(row, 201);
   })
@@ -232,7 +233,7 @@ export const customerRoutes = new Hono<AppEnv>()
           updatedAt: new Date(),
         })
         .where(and(eq(customers.id, id), eq(customers.companyId, auth.company_id!)))
-        .returning(),
+        .returning(KOLOM_CUSTOMER),
     );
     if (!row) throw new HTTPException(404, { message: "Member tidak ditemukan" });
     return c.json(row);

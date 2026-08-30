@@ -6,6 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { SEPULUH_TAHUN, zStempelRencana } from "../../lib/waktu-kejadian";
 import { db } from "../../db/client";
+import { KOLOM_COMPANY } from "../../db/kolom-publik";
 import { bentrokUnikPada } from "../../lib/pg-galat";
 import { branches, companies, memberships, users } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
@@ -189,7 +190,7 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
         updatedAt: new Date(),
       })
       .where(eq(companies.id, c.req.param("id")))
-      .returning();
+      .returning(KOLOM_COMPANY);
     if (!row) throw new HTTPException(404, { message: "Tenant tidak ditemukan" });
     return c.json(row);
   });
