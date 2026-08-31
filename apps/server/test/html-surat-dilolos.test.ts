@@ -184,26 +184,28 @@ describe("keluaran perakit surat: suntikan mati, nama wajar tetap terbaca", () =
   });
 
   /**
-   * Surat verifikasi TAK BOLEH MEMUAT TAUTAN SAMA SEKALI — itu bukan sekadar
-   * akibat sampingan dari pindah ke kode 6 digit, melainkan setengah dari
-   * alasan pindahnya. Tautan verifikasi punya tiga cara gagal yang tak bisa
-   * ditambal: dipotong klien email, dibuka lebih dulu oleh pemindai tautan
-   * penyedia email (sekali pakai → mati sebelum orangnya sempat), dan membuka
-   * peramban LAIN sehingga sesi auto-login mendarat di perangkat yang salah.
+   * ASERSI INI DULU BERBUNYI "TAK ADA TAUTAN SAMA SEKALI", dan itu benar
+   * selama satu putaran — lalu salah, dan diganti alih-alih dilonggarkan.
    *
-   * Satu `<a>` yang diselipkan kembali "supaya lebih praktis" mengembalikan
-   * ketiganya sekaligus, dan tak akan terlihat siapa pun sampai orang gagal
-   * mendaftar. Karena itu dipaku di sini, bukan diserahkan pada ingatan.
+   * Tautannya kembali karena `docs/API-CONTRACT.md` menuliskan alur daftar
+   * APLIKASI PONSEL di atasnya: register → tangkap deep link
+   * `APP_BASE_URL/verifikasi-email?token=…` → `verify-email { token }`.
+   * Mencabut tautannya mematikan pendaftaran dari ponsel sampai repo ponsel
+   * menyusul.
+   *
+   * Yang dijaga karena itu bukan lagi "nol tautan" melainkan **tepat satu**:
+   * nama pemakai ikut ke dalam badan surat, dan nama ber-HTML yang tak dilolos
+   * bisa menyelipkan `<a>` KEDUA yang menuju ke mana pun ia mau — di dalam
+   * email yang dikirim atas nama kami, ke orang yang baru saja mendaftar.
    */
-  it("verifikasi: TAK ADA tautan sama sekali, dan nama ber-HTML tetap dilolos", () => {
-    const html = suratVerifikasi(JAHAT, "123456", 60);
-    expect(html.match(/<a\b/g), "surat verifikasi memuat tautan").toBeNull();
-    // `href="http…` MENTAH, bukan sekadar teks "https://": nama penyerang di
-    // atas memang memuat URL, dan sesudah dilolos ia tinggal tulisan. Yang
-    // dilarang adalah atribut yang benar-benar bisa diklik.
-    expect(html).not.toContain('href="http');
+  it("verifikasi: TEPAT SATU tautan, dan nama ber-HTML tak bisa menambah yang kedua", () => {
+    const html = suratVerifikasi(JAHAT, "123456", 60, URL_SAH);
+    expect(html.match(/<a\b/g) ?? [], "jumlah tautan di surat verifikasi").toHaveLength(1);
     expect(html).not.toContain('<a href="https://penyerang.example">');
     expect(html).toContain("&lt;/b&gt;"); // suntikannya jadi TEKS yang terlihat
+    // Tautan yang SAH tetap utuh — pelolosnya tak boleh merusak jalan ponsel.
+    expect(html).toContain(`href="${URL_SAH}"`);
+    // Dan kodenya tetap ada: ia jalan utamanya, tautannya cuma pendamping.
     expect(html).toContain("123456");
   });
 

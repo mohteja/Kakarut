@@ -4340,12 +4340,44 @@ cek "verifikasi kode ngawur → 400" "V == 400" \
 # BALASANNYA: netral, membawa jaraknya, dan tak membocorkan apakah emailnya
 # terdaftar. Sisi positifnya ("kode mati → kirim ulang langsung memberi kode
 # baru") diuji di bagian 281, tempat keadaan itu bisa dibuat tanpa menunggu.
-api "" POST /auth/register '{"nama":"Verif106B","email":"verif106b@example.com","password":"Verif10634"}' > /dev/null
+REG106B=$(api "" POST /auth/register '{"nama":"Verif106B","email":"verif106b@example.com","password":"Verif10634"}')
 RESEND106=$(api "" POST /auth/resend-verification '{"email":"verif106b@example.com"}')
 cek "kirim ulang seketika sesudah daftar → ditahan jaraknya (tanpa kode baru)" "V == 1" \
   "$(echo "$RESEND106" | jq '((.ok==true) and (.dev_verify_kode==null) and (.retry_after_detik==120))|if . then 1 else 0 end')"
 cek "kirim ulang (email tak dikenal) → 200 tanpa kode, jarak yang SAMA" "V == 1" \
   "$(api "" POST /auth/resend-verification '{"email":"tidakada106@example.com"}' | jq '((.ok==true) and (.dev_verify_kode==null) and (.retry_after_detik==120))|if . then 1 else 0 end')"
+
+# (f) JALUR PONSEL — SATU PENERBITAN, DUA JALAN MASUK.
+#
+# `docs/API-CONTRACT.md` menuliskan alur daftar APLIKASI PONSEL: register →
+# tangkap deep link `APP_BASE_URL/verifikasi-email?token=…` → `verify-email
+# { token }`. Kode 6 angka menggantikan tautan di WEB (tautan sekali pakai
+# gagal tiga cara: dibuka dua kali, dipotong klien email, membuka peramban
+# lain), tapi mencabutnya dari email berarti pendaftaran dari ponsel MATI
+# TOTAL sampai repo ponsel menyusul — dan mereka tak melakukan apa pun yang
+# salah. Jadi keduanya diterbitkan bersama, dan jalur ponselnya diuji UTUH.
+#
+# Akun ini yang dipakai, dan itu bukan kebetulan: ia SUDAH didaftarkan di (e)
+# dan sengaja dibiarkan belum terverifikasi. `POST /auth/register` dibatasi
+# 20 per IP per JAM dan skrip ini berjalan di tepi kuota itu — menambah satu
+# pendaftaran demi seksi ini akan memerahkan seksi lain karena sebab yang sama
+# sekali bukan kode. (Terukur: percobaan pertama seksi ini melakukannya, dan
+# premisnya yang menangkapnya.)
+TOK106B=$(echo "$REG106B" | jq -r '.dev_verify_url // ""' | sed 's/.*token=//')
+KODE106B=$(echo "$REG106B" | jq -r '.dev_verify_kode // ""')
+cek "premis §106f: pendaftaran memulangkan TAUTAN dan KODE sekaligus" "V == 1" \
+  "$(printf '%s' "$TOK106B" | grep -Eq '^[0-9a-f]{64}$' && printf '%s' "$KODE106B" | grep -Eq '^[0-9]{6}$' && echo 1 || echo 0)"
+
+V106B=$(api "" POST /auth/verify-email "{\"token\":\"$TOK106B\"}")
+cek "§106f JALUR PONSEL: verifikasi lewat { token } memberi sesi" "V == 1" \
+  "$(echo "$V106B" | jq '((.token|length)>0)|if . then 1 else 0 end')"
+
+# SATU PENERBITAN: memakai salah satu jalan mematikan yang lain. Kode
+# verifikasi yang masih berlaku pada akun yang SUDAH aktif adalah kunci masuk
+# yang tertinggal di kotak masuk seseorang — verifikasi yang berhasil memberi
+# sesi, jadi taruhannya bukan sekadar kerapian.
+cek "§106f satu penerbitan: KODE ikut mati sesudah tautannya dipakai" "V == 400" \
+  "$(status_code_body "" POST /auth/verify-email "{\"email\":\"verif106b@example.com\",\"kode\":\"$KODE106B\"}")"
 
 echo "== 107. Role Kitchen: produksi lokal di cabang store =="
 # Kitchen = tim cabang store + akses Produksi lokal: hanya bahan yang di Resep
@@ -15828,6 +15860,23 @@ verif281() { # verif281 <email> <kode> → kode HTTP
   curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/verify-email" \
     -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"kode\":\"$2\"}"
 }
+
+# ── JALUR PONSEL: SATU PENERBITAN, DUA JALAN MASUK ─────────────────────────
+#
+# `docs/API-CONTRACT.md` menuliskan alur daftar APLIKASI PONSEL: register →
+# tangkap deep link `APP_BASE_URL/verifikasi-email?token=…` → `verify-email
+# { token }`. Kode 6 angka menggantikan tautan di WEB (tautan sekali pakai
+# gagal tiga cara), tapi mencabutnya dari email berarti pendaftaran dari ponsel
+# MATI TOTAL sampai repo ponsel menyusul — dan mereka tak melakukan apa pun
+# yang salah.
+#
+# Jadi keduanya diterbitkan bersama, dan yang diuji di sini jalur ponselnya
+# UTUH — bukan disimpulkan dari kodenya.
+U281=$(echo "$REG281" | jq -r '.dev_verify_url // ""')
+cek "§281 pendaftaran memulangkan TAUTAN juga (jalur ponsel)" "V == 1" \
+  "$(printf '%s' "$U281" | grep -Eq '/verifikasi-email\?token=[0-9a-f]{64}$' && echo 1 || echo 0)"
+
+
 # Kode SALAH yang bentuknya sah: digit terakhir digeser, jadi ia tetap 6 angka
 # dan tetap lolos validasi bentuk — yang diuji penolakan ISI, bukan bentuk.
 SALAH281="${K281:0:5}$(( (${K281: -1} + 1) % 10 ))"

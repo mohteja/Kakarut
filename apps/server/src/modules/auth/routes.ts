@@ -226,8 +226,31 @@ async function kirimKodeVerifikasi(
   userId: string,
   email: string,
   nama: string,
-): Promise<string | undefined> {
+  baseUrl: string,
+): Promise<{ kode: string; url: string } | undefined> {
   const kode = kodeVerifikasi();
+  /*
+   * DUA JALAN MASUK UNTUK SATU PENERBITAN — kode 6 angka DAN tautan 64-hex.
+   *
+   * Kodenya jalan utama (web), sebab tautan verifikasi punya tiga cara gagal
+   * yang tak bisa ditambal: sekali pakai (muat ulang → "kedaluwarsa" padahal
+   * masih 24 jam), dipotong klien email, dan membuka peramban LAIN sehingga
+   * sesi auto-login mendarat di perangkat yang salah.
+   *
+   * Tautannya tetap ada karena `docs/API-CONTRACT.md` menuliskannya sebagai
+   * alur daftar APLIKASI PONSEL: register → tangkap deep link
+   * `APP_BASE_URL/verifikasi-email?token=…` → `verify-email { token }`.
+   * Mencabutnya berarti mematikan pendaftaran dari ponsel sampai repo ponsel
+   * menyusul — dan mereka tak melakukan apa pun yang salah.
+   *
+   * DUA BARIS, bukan satu baris berkolom baru: baris tautannya berbentuk
+   * PERSIS SAMA dengan baris yang terbit sebelum kode ada, jadi cabang
+   * `{ token }` di `verify-email` tak perlu tahu apa-apa tentang perubahan ini
+   * dan baris lama di produksi tetap bekerja tanpa cabang khusus. Tak ada
+   * migrasi yang dibutuhkan.
+   */
+  const raw = randomBytes(32).toString("hex");
+  const url = `${baseUrl}/verifikasi-email?token=${raw}`;
   const dikirim = await db.transaction(async (tx) => {
     /*
      * "Baca kode terakhir lalu tulis kode baru" adalah balapan, dan akibatnya
@@ -274,11 +297,21 @@ async function kirimKodeVerifikasi(
           isNull(emailVerificationTokens.usedAt),
         ),
       );
-    await tx.insert(emailVerificationTokens).values({
-      userId,
-      tokenHash: sidikKode(userId, kode),
-      expiresAt: new Date(Date.now() + VERIFIKASI_MENIT * 60 * 1000),
-    });
+    const kedaluwarsa = new Date(Date.now() + VERIFIKASI_MENIT * 60 * 1000);
+    /*
+     * Keduanya milik SATU penerbitan, dan seluruh invarian yang sudah dipaku
+     * tetap berlaku apa adanya karena itu: pematian "seluruh baris hidup milik
+     * akun" mematikan keduanya sekaligus (jadi memakai salah satu jalan
+     * mematikan yang lain), penjaga jarak membaca baris hidup TERBARU dan
+     * keduanya seumur, dan penghitung tebakan salah menaikkan `percobaan` pada
+     * seluruh baris hidup — jadi lima tebakan kode yang salah mematikan
+     * tautannya juga. Yang terakhir disebut apa adanya, bukan disembunyikan:
+     * itu satu penerbitan, dan jalan keluarnya tetap "kirim ulang".
+     */
+    await tx.insert(emailVerificationTokens).values([
+      { userId, tokenHash: sidikKode(userId, kode), expiresAt: kedaluwarsa },
+      { userId, tokenHash: hashToken(raw), expiresAt: kedaluwarsa },
+    ]);
     return true;
   });
   if (!dikirim) return undefined;
@@ -286,13 +319,13 @@ async function kirimKodeVerifikasi(
     await kirimEmail({
       to: email,
       subject: "Kode verifikasi Terakasir",
-      html: suratVerifikasi(nama, kode, VERIFIKASI_MENIT),
+      html: suratVerifikasi(nama, kode, VERIFIKASI_MENIT, url),
     });
   } catch {
     /* best-effort: jangan gagalkan permintaan bila email error */
   }
   if (!(await emailTerkonfigurasi()) && process.env.NODE_ENV !== "production") {
-    return kode;
+    return { kode, url };
   }
   return undefined;
 }
@@ -344,7 +377,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post("/register", batasRegister, zValidator("json", RegisterSchema), async (c) => {
     const { nama, email, password } = c.req.valid("json");
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
-    let devKode: string | undefined;
+    let dev: { kode: string; url: string } | undefined;
     if (!existing) {
       const passwordHash = bcrypt.hashSync(password, 10);
       /*
@@ -375,7 +408,7 @@ export const authRoutes = new Hono<AppEnv>()
           if (bentrokUnikPada(e, "users_email_unique")) return null;
           throw e;
         });
-      if (user) devKode = await kirimKodeVerifikasi(user.id, email, nama);
+      if (user) dev = await kirimKodeVerifikasi(user.id, email, nama, appBaseUrl(c));
     }
     // Respons NETRAL & IDENTIK untuk email baru maupun yang sudah terdaftar →
     // menutup total celah enumerasi akun (di produksi dev_verify_kode tak pernah
@@ -390,7 +423,7 @@ export const authRoutes = new Hono<AppEnv>()
       // mundurnya: pendaftaran BARU SAJA mengirim kode, jadi tombol "kirim
       // ulang" yang tampak siap ditekan akan ditolak diam-diam oleh jaraknya.
       retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
-      ...(devKode ? { dev_verify_kode: devKode } : {}),
+      ...(dev ? { dev_verify_kode: dev.kode, dev_verify_url: dev.url } : {}),
     });
   })
   // Lupa password: selalu balas 200 (jangan bocorkan apakah email terdaftar).
@@ -637,9 +670,9 @@ export const authRoutes = new Hono<AppEnv>()
     async (c) => {
       const { email } = c.req.valid("json");
       const [user] = await db.select().from(users).where(eq(users.email, email));
-      let devKode: string | undefined;
+      let dev: { kode: string; url: string } | undefined;
       if (user && !user.deletedAt && user.isActive && !user.emailVerifiedAt) {
-        devKode = await kirimKodeVerifikasi(user.id, email, user.nama);
+        dev = await kirimKodeVerifikasi(user.id, email, user.nama, appBaseUrl(c));
       }
       /*
        * `retry_after_detik` dipulangkan SELALU dan nilainya TETAP — email yang
@@ -650,7 +683,7 @@ export const authRoutes = new Hono<AppEnv>()
       return c.json({
         ok: true,
         retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
-        ...(devKode ? { dev_verify_kode: devKode } : {}),
+        ...(dev ? { dev_verify_kode: dev.kode, dev_verify_url: dev.url } : {}),
       });
     },
   )
