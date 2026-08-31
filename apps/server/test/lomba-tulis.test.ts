@@ -33,7 +33,43 @@ const MAKS_UTANG = 4;
 
 /** kunci: `berkas` -> nama fungsi -> alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
+  "modules/auth/routes.ts": {
+    "POST /reset-password": {
+      kelas: "sah",
+      teks:
+        "BARU TERLIHAT sesudah pemindai bisa menembus `db.transaction`. Dua " +
+        "pemakaian tautan reset yang sama secara bersamaan: keduanya menyetel " +
+        "password (penulis terakhir menang) dan keduanya mematikan SELURUH " +
+        "tautan reset akun itu. Kedua permintaan datang dari pemegang tautan " +
+        "yang sama, jadi tak ada yang bisa didapat seseorang yang belum bisa " +
+        "ia lakukan sendirian — dan di setiap urutan, tautannya berakhir mati.",
+    },
+    "POST /verify-email": {
+      kelas: "sah",
+      teks:
+        "BARU TERLIHAT sesudah pemindai menembus transaksi. `emailVerifiedAt` " +
+        "ditulis `user.emailVerifiedAt ?? new Date()` — idempoten, verifikasi " +
+        "pertama yang bertahan — dan seluruh tautan verifikasi akun itu " +
+        "dimatikan sekaligus. Dua permintaan bersamaan berakhir di keadaan " +
+        "yang persis sama dengan satu permintaan; tak ada invarian yang bisa " +
+        "dilanggar salah satu urutannya.",
+    },
+  },
   "modules/produksi/routes.ts": {
+    "POST /kirim/:fakturId": {
+      kelas: "utang",
+      teks:
+        "UTANG BARU, dan ia tak pernah terlihat sebelum putaran ini: klaimnya " +
+        "ada di dalam `db.transaction` yang dulu buta bagi pemindai ini. " +
+        "Predikatnya `status = 'menunggu'` TETAP BENAR sesudah pengiriman " +
+        "pertama (yang berubah `branch_id` & `dikirim_at`, bukan statusnya), " +
+        "jadi permintaan kedua yang berpapasan mencocokkan baris yang sama " +
+        "lagi: perpindahan diterapkan ulang dan `catatLogFaktur` menulis " +
+        "jejak 'Dikirim ke X' KEDUA untuk satu pengiriman. Balasannya pun " +
+        "menyebut `jumlah_baris` dari BACAAN awal, bukan dari baris yang " +
+        "benar-benar tersentuh. Ditulis dari kodenya, BELUM diukur lewat HTTP " +
+        "— dan itu disebut di sini supaya tak terbaca lebih kuat dari adanya.",
+    },
     catatRealisasiDana: {
       kelas: "sah",
       teks:
@@ -71,16 +107,6 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "padanya.",
     },
   },
-  "modules/perlengkapan/service.ts": {
-    tibaBeliPerlengkapan: {
-      kelas: "utang",
-      teks:
-        "UTANG. Klaimnya ADA — WHERE id = ? AND status IN (menunggu, " +
-        "diproses) — tapi hasilnya tak pernah dilihat, jadi yang kalah " +
-        "balapan tetap dibalas sukses. Bentuk yang paling sulit dilihat mata: " +
-        "kodenya TERLIHAT menjaga dirinya.",
-    },
-  },
   "modules/sync/routes.ts": {
     execPenjualan: {
       kelas: "utang",
@@ -93,7 +119,10 @@ const daftar: Record<string, Record<string, Alasan>> = {
     },
   },
   "modules/admin-tenants/routes.ts": {
-    transaction: {
+    // Kunci daftar berubah `transaction` → `jalankan` begitu callback transaksi
+    // berhenti dinilai sebagai situs tersendiri: yang tertuduh kini fungsi
+    // yang MENULISKAN transaksinya, dan itu memang nama yang benar untuknya.
+    jalankan: {
       kelas: "utang",
       teks:
         "UTANG. Pembuatan penyewa (companies + users) oleh super admin. " +
@@ -139,6 +168,90 @@ describe("periksa-dulu-baru-tulis wajib punya penahan", () => {
     for (const b of backfill) {
       expect(b.kelas, `${b.berkas} -> ${b.nama} tak memegang kunci`).toBe("KUNCI");
     }
+  });
+
+  /* ── PENAHAN DI DALAM TRANSAKSI — kebutaan yang dibayar putaran ini ─────── */
+
+  /**
+   * `db.transaction(cb)` bukan fungsi lain dari sudut pandang balapan.
+   *
+   * Generasi pertama pemindai ini menghitung panggilan hanya bila pembungkus
+   * TERDEKATNYA adalah fungsi yang sedang dinilai — jadi setiap penjaga yang
+   * hidup di dalam sebuah transaksi tak terlihat sama sekali. Terukur saat
+   * kebutaan itu dicabut: dari 73 callback transaksi di `src`, 31 memuat
+   * `.update(` langsung di dalamnya dan **17** memegang klaim yang DIPERIKSA.
+   *
+   * Harganya sudah masuk ledger sebagai tuduhan yang kalimatnya keliru:
+   * `tibaBeliPerlengkapan` didaftarkan `utang` dengan alasan *"hasilnya tak
+   * pernah dilihat"*, padahal `if (dikunci.length === 0) throw SUDAH` sudah ada
+   * lima minggu sebelum utang itu ditulis. Yang tak terlihat transaksinya.
+   */
+  const satu = (kode: string) => situsLomba({ "x.ts": kode })[0];
+
+  it("PREMIS: klaim yang diperiksa DI DALAM transaksi terbaca KLAIM", () => {
+    expect(
+      satu(`async function f() {
+         const [ada] = await db.select().from(t).where(eq(t.id, id));
+         return db.transaction(async (tx) => {
+           const kena = await tx.update(t).set({ s: 1 }).where(and(eq(t.id, id), eq(t.s, 0))).returning();
+           if (kena.length === 0) throw new Error("kalah");
+           return kena;
+         });
+       }`).kelas,
+    ).toBe("KLAIM");
+  });
+
+  it("PREMIS: klaim TANPA pemeriksaan di dalam transaksi tetap KLAIM_BUTA", () => {
+    expect(
+      satu(`async function f() {
+         const [ada] = await db.select().from(t).where(eq(t.id, id));
+         return db.transaction(async (tx) => {
+           await tx.update(t).set({ s: 1 }).where(and(eq(t.id, id), eq(t.s, 0)));
+         });
+       }`).kelas,
+    ).toBe("KLAIM_BUTA");
+  });
+
+  it("PREMIS: kunci di dalam transaksi terbaca KUNCI", () => {
+    expect(
+      satu(`async function f() {
+         return db.transaction(async (tx) => {
+           await kunciAntrean(tx, "a", id);
+           const [ada] = await tx.select().from(t).where(eq(t.id, id));
+           await tx.update(t).set({ s: 1 }).where(eq(t.id, id));
+         });
+       }`).kelas,
+    ).toBe("KUNCI");
+  });
+
+  it("PASANGAN: callback yang BUKAN transaksi tetap tak ikut dihitung", () => {
+    // `.map(...)`/`Promise.all` benar-benar menjalankan badannya di konteks
+    // lain; hanya `db.transaction(cb)` yang menjalankan `cb` tepat sekali di
+    // alur fungsi yang menuliskannya. Menembus keduanya akan menggabungkan
+    // balapan yang tak berhubungan jadi satu situs.
+    expect(
+      situsLomba({
+        "x.ts": `async function f() {
+           const baris = await db.select().from(t);
+           await Promise.all(baris.map(async (b) => { await db.update(t).set({ s: 1 }).where(eq(t.id, b.id)); }));
+         }`,
+      }),
+    ).toEqual([]);
+  });
+
+  it("PASANGAN: callback transaksi tak dihitung DUA KALI", () => {
+    // Sesudah ia jadi milik fungsi induknya, ia tak boleh juga berdiri sebagai
+    // situs tersendiri — satu balapan yang sama akan muncul dua kali dan angka
+    // populasinya berhenti berarti.
+    const s = situsLomba({
+      "x.ts": `async function f() {
+         return db.transaction(async (tx) => {
+           const [ada] = await tx.select().from(t).where(eq(t.id, id));
+           await tx.update(t).set({ s: 1 }).where(eq(t.id, id));
+         });
+       }`,
+    });
+    expect(s.length).toBe(1);
   });
 
   it("tiap periksa-lalu-tulis tanpa penahan sudah diadjudikasi", () => {

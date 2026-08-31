@@ -86,15 +86,53 @@ const SPASI = /\s+/g;
 const KUNCI = /FOR UPDATE|pg_advisory|\bkunci[A-Z]\w*\s*\(/;
 const BENTROK = /onConflict|tanpaBentrok|bentrokUnik/;
 
+const FUNGSI = new Set([
+  "ArrowFunctionExpression",
+  "FunctionExpression",
+  "FunctionDeclaration",
+]);
+
+/**
+ * Apakah `fn` adalah CALLBACK sebuah `.transaction(...)`.
+ *
+ * Callback transaksi bukan fungsi lain dari sudut pandang balapan — ia badan
+ * fungsi induknya yang kebetulan atomik. Memperlakukannya sebagai fungsi
+ * terpisah adalah kebutaan yang paling mahal di berkas ini, dan harganya
+ * terukur: dari **73** callback transaksi di `src`, **31** memuat `.update(`
+ * langsung di dalamnya dan **17** di antaranya memegang klaim yang DIPERIKSA
+ * (`returning` + `if`/`throw`) — tak satu pun terlihat oleh generasi pertama
+ * pemindai ini.
+ *
+ * Akibat nyatanya tercatat di ledger: `tibaBeliPerlengkapan` didaftarkan
+ * sebagai `utang` dengan kalimat *"klaimnya ADA … tapi hasilnya tak pernah
+ * dilihat, jadi yang kalah balapan tetap dibalas sukses"* — padahal
+ * pemeriksaannya (`if (dikunci.length === 0) throw SUDAH`) sudah ada lima
+ * minggu SEBELUM utang itu dicatat. Yang tak terlihat bukan pemeriksaannya,
+ * melainkan transaksi yang membungkusnya; yang tersisa di mata pemindai cuma
+ * satu `update` jinak di luar transaksi, dan dari situ lahir tuduhan yang
+ * kalimatnya menggambarkan baris yang lain.
+ */
+function callbackTransaksi(fn: Simpul, induk: Map<Simpul, Simpul>): boolean {
+  const p = induk.get(fn);
+  if (!p || p.type !== "CallExpression") return false;
+  if ((p.arguments as Simpul[])?.[0] !== fn) return false;
+  return namaProperti(p.callee as Simpul) === "transaction";
+}
+
+/**
+ * Fungsi yang MEMILIKI panggilan ini — dengan callback transaksi ditembus.
+ *
+ * Callback selain `.transaction(` TIDAK ditembus, dan itu disengaja: `.map(…)`
+ * atau `Promise.all([…])` benar-benar menjalankan badannya di konteks lain,
+ * sementara `db.transaction(cb)` menjalankan `cb` tepat sekali, di alur yang
+ * sama, sebagai bagian dari fungsi yang menuliskannya.
+ */
 function fungsiPembungkus(n: Simpul, induk: Map<Simpul, Simpul>): Simpul | undefined {
   let k: Simpul | undefined = induk.get(n);
   while (k) {
-    if (
-      k.type === "ArrowFunctionExpression" ||
-      k.type === "FunctionExpression" ||
-      k.type === "FunctionDeclaration"
-    ) {
-      return k;
+    if (FUNGSI.has(k.type)) {
+      if (!callbackTransaksi(k, induk)) return k;
+      // callback transaksi → naik terus, panggilannya milik fungsi induknya
     }
     k = induk.get(k);
   }
@@ -250,6 +288,10 @@ export function situsLomba(kode?: Record<string, string>): SitusLomba[] {
     });
 
     for (const fn of fungsi) {
+      // Callback transaksi kini DIHITUNG MILIK fungsi induknya, jadi ia tak
+      // boleh dinilai lagi sebagai situs tersendiri — satu balapan yang sama
+      // akan muncul dua kali, dan angka populasi berhenti berarti.
+      if (callbackTransaksi(fn, induk)) continue;
       const { baca, tulis, klaim, bacaUlang } = bacaLingkup(fn, isi, induk);
       const tabel = [...tulis].filter((t) => baca.has(t)).sort();
       if (tabel.length === 0) continue;

@@ -50,6 +50,116 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Utang `tibaBeliPerlengkapan` DICABUT — dan detektornya yang dibayar — server (uji) — 2026-08-31
+
+- **Yang diminta**: membayar utang balapan kedua. Catatan putaran 24
+  menuliskannya begini:
+
+  > *"UTANG. Klaimnya ADA — `WHERE id = ? AND status IN (menunggu, diproses)` —
+  > tapi hasilnya tak pernah dilihat, jadi yang kalah balapan tetap dibalas
+  > sukses."*
+
+- **Kalimat itu keliru, dan `git log -S` yang membuktikannya.** Pemeriksaan
+  `if (dikunci.length === 0) throw SUDAH` lahir di commit `7a8eb02`,
+  **2026-07-20** — lima minggu SEBELUM utangnya dicatat (2026-08-27). Keadaan
+  yang digambarkannya tak pernah ada pada saat ditulis.
+
+- **DIUKUR LEWAT HTTP sebelum apa pun disimpulkan** — dua
+  `POST /perlengkapan/beli/:id/tiba` benar-benar bersamaan atas satu faktur,
+  tiga kali berturut-turut:
+
+  | | kode balasan | mutasi `masuk` bertambah |
+  |---|---|---|
+  | apa adanya hari ini | **200 & 400** (3 dari 3) | **1** |
+
+  Yang kalah **ditolak**, dan stok bertambah **sekali**. Utangnya karena itu
+  **DICABUT, bukan dibayar** — menambal kode yang sudah benar supaya angkanya
+  turun adalah cara paling halus untuk berbohong pada ledger sendiri.
+
+- **Tapi tuduhannya BUKAN mengada-ada — dan sebabnya jauh lebih berharga
+  daripada situsnya.** `lomba.ts` menghitung sebuah panggilan hanya bila
+  pembungkus TERDEKATNYA adalah fungsi yang sedang dinilai. Klaim yang dijaga
+  itu hidup di dalam `db.transaction(async (tx) => …)` — fungsi BERSARANG.
+  Dari sudut pandang `tibaBeliPerlengkapan`, penjaganya **tak ada**; yang
+  tersisa di mata pemindai cuma satu `update` jinak di luar transaksi. Dari
+  situ lahir tuduhan yang kalimatnya menggambarkan baris yang lain.
+
+- **KEBUTAAN ITU SISTEMIS, dan terukur**: dari **73** callback transaksi di
+  `src`, **31** memuat `.update(` langsung di dalamnya, dan **17** di antaranya
+  memegang klaim yang DIPERIKSA (`returning` + `if`/`throw`) — tersebar di
+  `penerimaan` (4), `pesanan` (4), `perlengkapan` (3), `penjualan`, `produksi`,
+  `open-bill`, `company`. Sapuan 58 situs putaran 24, di tiap fungsi yang
+  menaruh penjaganya di dalam transaksi, menilai **hanya sisa penulisan di
+  luarnya**.
+
+- **Yang dibayar putaran ini karena itu INSTRUMENNYA**: `fungsiPembungkus`
+  menembus callback `.transaction(` (dan **hanya** itu — `.map(…)` /
+  `Promise.all` benar-benar berjalan di konteks lain), dan callback transaksi
+  berhenti dinilai sebagai situs tersendiri supaya satu balapan tak dihitung
+  dua kali.
+
+- **Sapuan diadu berdampingan atas populasi yang sama** — cara yang sama
+  dipakai saat instrumennya naik ke pohon sintaks:
+
+  | | lama | baru |
+  |---|---|---|
+  | situs | 58 | **69** |
+  | `KUNCI` | 22 | 23 |
+  | `BENTROK` | 12 | **17** |
+  | `KLAIM` | 16 | **19** |
+  | `KLAIM_BUTA` | 5 | **7** |
+  | `TELANJANG` | 3 | 3 |
+
+- **Mata yang lebih baik MENAIKKAN tuduhan, dan itu hasil yang sah.** Satu
+  dicabut (`tibaBeliPerlengkapan` → `KLAIM`), **tiga baru terlihat**, dan
+  ketiganya dipilah tangan:
+
+  | situs | kelas | dasar |
+  |---|---|---|
+  | `POST /reset-password` | **sah** | dua pemakaian tautan yang sama oleh pemegang tautan yang sama; di setiap urutan tautannya berakhir mati |
+  | `POST /verify-email` | **sah** | `emailVerifiedAt` ditulis `?? new Date()` (idempoten) + seluruh tautan dimatikan sekaligus |
+  | `POST /kirim/:fakturId` | **utang** | predikat `status='menunggu'` TETAP benar sesudah kiriman pertama, jadi permintaan kedua mencocokkan baris yang sama lagi → jejak faktur "Dikirim ke X" KEDUA, dan `jumlah_baris` dilaporkan dari BACAAN awal |
+
+  Kunci daftar `admin-tenants` ikut berubah `transaction` → `jalankan`: yang
+  tertuduh kini fungsi yang MENULISKAN transaksinya, dan itu nama yang benar.
+
+- **`MAKS_UTANG` tetap 4 — dan itu justru yang jujur.** Satu dicabut, satu baru
+  terlihat. Angka yang tak bergerak di sini lebih berarti daripada angka yang
+  turun: komposisinya berubah, dan keduanya disebut namanya.
+
+- **Bukti merah dua arah, dijalankan bukan diasumsikan.** Pemeriksaan
+  `dikunci.length === 0` dicabut →
+  - gerbang statis merah: `modules/perlengkapan/service.ts:1295
+    [tibaBeliPerlengkapan] KLAIM_BUTA tabel=supplyPurchases`;
+  - **§278 merah dengan angka yang persis digambarkan catatan putaran 24**:
+    kode **200 & 200**, dan **stok CK bertambah 14, bukan 7**.
+
+  Jadi catatan lama benar tentang BENTUK kegagalannya, dan keliru hanya tentang
+  apakah penjaganya ada. Itu ditulis di sini utuh — bukan dihapus diam-diam.
+
+- **Premis instrumen baru dibuktikan di fikstur** (4 uji): klaim diperiksa di
+  dalam `tx` → `KLAIM` · tanpa pemeriksaan → tetap `KLAIM_BUTA` · `kunciAntrean`
+  di dalam `tx` → `KUNCI` · **PASANGAN**: callback non-transaksi (`.map`) tak
+  ikut dihitung, dan callback transaksi tak dihitung DUA kali.
+
+- **§278 verify-api** (4 asersi): premis status faktur · tepat satu diterima ·
+  yang kalah **ditolak** · stok bertambah tepat sekali qty. Ia memaku hasil
+  pengukuran supaya klaim yang keliru tak bisa lahir lagi tanpa ketahuan.
+
+- **Batas yang tetap diakui**: `lomba.ts` menilai per FUNGSI, jadi kunci yang
+  dipegang PEMANGGIL tetap tak terlihat · nama tabel tetap dibandingkan sebagai
+  teks argumen · callback selain `.transaction(` tetap di luar lingkup, dan itu
+  disengaja · entri `POST /kirim/:fakturId` ditulis dari KODENYA, **belum
+  diukur lewat HTTP**, dan itu disebut di entrinya sendiri.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.572** (214 berkas, +5 uji) ·
+  **`verify-api.sh` 3.292 lolos / 0 gagal** (DB segar; §278 baru) ·
+  `audit:invarian` **26/26**. **Playwright tidak dijalankan** — `apps/web` tak
+  tersentuh. **Tak satu baris pun kode PRODUK berubah** (`git status` atas
+  `apps/server/src` kosong): yang dibayar catatannya dan alat ukurnya.
+
+---
+
 ## Utang DIBAYAR: balapan `catatAbsen` — server — 2026-08-31
 
 - **Kenapa entri ini ada**: putaran 24 menyapu 58 situs periksa-dulu-baru-tulis,

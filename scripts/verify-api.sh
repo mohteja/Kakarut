@@ -15481,6 +15481,61 @@ cek "PASANGAN: ketukan berikutnya tetap MEMBALIK ($T277 → $L277)" "V == 1" \
 
 rm -f /tmp/kk277-*.json
 
+# §278 — DUA "TIBA" YANG BERPAPASAN: SATU MASUK, SATU DITOLAK
+#
+# Putaran 24 mendaftarkan `tibaBeliPerlengkapan` sebagai utang balapan dengan
+# kalimat: *"klaimnya ADA … tapi hasilnya tak pernah dilihat, jadi yang kalah
+# balapan tetap dibalas sukses."*
+#
+# Kalimat itu KELIRU, dan `git log -S` yang membuktikannya: pemeriksaannya
+# (`if (dikunci.length === 0) throw SUDAH`) lahir 2026-07-20, lima minggu
+# SEBELUM utang itu dicatat. Yang tak terlihat bukan pemeriksaannya melainkan
+# `db.transaction` yang membungkusnya — pemindai balapan waktu itu tak bisa
+# menembus callback transaksi, jadi yang tersisa di matanya cuma satu `update`
+# jinak di luar transaksi.
+#
+# TERUKUR sebelum seksi ini ditulis, dua `tiba` benar-benar bersamaan atas satu
+# faktur, tiga kali berturut-turut:
+#
+#     kode: 200 & 400   ·   mutasi 'masuk' bertambah: 1   (3 dari 3)
+#
+# Seksi ini memakukan hasil itu supaya klaim yang keliru tak bisa lahir lagi
+# tanpa ketahuan — dan supaya penahannya tak bisa dicabut diam-diam.
+echo
+echo "── §278 dua tiba yang berpapasan: satu masuk, satu ditolak ──"
+
+SUP278=$(api "$OWNER" POST /perlengkapan '{"nama":"Uji Papasan Tiba","satuan":"pcs","harga_beli":1000}' | jq -r .id)
+BELI278=$(api "$OWNER" POST /perlengkapan/beli \
+  "{\"supply_id\":\"$SUP278\",\"ck_branch_id\":\"$CK52_UTAMA\",\"qty\":7,\"total_harga\":7000}" | jq -r '.ids[0]')
+
+# PREMIS: fakturnya memang ada dan berstatus 'menunggu'. Tanpa ini "satu 200
+# satu 400" bisa benar karena dua-duanya gagal karena sebab lain.
+cek "premis: faktur beli uji berstatus menunggu" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg b "$BELI278" '([.[]|select(.id==$b and .status=="menunggu")]|length) | if . == 1 then 1 else 0 end')"
+
+SALDO278_A=$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$SUP278" '[.[]|select(.id==$id)][0].saldo // 0')
+
+rm -f /tmp/kk278-*
+for i in 1 2; do
+  ( curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/perlengkapan/beli/$BELI278/tiba" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"qty":7}' \
+      > "/tmp/kk278-$i" ) &
+done
+wait
+
+K278="$(cat /tmp/kk278-1 2>/dev/null) $(cat /tmp/kk278-2 2>/dev/null)"
+cek "tepat SATU yang diterima (kode: $K278)" "V == 1" \
+  "$(printf '%s\n' $K278 | grep -c '^2')"
+cek "yang KALAH ditolak, bukan dibalas sukses (kode: $K278)" "V == 1" \
+  "$(printf '%s\n' $K278 | grep -c '^4')"
+
+# Yang paling mahal bila penahannya lepas: stok masuk DUA KALI.
+SALDO278_B=$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$SUP278" '[.[]|select(.id==$id)][0].saldo // 0')
+cek "stok CK bertambah TEPAT sekali qty (7), bukan dua kali" "abs(V - 7) < 0.001" \
+  "$(python3 -c "print(float('$SALDO278_B') - float('$SALDO278_A'))")"
+
+rm -f /tmp/kk278-*
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
