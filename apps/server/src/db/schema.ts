@@ -417,12 +417,37 @@ export const emailVerificationTokens = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    tokenHash: text("token_hash").notNull().unique(),
+    /**
+     * Hash dari `<user_id>:<kode>`, bukan dari kodenya saja — dan user id itu
+     * yang membuat kode 6 digit aman disimpan begini.
+     *
+     * Kode 6 digit hanya punya sejuta kemungkinan, jadi dua akun BISA memegang
+     * kode yang sama pada saat yang sama. Meng-hash kodenya telanjang membuat
+     * tabrakan itu jadi galat penyisipan (dulu kolomnya `unique`), dan yang
+     * lebih buruk: satu kode jadi berlaku untuk akun mana pun yang kebetulan
+     * memegangnya. Dengan user id ikut di-hash, sebuah kode hanya pernah
+     * berarti bagi akun yang menerimanya.
+     *
+     * Baris LAMA berisi hash token tautan 64-hex (skema sebelum OTP). Keduanya
+     * hidup berdampingan sampai token-token itu kedaluwarsa sendiri — lihat
+     * cabang transisi di `POST /auth/verify-email`.
+     */
+    tokenHash: text("token_hash").notNull(),
+    /**
+     * Percobaan SALAH terhadap kode ini. Sejuta kemungkinan bukan rahasia yang
+     * kuat; yang membuatnya kuat adalah batas percobaannya. Begitu batasnya
+     * tercapai barisnya dimatikan, dan pemakainya harus minta kode baru.
+     */
+    percobaan: integer("percobaan").notNull().default(0),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("email_verification_user_idx").on(t.userId)],
+  (t) => [
+    index("email_verification_user_idx").on(t.userId),
+    // Bukan unik: lihat catatan `tokenHash` di atas.
+    index("email_verification_hash_idx").on(t.tokenHash),
+  ],
 );
 
 /** Master supplier / sumber pengadaan (per perusahaan). */

@@ -37,13 +37,24 @@ function blokKodeEmail(raw: string): string {
   );
 }
 
-/** Badan surat verifikasi email pendaftaran. */
-export function suratVerifikasi(nama: string, url: string, raw: string): string {
+/**
+ * Badan surat verifikasi email pendaftaran — KODE 6 DIGIT, bukan tautan.
+ *
+ * Kodenya dicetak besar dan berjarak antarangka: yang dilakukan orang dengan
+ * email ini adalah MEMBACANYA lalu mengetiknya di layar sebelah, dan digit
+ * yang berdempetan adalah digit yang salah ketik. Tak ada tautan sama sekali,
+ * jadi tak ada yang bisa dipotong klien email dan tak ada yang bisa dibuka
+ * pemindai tautan sebelum orangnya sempat.
+ */
+export function suratVerifikasi(nama: string, kode: string, menit: number): string {
   return (
     `<p>Halo ${lolosHtml(nama)},</p>` +
-    `<p>Terima kasih sudah mendaftar Terakasir. Klik tautan di bawah untuk memverifikasi email &amp; mengaktifkan akun (berlaku 24 jam):</p>` +
-    `<p><a href="${lolosAtribut(url)}">Verifikasi email saya</a></p>` +
-    blokKodeEmail(raw) +
+    `<p>Terima kasih sudah mendaftar Terakasir. Masukkan kode ini di halaman verifikasi untuk mengaktifkan akun (berlaku ${lolosHtml(String(menit))} menit):</p>` +
+    `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:32px;` +
+    `font-weight:700;letter-spacing:8px;background:#f4f4f5;color:#111;` +
+    `padding:16px 18px;border-radius:8px;border:1px solid #e4e4e7;` +
+    `text-align:center">${lolosHtml(kode)}</p>` +
+    `<p>Jangan berikan kode ini kepada siapa pun. Kami tidak pernah memintanya lewat telepon atau chat.</p>` +
     `<p>Abaikan email ini bila Anda tidak mendaftar.</p>`
   );
 }

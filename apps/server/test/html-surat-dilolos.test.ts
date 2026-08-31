@@ -177,21 +177,40 @@ describe("keluaran perakit surat: suntikan mati, nama wajar tetap terbaca", () =
     expect(html).toContain("&lt;/b&gt;"); // suntikannya jadi TEKS yang terlihat
   });
 
-  it("verifikasi & reset: nama ber-HTML tak menambah satu pun tag", () => {
-    for (const html of [
-      suratVerifikasi(JAHAT, "https://kakarut.app/verifikasi-email?token=abc", "abc"),
-      suratReset(JAHAT, "https://kakarut.app/reset-password?token=abc", "abc"),
-    ]) {
-      expect((html.match(/<a\b/g) ?? []).length).toBe(1);
-      expect(html).not.toContain('<a href="https://penyerang.example">');
-    }
+  it("reset: nama ber-HTML tak menambah satu pun tag", () => {
+    const html = suratReset(JAHAT, "https://kakarut.app/reset-password?token=abc", "abc");
+    expect((html.match(/<a\b/g) ?? []).length).toBe(1);
+    expect(html).not.toContain('<a href="https://penyerang.example">');
+  });
+
+  /**
+   * Surat verifikasi TAK BOLEH MEMUAT TAUTAN SAMA SEKALI — itu bukan sekadar
+   * akibat sampingan dari pindah ke kode 6 digit, melainkan setengah dari
+   * alasan pindahnya. Tautan verifikasi punya tiga cara gagal yang tak bisa
+   * ditambal: dipotong klien email, dibuka lebih dulu oleh pemindai tautan
+   * penyedia email (sekali pakai → mati sebelum orangnya sempat), dan membuka
+   * peramban LAIN sehingga sesi auto-login mendarat di perangkat yang salah.
+   *
+   * Satu `<a>` yang diselipkan kembali "supaya lebih praktis" mengembalikan
+   * ketiganya sekaligus, dan tak akan terlihat siapa pun sampai orang gagal
+   * mendaftar. Karena itu dipaku di sini, bukan diserahkan pada ingatan.
+   */
+  it("verifikasi: TAK ADA tautan sama sekali, dan nama ber-HTML tetap dilolos", () => {
+    const html = suratVerifikasi(JAHAT, "123456", 60);
+    expect(html.match(/<a\b/g), "surat verifikasi memuat tautan").toBeNull();
+    // `href="http…` MENTAH, bukan sekadar teks "https://": nama penyerang di
+    // atas memang memuat URL, dan sesudah dilolos ia tinggal tulisan. Yang
+    // dilarang adalah atribut yang benar-benar bisa diklik.
+    expect(html).not.toContain('href="http');
+    expect(html).not.toContain('<a href="https://penyerang.example">');
+    expect(html).toContain("&lt;/b&gt;"); // suntikannya jadi TEKS yang terlihat
+    expect(html).toContain("123456");
   });
 
   it("url ber-tanda-kutip tak keluar dari atributnya", () => {
     const url = 'https://kakarut.app" onmouseover="jahat()" x="';
     for (const html of [
       suratUndangan("PT Waras", url),
-      suratVerifikasi("Budi", url, "abc"),
       suratReset("Budi", url, "abc"),
     ]) {
       // Kutipnya jadi `&quot;` — jadi `onmouseover` tinggal teks di dalam href,

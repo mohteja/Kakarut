@@ -6,9 +6,15 @@ import { useAuth } from "../context/AuthContext";
 
 /**
  * Daftar akun sendiri (self sign-up). TIDAK langsung login: server mengirim
- * tautan verifikasi ke email. Setelah email diverifikasi (klik tautan) barulah
- * user bisa masuk. Respons daftar SELALU netral — tak membocorkan apakah email
- * sudah terdaftar (anti-enumerasi). Bila email diundang, otomatis bergabung.
+ * KODE 6 ANGKA ke email. Sesudah kodenya dimasukkan barulah akunnya aktif
+ * (dan sesinya langsung diberikan). Respons daftar SELALU netral — tak
+ * membocorkan apakah email sudah terdaftar (anti-enumerasi). Bila email
+ * diundang, otomatis bergabung.
+ *
+ * Layar sukses membawa orangnya LANGSUNG ke halaman kode dengan emailnya sudah
+ * terisi, bukan menyuruhnya "cek email lalu klik tautan": tab ini adalah tab
+ * tempat ia akan mengetik kodenya, dan mengembalikannya ke sini kemudian
+ * berarti mengetik ulang emailnya.
  */
 export function SignupPage() {
   const { register } = useAuth();
@@ -19,7 +25,7 @@ export function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
-  const [devUrl, setDevUrl] = useState<string | null>(null);
+  const [devKode, setDevKode] = useState<string | null>(null);
 
   const terlaluPendek = password.length > 0 && password.length < 8;
   const tidakCocok = konfirmasi.length > 0 && password !== konfirmasi;
@@ -32,7 +38,7 @@ export function SignupPage() {
     try {
       const res = await register(nama, email, password);
       setSent(true);
-      setDevUrl(res.dev_verify_url ?? null);
+      setDevKode(res.dev_verify_kode ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal mendaftar");
     } finally {
@@ -58,18 +64,25 @@ export function SignupPage() {
         {sent ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
-              📧 Jika <b>{email}</b> valid, kami sudah mengirim tautan verifikasi ke email tersebut.
-              Klik tautannya untuk mengaktifkan akun (berlaku 24 jam), lalu masuk.
+              📧 Jika <b>{email}</b> valid, kami sudah mengirim <b>kode 6 angka</b> ke email
+              tersebut. Masukkan kodenya untuk mengaktifkan akun (berlaku 60 menit).
             </div>
-            {devUrl && (
+            {devKode && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 <div className="mb-1 font-semibold">Mode dev (email belum dikonfigurasi):</div>
-                <a href={devUrl} className="break-all font-mono text-amber-700 underline">
-                  {devUrl}
-                </a>
+                <span className="font-mono text-lg tracking-widest text-amber-700">{devKode}</span>
               </div>
             )}
-            <Link to="/login" className={`${btnPrimary} block w-full text-center`}>
+            <Link
+              to={`/verifikasi-email?email=${encodeURIComponent(email)}`}
+              className={`${btnPrimary} block w-full text-center`}
+            >
+              Masukkan kode verifikasi
+            </Link>
+            <Link
+              to="/login"
+              className="block text-center text-sm text-stone-500 hover:text-orange-600 hover:underline"
+            >
               Ke halaman Masuk
             </Link>
           </div>

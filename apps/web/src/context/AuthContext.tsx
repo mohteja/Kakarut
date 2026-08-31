@@ -15,8 +15,8 @@ import { hapusLokal } from "../lib/simpanan";
 export interface DaftarResult {
   ok: boolean;
   message?: string;
-  /** Hanya di dev (email belum diatur) — tautan verifikasi langsung. */
-  dev_verify_url?: string;
+  /** Hanya di dev (email belum diatur) — kode verifikasi 6 digit langsung. */
+  dev_verify_kode?: string;
 }
 
 interface AuthContextValue {
@@ -26,9 +26,15 @@ interface AuthContextValue {
   masukTamu: (peran: "owner" | "kasir") => Promise<AuthState>;
   /** Daftar akun. TIDAK auto-login: kirim tautan verifikasi ke email. */
   register: (nama: string, email: string, password: string) => Promise<DaftarResult>;
-  /** Verifikasi email dari token tautan → langsung dapat sesi (auto-login). */
-  verifikasiEmail: (token: string) => Promise<AuthState>;
-  /** Kirim ulang tautan verifikasi ke email (netral). */
+  /** Verifikasi email dengan KODE 6 digit → langsung dapat sesi (auto-login). */
+  verifikasiEmail: (email: string, kode: string) => Promise<AuthState>;
+  /**
+   * TRANSISI: tautan 64-hex yang sudah terlanjur ada di kotak masuk orang saat
+   * perpindahan ke kode 6 digit terpasang. Dipertahankan sampai yang terakhir
+   * kedaluwarsa sendiri.
+   */
+  verifikasiEmailTautan: (token: string) => Promise<AuthState>;
+  /** Kirim ulang KODE verifikasi ke email (netral). */
   kirimUlangVerifikasi: (email: string) => Promise<DaftarResult>;
   /** Ganti sesi aktif (mis. setelah buat perusahaan / terima undangan di onboarding). */
   setSession: (data: AuthState) => void;
@@ -180,6 +186,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const verifikasiEmail = useCallback(
+    async (email: string, kode: string) => {
+      const data = await api<AuthState>("/auth/verify-email", {
+        method: "POST",
+        body: { email, kode },
+      });
+      setSession(data);
+      return data;
+    },
+    [setSession],
+  );
+
+  const verifikasiEmailTautan = useCallback(
     async (token: string) => {
       const data = await api<AuthState>("/auth/verify-email", {
         method: "POST",
@@ -217,6 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         masukTamu,
         register,
         verifikasiEmail,
+        verifikasiEmailTautan,
         kirimUlangVerifikasi,
         setSession,
         logout,
