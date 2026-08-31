@@ -168,6 +168,24 @@ jobs:
       # spec merah karena layarnya berubah (kasir kini wajib absen + buka
       # shift, checkout jadi dua langkah, struk dirender portal cetak).
       # Uji yang tak pernah dijalankan bukan jaring pengaman, cuma berkas.
+      # ─────────────────────────────────────────────────────────────────────
+      # EMBER BATAS LAJU DIKOSONGKAN DI ANTARA KEDUA FASE.
+      #
+      # verify-api dan Playwright berjalan berurutan di satu server, satu IP,
+      # dengan akun seed yang SAMA. `POST /auth/login` dibatasi 10 per
+      # (IP + email) tiap 5 menit — dan verify-api menyebut rute itu 19 kali,
+      # sebagian justru untuk MENGUJI batasnya. Jatahnya karena itu habis
+      # sebelum spec pertama menyala, dan seluruh suite mati dengan "KUOTA
+      # LOGIN HABIS": kegagalan yang tak menyatakan apa pun tentang produk.
+      #
+      # Prosedur LOKAL sudah melakukan ini sejak lama; CI tidak — dan selisih
+      # itulah yang membuat rilis pertama putaran ini merah di sini padahal
+      # hijau di mesin penulisnya. Yang dikosongkan cuma tabel embernya;
+      # penjaganya tak disentuh, dan verify-api tetap menguji batasnya di dalam
+      # jendelanya sendiri.
+      # ─────────────────────────────────────────────────────────────────────
+      - name: Kosongkan ember batas laju (verify-api → e2e)
+        run: npm run --silent reset:batas-laju -w @kakarut/server
       - name: Pasang Chromium untuk Playwright
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
