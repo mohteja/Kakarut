@@ -124,7 +124,7 @@ async function riwayatHargaPerlengkapan(
     eq(supplyMutations.tipe, "masuk"),
     eq(supplyMutations.status, "disetujui"),
   );
-  const urutan = [desc(supplyMutations.tanggal), desc(supplyMutations.waktu)] as const;
+  const urutan = [desc(supplyMutations.tanggal), desc(supplyMutations.waktu), desc(supplyMutations.id)] as const;
   // Dua kueri, alasan yang sama persis dengan kartu Riwayat Harga bahan:
   // statistiknya harus dari SELURUH lot (kueri sempit, tanpa join, tanpa
   // batas), sementara daftar yang dikirim dibatasi. Lihat catatan panjang di

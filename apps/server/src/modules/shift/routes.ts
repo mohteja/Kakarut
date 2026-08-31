@@ -222,7 +222,7 @@ async function transaksiWindow(
         milikShift(shiftId, openedAt, closedAt),
       ),
     )
-    .orderBy(desc(sales.waktu))
+    .orderBy(desc(sales.waktu), desc(sales.id))
     .limit(BATAS_TRANSAKSI_SHIFT + 1);
   const terpotong = rows.length > BATAS_TRANSAKSI_SHIFT;
   const dipakai = terpotong ? rows.slice(0, BATAS_TRANSAKSI_SHIFT) : rows;
@@ -637,7 +637,7 @@ export const shiftRoutes = new Hono<AppEnv>()
           isNotNull(shifts.closedAt),
         ),
       )
-      .orderBy(desc(shifts.openedAt))
+      .orderBy(desc(shifts.openedAt), desc(shifts.id))
       .limit(50);
     // Riwayat = shift yang SUDAH ditutup, jadi tak ada yang dibutakan di sini.
     return c.json(await Promise.all(rows.map((r) => toDto(r, auth.role))));
@@ -691,7 +691,7 @@ export const shiftRoutes = new Hono<AppEnv>()
               : eq(shifts.selisihStatus, q.status),
           ),
         )
-        .orderBy(desc(shifts.closedAt))
+        .orderBy(desc(shifts.closedAt), desc(shifts.id))
         // Ambil lebih banyak saat statusnya harus dihitung: penyaringan terjadi
         // SESUDAH query, jadi memotong di 50 lebih dulu bisa membuang baris
         // yang justru diminta. Dipangkas kembali ke BATAS_SELISIH di bawah.

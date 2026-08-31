@@ -34,7 +34,7 @@ export const memberCariRoutes = new Hono<AppEnv>().get("/", async (c) => {
     .select({ id: customers.id, nama: customers.nama, wa: customers.wa })
     .from(customers)
     .where(filter)
-    .orderBy(desc(customers.updatedAt))
+    .orderBy(desc(customers.updatedAt), desc(customers.id))
     .limit(8);
   return c.json(rows satisfies MemberCariRow[]);
 });
@@ -99,7 +99,7 @@ export const customerRoutes = new Hono<AppEnv>()
         .leftJoin(sales, and(eq(sales.customerId, customers.id), isNull(sales.deletedAt)))
         .where(filter)
         .groupBy(customers.id)
-        .orderBy(sql`MAX(${sales.waktu}) DESC NULLS LAST`)
+        .orderBy(sql`MAX(${sales.waktu}) DESC NULLS LAST`, customers.id)
         .limit(BATAS_MEMBER + 1),
       // Hitungan sebenarnya, TANPA batas — judul halaman menyebut "Member (N)"
       // dan N itu harus jumlah member yang cocok, bukan jumlah yang terkirim.
@@ -150,7 +150,7 @@ export const customerRoutes = new Hono<AppEnv>()
         .from(sales)
         .leftJoin(branches, eq(sales.branchId, branches.id))
         .where(milikMember)
-        .orderBy(desc(sales.waktu))
+        .orderBy(desc(sales.waktu), desc(sales.id))
         .limit(BATAS_TRANSAKSI_MEMBER + 1),
     ]);
     const iso = (d: Date | string) => (d instanceof Date ? d.toISOString() : String(d));

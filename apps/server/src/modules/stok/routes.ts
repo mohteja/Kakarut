@@ -296,7 +296,8 @@ export const stokRoutes = new Hono<AppEnv>()
         FROM stock_opnames so
         WHERE so.branch_id = pr.branch_id AND so.ingredient_id = pr.ingredient_id
           AND so.penyesuaian_status = 'disetujui'
-        ORDER BY so.created_at DESC
+        -- PEMUTUS SERI: baseline saldo (lihat catatan di stok/service.ts)
+        ORDER BY so.created_at DESC, so.id DESC
         LIMIT 1
       ) b ON TRUE
       WHERE pr.company_id = ${auth.company_id!} AND pr.branch_id = ${branchId}
@@ -786,7 +787,7 @@ export const stokRoutes = new Hono<AppEnv>()
       .leftJoin(klarUser, eq(stockOpnames.klarifikasiBy, klarUser.id))
       .leftJoin(setujuUser, eq(stockOpnames.disetujuiBy, setujuUser.id))
       .where(and(...conds))
-      .orderBy(desc(stockOpnames.createdAt))
+      .orderBy(desc(stockOpnames.createdAt), desc(stockOpnames.id))
       // `+ 1`: pembeda "tepat sejumlah batas" dari "lebih dari batas".
       .limit(BATAS_PENYESUAIAN + 1);
     /**
@@ -1020,7 +1021,7 @@ export const stokRoutes = new Hono<AppEnv>()
         ),
       )
       .groupBy(stockOpnames.sessionId)
-      .orderBy(desc(sql`max(${stockOpnames.createdAt})`))
+      .orderBy(desc(sql`max(${stockOpnames.createdAt})`), stockOpnames.sessionId)
       .limit(200);
 
     // resolusi nama user (opsional)
@@ -1278,7 +1279,7 @@ export const stokRoutes = new Hono<AppEnv>()
       .where(
         and(eq(stockOpnames.companyId, auth.company_id!), eq(stockOpnames.branchId, branchId)),
       )
-      .orderBy(desc(stockOpnames.createdAt))
+      .orderBy(desc(stockOpnames.createdAt), desc(stockOpnames.id))
       .limit(200);
     return c.json(rows);
   });

@@ -305,7 +305,7 @@ export const mejaRoutes = new Hono<AppEnv>()
       .from(mejaKosongLogs)
       .leftJoin(users, eq(mejaKosongLogs.userId, users.id))
       .where(eq(mejaKosongLogs.mejaId, ada.id))
-      .orderBy(desc(mejaKosongLogs.waktu))
+      .orderBy(desc(mejaKosongLogs.waktu), desc(mejaKosongLogs.id))
       .limit(50);
     return c.json(
       rows.map(

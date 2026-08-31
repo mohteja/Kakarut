@@ -552,7 +552,7 @@ export const menuRoutes = new Hono<AppEnv>()
           eq(menuPriceLogs.menuId, c.req.param("id")),
         ),
       )
-      .orderBy(desc(menuPriceLogs.createdAt))
+      .orderBy(desc(menuPriceLogs.createdAt), desc(menuPriceLogs.id))
       // `+ 1`: satu baris lebih untuk membedakan "tepat 50" dari "lebih".
       .limit(BATAS_RIWAYAT_HARGA + 1);
     const hasil: MenuPriceLogRow[] = rows.map((r) => ({

@@ -220,7 +220,7 @@ export const transferRoutes = new Hono<AppEnv>()
       )
       .where(kondisi)
       .groupBy(productions.fakturId)
-      .orderBy(desc(sql`MAX(${productions.waktu})`))
+      .orderBy(desc(sql`MAX(${productions.waktu})`), productions.fakturId)
       // `+ 1`: pembeda "tepat sejumlah batas" dari "lebih dari batas".
       .limit(perPage + 1);
     const terpotong = fakturTerbaru.length > perPage;

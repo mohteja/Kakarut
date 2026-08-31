@@ -73,7 +73,7 @@ function cteMenggantung(companyId: string) {
                (SELECT p2.dari_branch_id FROM productions p2
                  WHERE p2.faktur_id = pr.faktur_id AND p2.dari_branch_id IS NOT NULL LIMIT 1),
                (SELECT fl.branch_id FROM faktur_logs fl
-                 WHERE fl.faktur_id = pr.faktur_id ORDER BY fl.waktu ASC LIMIT 1)
+                 WHERE fl.faktur_id = pr.faktur_id ORDER BY fl.waktu ASC, fl.id ASC LIMIT 1)
              ) AS asal_faktur
       FROM productions pr
       WHERE pr.company_id = ${companyId}
@@ -508,7 +508,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         ON dn.company_id = ${auth.company_id!} AND dn.ref_id = g.faktur_id
       WHERE ${MENGGANTUNG}
         ${kunciCabang}
-      ORDER BY g.waktu ASC
+      ORDER BY g.waktu ASC, g.id ASC
       LIMIT ${BATAS_ANOMALI}
     `);
     /*

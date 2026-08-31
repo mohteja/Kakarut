@@ -2594,6 +2594,17 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .orderBy(
           sql`MAX(CASE WHEN ${productions.status} NOT IN ('dikonfirmasi', 'ditolak') THEN 1 ELSE 0 END) DESC`,
           sql`MIN(${productions.waktu}) DESC`,
+          // PEMUTUS SERI — tanpa ini halamannya tumpang-tindih, dan yang
+          // hilang tak meninggalkan gejala. Kedua kunci di atas AGREGAT, jadi
+          // dua faktur yang berwaktu sama tak punya urutan sama sekali; dan
+          // waktu yang sama bukan kebetulan langka: konfirmasi massal menulis
+          // SATU `new Date()` ke semua barisnya (`:1288`), dan satu permintaan
+          // "Tambah Stok dari Menu" melahirkan sampai lima faktur dalam satu
+          // transaksi — `now()` stabil per transaksi. Terukur pada 60 faktur
+          // seri: `per_page=5`, seluruh halaman ditelusuri, 56 faktur berbeda
+          // terkumpul dari `total: 60` — EMPAT tak muncul di halaman mana pun.
+          // `keyExpr` adalah kunci GRUP-nya, jadi ia unik per baris hasil.
+          keyExpr,
         )
         .limit(perPage)
         .offset(offset);

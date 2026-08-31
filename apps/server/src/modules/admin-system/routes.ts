@@ -104,7 +104,7 @@ export const adminSystemRoutes = new Hono<AppEnv>()
     const rows = await db
       .select()
       .from(backupRuns)
-      .orderBy(desc(backupRuns.waktu))
+      .orderBy(desc(backupRuns.waktu), desc(backupRuns.id))
       .limit(50);
     const terakhir = await backupSuksesTerakhir();
     const zona = await zonaWaktuCadangan();

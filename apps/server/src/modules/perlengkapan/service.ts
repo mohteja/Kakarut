@@ -586,7 +586,7 @@ export async function kartuPerlengkapan(params: {
         lte(supplyMutations.tanggal, params.sampai),
       ),
     )
-    .orderBy(asc(supplyMutations.tanggal), asc(supplyMutations.waktu))
+    .orderBy(asc(supplyMutations.tanggal), asc(supplyMutations.waktu), asc(supplyMutations.id))
     .limit(BATAS_MUTASI + 1);
 
   const terpotong = rows.length > BATAS_MUTASI;
@@ -785,7 +785,7 @@ export async function riwayatOpnamePerlengkapan(companyId: string, branchId: str
       ),
     )
     .groupBy(supplyMutations.sessionId)
-    .orderBy(desc(sql`MIN(${supplyMutations.waktu})`))
+    .orderBy(desc(sql`MIN(${supplyMutations.waktu})`), supplyMutations.sessionId)
     .limit(100);
   const nomorMap = await nomorUntukRefs(
     db,
@@ -1619,6 +1619,7 @@ export async function daftarBeliPerlengkapan(
     .orderBy(
       sql`(${supplyPurchases.status} in ('menunggu','diproses')) desc`,
       desc(supplyPurchases.createdAt),
+      desc(supplyPurchases.id),
     )
     .limit(200);
   // nomor BP-: ref = faktur_id (baris warisan tanpa faktur → ref = id baris)
@@ -1736,7 +1737,7 @@ export async function daftarKirimanPerlengkapan(companyId: string, branchId: str
         sql`(${supplyTransfers.dariBranchId} = ${branchId} OR ${supplyTransfers.keBranchId} = ${branchId})`,
       ),
     )
-    .orderBy(desc(supplyTransfers.waktu))
+    .orderBy(desc(supplyTransfers.waktu), desc(supplyTransfers.id))
     .limit(50);
   const nomorMap = await nomorUntukRefs(
     db,

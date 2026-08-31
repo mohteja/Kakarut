@@ -76,7 +76,7 @@ export const sampahRoutes = new Hono<AppEnv>()
     LEFT JOIN users pb ON pb.id = s.cashier_user_id
     LEFT JOIN users ph ON ph.id = s.deleted_by
     WHERE s.company_id = ${companyId} AND s.deleted_at IS NOT NULL
-    ORDER BY s.deleted_at DESC
+    ORDER BY s.deleted_at DESC, s.id DESC
     LIMIT ${BATAS_SAMPAH + 1}
   `);
 
@@ -96,7 +96,7 @@ export const sampahRoutes = new Hono<AppEnv>()
     LEFT JOIN users ph ON ph.id = pr.deleted_by
     WHERE pr.company_id = ${companyId} AND pr.deleted_at IS NOT NULL
     GROUP BY COALESCE(pr.faktur_id::text, pr.id::text), pr.tipe
-    ORDER BY MAX(pr.deleted_at) DESC
+    ORDER BY MAX(pr.deleted_at) DESC, COALESCE(pr.faktur_id::text, pr.id::text), pr.tipe
     LIMIT ${BATAS_SAMPAH + 1}
   `);
 

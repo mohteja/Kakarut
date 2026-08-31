@@ -91,7 +91,7 @@ async function menuTerlarisPeriode(
       ),
     )
     .groupBy(saleItems.menuNama)
-    .orderBy(desc(omzetDitagihSql))
+    .orderBy(desc(omzetDitagihSql), saleItems.menuNama)
     .limit(8);
   return rows.map((r) => ({
     menu_nama: r.menu_nama,

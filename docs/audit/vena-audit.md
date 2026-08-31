@@ -50,6 +50,135 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Urutan yang tidak MENENTUKAN, dan baris yang dipilihnya — server — 2026-08-31
+
+- **Kenapa vena ini ada**: putaran 23 menghitung 86 pemotongan dan bertanya
+  *berapa* baris yang dibuang; putaran 27 memberi tiga pintu berhalaman satu
+  rumah `per_page`. Keduanya melewati pertanyaan yang menempel persis di
+  sebelahnya: **`LIMIT n` memulangkan n baris yang MANA?**
+
+- **POLA-META, KEENAM KALINYA — dan yang paling telanjang sejauh ini.**
+  Gerbangnya sudah ada (`test/urutan-pemutus-seri.test.ts`, 98 baris) dan
+  komentarnya sudah menuliskan aturannya DAN sumber serinya dengan benar:
+
+  > *"`now()` di Postgres STABIL PER TRANSAKSI, jadi seluruh baris yang lahir
+  > dalam satu transaksi berbagi `created_at` yang persis sama."*
+
+  Lalu kodenya hanya melihat `.orderBy(` yang **dalam 500 karakter** berikutnya
+  memuat `.offset(`, dan menghitung **KOMA** sebagai pengganti keunikan.
+
+  | | |
+  |---|---|
+  | pengurutan di `src` | **143** (107 `.orderBy(` + 36 `ORDER BY` mentah) |
+  | yang MEMOTONG (limit/offset serantai) | **52** (41 Drizzle + 11 templat `sql`) |
+  | **yang dijaganya** | **2** |
+  | ambang premisnya sendiri | `>= 2` — persis seluruh populasi yang dilihatnya, jadi kebutaannya tak bisa ketahuan dari dalam |
+
+- **Populasi & kelas, sebelum → sesudah**: `TOTAL` **6 → 52** · `SERI`
+  **46 → 0** · templat `sql` yang terlihat **0 → 11** · pintu ber-`OFFSET` **2**,
+  satu di antaranya SERI.
+
+- **TERUKUR LEWAT HTTP, pada data yang dibuktikan terbaca lebih dulu.**
+  `GET /produksi` — pintu yang putaran 27 baru saja beri `per_page` — mengurut
+  `MAX(CASE WHEN status NOT IN (…)) DESC, MIN(waktu) DESC`: dua kunci, keduanya
+  **agregat**, tak satu pun unik; kunci GRUP-nya (`COALESCE(faktur_id, id)`)
+  tak ada di `ORDER BY`. Gerbang lama meluluskannya karena komanya satu.
+
+  60 faktur dengan `waktu` identik — persis bentuk yang ditulis jalur
+  konfirmasi massal (`produksi/routes.ts:1288`: satu `new Date()` untuk semua
+  barisnya). **Premisnya dibuktikan dari balasan rutenya sendiri lebih dulu**:
+  `total: 60`, 60 baris terkirim, keenam puluh nomornya terbaca.
+
+  | `per_page` | `total` dikatakan | terkumpul | **faktur BERBEDA** | **HILANG** |
+  |---|---|---|---|---|
+  | 5 | 60 | 60 | **56** | **4** |
+  | 10 | 60 | 60 | **59** | **1** |
+  | 20 | 60 | 60 | 60 | 0 |
+
+  Menelusuri **seluruh** halaman sampai habis memulangkan 56 faktur berbeda
+  dari 60 yang diakuinya sendiri. Empat tak muncul di halaman mana pun,
+  sementara yang lain muncul dua kali — tanpa satu galat pun. Sesudah pemutus
+  serinya dipasang: **60/60/60/60, hilang 0, ganda 0**, di keempat ukuran
+  halaman.
+
+- **Serinya bukan kebetulan langka, dan itu ditelusuri bukan diduga**: satu
+  `POST` "Tambah Stok dari Menu" (`rekomendasi/rencana.ts:670–737`) melahirkan
+  sampai **LIMA faktur berbeda dalam satu transaksi** — `now()` stabil per
+  transaksi, jadi kelimanya seri sempurna pada `MIN(waktu)` DAN pada bendera
+  statusnya.
+
+- **Yang paling mahal justru yang tak pernah terlihat gerbang lama**: sebelas
+  `ORDER BY` di dalam templat `sql`, enam di `stok/service.ts` — dan tiga di
+  antaranya `ORDER BY so.created_at DESC LIMIT 1` yang memilih **BASELINE
+  SALDO STOK**. Aturan yang sama disalin ke tiga pintu (`service.ts:82`,
+  `:362`, `:607`, plus `routes.ts:299`), dan di ketiganya "opname terakhir"
+  tak tertentu saat dua opname disetujui pada instan yang sama. Deret event
+  FIFO (`:740`) juga: walk-nya menyusun **HPP** dari urutan itu.
+
+- **Tuduhan lain yang jawabannya dipakai untuk MEMUTUSKAN**: `resolveBranchId`
+  (`middleware/auth.ts:270`) memilih cabang bawaan pemilik dengan
+  `ORDER BY branches.createdAt LIMIT 1` — dan `company/routes.ts:91–110`
+  membuat **tiga cabang dalam satu transaksi**. Satu-satunya pintu sumbu cabang
+  (vena putaran 16–17) memilih bawaannya sembarang. Ditambah cap absen terakhir
+  (3 salinan) dan shift berjalan (2).
+
+- **Detektornya sendiri salah EMPAT kali, dan keempatnya ketahuan dari bukti
+  merah — bukan dari membaca ulang**:
+
+  | cacat | bagaimana ketahuan |
+  |---|---|
+  | `grupTerpakai` memakai `includes`: kunci grup `k` dinyatakan hadir di dalam `MAX(waktu)` sebab kata *waktu* memuat huruf **k** | fikstur `h.ts` harusnya SERI, dijawab TOTAL |
+  | `[…] as const` membungkus lariknya `TSAsExpression` — dua situs `...urutan` yang sudah diperbaiki tetap tertuduh | keduanya bertahan SERI sesudah diperbaiki |
+  | `GROUP BY COALESCE(a, b)` dipecah `split(",")` jadi dua kunci palsu, jadi kunci grupnya tak pernah cocok lagi | `sampah/routes.ts` tetap SERI sesudah diperbaiki |
+  | komentar SQL tak dibuang: `-- … LIMIT memilih …` terbaca sebagai klausa | batas dilaporkan bernama `memilih` |
+
+  Keempatnya kini punya ujinya sendiri. Yang keempat paling perlu diingat:
+  **pemindai yang bisa dibingungkan komentar bisa dibungkam dengan komentar.**
+
+- **ALAT UKURNYA SENDIRI SALAH DUA KALI, dan verify-api yang menangkapnya**
+  (Aturan 7). §275 generasi pertama menghitung `rows` sebagai satuan paginasi
+  dan melaporkan *"7 faktur muncul di dua halaman"* atas paginasi yang
+  sebenarnya benar — `total` menghitung FAKTUR, `rows` mengirim satu baris per
+  item, jadi satu faktur memakai delapan baris di halaman yang sama. Asersi
+  kedua mengadu peringkat faktur dengan urutan BARIS, padahal barisnya diambil
+  kueri KEDUA yang mengurut `waktu ASC, id ASC`. Keduanya diperbaiki: tiap
+  halaman di-dedup dulu, dan yang dipaku kontrak kueri kedua.
+
+- **Bukti merah pada pohon SUNGGUHAN, dua arah**: `keyExpr` dicabut dari
+  `produksi` → merah menyebut berkas, baris & kedua kuncinya · `, e.ev_id ASC`
+  dicabut dari deret FIFO → merah menyebut `stok/service.ts:740` — jalur
+  `sql` mentah yang gerbang lama **tak pernah bisa lihat**.
+
+- **PASANGAN**: pengurutan yang **tidak** memotong tak ikut dituduh (seri pada
+  daftar yang dipulangkan utuh cuma soal tampilan) · kueri beragregat yang
+  menyebut kunci grupnya tetap hijau · indeks unik **parsial**
+  (`uniqueIndex(...).where(...)`) tidak dihitung membuat total · `MAX(id)`
+  bukan `id`.
+
+- **Perbaikannya tak boleh mengubah yang terlihat**, dan itu dipaku: kunci
+  PERTAMA tak disentuh di satu pun dari 46 situs; §275 memaku urutan baris
+  `GET /produksi` tetap menaik menurut waktu, bentuk balasannya tetap, dan
+  saldo stok tetap terbaca.
+
+- **Batas detektor, ditulis jujur**: hanya kunci TELANJANG menyumbang keunikan
+  — agregat & templat dicatat sebagai ekspresi · indeks unik parsial diabaikan
+  · JOIN tak dimodelkan, jadi tupel unik sebuah tabel bisa membebaskan terlalu
+  cepat pada kueri yang menggandakan baris · sisi `sql` mentah diresolusi lewat
+  NAMA kolom saja, tanpa tahu alias mana menunjuk tabel mana · pengurutan yang
+  dilakukan di JS sesudah kueri bukan populasi ini · `ORDER BY` yang dirakit di
+  luar templat `sql` tak terlihat.
+
+- **§275 verify-api** (8 asersi): menelusuri seluruh halaman `produksi` &
+  `penerimaan` dengan `per_page=2` → tiap satuan TEPAT SEKALI · nol yang muncul
+  di dua halaman · himpunan halaman kecil == sekali ambil · tiga PASANGAN.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.546** (212 berkas) ·
+  **`verify-api.sh` 3.282 lolos / 0 gagal** (DB segar; §275 baru) ·
+  `audit:invarian` **26/26**. **Playwright e2e tidak dijalankan** — `apps/web`
+  tak tersentuh satu baris pun (`git status` sebagai buktinya).
+
+---
+
 ## Masukan dari QUERY tak punya rumah — server — 2026-08-27
 
 - **Kenapa vena ini ada**: repo ini sudah menghabiskan satu vena penuh

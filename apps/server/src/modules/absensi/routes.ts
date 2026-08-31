@@ -150,7 +150,7 @@ async function capHariSebelumnya(
         lt(attendances.waktu, acuan),
       ),
     )
-    .orderBy(desc(attendances.waktu))
+    .orderBy(desc(attendances.waktu), desc(attendances.id))
     .limit(1);
   return row ? { tipe: row.tipe, waktu_ms: row.waktu.getTime(), tanggal: row.attendDate } : null;
 }
@@ -188,7 +188,7 @@ export async function catatAbsen(opts: {
         ...(opts.waktu ? [lt(attendances.waktu, opts.waktu)] : []),
       ),
     )
-    .orderBy(desc(attendances.waktu))
+    .orderBy(desc(attendances.waktu), desc(attendances.id))
     .limit(1);
   const { tipe, tanggal_sesi } = capAbsenBerikutnya(
     last ? { tipe: last.tipe, waktu_ms: last.waktu.getTime(), tanggal } : null,
@@ -255,7 +255,7 @@ export async function sedangHadir(
         eq(attendances.attendDate, tanggal),
       ),
     )
-    .orderBy(desc(attendances.waktu))
+    .orderBy(desc(attendances.waktu), desc(attendances.id))
     .limit(1);
   const buka = sesiHadirTerbuka(
     last ? { tipe: last.tipe, waktu_ms: last.waktu.getTime(), tanggal } : null,

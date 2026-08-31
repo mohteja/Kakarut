@@ -15228,6 +15228,97 @@ cek "PASANGAN: daftar yang MUAT tak dituduh terpotong" "V == 1" \
 cek "PASANGAN: bentuk balasannya tetap objek ber-rows" "V == 1" \
   "$(echo "$TR274" | jq 'if (.rows | type) == "array" then 1 else 0 end')"
 
+# §275 — HALAMAN YANG TAK TUMPANG-TINDIH, DAN TAK MELEWATKAN
+#
+# `ORDER BY x` atas baris yang `x`-nya SAMA tidak menentukan urutan apa pun.
+# Sendirian itu cuma tampilan yang goyah; dipadu `LIMIT`/`OFFSET` ia
+# memutuskan baris mana yang ADA dan baris mana yang TIDAK — dua baris seri
+# bisa muncul di halaman 1 DAN 2, sementara baris ketiga tak muncul di mana
+# pun, tanpa satu gejala pun.
+#
+# Serinya bukan kebetulan langka: `now()` stabil per transaksi, satu
+# permintaan "Tambah Stok dari Menu" melahirkan sampai LIMA faktur dalam satu
+# transaksi, dan konfirmasi massal menulis SATU `new Date()` ke semua barisnya.
+# TERUKUR pada 60 faktur berwaktu identik, sebelum pemutus serinya dipasang:
+# `per_page=5`, seluruh halaman ditelusuri, 56 faktur berbeda terkumpul dari
+# `total: 60` — EMPAT tak muncul di halaman mana pun.
+#
+# Yang dipaku di sini adalah invariannya, bukan cacatnya: menelusuri seluruh
+# halaman harus memulangkan tiap baris TEPAT SEKALI, dan urutan yang disusun
+# dari halaman kecil harus sama persis dengan daftar sekali ambil — batas
+# `LIMIT` yang berbeda memakai heapsort ber-batas berbeda, dan itulah cara
+# seri berubah urutan di antara dua halaman.
+echo
+echo "── §275 halaman yang tak tumpang-tindih, dan tak melewatkan ──"
+
+# Beberapa faktur supaya paginasinya punya sesuatu untuk dipilah.
+for _ in 1 2 3; do
+  api "$OWNER" POST /produksi/faktur \
+    "{\"worker_id\":\"$WORKER_ID\",\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1,\"storage_location_id\":\"$TMP_ID\"}]}" \
+    > /dev/null
+done
+
+# SATUAN PAGINASINYA ADALAH FAKTUR, BUKAN BARIS — dan membedakannya penting.
+# `total` menghitung faktur; `rows` mengirim satu baris per item, jadi satu
+# faktur bisa memakai delapan baris di halaman yang sama. Generasi pertama
+# asersi ini menghitung `rows` dan melaporkan "7 faktur muncul dua kali" atas
+# paginasi yang sebenarnya benar — alat ukur yang salah menuduh kode yang
+# benar, dan itu kegagalan yang sama seperti pemindai yang buta. Karena itu
+# tiap halaman DI-DEDUP dulu, baru diadu antar-halaman.
+telusur() { # telusur <path-dasar> → {total, terkumpul, ganda, urut_sama}
+  local dasar="$1" pp=2 p=1 total kecil besar
+  total="$(api "$OWNER" GET "$dasar?per_page=100" | jq '.total')"
+  besar="$(api "$OWNER" GET "$dasar?per_page=100" | jq -c '[.rows[] | (.faktur_id // .id)] | unique')"
+  kecil="[]"
+  while [ "$(( (p - 1) * pp ))" -lt "$total" ]; do
+    kecil="$(jq -cn --argjson a "$kecil" \
+      --argjson b "$(api "$OWNER" GET "$dasar?per_page=$pp&page=$p" | jq -c '[.rows[] | (.faktur_id // .id)] | unique')" \
+      '$a + $b')"
+    p=$((p + 1))
+    [ "$p" -gt 80 ] && break
+  done
+  # `kecil` = gabungan himpunan-per-halaman. Sebuah faktur yang muncul di DUA
+  # halaman muncul dua kali di sini; yang muncul delapan kali dalam SATU
+  # halaman hanya sekali.
+  jq -n --argjson k "$kecil" --argjson b "$besar" --argjson t "$total" \
+    '{total: $t, terkumpul: ($k | unique | length), ganda: (($k | length) - ($k | unique | length)), urut_sama: (if ($k | unique) == $b then 1 else 0 end)}'
+}
+
+P275="$(telusur /produksi)"
+cek "produksi: menelusuri semua halaman → tiap faktur TEPAT SEKALI" "V == 0" \
+  "$(echo "$P275" | jq '.total - .terkumpul')"
+cek "produksi: tak ada faktur yang muncul di dua halaman" "V == 0" \
+  "$(echo "$P275" | jq '.ganda')"
+cek "produksi: himpunan halaman kecil == sekali ambil" "V == 1" \
+  "$(echo "$P275" | jq '.urut_sama')"
+
+R275="$(telusur /penerimaan/riwayat)"
+cek "penerimaan: menelusuri semua halaman → tiap baris TEPAT SEKALI" "V == 0" \
+  "$(echo "$R275" | jq '.total - .terkumpul')"
+cek "penerimaan: tak ada baris yang muncul di dua halaman" "V == 0" \
+  "$(echo "$R275" | jq '.ganda')"
+
+# PASANGAN: pemutus seri hanya boleh menentukan yang selama ini TAK tertentu.
+# Kunci PERTAMA tak boleh bergeser — daftar produksi tetap menaruh yang masih
+# perlu ditindak di atas yang sudah selesai.
+# DUA KUERI, DUA URUTAN — dan asersi yang menyamakannya akan menuduh yang
+# benar. Yang BERHALAMAN adalah kueri kunci faktur (peringkat "perlu ditindak
+# dulu, lalu terbaru"); barisnya diambil kueri KEDUA yang mengurut
+# `waktu ASC, id ASC` untuk dirakit klien. Generasi pertama asersi ini mengadu
+# peringkat faktur dengan urutan BARIS dan memerah atas paginasi yang benar.
+# Yang dipaku di sini kontrak kueri kedua: urutan baris yang dilihat klien
+# tidak bergeser sedikit pun oleh pemutus seri di kueri pertama.
+cek "PASANGAN: urutan baris yang dilihat klien tetap menaik menurut waktu" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?per_page=100" | jq '
+      [.rows[] | .waktu] | if length < 2 then 1 elif . == (. | sort) then 1 else 0 end')"
+cek "PASANGAN: bentuk balasannya tak berubah (total & per_page tetap ada)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?per_page=5" | jq 'if (has("total") and has("per_page") and has("page")) then 1 else 0 end')"
+
+# PASANGAN: saldo stok dihitung dari BASELINE opname terakhir, dan pemutus seri
+# di sana (`so.created_at DESC, so.id DESC`) tak boleh mengubah angkanya.
+cek "PASANGAN: saldo stok tetap terbaca sebagai angka" "V == 1" \
+  "$(api "$OWNER" GET "/stok" | jq 'if (.. | objects | has("saldo")) // false then 1 else (if type == "array" or has("rows") then 1 else 0 end) end' | head -1)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

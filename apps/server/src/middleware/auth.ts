@@ -267,7 +267,7 @@ export async function resolveBranchId(c: Context<AppEnv>): Promise<string> {
     .select({ id: branches.id })
     .from(branches)
     .where(and(eq(branches.companyId, auth.company_id!), eq(branches.isActive, true)))
-    .orderBy(branches.createdAt)
+    .orderBy(branches.createdAt, branches.id)
     .limit(1);
   if (!first) throw new HTTPException(404, { message: "Perusahaan belum punya cabang" });
   return first.id;

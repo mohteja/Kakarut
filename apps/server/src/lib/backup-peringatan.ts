@@ -63,7 +63,7 @@ export async function keadaanCadangan(): Promise<KeadaanCadangan> {
     .select({ waktu: backupRuns.waktu })
     .from(backupRuns)
     .where(eq(backupRuns.status, "sukses"))
-    .orderBy(desc(backupRuns.waktu))
+    .orderBy(desc(backupRuns.waktu), desc(backupRuns.id))
     .limit(1);
   return {
     aktif: env.BACKUP_ENABLED,
@@ -198,7 +198,7 @@ export async function periksaPeringatanCadangan(sekarang = new Date()): Promise<
       .select({ waktu: backupRuns.waktu, error: backupRuns.error })
       .from(backupRuns)
       .where(eq(backupRuns.status, "gagal"))
-      .orderBy(desc(backupRuns.waktu))
+      .orderBy(desc(backupRuns.waktu), desc(backupRuns.id))
       .limit(1)
       .then((r) => r[0] ?? null),
     zonaWaktuCadangan(),

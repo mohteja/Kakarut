@@ -156,7 +156,7 @@ async function riwayat(kolom: "sale" | "bill", id: string): Promise<PesananLogRo
     .from(pesananLogs)
     .leftJoin(users, eq(pesananLogs.userId, users.id))
     .where(kolom === "sale" ? eq(pesananLogs.saleId, id) : eq(pesananLogs.openBillId, id))
-    .orderBy(desc(pesananLogs.waktu))
+    .orderBy(desc(pesananLogs.waktu), desc(pesananLogs.id))
     .limit(200);
   return rows.map((r) => ({
     waktu: r.waktu.toISOString(),

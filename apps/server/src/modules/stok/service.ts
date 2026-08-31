@@ -79,7 +79,10 @@ export async function hitungSaldoCabang(
       FROM stock_opnames so
       WHERE so.branch_id = ${branchId} AND so.ingredient_id = i.id
         AND so.penyesuaian_status = 'disetujui'
-      ORDER BY so.created_at DESC
+      -- PEMUTUS SERI: baseline SALDO. Dua opname yang disetujui pada instan
+      -- yang sama membuat "yang terakhir" tak tertentu, dan seluruh saldo
+      -- cabang dihitung dari baris yang terpilih itu.
+      ORDER BY so.created_at DESC, so.id DESC
       LIMIT 1
     ) b ON TRUE
     LEFT JOIN LATERAL (
@@ -359,7 +362,7 @@ export async function kartuStok(params: {
       WHERE branch_id = ${branchId} AND ingredient_id = ${ingredientId}
         AND opname_date < ${dari}
         AND penyesuaian_status = 'disetujui'
-      ORDER BY created_at DESC LIMIT 1
+      ORDER BY created_at DESC, id DESC LIMIT 1
     )
     SELECT
       COALESCE((SELECT qty FROM baseline), 0) AS baseline_qty,
@@ -404,7 +407,7 @@ export async function kartuStok(params: {
     SELECT * FROM (
       SELECT so.created_at AS waktu, 'opname' AS jenis, so.qty AS qty,
              so.catatan AS catatan, dn.nomor_teks AS nomor, NULL AS supplier,
-             NULL AS tempat, false AS is_batch
+             NULL AS tempat, false AS is_batch, so.id AS ev_id
       FROM stock_opnames so
       LEFT JOIN dokumen_nomor dn
         ON dn.company_id = so.company_id AND dn.ref_id = so.session_id
@@ -415,7 +418,7 @@ export async function kartuStok(params: {
       SELECT pr.waktu, pr.tipe::text AS jenis, pr.qty, pr.catatan,
              -- nomor dokumen otomatis (PB-/PR-); nota supplier sebagai cadangan
              COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
-             sp.nama AS supplier, sl.nama AS tempat, pr.is_batch
+             sp.nama AS supplier, sl.nama AS tempat, pr.is_batch, pr.id AS ev_id
       FROM productions pr
       LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
       LEFT JOIN storage_locations sl ON sl.id = pr.storage_location_id
@@ -426,7 +429,7 @@ export async function kartuStok(params: {
         AND pr.prod_date >= ${dari} AND pr.prod_date <= ${sampai}
       UNION ALL
       SELECT sc.waktu, 'penjualan' AS jenis, sc.qty, NULL AS catatan,
-             s.nomor, NULL AS supplier, NULL AS tempat, false AS is_batch
+             s.nomor, NULL AS supplier, NULL AS tempat, false AS is_batch, sc.id AS ev_id
       FROM sale_consumptions sc
       JOIN sales s ON s.id = sc.sale_id
       WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${ingredientId}
@@ -435,7 +438,7 @@ export async function kartuStok(params: {
       UNION ALL
       SELECT pc.waktu, 'pemakaian' AS jenis, pc.qty,
              ('Untuk produksi ' || ij.nama) AS catatan,
-             NULL AS nomor, NULL AS supplier, NULL AS tempat, false AS is_batch
+             NULL AS nomor, NULL AS supplier, NULL AS tempat, false AS is_batch, pc.id AS ev_id
       FROM production_consumptions pc
       JOIN productions pr ON pr.id = pc.production_id
       JOIN ingredients ij ON ij.id = pr.ingredient_id
@@ -449,7 +452,7 @@ export async function kartuStok(params: {
       SELECT pr.waktu, 'kirim' AS jenis, pr.qty,
              ('Kirim ke ' || bt.nama) AS catatan,
              COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
-             NULL AS supplier, NULL AS tempat, false AS is_batch
+             NULL AS supplier, NULL AS tempat, false AS is_batch, pr.id AS ev_id
       FROM productions pr
       JOIN branches bt ON bt.id = pr.branch_id
       LEFT JOIN dokumen_nomor dn
@@ -458,7 +461,9 @@ export async function kartuStok(params: {
         AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
         AND pr.prod_date >= ${dari} AND pr.prod_date <= ${sampai}
     ) m
-    ORDER BY m.waktu ASC
+    -- PEMUTUS SERI: banyak baris lahir dari satu transaksi, jadi
+    -- waktu-nya identik dan LIMIT memilih yang mana sesukanya.
+    ORDER BY m.waktu ASC, m.ev_id ASC
     LIMIT ${BATAS_MUTASI + 1}
   `);
 
@@ -604,7 +609,7 @@ export async function saldoBahanPerCabang(
       FROM stock_opnames so
       WHERE so.branch_id = br.id AND so.ingredient_id = ${ingredientId}
         AND so.penyesuaian_status = 'disetujui'
-      ORDER BY so.created_at DESC
+      ORDER BY so.created_at DESC, so.id DESC
       LIMIT 1
     ) b ON TRUE
     LEFT JOIN LATERAL (
@@ -687,7 +692,7 @@ export async function fifoBahan(params: {
                   ELSE pr.tipe::text END AS jenis,
              pr.qty AS qty, pr.total_harga AS total_harga, pr.exp_date AS exp_date,
              COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
-             sp.nama AS supplier, pr.catatan AS catatan
+             sp.nama AS supplier, pr.catatan AS catatan, pr.id AS ev_id
       FROM productions pr
       LEFT JOIN suppliers sp ON sp.id = pr.supplier_id
       LEFT JOIN dokumen_nomor dn
@@ -698,7 +703,7 @@ export async function fifoBahan(params: {
       UNION ALL
       -- KELUAR: konsumsi penjualan (BOM struk)
       SELECT sc.waktu, 'keluar', 'penjualan', sc.qty, NULL, NULL,
-             s.nomor, NULL, NULL
+             s.nomor, NULL, NULL, sc.id
       FROM sale_consumptions sc
       JOIN sales s ON s.id = sc.sale_id
       WHERE sc.branch_id = ${branchId} AND sc.ingredient_id = ${bahan.id}
@@ -707,7 +712,7 @@ export async function fifoBahan(params: {
       UNION ALL
       -- KELUAR: bahan mentah terpakai resep produksi
       SELECT pc.waktu, 'keluar', 'pemakaian', pc.qty, NULL, NULL,
-             NULL, NULL, ('Untuk produksi ' || ij.nama)
+             NULL, NULL, ('Untuk produksi ' || ij.nama), pc.id
       FROM production_consumptions pc
       JOIN productions pr ON pr.id = pc.production_id
       JOIN ingredients ij ON ij.id = pr.ingredient_id
@@ -718,7 +723,7 @@ export async function fifoBahan(params: {
       -- KELUAR: kiriman ke cabang lain yang sudah diterima
       SELECT pr.waktu, 'keluar', 'kirim', pr.qty, NULL, NULL,
              COALESCE(dn.nomor_teks, pr.no_faktur), NULL,
-             ('Kirim ke ' || bt.nama)
+             ('Kirim ke ' || bt.nama), pr.id
       FROM productions pr
       JOIN branches bt ON bt.id = pr.branch_id
       LEFT JOIN dokumen_nomor dn
@@ -729,7 +734,7 @@ export async function fifoBahan(params: {
       UNION ALL
       -- OPNAME disetujui: reset saldo ke hitung fisik (termasuk stok awal)
       SELECT so.created_at, 'opname', 'opname', so.qty, NULL, NULL,
-             dn.nomor_teks, NULL, so.catatan
+             dn.nomor_teks, NULL, so.catatan, so.id
       FROM stock_opnames so
       LEFT JOIN dokumen_nomor dn
         ON dn.company_id = so.company_id AND dn.ref_id = so.session_id
@@ -737,7 +742,10 @@ export async function fifoBahan(params: {
         AND so.penyesuaian_status = 'disetujui'
         AND (${sejak}::timestamptz IS NULL OR so.created_at >= ${sejak})
     ) e
-    ORDER BY e.waktu ASC
+    -- PEMUTUS SERI: walk FIFO menyusun HPP dari urutan deret ini.
+    -- Tanpa kunci kedua, dua peristiwa berwaktu sama bisa tertukar antar
+    -- permintaan — dan harga pokok yang dihitungnya ikut berubah.
+    ORDER BY e.waktu ASC, e.ev_id ASC
     LIMIT ${BATAS_EVENT_FIFO + 1}
   `);
 
@@ -752,7 +760,7 @@ export async function fifoBahan(params: {
       SELECT created_at FROM stock_opnames
       WHERE branch_id = ${branchId} AND ingredient_id = ${bahan.id}
         AND penyesuaian_status = 'disetujui'
-      ORDER BY created_at DESC LIMIT 1
+      ORDER BY created_at DESC, id DESC LIMIT 1
     `);
     const createdAt = (base.rows[0] as Record<string, unknown> | undefined)?.created_at;
     if (createdAt != null) {

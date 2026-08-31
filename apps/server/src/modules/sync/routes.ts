@@ -150,7 +150,7 @@ async function resolveCabangSync(auth: SyncAuth, payloadBranchId?: string | null
     .select({ id: branches.id })
     .from(branches)
     .where(and(eq(branches.companyId, auth.company_id!), eq(branches.isActive, true)))
-    .orderBy(branches.createdAt)
+    .orderBy(branches.createdAt, branches.id)
     .limit(1);
   if (!first) throw new HTTPException(404, { message: "Perusahaan belum punya cabang" });
   return first.id;
@@ -371,7 +371,7 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
         sql`(${shifts.closedAt} IS NULL OR ${shifts.closedAt} >= ${waktu})`,
       ),
     )
-    .orderBy(desc(shifts.openedAt))
+    .orderBy(desc(shifts.openedAt), desc(shifts.id))
     .limit(1);
 
   // Tahap 2 — shift tertutup terdekat sebelum `waktu`.
@@ -388,7 +388,7 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
           lte(shifts.closedAt, waktu),
         ),
       )
-      .orderBy(desc(shifts.closedAt))
+      .orderBy(desc(shifts.closedAt), desc(shifts.id))
       .limit(1);
     if (terdekat?.closedAt) {
       const [comp] = await db
