@@ -28,6 +28,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { bacaLokal, tulisLokal } from "../../lib/simpanan";
 
 /** Baris editor resep (bahan mentah per 1 batch bahan jadi). */
 interface ResepDraft {
@@ -104,6 +105,17 @@ interface PengaturanBatch {
 /** Filter grid resep per lokasi/divisi produksi. */
 type FilterResep = "semua" | "ck" | "kitchen" | "bar";
 
+/**
+ * Bentuk daftar resep: kartu foto ("ikon") atau baris padat ("daftar").
+ *
+ * Disimpan per perangkat, bukan per akun: yang menentukan bentuk mana yang
+ * enak dipakai adalah LAYARNYA — tablet dapur yang disentuh dengan tangan
+ * berminyak butuh kartu besar, laptop kantor yang menyunting puluhan resep
+ * butuh baris. Satu orang bisa memakai keduanya di hari yang sama.
+ */
+type TampilanResep = "ikon" | "daftar";
+const KUNCI_TAMPILAN = "kakarut.resepTampilan";
+
 const MAKS_LANGKAH = 30;
 
 /** Badge lokasi/divisi resep — dipakai kartu grid & judul detail. */
@@ -143,6 +155,15 @@ export function ResepPage() {
   // daftar cabang toko aktif — pilihan "cabang produsen" saat produksi di cabang
   const { cabang } = useBranch();
   const cabangStore = cabang.filter((b) => b.is_active && b.tipe === "store");
+
+  // Bawaannya `ikon` — bentuk yang sudah ada sebelum tombol ini, jadi tak ada
+  // yang berubah bagi pemakai yang tak menyentuhnya.
+  const [tampilan, setTampilan] = useState<TampilanResep>(() =>
+    bacaLokal(KUNCI_TAMPILAN) === "daftar" ? "daftar" : "ikon",
+  );
+  useEffect(() => {
+    tulisLokal(KUNCI_TAMPILAN, tampilan);
+  }, [tampilan]);
 
   const { data: bahan, isLoading } = useQuery({
     queryKey: ["bahan", "ringkas"],
@@ -652,6 +673,39 @@ export function ResepPage() {
                 🗄 Arsip ({arsipProduksi.length})
               </button>
             )}
+            {/* Bentuk daftar — didorong ke kanan supaya tak berebut tempat
+                dengan chip divisi yang jumlahnya berubah-ubah. Sengaja TIDAK
+                muncul di tab Arsip: kartu arsip sudah berbentuk baris dan
+                tombol aksinya berbeda (Pulihkan), jadi tombol ini hanya akan
+                menawarkan pilihan yang tak mengubah apa pun di sana. */}
+            {tab !== "arsip" && (
+              <div className="ml-auto flex overflow-hidden rounded-lg border border-stone-300 text-sm">
+                <button
+                  type="button"
+                  onClick={() => setTampilan("ikon")}
+                  aria-pressed={tampilan === "ikon"}
+                  className={`px-3 py-1.5 font-medium ${
+                    tampilan === "ikon"
+                      ? "bg-orange-600 text-white"
+                      : "bg-white text-stone-600 hover:bg-stone-50"
+                  }`}
+                >
+                  🔳 Ikon
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTampilan("daftar")}
+                  aria-pressed={tampilan === "daftar"}
+                  className={`px-3 py-1.5 font-medium ${
+                    tampilan === "daftar"
+                      ? "bg-orange-600 text-white"
+                      : "bg-white text-stone-600 hover:bg-stone-50"
+                  }`}
+                >
+                  ☰ Daftar
+                </button>
+              </div>
+            )}
           </div>
 
           {tab === "arsip" && bolehUbah ? (
@@ -683,6 +737,58 @@ export function ResepPage() {
               <div className="col-span-full">
                 <ErrorText error={pulihkan.error} />
               </div>
+            </div>
+          ) : tampilan === "daftar" ? (
+            /* ---- BENTUK DAFTAR: satu baris per resep ---- */
+            <div className="space-y-2">
+              {daftar.map((b) => {
+                const n = ringkas ? (ringkas[b.id] ?? 0) : null;
+                return (
+                  <Card
+                    key={b.id}
+                    onClick={() => bukaDetail(b.id)}
+                    className="flex cursor-pointer items-center gap-3 p-2.5 text-left transition hover:border-orange-300 hover:shadow-sm"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
+                      {b.foto_hasil_url ? (
+                        <img
+                          src={b.foto_hasil_url}
+                          alt={b.nama}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-lg" aria-hidden>
+                          🍲
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 truncate text-sm font-semibold text-stone-800">
+                          {b.nama}
+                        </span>
+                        <BadgeDivisi b={b} />
+                      </div>
+                      <div className="truncate text-xs text-stone-500">
+                        batch {formatAngka(b.isi)} {b.satuan} ·{" "}
+                        {n == null ? "—" : n > 0 ? `${n} bahan baku` : "belum ada resep"}
+                      </div>
+                    </div>
+                    {/* harga hanya owner/admin — sama seperti kartu ikon, staf
+                        produksi tetap melihat resepnya tanpa harga */}
+                    {bolehUbah && (
+                      <span className="shrink-0 text-sm font-semibold text-stone-700 tabular-nums">
+                        {formatRupiah(b.harga_beli)}
+                      </span>
+                    )}
+                  </Card>
+                );
+              })}
+              {daftar.length === 0 && (
+                <div className="py-8 text-center text-sm text-stone-400">
+                  {produksi.length === 0 ? "Belum ada resep aktif." : "Tidak ada yang cocok."}
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
