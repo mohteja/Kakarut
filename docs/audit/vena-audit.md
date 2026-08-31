@@ -50,6 +50,136 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Dua utang balapan terakhir — satu DIBAYAR, satu DICABUT — server — 2026-08-31 — `MAKS_UTANG` 2 → 0
+
+- **Entri venanya sendiri yang menagih peninjauan**, dan alasannya tertulis:
+  keduanya didaftarkan **sebelum `lomba.ts` bisa menembus `db.transaction`**,
+  jadi kelasnya dinilai dengan mata yang lebih buruk daripada yang sekarang.
+  Repo ini sudah sekali membayar harga karena tidak meninjau ulang
+  (`tibaBeliPerlengkapan`: `utang` dengan alasan *"hasilnya tak pernah
+  dilihat"*, padahal penjaganya sudah ada lima minggu sebelumnya).
+
+- **Keduanya ternyata bukan hal yang sama, dan itu inti putaran ini:**
+
+  | situs | yang sebenarnya menahan | putusan |
+  |---|---|---|
+  | `admin-tenants` `jalankan` | `companies_slug_unique` + `users_email_unique`, diterjemahkan **per indeks** jadi 409 | **tuduhan DICABUT** |
+  | `pastikanSuperAdmin` | `users_email_unique` — **secara kebetulan** | **utang DIBAYAR** |
+
+---
+
+### 1. `pastikanSuperAdmin` — utang yang memang utang
+
+- **Indeksnya menjaga aturan yang SALAH.** `users_email_unique` menjaga "satu
+  user per email"; aturan di sini "paling banyak satu super admin aktif".
+  Keduanya berimpit **hanya** selama seluruh instance membaca
+  `SEED_SUPERADMIN_EMAIL` yang sama.
+
+- **TERUKUR atas Postgres sungguhan** — 8 ronde, tiap ronde dua panggilan
+  serentak dari keadaan nol super admin, dan premisnya dibuktikan tiap ronde
+  (jumlah baris dibaca ulang, bukan diasumsikan):
+
+  ```
+  3/8  bersih
+  4/8  yang kalah ditolak 23505 users_email_unique → index.ts mencetak
+       "Gagal memastikan super admin: Failed query: insert into users …"
+  1/8  yang kalah membaca emailDipakai SESUDAH yang menang commit lalu
+       mencetak kalimat yang KELIRU: "email … sudah dipakai akun lain —
+       lewati pembuatan otomatis"
+  0/8  jumlah barisnya salah
+  ```
+
+  **Lima dari delapan boot menutup dengan galat atau dengan kalimat yang
+  salah** — di satu-satunya tempat pemilik sistem bisa membacanya. Datanya
+  tak pernah rusak; yang rusak apa yang DIKATAKAN log boot. Yang 1/8 itu
+  bentuk terburuknya: bukan diam, melainkan **percaya diri dan salah**.
+
+- **Sesudah `kunciAntrean(tx, "super-admin")`: 8/8 bersih**, nol galat, nol
+  kalimat menyesatkan, jumlah baris tetap 1. Kunci yang sama jenisnya dengan
+  yang sudah dipegang tetangganya `backfillEmployeeCode` **di boot yang sama** —
+  persis jawaban yang entri utangnya sendiri tunjuk.
+
+### 2. `admin-tenants` `jalankan` — tuduhan DICABUT, dan alasan lamanya salah
+
+- Balapannya **sudah** ditahan sejak lama, dan **sudah** diukur lewat HTTP:
+  §213 verify-api menembak tiga pembuatan tenant kembar → *"TAK ADA 5xx"*,
+  *"tepat SATU tenant lahir"*. Yang kalah menerima **409 per indeks** ("slug
+  sudah dipakai" vs "email sudah terdaftar"), bukan 500.
+
+- Yang tak terbaca **penjaganya**, bukan penjagaan: `.catch(bentrokUnikPada …)`
+  menempel di situs **panggil**, satu lingkup di luar fungsi yang tertuduh, dan
+  `lomba.ts` berlingkup satu fungsi. `.catch`-nya dipindahkan ke dalam badan
+  `jalankan` — **perilaku identik**, kelasnya jadi `BENTROK`, entri tangannya
+  lenyap. Sama bentuknya dengan dua situs `F` yang keluar dari `DIPILAH_TANGAN`
+  putaran lalu: yang berubah siapa yang bisa membaca buktinya.
+
+- **Alasan lamanya dicatat sebagai SALAH, bukan dihapus diam-diam**: *"kecil
+  bukan ditahan"* — ia ditahan, dan sudah diukur, sejak sebelum kalimat itu
+  ditulis.
+
+### 3. Aturannya ditulis di DATA — `audit:invarian` 26 → **27**
+
+`paling banyak SATU super admin aktif`
+(`GREATEST(count(*)-1, 0) FROM users WHERE is_super_admin AND deleted_at IS NULL`).
+Uji statis bisa menagih kuncinya TERTULIS; hanya baris ini yang menjawab
+**berapa akun yang benar-benar lahir**, dan CI menjalankannya SESUDAH
+verify-api di atas basis data yang sudah dilewati 3.344 asersi. Nol super admin
+sengaja **bukan** pelanggaran (basis data yang belum di-boot pun sah); yang
+dilarang akun kedua.
+
+---
+
+- **BUKTI MERAH — tiga, satu per gerbang:**
+  1. `kunciAntrean` dicabut → *"provisi super admin memegang kuncinya"* **dan**
+     *"tiap periksa-lalu-tulis tanpa penahan sudah diadjudikasi"* merah;
+  2. `.catch` dikembalikan ke situs panggil → *"pembuatan penyewa terbaca
+     BENTROK"* + uji adjudikasi merah;
+  3. satu baris super admin kedua disisipkan ke DB → `audit:invarian`
+     **26 sehat, 1 dilanggar**; dihapus lagi → 27/27.
+
+  Dua asersi struktural itu ADA justru karena menghapus entri dari `daftar`
+  saja tak menahan apa pun: tanpa keduanya, pencabutan penjaga hanya
+  memerahkan uji "sudah diadjudikasi" — pesan yang menyuruh MENDAFTARKANNYA
+  kembali, bukan mengembalikan penjaganya.
+
+- **Gerbang kedua yang menagihku, dan ia benar**: `penjaga-semua-pintu`
+  memerah dengan *"`dasar` tak menyimpan entri yang sudah tak berlaku"* —
+  entri `superadmin.ts` di daftar «bentrok-unik» jadi basi begitu pintunya
+  tertutup. Alasan lamanya pantas dibaca penerusnya sebab ia BENAR pada bagian
+  yang diukurnya dan MELESET pada yang tidak: *"satu di antaranya mencatat
+  galat lalu lanjut — akunnya tetap tepat satu."* Jumlah akunnya memang selalu
+  satu; "mencatat galat lalu lanjut" bukan satu-satunya cara gagal.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - **Tak ada seksi verify-api baru, dan tak bisa ada**: `pastikanSuperAdmin`
+    berjalan di BOOT — tak ada pintu HTTP yang mencapainya. Gerbangnya
+    STRUKTURAL (kelas `KUNCI` dipaku) + **DATA** (invarian ke-27). Sisi HTTP
+    pembuatan penyewa dijaga §213, yang dijalankan ulang sebagai pasangan dan
+    tak bergeser satu jawaban pun.
+  - Pengukuran 8 ronde hidup di scratchpad, bukan di `scripts/` — ia
+    MENGHAPUS baris `users`, dan skrip perusak yang bisa salah sasaran tak
+    pantas tinggal di repo. Prosedurnya: kosongkan super admin → dua
+    `pastikanSuperAdmin(db)` serentak → baca ulang jumlah barisnya.
+  - `MAKS_UTANG` kini **0**, dan nol itu berarti: tiap situs
+    periksa-dulu-baru-tulis di `src` entah memegang penahan yang terbaca
+    mesin, entah terdaftar `sah` beserta alasannya. Ia TIDAK berarti tak ada
+    balapan tersisa di luar populasi yang disapu `lomba.ts` — lingkupnya tetap
+    satu fungsi, dan nama tabel tetap dibandingkan sebagai teks argumen.
+
+- **Berkas:** `modules/auth/superadmin.ts` (kunci antrean + transaksi) ·
+  `modules/admin-tenants/routes.ts` (`.catch` pindah ke dalam `jalankan`) ·
+  `scripts/audit-invarian.ts` (invarian ke-27) · `test/lomba-tulis.test.ts`
+  (dua entri dihapus, `MAKS_UTANG` 2 → 0, +2 premis struktural) ·
+  `test/penjaga-semua-pintu.test.ts` (entri basi dihapus).
+
+- **Gerbang:** typecheck bersih · `npm test` **2.582** (214 berkas) · build web ·
+  `verify-api.sh` **3.344 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` **27/27** · Playwright **13/13**.
+
+- **Utang balapan tersisa: 0.**
+
+---
+
 ## Utang DIBAYAR: selisih yang muncul SESUDAH shift ditutup — dan alat ukur §280 yang ikut mati karenanya — server — 2026-08-31
 
 - **Utang ini kudaftarkan sendiri putaran lalu**, di bagian "BATAS YANG
@@ -8129,11 +8259,11 @@ berlaku di situ).
       atas. 40 situs tulis; 4 tuduhan dicabut berturut-turut (tiap pencabutan
       mengajari pemindainya satu bentuk penjagaan), 1 perbaikan, 1 terdaftar
       beralasan. Terukur lewat HTTP: tombol dapur pada penjualan terbuang → 404
-- [ ] **Periksa-dulu-baru-tulis tanpa penahan** — 8 situs tersisa (4 `sah`,
-      **2 `utang` yang jumlahnya dipaku**: pembuatan penyewa dan
-      `pastikanSuperAdmin`). Keduanya ditulis SEBELUM `lomba.ts` bisa menembus
-      transaksi, jadi kelasnya dinilai dengan mata yang lebih buruk dari yang
-      sekarang — layak ditinjau ulang, bukan dipercaya
+- [x] ~~**Periksa-dulu-baru-tulis tanpa penahan**~~ — SELESAI, lihat entri di
+      atas. Peninjauan ulangnya terbayar dua arah: `pastikanSuperAdmin` memang
+      utang (3/8 boot bersih → 8/8), sedangkan tuduhan atas pembuatan penyewa
+      DICABUT — ia sudah ditahan indeks unik dan diukur §213 sejak sebelum
+      alasan utangnya ditulis. **`MAKS_UTANG` 2 → 0**, `audit:invarian` 26 → 27
 - [x] ~~**Selisih kas yang MUNCUL sesudah shift ditutup tak bisa diputuskan
       siapa pun**~~ — UTANG DIBAYAR, lihat entri di atas. 400 → 200, dan alat
       ukur §280 yang ikut mati karena perbaikan ini diganti + dibuktikan masih

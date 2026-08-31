@@ -119,6 +119,31 @@ const INVARIAN: Invarian[] = [
     langgar:
       "SELECT count(*) n FROM open_bills WHERE sale_id IS NOT NULL AND pernah_jadi_penjualan = false",
   },
+  {
+    /*
+     * ATURANNYA DITULIS DI DATA, sebab yang menahannya di kode hanyalah indeks
+     * atas aturan yang LAIN.
+     *
+     * `pastikanSuperAdmin` membuat akun hanya bila belum ada satu pun super
+     * admin aktif, dan `seed` menulis satu akun tetap ber-`onConflictDoUpdate`
+     * — dua-duanya satu akun. Tapi yang benar-benar menahan dua boot yang
+     * bertindih selama ini `users_email_unique`: indeks atas "satu user per
+     * email", bukan atas "paling banyak satu super admin". Keduanya berimpit
+     * HANYA selama seluruh instance membaca `SEED_SUPERADMIN_EMAIL` yang sama.
+     *
+     * Uji statis bisa menagih kuncinya TERTULIS; hanya baris ini yang bisa
+     * menjawab berapa akun yang benar-benar LAHIR — dan ia dijalankan CI
+     * SESUDAH verify-api, di atas basis data yang sudah dilewati ribuan asersi.
+     *
+     * `GREATEST(count-1, 0)`: yang dihitung KELEBIHANNYA. Nol super admin bukan
+     * pelanggaran invarian ini (basis data yang belum di-boot pun sah); yang
+     * dilarang akun KEDUA.
+     */
+    nama: "paling banyak SATU super admin aktif",
+    langgar:
+      "SELECT GREATEST(count(*)::int - 1, 0) n FROM users " +
+      "WHERE is_super_admin AND deleted_at IS NULL",
+  },
 ];
 
 async function main(): Promise<void> {

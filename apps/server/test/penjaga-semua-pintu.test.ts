@@ -249,14 +249,18 @@ const ATURAN: Aturan[] = [
           "sama dengan routes-nya: ketiga insert bertipe koreksi/masuk/kirim, " +
           "di luar cakupan indeks parsial `auto_uq`",
       },
-      "modules/auth/superadmin.ts": {
-        pintu: 1,
-        alasan:
-          "`pastikanSuperAdmin` berjalan saat BOOT di dalam try/catch yang sengaja " +
-          "tak menggagalkan boot (lihat index.ts). Dua instance yang boot " +
-          "bersamaan membuat satu di antaranya mencatat galat lalu lanjut — tak " +
-          "ada pengguna yang menerima 500, dan akunnya tetap tepat satu",
-      },
+      // `auth/superadmin.ts` DIHAPUS dari daftar ini 2026-08-31, dan bukan
+      // karena sapuannya melunak: `pastikanSuperAdmin` kini memegang
+      // `kunciAntrean(tx, "super-admin")`, jadi pintunya benar-benar tertutup.
+      //
+      // Alasan yang dulu tertulis di sini pantas dibaca penerusnya, sebab ia
+      // BENAR pada bagian yang diukurnya dan MELESET pada yang tidak: *"satu
+      // di antaranya mencatat galat lalu lanjut — akunnya tetap tepat satu."*
+      // Jumlah akunnya memang selalu satu (`users_email_unique` menahannya),
+      // tapi "mencatat galat lalu lanjut" ternyata bukan satu-satunya cara
+      // gagal. Terukur 8 ronde dua boot serentak: 4/8 galat 23505, dan 1/8
+      // mencetak kalimat yang KELIRU — "email sudah dipakai akun lain" tentang
+      // email milik super admin yang baru saja lahir. Hanya 3/8 yang bersih.
       "modules/onboarding/service.ts": {
         pintu: 1,
         alasan:
