@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { btnPrimary, inputClass } from "../components/ui";
+import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { tulisLokal } from "../lib/simpanan";
@@ -131,14 +131,12 @@ export function SignupPage() {
               <label htmlFor="password" className="mb-1 block text-sm font-medium text-stone-700">
                 Password
               </label>
-              <input
+              <InputPassword
                 id="password"
-                type="password"
                 required
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className={inputClass}
                 placeholder="Minimal 8 karakter"
                 autoComplete="new-password"
               />
@@ -148,13 +146,11 @@ export function SignupPage() {
               <label htmlFor="konfirmasi" className="mb-1 block text-sm font-medium text-stone-700">
                 Ulangi password
               </label>
-              <input
+              <InputPassword
                 id="konfirmasi"
-                type="password"
                 required
                 value={konfirmasi}
                 onChange={(e) => setKonfirmasi(e.target.value)}
-                className={inputClass}
                 placeholder="••••••••"
                 autoComplete="new-password"
               />

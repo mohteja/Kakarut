@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { btnPrimary, inputClass } from "../components/ui";
+import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 
@@ -94,13 +94,12 @@ export function LoginPage() {
             <label htmlFor="password" className="mb-1 block text-sm font-medium text-stone-700">
               Password
             </label>
-            <input
+            <InputPassword
               id="password"
-              type="password"
               required
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
               placeholder="••••••••"
             />
           </div>

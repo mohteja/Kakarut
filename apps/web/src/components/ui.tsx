@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, useState, type ComponentProps, type ReactNode } from "react";
 import type { StokStatus } from "@kakarut/shared";
 
 export function PageTitle({ children, aksi }: { children: ReactNode; aksi?: ReactNode }) {
@@ -182,3 +182,54 @@ export const btnSecondary =
   "rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50";
 export const thClass = "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-stone-500";
 export const tdClass = "px-3 py-2 text-sm text-stone-700";
+
+/**
+ * MEDAN PASSWORD DENGAN TOMBOL LIHAT.
+ *
+ * Password yang tak bisa dilihat adalah satu-satunya isian di aplikasi ini yang
+ * pemakainya TAK BISA memeriksa sendiri sebelum menekan kirim. Salah ketik
+ * satu huruf, dan yang ia terima "Email atau password salah" — kalimat yang
+ * sengaja netral (anti-enumerasi), jadi ia tak pernah tahu bahwa yang salah
+ * cuma jarinya. Di layar sentuh, dengan papan ketik yang menyembunyikan huruf
+ * besar, itu terjadi sepanjang hari.
+ *
+ * `type` sengaja TIDAK bisa dioper pemanggil: justru itu yang sedang diatur di
+ * sini. Sisa prop `<input>` diteruskan apa adanya — `autoComplete`
+ * (`current-password`/`new-password`) penting untuk pengelola password, dan
+ * komponen yang diam-diam membuangnya akan merusak sesuatu yang tak kelihatan.
+ *
+ * Tombolnya `type="button"`: di dalam `<form>`, tombol tanpa `type` adalah
+ * SUBMIT — menekan "lihat" akan mengirim formulirnya, dan orang akan menekan
+ * "lihat" justru saat ia belum yakin isinya benar.
+ */
+export function InputPassword({
+  className,
+  ...props
+}: Omit<ComponentProps<"input">, "type">) {
+  const [lihat, setLihat] = useState(false);
+  const id = useId();
+  return (
+    <div className="relative">
+      <input
+        {...props}
+        type={lihat ? "text" : "password"}
+        // `pr-10` selalu ditambahkan, bahkan saat pemanggil mengoper kelasnya
+        // sendiri: tanpa itu teks yang panjang berjalan ke bawah tombolnya dan
+        // tak terbaca — persis pada mode yang gunanya supaya terbaca.
+        className={`${className ?? inputClass} pr-10`}
+        aria-describedby={id}
+      />
+      <button
+        type="button"
+        id={id}
+        onClick={() => setLihat((v) => !v)}
+        aria-pressed={lihat}
+        aria-label={lihat ? "Sembunyikan password" : "Tampilkan password"}
+        title={lihat ? "Sembunyikan password" : "Tampilkan password"}
+        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-stone-400 hover:text-stone-600"
+      >
+        {lihat ? "🙈" : "👁"}
+      </button>
+    </div>
+  );
+}

@@ -8,8 +8,8 @@ import {
   PageTitle,
   Spinner,
   SpinnerAtauGalat,
+  InputPassword,
   btnPrimary,
-  inputClass,
 } from "../../components/ui";
 import { HapusAkunButton } from "../../components/HapusAkunButton";
 import { api, saveAuth, type AuthState } from "../../lib/api";
@@ -155,25 +155,21 @@ export function ProfilPage() {
         <form onSubmit={onSubmit} className="space-y-3">
           <div>
             <label className="mb-1 block text-sm font-medium">Password sekarang</label>
-            <input
-              type="password"
+            <InputPassword
               required
               value={lama}
               onChange={(e) => setLama(e.target.value)}
               autoComplete="current-password"
-              className={inputClass}
             />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Password baru</label>
-            <input
-              type="password"
+            <InputPassword
               required
               minLength={8}
               value={baru}
               onChange={(e) => setBaru(e.target.value)}
               autoComplete="new-password"
-              className={inputClass}
             />
             {terlaluPendek && (
               <p className="mt-1 text-xs text-red-600">Minimal 8 karakter.</p>
@@ -181,13 +177,11 @@ export function ProfilPage() {
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Ulangi password baru</label>
-            <input
-              type="password"
+            <InputPassword
               required
               value={konfirmasi}
               onChange={(e) => setKonfirmasi(e.target.value)}
               autoComplete="new-password"
-              className={inputClass}
             />
             {tidakCocok && (
               <p className="mt-1 text-xs text-red-600">Password baru tidak sama.</p>

@@ -6,6 +6,7 @@ import {
   ErrorText,
   Modal,
   PageTitle,
+  InputPassword,
   Spinner,
   btnPrimary,
   btnSecondary,
@@ -706,14 +707,13 @@ export function KaryawanPage() {
               </label>
               {/* minLength diabaikan browser saat kosong & tak required — pas
                   untuk mode ubah (kosong = password tidak diganti) */}
-              <input
+              <InputPassword
                 required={!form.id}
                 minLength={8}
-                type="password"
+                autoComplete="new-password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 placeholder={form.id ? "••••••••" : undefined}
-                className={inputClass}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">

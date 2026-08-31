@@ -18,7 +18,12 @@ export const OWNER_PASS = process.env.E2E_OWNER_PASS ?? "Basooopa123!";
 export async function login(page: Page, email: string, pass: string) {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(pass);
+  // `exact`, dan itu bukan kerapian: tombol "Tampilkan password" di dalam
+  // medannya juga bernama-aksesibel mengandung kata "password", jadi pencarian
+  // substring (bawaan `getByLabel`) memulangkan DUA elemen dan seluruh spec
+  // yang memakai pembantu ini mati dengan "strict mode violation" — kegagalan
+  // yang menuduh spec-nya padahal yang berubah komponennya.
+  await page.getByLabel("Password", { exact: true }).fill(pass);
   await page.getByRole("button", { name: "Masuk" }).click();
 }
 

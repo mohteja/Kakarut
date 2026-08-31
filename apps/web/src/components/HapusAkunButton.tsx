@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { ErrorText, inputClass } from "./ui";
+import { ErrorText, InputPassword } from "./ui";
 
 /**
  * Tombol + modal "Hapus Akun" (SOFT delete). Butuh konfirmasi password. Server
@@ -49,14 +49,12 @@ export function HapusAkunButton() {
               Akun Anda akan dihapus dan tidak bisa dipakai login lagi. Riwayat transaksi
               tetap tersimpan. Masukkan password untuk konfirmasi.
             </p>
-            <input
-              type="password"
+            <InputPassword
               autoFocus
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password Anda"
               autoComplete="current-password"
-              className={inputClass}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && password) hapus.mutate();
               }}
