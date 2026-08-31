@@ -182,8 +182,7 @@ export async function catatAbsen(opts: {
   /** waktu kejadian (sinkron offline); bila kosong pakai waktu server */
   waktu?: Date;
 }): Promise<AbsenResult> {
-  const tanggal = tanggalDi(await timezoneOf(opts.companyId), opts.waktu);
-  const acuan = opts.waktu ?? new Date();
+  const tz = await timezoneOf(opts.companyId);
   /*
    * BACA → PUTUSKAN → TULIS, DAN KETIGANYA DI DALAM SATU KUNCI.
    *
@@ -221,6 +220,30 @@ export async function catatAbsen(opts: {
    */
   const ins = await db.transaction(async (tx) => {
     await kunciAntrean(tx, "absen", opts.companyId, opts.branchId, opts.userId);
+    /*
+     * STEMPELNYA DIAMBIL DI DALAM KUNCI, dan itu bukan kerapian.
+     *
+     * Versi pertama perbaikan ini memasang kuncinya tapi membiarkan `waktu`
+     * jatuh ke bawaan kolom, `now()` — yang di Postgres adalah waktu
+     * TRANSAKSI DIMULAI, bukan waktu barisnya ditulis. Urutan transaksi
+     * dimulai TIDAK sama dengan urutan kunci diberikan: empat permintaan bisa
+     * memulai transaksinya pada t1<t2<t3<t4 lalu mendapat giliran kunci dalam
+     * urutan lain. Keputusannya berselang-seling dengan benar — sebab tiap
+     * pemegang kunci membaca cap terakhir yang sudah ter-commit — tapi
+     * `waktu` yang tersimpan mengurutkannya kembali ke urutan MULAI. Dibaca
+     * ulang menurut `waktu`, alternasinya patah lagi.
+     *
+     * TERUKUR sesudah kunci dipasang dan sebelum stempel ini dipindahkan:
+     * **5 dari 25** putaran empat-ketukan-serentak melanggar alternasi
+     * (mis. `masuk@41.340 → masuk@41.347 → keluar@41.348 → masuk@41.350`).
+     * Kuncinya benar; yang salah jam yang dipakai menuliskannya.
+     *
+     * `new Date()` di sini dievaluasi SESUDAH kunci dipegang, jadi ia menaik
+     * searah urutan giliran — dan baris yang ditulis selalu lebih baru
+     * daripada baris yang baru saja dibacanya.
+     */
+    const acuan = opts.waktu ?? new Date();
+    const tanggal = tanggalDi(tz, acuan);
     const [last] = await tx
       .select({ tipe: attendances.tipe, waktu: attendances.waktu })
       .from(attendances)
@@ -253,7 +276,11 @@ export async function catatAbsen(opts: {
         tipe,
         attendDate: tanggal_sesi ?? tanggal,
         fotoUrl: opts.fotoUrl,
-        ...(opts.waktu ? { waktu: opts.waktu } : {}),
+        // SELALU disebut — bukan lagi jatuh ke bawaan `now()` kolomnya, yang
+        // adalah waktu transaksi DIMULAI dan karena itu tak searah dengan
+        // urutan giliran kunci. Untuk cap susulan (offline) nilainya sama
+        // seperti sebelumnya: `opts.waktu`.
+        waktu: acuan,
       })
       .returning({ waktu: attendances.waktu });
     return { ...baris, tipe };

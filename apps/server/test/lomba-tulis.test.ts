@@ -29,7 +29,7 @@ interface Alasan {
 }
 
 /** Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar. */
-const MAKS_UTANG = 4;
+const MAKS_UTANG = 3;
 
 /** kunci: `berkas` -> nama fungsi -> alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
@@ -56,20 +56,6 @@ const daftar: Record<string, Record<string, Alasan>> = {
     },
   },
   "modules/produksi/routes.ts": {
-    "POST /kirim/:fakturId": {
-      kelas: "utang",
-      teks:
-        "UTANG BARU, dan ia tak pernah terlihat sebelum putaran ini: klaimnya " +
-        "ada di dalam `db.transaction` yang dulu buta bagi pemindai ini. " +
-        "Predikatnya `status = 'menunggu'` TETAP BENAR sesudah pengiriman " +
-        "pertama (yang berubah `branch_id` & `dikirim_at`, bukan statusnya), " +
-        "jadi permintaan kedua yang berpapasan mencocokkan baris yang sama " +
-        "lagi: perpindahan diterapkan ulang dan `catatLogFaktur` menulis " +
-        "jejak 'Dikirim ke X' KEDUA untuk satu pengiriman. Balasannya pun " +
-        "menyebut `jumlah_baris` dari BACAAN awal, bukan dari baris yang " +
-        "benar-benar tersentuh. Ditulis dari kodenya, BELUM diukur lewat HTTP " +
-        "— dan itu disebut di sini supaya tak terbaca lebih kuat dari adanya.",
-    },
     catatRealisasiDana: {
       kelas: "sah",
       teks:

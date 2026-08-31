@@ -15536,6 +15536,71 @@ cek "stok CK bertambah TEPAT sekali qty (7), bukan dua kali" "abs(V - 7) < 0.001
 
 rm -f /tmp/kk278-*
 
+# §279 — DUA "KIRIM" YANG BERPAPASAN: SATU BERANGKAT, SATU JEJAK
+#
+# Membayar utang balapan `POST /kirim/:fakturId`, yang baru TERLIHAT putaran
+# lalu saat pemindai balapan diajari menembus `db.transaction`.
+#
+# Klaim UPDATE-nya dulu berbunyi `status = 'menunggu'` — dan itu BUKAN keadaan
+# yang berubah saat pengiriman. Yang berubah `branch_id` & `dikirim_at`;
+# statusnya tetap 'menunggu' di cabang tujuan (di sana ia berarti "menunggu
+# diterima"). Predikatnya karena itu tetap benar sesudah pengiriman pertama.
+#
+# Permintaan BERURUTAN memang sudah ditolak 400 oleh saringan `siap`. Yang
+# lolos hanya yang benar-benar berpapasan — dan `catatHasilIdempoten` di ekor
+# rute tak menutupnya: ia MENCATAT hasil sesudah kerjanya selesai.
+#
+# TERUKUR sebelum `dikirim_at IS NULL` ditambahkan, di KEDUA pintu:
+#
+#     kode 200 & 200 · keduanya melaporkan `jumlah_baris` penuh
+#     jejak faktur "Dikirim ke …": 2 untuk SATU pengiriman
+#
+# Batasnya ikut diukur, dan disebut supaya tak terbaca lebih besar dari adanya:
+# barisnya TIDAK berganda (7 → 7), `dari_branch_id` tetap satu, stok tak dobel.
+# Yang rusak JEJAKNYA — dan buku faktur yang menulis "dikirim" dua kali adalah
+# catatan yang menuduh orang.
+echo
+echo "── §279 dua kirim yang berpapasan: satu berangkat, satu jejak ──"
+
+# Faktur kiriman BARU (stok CK sudah cukup dari §82) — satu submit, satu faktur.
+K279=$(api "$OWNER" POST /rekomendasi/menu/faktur \
+  "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+F279=$(echo "$K279" | jq -r '.kirim.faktur_id // empty')
+
+# PREMIS: fakturnya ada DAN punya baris siap kirim. Tanpa ini "satu 200 satu
+# 409" bisa benar karena dua-duanya gagal karena sebab lain.
+cek "premis: faktur kiriman baru terbit" "V == 1" \
+  "$([ -n "$F279" ] && [ "$F279" != "null" ] && echo 1 || echo 0)"
+BARIS279=$(echo "$K279" | jq -r '.kirim.jumlah_baris // 0')
+cek "premis: fakturnya punya baris siap kirim" "V >= 1" "$BARIS279"
+
+rm -f /tmp/kk279-*
+for i in 1 2; do
+  ( curl -s -o "/tmp/kk279-b$i" -w "%{http_code}" -X POST "$BASE/api/produksi/kirim/$F279" \
+      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{}' \
+      > "/tmp/kk279-$i" ) &
+done
+wait
+
+K279KODE="$(cat /tmp/kk279-1 2>/dev/null) $(cat /tmp/kk279-2 2>/dev/null)"
+cek "tepat SATU yang memberangkatkan (kode: $K279KODE)" "V == 1" \
+  "$(printf '%s\n' $K279KODE | grep -c '^2')"
+cek "yang KALAH ditolak 409, bukan dibalas sukses (kode: $K279KODE)" "V == 1" \
+  "$(printf '%s\n' $K279KODE | grep -c '^409')"
+
+# Yang paling mahal bila predikatnya lepas: buku faktur menulis "dikirim" dua
+# kali untuk satu pengiriman.
+cek "jejak faktur 'Dikirim ke' TEPAT satu untuk satu pengiriman" "V == 1" \
+  "$(api "$OWNER" GET "/produksi/log/$F279" | jq '[.rows[]|select(.aksi|test("^Dikirim ke"))]|length')"
+
+# `jumlah_baris` dilaporkan dari baris yang BENAR-BENAR pindah, bukan dari
+# bacaan awal — balasan yang menghitung dari bacaan melaporkan pekerjaan yang
+# mungkin dikerjakan orang lain.
+cek "jumlah_baris yang dilaporkan = baris yang benar-benar pindah ($BARIS279)" "V == 1" \
+  "$(cat /tmp/kk279-b1 /tmp/kk279-b2 2>/dev/null | jq -s --argjson n "$BARIS279" '[.[]|select(.ok==true)|.jumlah_baris] | (length==1 and .[0]==$n) | if . then 1 else 0 end')"
+
+rm -f /tmp/kk279-*
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

@@ -1774,8 +1774,40 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         }
         tujuanStorage = tujuan_storage_id;
       }
-      await db.transaction(async (tx) => {
-        await tx
+      /*
+       * PREDIKATNYA HARUS MENYEBUT TRANSISI YANG SEDANG DILAKUKANNYA.
+       *
+       * Versi pertama mengklaim `status = 'menunggu'` — dan itu bukan keadaan
+       * yang berubah saat pengiriman. Yang berubah `branch_id` & `dikirim_at`;
+       * statusnya TETAP 'menunggu' di cabang tujuan (di sana ia berarti
+       * "menunggu diterima"). Jadi predikatnya tetap benar sesudah pengiriman
+       * pertama, dan permintaan kedua yang berpapasan mencocokkan baris yang
+       * sama lagi.
+       *
+       * Permintaan BERURUTAN memang sudah tertahan saringan `siap` di atas
+       * (sesudah pindah, `branchId === tujuanBranchId`). Yang lolos hanya yang
+       * benar-benar berpapasan: keduanya membaca sebelum salah satunya menulis.
+       * `catatHasilIdempoten` di ekor rute tak menutupnya — ia MENCATAT hasil
+       * sesudah kerjanya selesai, bukan mengklaim sebelum.
+       *
+       * TERUKUR sebelum `dikirim_at IS NULL` ditambahkan, dua permintaan
+       * serentak atas satu faktur, di KEDUA pintu (`/produksi/kirim` dan
+       * `/pembelian/kirim`):
+       *
+       *     kode 200 & 200 · keduanya melaporkan `jumlah_baris: 7`
+       *     jejak faktur "Dikirim ke …": 2 untuk satu pengiriman
+       *
+       * Batas kerusakannya ikut diukur, dan sengaja disebut supaya tak terbaca
+       * lebih besar dari adanya: baris TIDAK berganda (7 → 7), `dari_branch_id`
+       * tetap satu (COALESCE di `kolomPindahCabang` memang menahannya), dan
+       * stoknya tidak dobel. Yang rusak JEJAKNYA — dan sebuah jejak faktur yang
+       * mengatakan barang dikirim dua kali adalah catatan yang menuduh orang.
+       *
+       * Idiomnya sudah baku di basis kode ini (`pengajuan/routes.ts:336`):
+       * UPDATE bersyarat + periksa barisnya + 409/404.
+       */
+      const dipindah = await db.transaction(async (tx) => {
+        const kena = await tx
           .update(productions)
           .set({
             // Jalur ini SUDAH benar sejak awal; disatukan ke helper supaya tak
@@ -1798,20 +1830,41 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 siap.map((b) => b.id),
               ),
               eq(productions.status, "menunggu" as const),
+              // KLAIMNYA: hanya baris yang BELUM berangkat. `dikirim_at` tak
+              // pernah dikosongkan siapa pun (dua penulisnya cuma menyetel),
+              // dan `/tolak`/`/batal-tolak` "hanya memindahkan status, tak
+              // menyentuh satu pun angka" — jadi tak ada kirim-ulang sah yang
+              // ikut tertutup di sini.
+              isNull(productions.dikirimAt),
               isNull(productions.deletedAt),
             ),
-          );
+          )
+          .returning({ id: productions.id });
+        // Kalah balapan: yang lain sudah memberangkatkannya. Jejaknya TIDAK
+        // ditulis — satu pengiriman, satu jejak.
+        if (kena.length === 0) return 0;
         await catatLogFaktur(tx, {
           companyId: auth.company_id!,
           branchId: ckId,
           fakturId,
           jalur: tipe,
           aksi: `Dikirim ke ${store.nama}`,
-          detail: `${siap.length} baris`,
+          detail: `${kena.length} baris`,
           userId: auth.sub,
         });
+        return kena.length;
       });
-      const hasilKirim = { ok: true, tujuan: store.nama, jumlah_baris: siap.length };
+      if (dipindah === 0) {
+        // 409, bukan 400: keduanya sudah dipakai rute ini untuk arti berbeda —
+        // 400 "tak ada yang siap dikirim", 409 "sudah dikirim orang lain".
+        throw new HTTPException(409, {
+          message: `Faktur ini baru saja dikirim ke ${store.nama} dari perangkat lain`,
+        });
+      }
+      // `jumlah_baris` dari baris yang BENAR-BENAR pindah, bukan dari bacaan
+      // awal: balasan yang menghitung dari `siap` melaporkan pekerjaan yang
+      // mungkin dikerjakan orang lain.
+      const hasilKirim = { ok: true, tujuan: store.nama, jumlah_baris: dipindah };
       // Ledger bersama: replay antrean offline ber-ref sama dibalas
       // `sudah_ada`, bukan 400 mesin-status yang terbaca "gagal" palsu.
       if (badan.client_ref) {

@@ -50,6 +50,102 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Utang DIBAYAR: balapan `POST /kirim/:fakturId` — dan gerbangnya menangkap perbaikanku SENDIRI — server — 2026-08-31
+
+- **Utang ini lahir putaran lalu**, saat `lomba.ts` diajari menembus
+  `db.transaction`. Entrinya sendiri menyebut batasnya: *"Ditulis dari kodenya,
+  BELUM diukur lewat HTTP."* Kewajiban pertama karena itu **mengukur**, bukan
+  memperbaiki — persis pelajaran `tibaBeliPerlengkapan`, tempat catatan tak
+  terukur berdiri tiga putaran sebagai temuan sebelum ternyata keliru.
+
+- **Bentuknya**: klaim UPDATE-nya berbunyi `status = 'menunggu'` — dan itu
+  BUKAN keadaan yang berubah saat pengiriman. Yang berubah `branch_id` &
+  `dikirim_at`; statusnya TETAP `'menunggu'` di cabang tujuan (di sana ia
+  berarti "menunggu diterima"). Predikatnya tetap benar sesudah pengiriman
+  pertama. Permintaan BERURUTAN sudah tertahan saringan `siap`; yang lolos
+  hanya yang berpapasan. `catatHasilIdempoten` tak menutupnya — ia MENCATAT
+  hasil sesudah kerjanya selesai, bukan mengklaim sebelum.
+
+- **TERUKUR, dua permintaan serentak, di KEDUA pintu** (`/produksi/kirim` dan
+  `/pembelian/kirim` — satu kode, dua rute):
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | kode balasan | **200 & 200** | **200 & 409** |
+  | jejak faktur "Dikirim ke …" | **2** | **1** |
+  | `jumlah_baris` dilaporkan | 7 & 7 (dari BACAAN) | 7 (dari TULISAN) |
+
+- **Batas kerusakannya ikut diukur, dan disebut supaya tak terbaca lebih besar
+  dari adanya**: barisnya **tidak** berganda (7 → 7), `dari_branch_id` tetap
+  satu (COALESCE di `kolomPindahCabang` memang menahannya), stok tidak dobel.
+  Yang rusak **JEJAKNYA** — dan buku faktur yang menulis "dikirim" dua kali
+  adalah catatan yang menuduh orang.
+
+- **Perbaikannya menambah PREDIKAT, bukan pemeriksaan**: `isNull(dikirimAt)` —
+  penanda KEBERANGKATAN yang skemanya sendiri sebut demikian, dan satu-satunya
+  kolom yang benar-benar berubah saat pengiriman. `.returning()` + nol baris →
+  **409 bernama** (400 di rute ini sudah berarti "tak ada yang siap dikirim";
+  menyamakannya membuat klien tak bisa membedakan dua keadaan). `jumlah_baris`
+  kini dari baris yang benar-benar pindah.
+
+- **BATAS GERBANG STATIS, ditemukan saat bukti merahnya dijalankan**:
+  `isNull(dikirimAt)` dicabut → `lomba-tulis.test.ts` **tetap hijau**. Ia
+  membuktikan hasil klaimnya DIPERIKSA; ia tak bisa menilai apakah
+  PREDIKATNYA cukup. Hanya §279 yang menangkapnya — dan itu alasan lapis
+  dinamisnya ada, bukan pelengkap.
+
+---
+
+### Dan gerbang §277 menangkap perbaikanku SENDIRI dari dua putaran lalu
+
+- **`catatAbsen` yang kubetulkan dua putaran lalu ternyata belum benar.**
+  Menjalankan gerbang penuh memerahkan §277: `keluar → keluar → masuk → masuk`.
+  Diukur: **5 dari 25** putaran empat-ketukan-serentak melanggar alternasi.
+
+- **Kuncinya benar; JAM-nya yang salah.** `waktu` dibiarkan jatuh ke bawaan
+  kolom `now()` — yang di Postgres adalah waktu **transaksi DIMULAI**, bukan
+  waktu barisnya ditulis. Urutan transaksi dimulai TIDAK sama dengan urutan
+  kunci diberikan: empat permintaan bisa memulai pada t1<t2<t3<t4 lalu mendapat
+  giliran dalam urutan lain. Keputusannya berselang-seling dengan benar — tiap
+  pemegang kunci membaca cap terakhir yang sudah ter-commit — tapi `waktu` yang
+  tersimpan mengurutkannya kembali ke urutan MULAI. Dibaca ulang menurut
+  `waktu`, alternasinya patah lagi:
+
+      masuk@41.340 → masuk@41.347 → keluar@41.348 → masuk@41.350
+
+- **Perbaikannya**: stempel diambil DI DALAM kunci (`new Date()` sesudah
+  `kunciAntrean` kembali), dan `waktu` selalu disebut alih-alih jatuh ke
+  bawaan. **Sesudah: 0 dari 50** putaran melanggar, dengan premis "empat baris
+  lahir" terpenuhi **50/50**.
+
+- **Ini pelajaran yang mahal dan layak ditulis besar**: sebuah penahan bisa
+  BENAR dan hasilnya tetap salah, karena yang dibaca ulang bukan urutan
+  keputusan melainkan urutan sebuah KOLOM. Kunci menyerialkan keputusan; ia tak
+  menyerialkan jam. Dan yang menemukannya bukan pembacaan ulang melainkan
+  gerbang dinamis yang kupasang sendiri di putaran itu — **satu-satunya alasan
+  cacat ini tak ikut terkirim adalah karena §277 dijalankan, bukan dipercaya.**
+
+---
+
+- **Angka**: `utang` balapan **4 → 3** · situsnya `KLAIM_BUTA → KLAIM` ·
+  jejak faktur dari dua kirim serentak **2 → 1** · pelanggaran alternasi absen
+  **5/25 → 0/50**.
+
+- **PASANGAN**: seluruh alur kirim berurutan yang sudah dipaku verify-api tetap
+  hijau (3.298 asersi), termasuk `tiba lagi → 400`, penerimaan cabang, dan
+  saldo CK/cabang sesudah kirim-terima.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.572** (214 berkas) ·
+  **`verify-api.sh` 3.298 lolos / 0 gagal** (DB segar; §279 baru, 6 asersi) ·
+  `audit:invarian` **26/26**. **Playwright tidak dijalankan** — `apps/web` tak
+  tersentuh.
+
+- **Utang balapan tersisa: 3** — `execPenjualan`, pembuatan penyewa,
+  `pastikanSuperAdmin`. Ketiganya ditulis SEBELUM `lomba.ts` bisa menembus
+  transaksi, jadi layak ditinjau ulang sebagai pekerjaan tersendiri.
+
+---
+
 ## Utang `tibaBeliPerlengkapan` DICABUT — dan detektornya yang dibayar — server (uji) — 2026-08-31
 
 - **Yang diminta**: membayar utang balapan kedua. Catatan putaran 24
