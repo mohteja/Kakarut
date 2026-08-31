@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { btnPrimary, inputClass } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
+import { tulisLokal } from "../lib/simpanan";
 
 /**
  * Daftar akun sendiri (self sign-up). TIDAK langsung login: server mengirim
@@ -39,6 +40,16 @@ export function SignupPage() {
       const res = await register(nama, email, password);
       setSent(true);
       setDevKode(res.dev_verify_kode ?? null);
+      // Pendaftaran BARU SAJA mengirim kode, jadi jaraknya sudah berjalan.
+      // Tenggatnya ditulis di sini supaya layar kode menampilkan hitung
+      // mundurnya sejak detik pertama, alih-alih tombol yang tampak siap
+      // ditekan lalu ditolak diam-diam oleh servernya.
+      if (res.retry_after_detik) {
+        tulisLokal(
+          `kakarut.verifJeda:${email.trim().toLowerCase()}`,
+          String(Date.now() + res.retry_after_detik * 1000),
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal mendaftar");
     } finally {

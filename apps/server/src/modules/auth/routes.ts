@@ -1,12 +1,13 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { env } from "../../config/env";
 import { appBaseUrl } from "../../lib/base-url";
+import { kunciAntrean } from "../../lib/kunci";
 import { bentrokUnikPada } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
@@ -135,11 +136,19 @@ const batasVerifikasiCek = rl(
   }),
 );
 
-/** Kirim ulang verifikasi: batasi per (IP + email) → cegah bom email. */
+/*
+ * Kirim ulang verifikasi: batasi per (IP + email) → cegah bom email.
+ *
+ * 6 → 8 saat jarak 2 menit dipasang: 15 menit memuat 7,5 kiriman yang MENURUTI
+ * jaraknya, jadi ember 6 akan menolak orang yang justru patuh — dan menolaknya
+ * dengan kalimat yang berbeda ("terlalu banyak permintaan"), sehingga ia tak
+ * bisa tahu bahwa yang salah cuma sabarnya. Jaraknya kini aturan yang
+ * mengikat; ember ini tinggal jaring pengaman.
+ */
 const batasVerifikasiKirim = rl(
   rateLimit({
     windowMs: 15 * 60_000,
-    max: 6,
+    max: 8,
     key: async (c) => `verifkirim:${ipKlien(c)}:${await emailDariBody(c)}`,
     message: "Terlalu banyak permintaan — coba lagi beberapa menit lagi.",
   }),
@@ -166,6 +175,19 @@ const VERIFIKASI_MENIT = 60;
  */
 const MAKS_PERCOBAAN = 5;
 
+/**
+ * JARAK MINIMUM ANTAR PENGIRIMAN KODE untuk satu akun.
+ *
+ * Sebelum ini jaraknya cuma ada di React (`setJeda(60)`) — 60 detik, di KLIEN,
+ * dan hilang begitu halamannya dimuat ulang. Itu kenyamanan tampilan, bukan
+ * penahan: sisi server hanya punya ember 15 menit yang tak mengatur jarak sama
+ * sekali, jadi enam kiriman boleh beruntun dalam enam detik.
+ *
+ * Angkanya dipulangkan ke klien (`retry_after_detik`) alih-alih disalin ke
+ * sana, supaya tak ada dua angka yang bisa menyimpang.
+ */
+const JEDA_KIRIM_ULANG_DETIK = 120;
+
 /** Kode 6 digit, dari sumber acak kriptografis (bukan `Math.random`). */
 function kodeVerifikasi(): string {
   return String(randomInt(0, 1_000_000)).padStart(6, "0");
@@ -188,6 +210,11 @@ function sidikKode(userId: string, kode: string): string {
  * bila email BELUM dikonfigurasi (bantuan dev/non-produksi); di produksi tidak
  * pernah dibocorkan.
  *
+ * JARAKNYA DIJAGA DI SINI, bukan di rutenya — alasan yang sama dengan
+ * pencarian shift di `createSale`: pemanggil berikutnya tak bisa lupa
+ * memakainya. Aman untuk pendaftaran, sebab akun yang baru lahir belum punya
+ * kode hidup, jadi penjaganya no-op di sana.
+ *
  * KODE LAMA DIMATIKAN LEBIH DULU, dan itu bukan kerapian. Orang yang emailnya
  * belum masuk akan menekan "Kirim ulang" berkali-kali; membiarkan kode-kode
  * sebelumnya hidup berarti setiap penekanan menambah satu rahasia 6 digit yang
@@ -201,7 +228,43 @@ async function kirimKodeVerifikasi(
   nama: string,
 ): Promise<string | undefined> {
   const kode = kodeVerifikasi();
-  await db.transaction(async (tx) => {
+  const dikirim = await db.transaction(async (tx) => {
+    /*
+     * "Baca kode terakhir lalu tulis kode baru" adalah balapan, dan akibatnya
+     * bukan sekadar dua email: dua tekanan yang berpapasan sama-sama melihat
+     * "tak ada yang baru", sama-sama mengirim, lalu yang KEDUA mematikan kode
+     * yang barusan dikirimkan yang pertama. Orangnya menerima dua email dan
+     * hanya satu yang berlaku — tanpa cara menebak yang mana.
+     */
+    await kunciAntrean(tx, "verifikasi-email", userId);
+    const [hidup] = await tx
+      .select({ createdAt: emailVerificationTokens.createdAt })
+      .from(emailVerificationTokens)
+      .where(
+        and(
+          eq(emailVerificationTokens.userId, userId),
+          isNull(emailVerificationTokens.usedAt),
+          // Kode KEDALUWARSA tak boleh menahan kirim ulang — kalau ia menahan,
+          // orang yang kodenya mati justru terkunci dari satu-satunya jalan
+          // keluarnya. Sama untuk kode yang MATI karena jatah tebakannya habis:
+          // salah ketik lima kali bukan alasan menunggu dua menit.
+          gt(emailVerificationTokens.expiresAt, new Date()),
+        ),
+      )
+      // Pemutus seri wajib: tanpa `id`, dua baris berdetik sama bisa bertukar
+      // urutan antar pemanggilan dan "yang terbaru" berhenti berarti.
+      .orderBy(desc(emailVerificationTokens.createdAt), desc(emailVerificationTokens.id))
+      .limit(1);
+    if (hidup && Date.now() - hidup.createdAt.getTime() < JEDA_KIRIM_ULANG_DETIK * 1000) {
+      /*
+       * DITOLAK TANPA MENYENTUH APA PUN — dan urutan ini yang paling mudah
+       * salah. Mematikan kode lama lebih dulu lalu menolak mengirim akan
+       * MENGHANCURKAN kode yang sedang diketik orangnya, dan ia tak menerima
+       * gantinya: satu tekanan tombol mengubah keadaan yang benar jadi jalan
+       * buntu.
+       */
+      return false;
+    }
     await tx
       .update(emailVerificationTokens)
       .set({ usedAt: new Date() })
@@ -216,7 +279,9 @@ async function kirimKodeVerifikasi(
       tokenHash: sidikKode(userId, kode),
       expiresAt: new Date(Date.now() + VERIFIKASI_MENIT * 60 * 1000),
     });
+    return true;
   });
+  if (!dikirim) return undefined;
   try {
     await kirimEmail({
       to: email,
@@ -321,6 +386,10 @@ export const authRoutes = new Hono<AppEnv>()
       message:
         "Jika email valid, kami telah mengirim KODE verifikasi 6 digit. Cek email Anda " +
         `dan masukkan kodenya (berlaku ${VERIFIKASI_MENIT} menit).`,
+      // Ikut dipulangkan di sini supaya layar kode langsung menampilkan hitung
+      // mundurnya: pendaftaran BARU SAJA mengirim kode, jadi tombol "kirim
+      // ulang" yang tampak siap ditekan akan ditolak diam-diam oleh jaraknya.
+      retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
       ...(devKode ? { dev_verify_kode: devKode } : {}),
     });
   })
@@ -572,7 +641,17 @@ export const authRoutes = new Hono<AppEnv>()
       if (user && !user.deletedAt && user.isActive && !user.emailVerifiedAt) {
         devKode = await kirimKodeVerifikasi(user.id, email, user.nama);
       }
-      return c.json({ ok: true, ...(devKode ? { dev_verify_kode: devKode } : {}) });
+      /*
+       * `retry_after_detik` dipulangkan SELALU dan nilainya TETAP — email yang
+       * terdaftar dan yang tidak menerima angka yang sama persis, jadi tak ada
+       * oracle baru yang dibuka di pintu yang seluruh rute di sekitarnya sudah
+       * susah payah tutup.
+       */
+      return c.json({
+        ok: true,
+        retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
+        ...(devKode ? { dev_verify_kode: devKode } : {}),
+      });
     },
   )
   /**

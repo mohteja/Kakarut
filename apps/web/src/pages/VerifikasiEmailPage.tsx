@@ -3,6 +3,38 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { btnPrimary, inputClass } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
+import { bacaLokal, tulisLokal } from "../lib/simpanan";
+
+/**
+ * TENGGAT KIRIM ULANG, DISIMPAN PER EMAIL — supaya tombolnya tak berbohong.
+ *
+ * Hitung mundur yang cuma hidup di state React hilang begitu halamannya dimuat
+ * ulang: tombolnya kembali tampak siap, ditekan, dan servernya menolak
+ * diam-diam karena jaraknya belum lewat. Orangnya melihat "kode baru sudah
+ * dikirim" untuk email yang tak pernah berangkat.
+ *
+ * Yang disimpan TENGGATNYA (epoch md), bukan sisa detiknya — sisa detik yang
+ * disimpan akan tetap sebesar itu berapa lama pun tabnya tertutup.
+ *
+ * Per email, sebab satu perangkat bisa dipakai mendaftarkan beberapa akun
+ * (pemilik yang menyiapkan akun karyawannya), dan jarak milik satu akun tak
+ * ada urusannya dengan akun lain.
+ */
+const kunciJeda = (email: string) => `kakarut.verifJeda:${email.trim().toLowerCase()}`;
+
+/** "1:59" untuk sisa yang masih semenit lebih; "45 dtk" untuk sisanya. */
+function jamPasir(detik: number): string {
+  if (detik < 60) return `${detik} dtk`;
+  return `${Math.floor(detik / 60)}:${String(detik % 60).padStart(2, "0")}`;
+}
+
+function sisaJeda(email: string): number {
+  if (!email) return 0;
+  const mentah = bacaLokal(kunciJeda(email));
+  const tenggat = mentah ? Number(mentah) : 0;
+  if (!Number.isFinite(tenggat)) return 0;
+  return Math.max(0, Math.ceil((tenggat - Date.now()) / 1000));
+}
 
 /**
  * Verifikasi email dengan KODE 6 DIGIT yang diketik di layar ini.
@@ -40,7 +72,7 @@ export function VerifikasiEmailPage() {
   const [status, setStatus] = useState<"isi" | "proses" | "sukses">(token ? "proses" : "isi");
   const [error, setError] = useState<string | null>(null);
   const [kirimUlang, setKirimUlang] = useState<"diam" | "loading" | "terkirim">("diam");
-  const [jeda, setJeda] = useState(0);
+  const [jeda, setJeda] = useState(() => sisaJeda(params.get("email") ?? ""));
   const sudahJalan = useRef(false);
 
   function sukses() {
@@ -69,14 +101,22 @@ export function VerifikasiEmailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // Jeda kirim ulang: mencegah satu orang membanjiri kotak masuknya sendiri
-  // (dan menghabiskan jatah 6 per 15 menit di server, yang justru akan
-  // mengunci dirinya sendiri).
+  /*
+   * Hitung mundurnya dibaca ULANG dari tenggat tersimpan, bukan dikurangi satu
+   * per detik dari angka di memori. Tab yang tertidur (ponsel yang dikunci)
+   * membuat `setTimeout` melambat; menghitung dari jam membuat sisa waktunya
+   * tetap benar berapa pun timernya meleset.
+   */
   useEffect(() => {
     if (jeda <= 0) return;
-    const t = setTimeout(() => setJeda((n) => n - 1), 1000);
+    const t = setTimeout(() => setJeda(sisaJeda(email)), 1000);
     return () => clearTimeout(t);
-  }, [jeda]);
+  }, [jeda, email]);
+
+  // Ganti email → jedanya ikut ganti: yang ditahan server adalah AKUNNYA.
+  useEffect(() => {
+    setJeda(sisaJeda(email));
+  }, [email]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -97,9 +137,14 @@ export function VerifikasiEmailPage() {
     setKirimUlang("loading");
     setError(null);
     try {
-      await kirimUlangVerifikasi(email);
+      const res = await kirimUlangVerifikasi(email);
       setKirimUlang("terkirim");
-      setJeda(60);
+      // Angkanya dari SERVER (`retry_after_detik`) — yang menahan servernya,
+      // jadi menyalin 120 ke sini cuma menyiapkan dua angka yang bisa
+      // menyimpang. Cadangannya dipakai hanya bila balasannya tak membawanya.
+      const detik = res.retry_after_detik ?? 120;
+      tulisLokal(kunciJeda(email), String(Date.now() + detik * 1000));
+      setJeda(detik);
     } catch (err) {
       setKirimUlang("diam");
       setError(err instanceof Error ? err.message : "Gagal mengirim kode");
@@ -178,7 +223,7 @@ export function VerifikasiEmailPage() {
               {kirimUlang === "loading"
                 ? "Mengirim…"
                 : jeda > 0
-                  ? `Kirim ulang kode (${jeda} dtk)`
+                  ? `Kirim ulang kode (${jamPasir(jeda)})`
                   : "Kirim ulang kode"}
             </button>
 

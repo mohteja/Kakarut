@@ -49,12 +49,18 @@ const daftar: Record<string, Record<string, Alasan>> = {
     "POST /verify-email": {
       kelas: "sah",
       teks:
-        "BARU TERLIHAT sesudah pemindai menembus transaksi. `emailVerifiedAt` " +
-        "ditulis `user.emailVerifiedAt ?? new Date()` — idempoten, verifikasi " +
-        "pertama yang bertahan — dan seluruh tautan verifikasi akun itu " +
-        "dimatikan sekaligus. Dua permintaan bersamaan berakhir di keadaan " +
-        "yang persis sama dengan satu permintaan; tak ada invarian yang bisa " +
-        "dilanggar salah satu urutannya.",
+        "DUA penulisan di sini, dan keduanya sengaja tak diperiksa hasilnya. " +
+        "(1) `emailVerifiedAt` ditulis `user.emailVerifiedAt ?? new Date()` — " +
+        "idempoten, verifikasi pertama yang bertahan — dan seluruh kode " +
+        "verifikasi akun itu dimatikan sekaligus; dua permintaan bersamaan " +
+        "berakhir di keadaan yang persis sama dengan satu permintaan. " +
+        "(2) penghitung tebakan salah: `percobaan + 1`, dengan `usedAt` diisi " +
+        "lewat CASE di pernyataan yang SAMA. Ia sengaja tak dibaca — yang " +
+        "dipedulikan bukan berapa baris kena melainkan bahwa jatahnya tak " +
+        "bisa dinaikkan dua kali oleh dua penebak yang berpapasan, dan itu " +
+        "dijamin oleh satu pernyataan, bukan oleh pemeriksaan sesudahnya. " +
+        "Membaca hasilnya lalu memutuskan justru mengembalikan balapan yang " +
+        "baru saja ditutup.",
     },
   },
   "modules/produksi/routes.ts": {
@@ -350,6 +356,23 @@ describe("periksa-dulu-baru-tulis wajib punya penahan", () => {
       /rekapWindow\(\s*tx\b/.test(badan[0]),
       "rekap penutupan dihitung di LUAR transaksi yang memegang kuncinya",
     ).toBe(true);
+  });
+
+  /**
+   * JARAK ANTAR KIRIM ULANG KODE dipegang KUNCI, bukan sekadar dibaca.
+   *
+   * "Baca kode hidup terakhir lalu tulis kode baru" adalah periksa-dulu-baru-
+   * tulis yang paling khas, dan akibat kegagalannya halus: dua tekanan yang
+   * berpapasan sama-sama lolos jaraknya, sama-sama mengirim, lalu yang KEDUA
+   * mematikan kode yang barusan dikirimkan yang pertama. Orangnya menerima dua
+   * email dan hanya satu yang berlaku, tanpa cara menebak yang mana.
+   */
+  it("jarak kirim ulang kode dipegang KUNCI", () => {
+    const s = semua.find(
+      (x) => x.berkas === "modules/auth/routes.ts" && x.nama === "kirimKodeVerifikasi",
+    );
+    expect(s, "situs kirimKodeVerifikasi hilang dari sapuan").toBeDefined();
+    expect(s!.kelas, "jarak kirim ulang dibaca tanpa penahan").toBe("KUNCI");
   });
 
   it("tiap periksa-lalu-tulis tanpa penahan sudah diadjudikasi", () => {

@@ -17,6 +17,14 @@ export interface DaftarResult {
   message?: string;
   /** Hanya di dev (email belum diatur) — kode verifikasi 6 digit langsung. */
   dev_verify_kode?: string;
+  /**
+   * Jarak minimum sebelum kode berikutnya boleh diminta, dalam detik.
+   *
+   * Datang dari SERVER, bukan disalin ke klien: server yang menahannya, jadi
+   * angka kedua di sini hanya akan menyimpang diam-diam. Nilainya TETAP untuk
+   * email mana pun — terdaftar atau tidak — jadi ia tak membocorkan apa pun.
+   */
+  retry_after_detik?: number;
 }
 
 interface AuthContextValue {

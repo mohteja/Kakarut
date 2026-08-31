@@ -4332,14 +4332,20 @@ cek "verifikasi kode bekas → 400" "V == 400" \
   "$(status_code_body "" POST /auth/verify-email "{\"email\":\"verif106@example.com\",\"kode\":\"$VT106\"}")"
 cek "verifikasi kode ngawur → 400" "V == 400" \
   "$(status_code_body "" POST /auth/verify-email "{\"email\":\"verif106@example.com\",\"kode\":\"000000\"}")"
-# (e) Kirim ulang verifikasi: selalu netral. Akun belum-verif → tautan baru;
-#     email tak dikenal → 200 tanpa kode.
+# (e) Kirim ulang verifikasi: SELALU netral, dan berjarak.
+#
+# Pendaftaran BARU SAJA mengirim kode, jadi tekanan "kirim ulang" seketika
+# ditahan jaraknya (2 menit) — itu perilaku yang benar, bukan kegagalan, dan
+# asersi di sini dulu berbunyi sebaliknya. Yang dijaga sekarang bentuk
+# BALASANNYA: netral, membawa jaraknya, dan tak membocorkan apakah emailnya
+# terdaftar. Sisi positifnya ("kode mati → kirim ulang langsung memberi kode
+# baru") diuji di bagian 281, tempat keadaan itu bisa dibuat tanpa menunggu.
 api "" POST /auth/register '{"nama":"Verif106B","email":"verif106b@example.com","password":"Verif10634"}' > /dev/null
 RESEND106=$(api "" POST /auth/resend-verification '{"email":"verif106b@example.com"}')
-cek "kirim ulang (akun belum verif) → kode baru" "V == 1" \
-  "$(echo "$RESEND106" | jq '((.ok==true) and ((.dev_verify_kode|length)==6))|if . then 1 else 0 end')"
-cek "kirim ulang (email tak dikenal) → 200 tanpa kode" "V == 1" \
-  "$(api "" POST /auth/resend-verification '{"email":"tidakada106@example.com"}' | jq '((.ok==true) and (.dev_verify_kode==null))|if . then 1 else 0 end')"
+cek "kirim ulang seketika sesudah daftar → ditahan jaraknya (tanpa kode baru)" "V == 1" \
+  "$(echo "$RESEND106" | jq '((.ok==true) and (.dev_verify_kode==null) and (.retry_after_detik==120))|if . then 1 else 0 end')"
+cek "kirim ulang (email tak dikenal) → 200 tanpa kode, jarak yang SAMA" "V == 1" \
+  "$(api "" POST /auth/resend-verification '{"email":"tidakada106@example.com"}' | jq '((.ok==true) and (.dev_verify_kode==null) and (.retry_after_detik==120))|if . then 1 else 0 end')"
 
 echo "== 107. Role Kitchen: produksi lokal di cabang store =="
 # Kitchen = tim cabang store + akses Produksi lokal: hanya bahan yang di Resep
@@ -15847,12 +15853,55 @@ for _ in 1 2 3; do verif281 "$EM281" "$SALAH281" > /dev/null; done
 cek "§281 kode BENAR ditolak sesudah 5 tebakan salah" "V == 400" "$(verif281 "$EM281" "$K281")"
 
 # KIRIM ULANG memberi kode baru — jalan keluar yang dulu tak ada di layar gagal.
-K281B=$(curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$EM281\"}" | jq -r '.dev_verify_kode // ""')
+# Kodenya sudah MATI (jatah tebakan habis), dan kode mati SENGAJA tak menahan
+# jarak 2 menit: salah ketik lima kali bukan alasan menunggu dua menit.
+R281B=$(curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EM281\"}")
+K281B=$(echo "$R281B" | jq -r '.dev_verify_kode // ""')
 cek "§281 kirim ulang memberi kode 6 angka yang BARU" "V == 1" \
   "$(printf '%s' "$K281B" | grep -Eq '^[0-9]{6}$' && [ "$K281B" != "$K281" ] && echo 1 || echo 0)"
 
-cek "§281 kode baru diterima 200" "V == 200" "$(verif281 "$EM281" "$K281B")"
+# ── JARAK 2 MENIT ANTAR KIRIM ULANG ────────────────────────────────────────
+#
+# Sebelum ini jaraknya cuma ada di React (`setJeda(60)`) — 60 detik, di KLIEN,
+# dan hilang begitu halamannya dimuat ulang. Sisi server tak mengatur jarak
+# sama sekali: enam kiriman boleh beruntun dalam enam detik.
+#
+# Yang diuji di sini BUKAN "tombolnya nonaktif" melainkan dua sifat yang cuma
+# server bisa jamin, dan yang KEDUA jauh lebih penting daripada yang pertama:
+#
+#   1. tekanan yang terlalu cepat tidak mengirim kode baru;
+#   2. dan ia TIDAK MERUSAK kode yang sedang dipegang orangnya. Urutan yang
+#      salah — matikan dulu, baru tolak — mengubah satu tekanan tombol jadi
+#      jalan buntu: kodenya hilang dan gantinya tak pernah datang.
+#
+# BATAS YANG DIAKUI: yang tergerbang separuhnya. Bahwa sesudah 2 menit ia
+# mengirim lagi TIDAK diuji — skrip ini seluruhnya berjalan ~2,5 menit, dan
+# menidurkannya 2 menit demi satu asersi menggandakan ongkos tiap kali siapa
+# pun menjalankan gerbangnya.
+R281C=$(curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EM281\"}")
+cek "§281 kirim ulang yang terlalu cepat TIDAK memberi kode baru" "V == 1" \
+  "$(echo "$R281C" | jq '(.dev_verify_kode == null)|if . then 1 else 0 end')"
+
+# Dan jaraknya dikatakan, bukan cuma ditegakkan diam-diam — klien memakainya
+# untuk hitung mundurnya alih-alih menyimpan angkanya sendiri.
+cek "§281 balasan kirim ulang menyebut jaraknya (detik)" "V == 120" \
+  "$(echo "$R281C" | jq '.retry_after_detik // 0')"
+
+# PASANGAN ANTI-ENUMERASI: angkanya TETAP, jadi email terdaftar dan tidak
+# terdaftar menerima balasan yang sama persis.
+cek "PASANGAN §281: email tak dikenal menerima jarak yang SAMA" "V == 1" \
+  "$(curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' \
+     -d "{\"email\":\"tak-ada-$RANDOM@uji.local\"}" \
+     | jq --argjson j "$(echo "$R281C" | jq '.retry_after_detik // 0')" \
+       '((.retry_after_detik == $j) and (.dev_verify_kode == null))|if . then 1 else 0 end')"
+
+# INTI KEBENARANNYA: kiriman yang DITOLAK jaraknya tak boleh menyentuh apa pun,
+# jadi kode dari kiriman sebelumnya HARUS masih berlaku. Kalau ia mati, tekanan
+# tombol yang tak menghasilkan apa-apa justru merusak keadaan yang tadinya benar.
+cek "§281 kode dari kiriman sebelumnya MASIH berlaku sesudah tekanan ditolak" "V == 200" \
+  "$(verif281 "$EM281" "$K281B")"
 
 # SEKALI PAKAI: kode yang sudah dipakai tak bisa dipakai lagi.
 cek "§281 kode yang sudah dipakai ditolak 400" "V == 400" "$(verif281 "$EM281" "$K281B")"
