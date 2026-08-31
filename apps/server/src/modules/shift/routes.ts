@@ -34,6 +34,8 @@ const penyetuju = alias(users, "shift_penyetuju");
 /** Selisih kas dianggap NOL di bawah ini (pembulatan numeric(…,2)). */
 const EPS_KAS = 0.005;
 
+type DbAtauTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 /**
  * Sale yang masuk hitungan sebuah shift.
  *
@@ -108,13 +110,20 @@ async function shiftTerbuka(companyId: string, branchId: string) {
  * refund pada shift yang sama hasilnya persis sama dengan sebelumnya.
  */
 async function rekapWindow(
+  /**
+   * Eksekutornya DISEBUT pemanggil, dan itu bukan kerapian: `POST /shift/tutup`
+   * menghitung rekap ini DI DALAM transaksi yang memegang kunci baris shiftnya.
+   * Dijalankan lewat `db` di sana, hitungannya berada di LUAR kunci — dan
+   * penjualan yang commit di antaranya tak terhitung oleh siapa pun.
+   */
+  exec: DbAtauTx,
   companyId: string,
   branchId: string,
   shiftId: string,
   openedAt: Date,
   closedAt: Date | null,
 ) {
-  const rows = await db
+  const rows = await exec
     .select({
       metode: sales.metodeBayar,
       total: sql<number>`COALESCE(SUM(${sales.total} + ${sales.refundTotal}), 0)::float8`,
@@ -132,7 +141,7 @@ async function rekapWindow(
     .groupBy(sales.metodeBayar);
   // Metode diambil dari penjualannya: uang kembali lewat jalan yang sama dengan
   // uang masuk — refund transaksi QRIS tidak mengurangi uang tunai di laci.
-  const refundRows = await db
+  const refundRows = await exec
     .select({ metode: sales.metodeBayar, nominal: sum(saleRefunds.nominal) })
     .from(saleRefunds)
     .innerJoin(sales, eq(saleRefunds.saleId, sales.id))
@@ -431,7 +440,7 @@ export function statusSelisih(
 }
 
 async function toDto(r: ShiftJoinRow, role?: string | null): Promise<Shift> {
-  const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
+  const rekap = await rekapWindow(db, r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
   const kasAsli = r.modalAwal + rekap.penjualan_tunai;
   const buta = role != null && butaUntuk(role, r.closedAt, r.uangFisik);
   return {
@@ -578,7 +587,7 @@ export const shiftRoutes = new Hono<AppEnv>()
     const tunaiShiftByBranch = new Map(
       await Promise.all(
         openRows.map(async (r) => {
-          const rk = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
+          const rk = await rekapWindow(db, r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
           return [r.branchId, rk.penjualan_tunai] as const;
         }),
       ),
@@ -701,7 +710,7 @@ export const shiftRoutes = new Hono<AppEnv>()
         .limit((perluHitung ? AMBIL_SELISIH : BATAS_SELISIH) + 1);
       const semua: SelisihKasRow[] = await Promise.all(
         rows.map(async (r) => {
-          const rekap = await rekapWindow(r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
+          const rekap = await rekapWindow(db, r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
           const kas = r.modalAwal + rekap.penjualan_tunai;
           return {
             id: r.id,
@@ -824,7 +833,7 @@ export const shiftRoutes = new Hono<AppEnv>()
       const branchId = await resolveBranchId(c);
       const body = c.req.valid("json");
       const open = await shiftTerbuka(auth.company_id!, branchId);
-      const rekap = await rekapWindow(auth.company_id!, branchId, open.id, open.openedAt, null);
+      const rekap = await rekapWindow(db, auth.company_id!, branchId, open.id, open.openedAt, null);
       const kas = open.modalAwal + rekap.penjualan_tunai;
       if (open.uangFisik != null) {
         const hasil = {
@@ -914,12 +923,38 @@ export const shiftRoutes = new Hono<AppEnv>()
       if (uangFisik == null) {
         throw new HTTPException(400, { message: "Uang fisik di laci wajib diisi" });
       }
-      // Kas sistem dihitung DI SINI (server), bukan dikirim klien — klien tak
-      // pernah memegang angka ini sebelum hitungannya dikunci.
-      const rekap = await rekapWindow(auth.company_id!, branchId, open.id, open.openedAt, null);
-      const selisih = uangFisik - (open.modalAwal + rekap.penjualan_tunai);
-      const perluAcc = Math.abs(selisih) > EPS_KAS;
       /*
+       * KUNCI BARIS SHIFT DIPEGANG DARI SEBELUM REKAP SAMPAI SESUDAH PENUTUPAN,
+       * dan itu satu-satunya cara angka penutupan dan penandanya tak berselisih.
+       *
+       * Rekap dihitung dari `sales`; penutupan menulis `closed_at`. Selama
+       * keduanya dua pernyataan lepas, ada celah selebar hitungan itu sendiri:
+       * penjualan sinkron yang commit di antaranya TIDAK ikut terhitung
+       * (rekapnya sudah lewat) dan TIDAK menyalakan penanda susulan (shiftnya
+       * masih terbuka saat ia membaca). Uangnya masuk shift, tak seorang pun
+       * menghitungnya, dan tak ada penanda yang mengatakannya.
+       *
+       * Terukur pada 20 penutupan yang berpapasan dengan satu penjualan
+       * sinkron: 11 mendarat persis di celah itu — dan rekap penutupan TAK
+       * SEKALI PUN sempat menghitung penjualannya (0 dari 20).
+       *
+       * `createSale` mengunci baris shift tujuannya `FOR UPDATE` di dalam
+       * transaksinya. Dengan kunci di sini, keduanya jadi berurutan: penjualan
+       * itu commit SEBELUM kunci ini didapat (jadi rekap menghitungnya), atau ia
+       * menunggu di belakang kunci ini lalu membaca `closed_at` yang sudah
+       * terisi (jadi penandanya menyala). Tak ada urutan ketiga.
+       *
+       * Urutan kunci tak bisa berputar: penjualan mengambil `branches` lalu
+       * `shifts`; penutupan hanya `shifts`.
+       */
+      const ditutup = await db.transaction(async (tx) => {
+        await tx.select({ id: shifts.id }).from(shifts).where(eq(shifts.id, open.id)).for("update");
+        // Kas sistem dihitung DI SINI (server), bukan dikirim klien — klien tak
+        // pernah memegang angka ini sebelum hitungannya dikunci.
+        const rekap = await rekapWindow(tx, auth.company_id!, branchId, open.id, open.openedAt, null);
+        const selisih = uangFisik - (open.modalAwal + rekap.penjualan_tunai);
+        const perluAcc = Math.abs(selisih) > EPS_KAS;
+        /*
        * `isNull(closedAt)` WAJIB ada di WHERE — bukan sekadar kerapian.
        *
        * `shiftTerbuka()` di atas hanya MEMBACA. Dua penutupan yang berpapasan
@@ -937,23 +972,24 @@ export const shiftRoutes = new Hono<AppEnv>()
        * Bentuknya sama persis dengan penjaga di `/selisih/putuskan`: yang kalah
        * balapan harus TAHU bahwa ia kalah, bukan dibalas keputusan lawan.
        */
-      const ditutup = await db
-        .update(shifts)
-        .set({
-          closedBy: auth.sub,
-          closedAt: new Date(),
-          uangFisik,
-          catatan: body.catatan ?? null,
-          selisihStatus: perluAcc ? "menunggu" : null,
-          // `catatan` jadi cadangan: klien lama (dan mobile) hanya punya satu
-          // kolom catatan, dan di praktiknya itulah keterangan selisihnya.
-          // Tanpa cadangan ini penjelasan kasir hilang dalam perjalanan ke owner.
-          selisihAlasan: perluAcc
-            ? (body.selisih_alasan?.trim() || body.catatan?.trim() || null)
-            : null,
-        })
-        .where(and(eq(shifts.id, open.id), isNull(shifts.closedAt)))
-        .returning({ id: shifts.id });
+        return await tx
+          .update(shifts)
+          .set({
+            closedBy: auth.sub,
+            closedAt: new Date(),
+            uangFisik,
+            catatan: body.catatan ?? null,
+            selisihStatus: perluAcc ? "menunggu" : null,
+            // `catatan` jadi cadangan: klien lama (dan mobile) hanya punya satu
+            // kolom catatan, dan di praktiknya itulah keterangan selisihnya.
+            // Tanpa cadangan ini penjelasan kasir hilang dalam perjalanan ke owner.
+            selisihAlasan: perluAcc
+              ? (body.selisih_alasan?.trim() || body.catatan?.trim() || null)
+              : null,
+          })
+          .where(and(eq(shifts.id, open.id), isNull(shifts.closedAt)))
+          .returning({ id: shifts.id });
+      });
       const [row] = await baseSelect().where(eq(shifts.id, open.id));
       if (ditutup.length === 0) {
         // Kalah balapan: perangkat lain menutup shift ini di sela baca-tulis.

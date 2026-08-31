@@ -419,13 +419,26 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     );
   }
 
-  // Rekap dihitung saat dibaca, jadi cukup tandai agar pembaca tahu angka
-  // penutupan awal bisa berbeda dari rekap terkini.
-  const susulan = shift.closedAt != null;
-  if (susulan) {
-    await db.update(shifts).set({ adaTransaksiSusulan: true }).where(eq(shifts.id, shift.id));
-  }
-  const result = await createSale({
+  /*
+   * PENANDA SUSULAN TIDAK LAGI DITULIS DI SINI — dan itu perbaikan, bukan
+   * kelalaian. Dulu ia ditulis persis di titik ini, dari `shift.closedAt` yang
+   * SUDAH DIBACA di atas, SEBELUM penjualannya ada. Dua cacat lahir dari satu
+   * bentuk itu, dan keduanya terukur lewat HTTP:
+   *
+   *   · tanpa balapan sama sekali — `createSale` melempar (menu tak ada, bill
+   *     sudah dibayar) dan penandanya tetap tertulis. Terukur: shift berbunyi
+   *     `ada_transaksi_susulan: true` dengan NOL transaksi, dan tak ada yang
+   *     pernah mencabutnya.
+   *   · dengan balapan — shift ditutup di sela bacaan dan penulisan. Terukur 11
+   *     dari 20 putaran: rekap penutupan tak menghitung penjualannya,
+   *     penjualannya tetap masuk shift, dan penandanya tetap `false`.
+   *
+   * Kini `createSale` yang menuliskannya — DI DALAM transaksi penjualan dan di
+   * bawah kunci baris shift — jadi ia ikut batal bila penjualannya batal, dan
+   * `closed_at` yang dibacanya tak bisa basi. Yang dibalas ke mobile adalah
+   * TULISAN itu, bukan bacaan di atas.
+   */
+  const { shift_susulan: susulan, ...result } = await createSale({
     companyId: auth.company_id!,
     branchId,
     cashierUserId: auth.sub,

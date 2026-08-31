@@ -157,7 +157,57 @@ export async function createSale(params: CreateSaleParams) {
      * sudah dihitung dan dicocokkan.
      */
     let shiftId = params.shiftId ?? null;
-    if (!shiftId) {
+    /**
+     * PENJUALAN INI MENDARAT DI SHIFT YANG SUDAH DITUTUP — dipulangkan ke
+     * pemanggil supaya ia melaporkan TULISAN, bukan bacaannya sendiri.
+     */
+    let shiftSusulan = false;
+    if (shiftId) {
+      /*
+       * KUNCINYA SAMA, DAN DI SINILAH IA PALING DIBUTUHKAN.
+       *
+       * Cabang di bawah (pemanggil TIDAK menyebut shift) sudah mengunci
+       * barisnya sejak lama, lengkap dengan alasannya di komentar atas. Cabang
+       * INI — pemanggil MENYEBUT shiftnya — melewatinya, dan yang melewatinya
+       * justru satu-satunya jalur yang bisa menghasilkan transaksi susulan:
+       * sinkron offline SELALU mengisi `shiftId`. Penjaganya ada, ditulis,
+       * dikomentari, dan dipasang di pintu yang bukan pintu yang membutuhkannya.
+       *
+       * `FOR UPDATE`, bukan `FOR SHARE`, sebab baris ini mungkin KITA TULIS
+       * beberapa baris di bawah: dua pemegang kunci berbagi yang sama-sama naik
+       * ke tulis akan saling menunggu selamanya, dan deadlock di jalur ini
+       * berarti perintahnya tercatat `gagal` — penjualannya hilang permanen.
+       * Ongkos berurutannya nol: `branches` sudah dikunci `FOR UPDATE` di awal
+       * transaksi ini, jadi penjualan satu cabang memang sudah berurutan.
+       *
+       * `closed_at` yang dibaca di bawah kunci ini adalah FAKTA SAAT
+       * PENYIMPANAN, bukan tebakan dari bacaan pemanggil yang bisa sudah basi
+       * beberapa puluh milidetik kemudian.
+       */
+      const [tujuan] = await tx
+        .select({ id: shifts.id, closedAt: shifts.closedAt })
+        .from(shifts)
+        .where(and(eq(shifts.id, shiftId), eq(shifts.companyId, params.companyId)))
+        .for("update");
+      shiftSusulan = tujuan?.closedAt != null;
+      if (shiftSusulan) {
+        /*
+         * Penandanya ditulis DI DALAM transaksi penjualan, jadi ia ikut batal
+         * bila penjualannya batal. Ditulis di pemanggil — SEBELUM penjualannya
+         * ada — ia bertahan walau `createSale` melempar, dan shift berbunyi
+         * "ada transaksi susulan" tanpa satu pun transaksi susulan.
+         */
+        await tx
+          .update(shifts)
+          .set({ adaTransaksiSusulan: true })
+          // `companyId` diulang walau baris ini BARU SAJA dibaca terkurung satu
+          // pernyataan di atas: gerbang `kueri-terkurung-tenant` membaca tiap
+          // situs di lingkupnya sendiri, dan pengurungan yang hanya bisa
+          // dibaca dari kalimat tetangganya adalah pengurungan yang hilang
+          // begitu tetangganya dipindah.
+          .where(and(eq(shifts.id, shiftId), eq(shifts.companyId, params.companyId)));
+      }
+    } else {
       const [terbuka] = await tx
         .select({ id: shifts.id })
         .from(shifts)
@@ -697,6 +747,6 @@ export async function createSale(params: CreateSaleParams) {
       );
     }
 
-    return { sale, items: insertedItems, branch_nama: branch.nama };
+    return { sale, items: insertedItems, branch_nama: branch.nama, shift_susulan: shiftSusulan };
   });
 }

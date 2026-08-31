@@ -15601,6 +15601,190 @@ cek "jumlah_baris yang dilaporkan = baris yang benar-benar pindah ($BARIS279)" "
 
 rm -f /tmp/kk279-*
 
+# §280 — PENANDA TRANSAKSI SUSULAN: DITULIS DARI TULISAN, DI BAWAH KUNCI
+#
+# Membayar utang balapan `execPenjualan`, yang entrinya sendiri sudah menyebut
+# batasnya: *"penahan itu ada di LUAR fungsi ini dan tak terbaca dari sini"*.
+# Penahan itu kini bisa ditunjuk — klaim atomik `client_ref` di `syncRoutes` —
+# tapi ia menjaga dari perintah KEMBAR, dan tak menjaga apa pun dari SHIFT YANG
+# DITUTUP DI TENGAH EKSEKUSI. Kalimat entrinya benar; sebabnya yang belum.
+#
+# Dulu `execPenjualan` menandai shiftnya SEBELUM penjualannya ada, dari
+# `closedAt` yang sudah dibaca di atas. Dua cacat lahir dari satu bentuk itu,
+# dan hanya satu perlu balapan — keduanya TERUKUR lewat HTTP:
+#
+#   (a) tanpa balapan sama sekali — `createSale` menolak (menu tak ada) dan
+#       penandanya tetap tertulis:
+#           ada_transaksi_susulan: true   dengan jumlah transaksi: 0
+#       Shift berbunyi "ada transaksi susulan" selamanya, tanpa satu pun.
+#
+#   (b) dengan balapan — 20 penutupan yang berpapasan dengan satu penjualan
+#       sinkron: 11 mendarat di celah antara rekap dan penutupan. Rekap
+#       penutupan tak menghitung penjualannya (0 dari 20 sempat menghitung),
+#       penjualannya tetap masuk shift, dan penandanya tetap false.
+#
+# KOLOM BEKU `selisih_status` DIBACA LEWAT `POST /:id/selisih/putuskan`, dan
+# itu satu-satunya cara melihatnya dari HTTP: rute itu 400 bila kolomnya NULL
+# (= rekap penutupan TIDAK menghitung penjualannya) dan 200 bila "menunggu"
+# (= rekap penutupan MENGHITUNGNYA). `status_selisih` di DTO tak bisa dipakai —
+# ia diturunkan dari angka HIDUP, jadi kedua keadaan itu terbaca sama.
+#
+# Gerbang statis hanya melihat kuncinya TERTULIS; yang di sini melihat ia
+# MENAHAN — dan melihat pula bahwa penandanya tak berbalik jadi cerewet.
+echo
+echo "── §280 penanda transaksi susulan ditulis dari tulisan, di bawah kunci ──"
+
+pastikanHadir "$REISS105" "§280"
+
+# Sisa shift dari seksi mana pun ditutup dulu: `POST /shift/buka` menolak bila
+# masih ada yang terbuka, dan kegagalannya akan menyamar jadi "premis salah".
+tutup_aktif280() {
+  local a id uf
+  a=$(api "$REISS105" GET /shift/aktif)
+  id=$(echo "$a" | jq -r '.id // empty')
+  [ -z "$id" ] && return 0
+  uf=$(echo "$a" | jq -r '.uang_fisik // 0')
+  api "$REISS105" POST /shift/tutup "{\"uang_fisik\":$uf}" > /dev/null
+  return 0
+}
+# Satu perintah sinkron `penjualan`: sync280 <menu_id> <waktu-iso>
+sync280() {
+  jq -nc --arg r "$(cat /proc/sys/kernel/random/uuid)" --arg w "$2" --arg m "$1" \
+    '{device_id:"e280",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,
+      payload:{is_dine_in:false,metode_bayar:"tunai",items:[{menu_id:$m,qty:1}]}}]}'
+}
+
+tutup_aktif280
+SH280=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+cek "premis §280: shift uji terbuka" "V == 1" \
+  "$([ -n "$SH280" ] && [ "$SH280" != "null" ] && echo 1 || echo 0)"
+api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null
+
+# (a) Perintah yang DITOLAK createSale tak boleh meninggalkan jejak apa pun.
+W280A=$(date -u -d '+2 seconds' +%Y-%m-%dT%H:%M:%S.000Z)
+R280A=$(api "$REISS105" POST /sync "$(sync280 "$(cat /proc/sys/kernel/random/uuid)" "$W280A")")
+cek "premis §280a: perintahnya memang DITOLAK createSale" "V == 1" \
+  "$(echo "$R280A" | jq '(.hasil[0].status=="gagal" and .hasil[0].kode>=400)|if . then 1 else 0 end')"
+D280A=$(api "$REISS105" GET "/shift/$SH280")
+cek "§280a perintah yang ditolak TIDAK menyalakan penanda susulan" "V == 0" \
+  "$(echo "$D280A" | jq '(.ada_transaksi_susulan)|if . then 1 else 0 end')"
+cek "premis §280a: shiftnya memang tanpa transaksi" "V == 0" \
+  "$(echo "$D280A" | jq '.transaksi|length')"
+
+# PASANGAN: pengetatan tak boleh menutup jalan yang sah. Penjualan sinkron yang
+# BENAR-BENAR mendarat di shift tertutup tetap diterima DAN tetap menyalakan
+# penandanya — itu justru gunanya kolom itu.
+W280B=$(date -u -d '+2 seconds' +%Y-%m-%dT%H:%M:%S.000Z)
+R280B=$(api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W280B")")
+cek "PASANGAN §280: penjualan susulan sungguhan tetap diterima (201)" "V == 201" \
+  "$(echo "$R280B" | jq '.hasil[0].kode // 0')"
+cek "PASANGAN §280: balasannya sendiri berkata susulan + di luar jendela" "V == 1" \
+  "$(echo "$R280B" | jq '(.hasil[0].data.ada_transaksi_susulan==true and .hasil[0].data.di_luar_jendela_shift==true)|if . then 1 else 0 end')"
+D280B=$(api "$REISS105" GET "/shift/$SH280")
+cek "PASANGAN §280: shiftnya kini bertanda susulan, dengan 1 transaksi" "V == 1" \
+  "$(echo "$D280B" | jq '(.ada_transaksi_susulan==true and (.transaksi|length)==1)|if . then 1 else 0 end')"
+
+# (b) BALAPAN — dan penutupannya ditunda menaik, bukan ditembak barengan.
+#
+# Invariannya: penjualan yang mendarat di sebuah shift entah TERHITUNG oleh
+# rekap penutupannya, entah menyalakan penandanya. Tak ada urutan ketiga.
+#
+# TEMBAKAN BARENGAN SAJA TAK CUKUP, dan itu diukur sebelum bagian ini ditulis
+# seperti ini: dengan `&` polos, penutupan MENANG 8 dari 8 di sini — perintah
+# sinkron harus lewat batas laju, ledger, dan klaim atomik lebih dulu, jadi ia
+# selalu tertinggal. Gerbang yang tak pernah bisa merah adalah hiasan, dan
+# versi pertama bagian ini memang hiasan: dijalankan atas kode SEBELUM
+# perbaikan, ia tetap hijau.
+#
+# Yang berbahaya adalah jendela antara `execPenjualan` MEMBACA shiftnya dan
+# `createSale` MENYIMPAN penjualannya. Terukur di mesin ini: baca ±10  md,
+# simpan ±20 md sesudah permintaan mulai — jendela selebar pangkalnya sendiri.
+# Maka penutupannya ditunda menurut TANGGA GEOMETRIS (rasio ±1,65) dari 4 md
+# sampai 150 md: jendela apa pun yang lebarnya sebanding dengan pangkalnya
+# pasti memuat salah satu anak tangga, di mesin cepat maupun lambat.
+#
+# Terukur atas kode SEBELUM perbaikan, tangga ini memerahkannya di anak tangga
+# 10 md dan 15 md: `put=400 flag=false` — rekap penutupan melewatkan
+# penjualannya DAN penandanya tetap diam.
+#
+# Dan tangganya sendiri DIPERIKSA (lihat premis di bawah): ia baru berarti bila
+# benar-benar MENYEBERANGI titik baliknya — ada anak tangga tempat penutupan
+# masih menang, DAN ada anak tangga tempat rekapnya sudah menghitung. Tanpa
+# kedua premis itu, "nol pelanggaran" cuma berarti tangganya meleset.
+LANGGAR280=0; MASUK280=0; TUTUPMENANG280=0; TERHITUNG280=0; N280=0
+for D280 in 0.004 0.007 0.012 0.020 0.033 0.055 0.090 0.150; do
+  N280=$((N280+1))
+  tutup_aktif280
+  S=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+  [ -n "$S" ] || continue
+  W=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+  rm -f /tmp/kk280-s
+  ( api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W")" > /tmp/kk280-s ) &
+  ( sleep "$D280"; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null ) &
+  wait
+  KODE=$(jq -r '.hasil[0].kode // 0' /tmp/kk280-s 2>/dev/null || echo 0)
+  [ "$KODE" = "201" ] && MASUK280=$((MASUK280+1))
+  # Kolom BEKU `selisih_status` cuma bisa dibaca lewat sini: 400 = NULL (rekap
+  # penutupan TIDAK menghitung penjualannya) · 200 = "menunggu" (ia MENGHITUNG).
+  # `status_selisih` di DTO tak bisa dipakai — ia diturunkan dari angka HIDUP.
+  PUT=$(status_code_body "$OWNER" POST "/shift/$S/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"probe 280"}')
+  [ "$PUT" = "200" ] && TERHITUNG280=$((TERHITUNG280+1))
+  D280H=$(api "$REISS105" GET "/shift/$S")
+  FLAG=$(echo "$D280H" | jq -r '.ada_transaksi_susulan')
+  NTX=$(echo "$D280H" | jq -r '.transaksi|length')
+  [ "$FLAG" = "true" ] && TUTUPMENANG280=$((TUTUPMENANG280+1))
+  if [ "$KODE" = "201" ] && [ "$NTX" = "1" ] && [ "$PUT" = "400" ] && [ "$FLAG" = "false" ]; then
+    LANGGAR280=$((LANGGAR280+1))
+  fi
+done
+rm -f /tmp/kk280-s
+
+# PREMIS, tiga-tiganya sebelum kesimpulannya. Nol pelanggaran hanya berarti
+# bila penjualannya memang mendarat DAN tangganya memang menyeberang.
+cek "premis §280b: seluruh penjualan di tangga penundaan diterima" "V == $N280" "$MASUK280"
+cek "premis §280b: tangganya mencapai sisi 'penutupan menang'" "V >= 1" "$TUTUPMENANG280"
+cek "premis §280b: tangganya mencapai sisi 'rekap sudah menghitung'" "V >= 1" "$TERHITUNG280"
+cek "§280b tak ada penjualan yang luput dari rekap SEKALIGUS tanpa penanda" "V == 0" "$LANGGAR280"
+
+# PASANGAN: penandanya tak boleh jadi cerewet. Bila penjualannya sempat MASUK
+# rekap penutupan, shiftnya BUKAN shift bertransaksi susulan — dan penandanya
+# harus tetap diam. Penutupan diberi jeda supaya urutan itulah yang terjadi.
+tutup_aktif280
+S280C=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+W280C=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+rm -f /tmp/kk280c-s
+( api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W280C")" > /tmp/kk280c-s ) &
+( sleep 0.4; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null ) &
+wait
+PUT280C=$(status_code_body "$OWNER" POST "/shift/$S280C/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"probe §280c"}')
+cek "premis §280c: rekap penutupan MEMANG menghitung penjualannya" "V == 200" "$PUT280C"
+cek "PASANGAN §280: yang sudah terhitung TIDAK ditandai susulan" "V == 0" \
+  "$(api "$REISS105" GET "/shift/$S280C" | jq '(.ada_transaksi_susulan)|if . then 1 else 0 end')"
+rm -f /tmp/kk280c-s
+
+# PASANGAN: penjaga penutupan-ganda yang SUDAH ADA harus selamat dari
+# perombakan ini — penutupannya kini hidup di dalam transaksi, dan yang paling
+# mudah rusak saat kode dipindahkan adalah jawaban bagi yang KALAH.
+#
+# Sengaja dua penutupan BERSAMAAN, bukan berurutan: yang berurutan tertahan
+# lebih dulu oleh `shiftTerbuka()` dan dibalas 400 "tak ada shift terbuka" —
+# jawaban yang benar, tapi bukan jalur yang sedang dijaga di sini.
+tutup_aktif280
+api "$REISS105" POST /shift/buka '{"modal_awal":100000}' > /dev/null
+rm -f /tmp/kk280d-*
+for i in 1 2; do
+  ( curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/tutup" \
+      -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
+      -d '{"uang_fisik":100000}' > "/tmp/kk280d-$i" ) &
+done
+wait
+K280D="$(cat /tmp/kk280d-1 2>/dev/null) $(cat /tmp/kk280d-2 2>/dev/null)"
+cek "PASANGAN §280: tepat SATU penutupan berhasil (kode: $K280D)" "V == 1" \
+  "$(printf '%s\n' $K280D | grep -c '^200')"
+cek "PASANGAN §280: yang kalah tetap dibalas 409 (kode: $K280D)" "V == 1" \
+  "$(printf '%s\n' $K280D | grep -c '^409')"
+rm -f /tmp/kk280d-*
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

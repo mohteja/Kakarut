@@ -50,6 +50,149 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Utang DIBAYAR: balapan `execPenjualan` — penjaganya ada, dipasang di pintu yang tak melewatinya — server — 2026-08-31
+
+- **Entrinya sendiri menyebut batasnya**: *"Jalur ini memang sudah dijaga
+  `client_ref` di tingkat antrean, tapi penahan itu ada di LUAR fungsi ini dan
+  tak terbaca dari sini."* Hari ini penahan itu **bisa** ditunjuk — klaim
+  atomik `INSERT … onConflictDoNothing().returning()` di `syncRoutes`. Tapi
+  `client_ref` menjaga dari perintah **kembar**, dan tak menjaga apa pun dari
+  **shift yang ditutup di tengah eksekusi**. Kalimat entrinya benar; sebabnya
+  yang belum lengkap.
+
+- **BENTUKNYA — dan `penjualan/service.ts:150` sudah menuliskan aturannya
+  sendiri**, lengkap: *"`FOR SHARE` di sini betul-betul menggigit —
+  `POST /shift/tutup` menutup lewat UPDATE biasa, yang menunggu kunci ini
+  lepas. Tanpa itu shift bisa tertutup di sela pencarian dan penyimpanan."*
+  Kunci itu berada **di dalam `if (!shiftId)`** — cabang jalur ONLINE. Jalur
+  sinkron SELALU mengisi `shiftId`, jadi ia melewatinya seluruhnya. Penjaganya
+  ada, ditulis, dikomentari, dan dipasang di pintu yang bukan pintu yang
+  membutuhkannya. Vena ini persis bentuk yang berkas ini ada untuk mencari.
+
+- **DUA CACAT DARI SATU BENTUK, dan hanya satu perlu balapan.** `execPenjualan`
+  menandai shiftnya SEBELUM penjualannya ada, dari `closedAt` yang sudah
+  dibaca. **Diukur lewat HTTP sebelum satu baris diubah:**
+
+  |  | sebelum | sesudah |
+  |---|---|---|
+  | (a) perintah DITOLAK `createSale` → `ada_transaksi_susulan` | **true** (dengan **0** transaksi) | **false** |
+  | (b) 20 penutupan berpapasan → penjualan luput rekap DAN tanpa penanda | **11 / 20** | **0 / 20** |
+  | (b) rekap penutupan sempat menghitung penjualannya | **0 / 20** | — |
+
+  (a) tak butuh balapan sama sekali: `createSale` melempar (menu tak ada, bill
+  sudah dibayar), penandanya sudah terlanjur tertulis, dan **tak ada yang
+  pernah mencabutnya**. Shift berbunyi "ada transaksi susulan" selamanya tanpa
+  satu pun. (b) adalah balapan melawan penutupan shift — uangnya masuk shift,
+  rekap penutupan tak menghitungnya, dan penanda yang ADA justru untuk
+  memperingatkan itu tetap diam.
+
+- **KOLOM BEKUNYA DIBACA LEWAT `POST /:id/selisih/putuskan`**, dan itu
+  satu-satunya cara melihatnya dari HTTP: 400 = `selisih_status` NULL (rekap
+  penutupan TIDAK menghitung penjualannya), 200 = "menunggu" (ia
+  menghitungnya). `status_selisih` di DTO tak bisa dipakai — ia diturunkan dari
+  angka HIDUP, jadi kedua keadaan itu terbaca sama persis.
+
+- **PERBAIKANNYA MEMASANG KUNCI YANG SUDAH DITULIS BASIS KODE INI, di pintu
+  yang melewatinya** — dan menutup sisanya di pintu kedua:
+  - `createSale` mengunci baris shift dari pemanggil `.for("update")` (bukan
+    `share`: baris itu mungkin ia TULIS, dan dua pemegang share yang naik ke
+    tulis adalah deadlock — yang di jalur ini berarti perintah tercatat `gagal`
+    dan penjualannya hilang permanen). Ongkos berurutannya nol: `branches`
+    sudah dikunci `FOR UPDATE` di awal transaksi yang sama.
+  - penandanya ditulis **di dalam transaksi penjualan**, jadi ia ikut batal
+    bila penjualannya batal; hasilnya dipulangkan supaya pemanggil melaporkan
+    TULISAN, bukan bacaannya sendiri.
+  - `POST /shift/tutup` memegang kunci baris itu **dari sebelum rekap sampai
+    sesudah penutupan** (`rekapWindow` menerima eksekutor, idiom yang sama
+    dengan `capHariSebelumnya`). Tanpa ini sisanya tetap terbuka: rekap dibaca
+    sebelum `closed_at` ditulis, dan penjualan bisa mendarat di antaranya.
+  - **Tak ada 409 di jalur ini**, dan itu disengaja: `sync/routes.ts:338`
+    menuliskan alasannya — uang tunainya sudah diterima kasir, menolak berarti
+    uang itu tak punya jejak sama sekali. Yang diperbaiki penandanya, bukan
+    penerimaannya.
+
+- **BERAPA YANG DITAHAN MASING-MASING KUNCI, diukur terpisah** — sebab
+  "dua-duanya dipasang lalu nol" tak memberi tahu siapa yang bekerja:
+
+  | konfigurasi | pelanggaran / 20 |
+  |---|---|
+  | tanpa kunci (semula) | **11** |
+  | hanya kunci `/shift/tutup` | **1** |
+  | kedua kunci | **0** |
+
+- **GERBANG STATIS: sapuan diadu berdampingan atas populasi yang sama** —
+  69 situs, sebelum → sesudah: `KLAIM_BUTA` **6 → 5**, `KUNCI` **23 → 24**,
+  `BENTROK` 17 → 17, `KLAIM` 20 → 20, `TELANJANG` 3 → 3. Diffnya tepat dua
+  baris: `execPenjualan` **HILANG** dari sapuan (ia tak lagi menulis `shifts`
+  sama sekali), dan `POST /tutup` **MUNCUL** sebagai situs baru yang lahir
+  `KUNCI`. Angka yang turun karena kodenya pindah rumah disebut demikian, bukan
+  dibaca sebagai satu balapan yang lenyap. `MAKS_UTANG` **3 → 2**.
+
+- **KELAS SITUS SAJA TAK CUKUP DI SINI, dan itu ditemukan saat bukti merahnya
+  dijalankan.** `createSale` sudah berkelas `KUNCI` karena `branches` dikunci
+  di baris pertamanya — kunci baris SHIFT bisa dicabut tanpa menurunkan
+  kelasnya sedikit pun. Maka ditambah dua uji **struktural** (AST, bukan
+  regex): tiap `.from(shifts)` di `createSale` wajib membawa `.for(`, dan
+  penulisan `closedAt: new Date()` wajib berada di dalam callback
+  `db.transaction` yang memuat `.for("update")` **dan** `rekapWindow(tx`.
+  Ketiganya dibuktikan merah satu per satu.
+
+- **GERBANG DINAMIS §280 — dan versi pertamanya adalah HIASAN.** Ditembak
+  barengan dengan `&` polos, penutupan **menang 8 dari 8**: perintah sinkron
+  harus lewat batas laju, ledger, dan klaim atomik lebih dulu. Dijalankan atas
+  kode SEBELUM perbaikan, §280b tetap **hijau** — gerbang yang tak pernah bisa
+  merah tidak menyatakan apa pun, dan itu persis yang kutulis pertama kali.
+  Diukur ulang: jendela berbahayanya antara shift DIBACA (±10 md) dan penjualan
+  DISIMPAN (±20 md) — selebar pangkalnya sendiri. Maka penutupannya kini
+  ditunda menurut **tangga geometris** (rasio ±1,65) dari 4 md sampai 150 md,
+  yang pasti memuat satu anak tangga di dalam jendela selebar itu, di mesin
+  cepat maupun lambat. **Tangganya sendiri diperiksa** (Aturan 7): ia wajib
+  menyeberang — ada anak tangga tempat penutupan masih menang DAN ada tempat
+  rekapnya sudah menghitung. Tanpa kedua premis itu, "nol pelanggaran" cuma
+  berarti tangganya meleset.
+
+- **Bukti merah, dijalankan bukan diasumsikan.** Atas `src` yang dikembalikan
+  ke keadaan sebelum perbaikan: §280a merah (`penanda: 1`, harusnya 0) dan
+  §280b merah (**3** pelanggaran) — dengan ketiga premisnya tetap hijau.
+  Sesudah perbaikan: 0 dan 0, premis penyeberangan 2 dan 6.
+
+- **PASANGAN** (tiap pengetatan bisa menutup jalan yang sah): penjualan susulan
+  sungguhan tetap 201 dan tetap menyalakan penandanya · penjualan yang sudah
+  TERHITUNG rekap penutupan tetap TIDAK ditandai (penandanya tak jadi cerewet)
+  · dua penutupan berpapasan tetap 200 & **409** · seluruh alur kasir, rekap,
+  dan selisih yang sudah dipaku verify-api tetap hijau.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - `POST /:id/selisih/putuskan` menolak **400** untuk shift yang selisihnya
+    baru muncul SESUDAH ditutup (kolom bekunya NULL) — padahal layar dan
+    antrean `GET /shift/selisih?status=menunggu` menampilkannya sebagai
+    "menunggu", sebab keduanya memakai `statusSelisih` yang hidup. Owner
+    melihat baris yang perlu diputuskan lalu ditolak rutenya. **Terukur 20 dari
+    20** di seluruh pengukuran vena ini. Ini bukan cacat vena ini — ia sisa
+    dari putaran `statusSelisih`, yang memperbaiki tampilan dan antreannya
+    tetapi tidak rute keputusannya. **Didaftarkan sebagai utang tersendiri.**
+  - `lomba.ts` tetap berlingkup satu fungsi; nama tabel tetap dibandingkan
+    sebagai teks argumen.
+  - §280b membuktikan invariannya bertahan **pada jendela yang tangganya
+    seberangi**; ia tak membuktikan tak ada jendela lain.
+
+- **Berkas:** `modules/penjualan/service.ts` (kunci + penanda di dalam
+  transaksi) · `modules/shift/routes.ts` (kunci baris shift membungkus rekap +
+  penutupan; `rekapWindow` menerima eksekutor) · `modules/sync/routes.ts`
+  (penanda dilaporkan dari tulisan) · `modules/penjualan/routes.ts` (bentuk
+  respons online tak berubah) · `test/lomba-tulis.test.ts` (entri dihapus,
+  `MAKS_UTANG` 3 → 2, +2 uji struktural) · `scripts/verify-api.sh` (§280,
+  15 asersi).
+
+- **Gerbang:** typecheck bersih · `npm test` **2.575** (214 berkas) ·
+  `verify-api.sh` **3.313 lolos / 0 gagal** (DB segar) · `audit:invarian`
+  26/26. Playwright tak dijalankan di commit ini: `apps/web` tak tersentuh.
+
+- **Utang balapan tersisa: 2** — pembuatan penyewa (`admin-tenants`) dan
+  `pastikanSuperAdmin`.
+
+---
+
 ## Utang DIBAYAR: balapan `POST /kirim/:fakturId` — dan gerbangnya menangkap perbaikanku SENDIRI — server — 2026-08-31
 
 - **Utang ini lahir putaran lalu**, saat `lomba.ts` diajari menembus
@@ -7860,9 +8003,21 @@ berlaku di situ).
       atas. 40 situs tulis; 4 tuduhan dicabut berturut-turut (tiap pencabutan
       mengajari pemindainya satu bentuk penjagaan), 1 perbaikan, 1 terdaftar
       beralasan. Terukur lewat HTTP: tombol dapur pada penjualan terbuang → 404
-- [ ] **Periksa-dulu-baru-tulis tanpa penahan** — 9 situs tersisa (4 `sah`,
-      **5 `utang` yang jumlahnya dipaku**); yang paling terasa `catatAbsen`,
-      karena `attendances` tak punya indeks unik apa pun
+- [ ] **Periksa-dulu-baru-tulis tanpa penahan** — 8 situs tersisa (4 `sah`,
+      **2 `utang` yang jumlahnya dipaku**: pembuatan penyewa dan
+      `pastikanSuperAdmin`). Keduanya ditulis SEBELUM `lomba.ts` bisa menembus
+      transaksi, jadi kelasnya dinilai dengan mata yang lebih buruk dari yang
+      sekarang — layak ditinjau ulang, bukan dipercaya
+- [ ] **Selisih kas yang MUNCUL sesudah shift ditutup tak bisa diputuskan
+      siapa pun** — TERUKUR 20 dari 20 selama vena `execPenjualan`:
+      `POST /shift/:id/selisih/putuskan` menolak **400** ("tak punya selisih
+      yang perlu diputuskan") bila kolom beku `selisih_status` NULL, padahal
+      layar shift DAN antrean `GET /shift/selisih?status=menunggu`
+      menampilkannya sebagai "menunggu" — keduanya memakai `statusSelisih` yang
+      dihitung dari angka HIDUP. Owner melihat baris yang perlu diputuskan,
+      menekannya, dan ditolak rutenya. Sisa dari putaran `statusSelisih`, yang
+      memperbaiki tampilan dan antreannya tetapi **tidak rute keputusannya** —
+      bentuk yang sama persis dengan yang berkas ini ada untuk mencari
 - [ ] **Pemotongan daftar yang tak dikatakan** — 23 situs tersisa (14 `sah`,
       **9 `utang` yang jumlahnya dipaku**), plus sisi ponsel `GET
       /stok/penyesuaian` yang headernya dikirim tapi belum dirender

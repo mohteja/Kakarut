@@ -108,7 +108,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
             "kasir_belum_dibuka",
           );
         }
-        const result = await createSale({
+        // `shift_susulan` hanya berarti bagi jalur SINKRON (yang menyebut
+        // shiftnya sendiri); di jalur online ia selalu false. Tidak ikut
+        // dibalas supaya bentuk respons `POST /penjualan` tak berubah.
+        const { shift_susulan: _susulan, ...result } = await createSale({
           companyId: auth.company_id!,
           branchId,
           cashierUserId: auth.sub,

@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { situsLomba, type SitusLomba } from "./util/lomba";
+import { jelajah, namaProperti, petaInduk, rantaiPenuh, uraikan, type Simpul } from "./util/ast";
+import { situsLomba, SRC, type SitusLomba } from "./util/lomba";
 
 /**
  * PERIKSA-DULU-BARU-TULIS WAJIB PUNYA PENAHAN.
@@ -29,7 +31,7 @@ interface Alasan {
 }
 
 /** Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar. */
-const MAKS_UTANG = 3;
+const MAKS_UTANG = 2;
 
 /** kunci: `berkas` -> nama fungsi -> alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
@@ -91,17 +93,6 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "Catatan bebas owner pada satu laporan kebersihan. Sama seperti nama " +
         "area: penulis terakhir menang, dan tak ada hitungan yang bergantung " +
         "padanya.",
-    },
-  },
-  "modules/sync/routes.ts": {
-    execPenjualan: {
-      kelas: "utang",
-      teks:
-        "UTANG. Shift tujuan penjualan susulan dipilih dari bacaan, lalu " +
-        "ditulis. Jalur ini memang sudah dijaga `client_ref` di tingkat " +
-        "antrean, tapi penahan itu ada di LUAR fungsi ini dan tak terbaca dari " +
-        "sini — dicatat sebagai utang alih-alih dibebaskan dengan alasan yang " +
-        "tak bisa kutunjuk.",
     },
   },
   "modules/admin-tenants/routes.ts": {
@@ -238,6 +229,127 @@ describe("periksa-dulu-baru-tulis wajib punya penahan", () => {
        }`,
     });
     expect(s.length).toBe(1);
+  });
+
+  /**
+   * PENANDA SUSULAN & PENUTUPAN SHIFT — dua sisi dari satu invarian, dipaku
+   * di sini supaya tak ada yang bisa mencabut salah satunya diam-diam.
+   *
+   * Penjualan yang mendarat di sebuah shift entah TERHITUNG oleh rekap
+   * penutupannya, entah menyalakan `ada_transaksi_susulan`. Yang menahannya:
+   * `createSale` mengunci baris shift tujuan `FOR UPDATE` lalu menulis
+   * penandanya di dalam transaksi yang sama, dan `POST /shift/tutup` memegang
+   * kunci baris itu dari SEBELUM rekap sampai SESUDAH penutupan.
+   *
+   * Terukur sebelum keduanya ada: 11 dari 20 penutupan yang berpapasan dengan
+   * satu penjualan sinkron mendarat di celah — rekapnya melewatkan penjualan
+   * itu DAN penandanya tetap `false`. Cabut salah satu kunci dan uji ini merah.
+   *
+   * BATAS yang diakui: uji ini hanya melihat KELAS situsnya, jadi ia
+   * membuktikan kuncinya ADA — bukan bahwa ia dipegang cukup lama. Yang
+   * menilai itu bagian §280 verify-api, dan itu alasan lapis dinamisnya ada.
+   */
+  it("penanda susulan & penutupan shift sama-sama DI BAWAH KUNCI", () => {
+    const kunciDi = (berkas: string, nama: string) => {
+      const s = semua.find((x) => x.berkas === berkas && x.nama === nama);
+      expect(s, `situs ${berkas} -> ${nama} hilang dari sapuan`).toBeDefined();
+      expect(s!.kelas, `${berkas} -> ${nama} tak memegang kunci`).toBe("KUNCI");
+    };
+    kunciDi("modules/penjualan/service.ts", "createSale");
+    kunciDi("modules/shift/routes.ts", "POST /tutup");
+  });
+
+  /**
+   * KUNCINYA DIPAKU DI TEMPATNYA, sebab kelas situs saja tak cukup di sini.
+   *
+   * `createSale` sudah berkelas KUNCI karena `branches` dikunci `FOR UPDATE`
+   * di baris pertamanya. Kunci baris SHIFT bisa dicabut tanpa menurunkan kelas
+   * itu sedikit pun — pemindai berlingkup fungsi, dan satu kunci sudah cukup
+   * membuat seluruh fungsi terbaca aman.
+   *
+   * Dan lapis dinamisnya pun tak bisa menggantikannya: TERUKUR, dengan kunci
+   * `/shift/tutup` terpasang tapi kunci `createSale` dicabut, pelanggarannya
+   * turun dari 11/20 jadi 1/20 — jendelanya menyempit ke beberapa milidetik
+   * dan §280 (8 putaran) cuma menangkapnya sesekali. Jadi yang menjaga kunci
+   * ITU adalah uji ini, dan itu sebabnya ia ditulis struktural, bukan
+   * mengandalkan peluang.
+   */
+  it("tiap pencarian shift di createSale MENGAMBIL kuncinya", () => {
+    const rel = "modules/penjualan/service.ts";
+    const isi = readFileSync(`${SRC}/${rel}`, "utf8");
+    const akar = uraikan(rel, isi);
+    const induk = petaInduk(akar);
+    const rantai: string[] = [];
+    jelajah(akar, (n) => {
+      if (n.type !== "CallExpression") return;
+      if (namaProperti(n.callee as Simpul) !== "from") return;
+      const arg = (n.arguments as Simpul[] | undefined)?.[0] as
+        | { type?: string; name?: string }
+        | undefined;
+      if (arg?.type !== "Identifier" || arg.name !== "shifts") return;
+      const r = rantaiPenuh(n, induk);
+      rantai.push(isi.slice(r.start as number, r.end as number));
+    });
+    // PREMIS: nol pencarian akan membuat "semuanya berkunci" benar secara hampa.
+    expect(rantai.length, "tak satu pun `.from(shifts)` terbaca di createSale").toBeGreaterThanOrEqual(2);
+    const telanjang = rantai
+      .filter((t) => !/\.for\(/.test(t))
+      .map((t) => t.replace(/\s+/g, " ").slice(0, 120));
+    expect(
+      telanjang,
+      "Pencarian shift tanpa kunci di `createSale`:\n" +
+        telanjang.join("\n") +
+        "\n\nShift yang dicari lalu dipakai TANPA dipegang bisa ditutup di sela " +
+        "pencarian dan penyimpanan — komentar di berkas itu sendiri yang " +
+        "menuliskannya, dan cabang `shiftId` dari pemanggil pernah melewatinya.",
+    ).toEqual([]);
+  });
+
+  /**
+   * Sisi kedua invarian yang sama: penutupan shift menghitung rekapnya DI
+   * DALAM transaksi yang memegang kunci baris itu. Dijalankan lewat `db`,
+   * hitungannya di luar kunci — dan penjualan yang commit di antaranya tak
+   * terhitung oleh siapa pun sekaligus tak menyalakan penandanya.
+   */
+  it("penutupan shift memegang kunci barisnya SEBELUM rekap dihitung", () => {
+    const rel = "modules/shift/routes.ts";
+    const isi = readFileSync(`${SRC}/${rel}`, "utf8");
+    const akar = uraikan(rel, isi);
+    const induk = petaInduk(akar);
+    const badan: string[] = [];
+    jelajah(akar, (n) => {
+      // Properti `closedAt: new Date()` — satu-satunya penulisan PENUTUPAN.
+      const kunci = (n as { key?: { name?: string } }).key?.name;
+      if (!/^(Property|ObjectProperty)$/.test(n.type) || kunci !== "closedAt") return;
+      const nilai = (n as { value?: { type?: string } }).value;
+      if (nilai?.type !== "NewExpression") return;
+      // Naik sampai callback `.transaction(...)` yang membungkusnya.
+      let k: Simpul | undefined = induk.get(n);
+      while (k) {
+        if (/Function(Expression|Declaration)$|ArrowFunctionExpression/.test(k.type)) {
+          const atas = induk.get(k);
+          if (
+            atas?.type === "CallExpression" &&
+            (atas.arguments as Simpul[] | undefined)?.[0] === k &&
+            namaProperti(atas.callee as Simpul) === "transaction"
+          ) {
+            badan.push(isi.slice(k.start as number, k.end as number));
+            return;
+          }
+        }
+        k = induk.get(k);
+      }
+      badan.push("(DI LUAR TRANSAKSI)");
+    });
+    expect(badan.length, "penulisan `closedAt: new Date()` tak ditemukan").toBe(1);
+    expect(badan[0], "penutupan shift tak berjalan di dalam db.transaction").not.toBe(
+      "(DI LUAR TRANSAKSI)",
+    );
+    expect(/\.for\("update"\)/.test(badan[0]), "kunci baris shift tak diambil").toBe(true);
+    expect(
+      /rekapWindow\(\s*tx\b/.test(badan[0]),
+      "rekap penutupan dihitung di LUAR transaksi yang memegang kuncinya",
+    ).toBe(true);
   });
 
   it("tiap periksa-lalu-tulis tanpa penahan sudah diadjudikasi", () => {
