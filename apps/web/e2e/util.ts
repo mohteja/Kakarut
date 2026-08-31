@@ -18,7 +18,12 @@ export const OWNER_PASS = process.env.E2E_OWNER_PASS ?? "Basooopa123!";
 export async function login(page: Page, email: string, pass: string) {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(pass);
+  // `exact`, dan itu bukan kerapian: tombol "Tampilkan password" di dalam
+  // medannya juga bernama-aksesibel mengandung kata "password", jadi pencarian
+  // substring (bawaan `getByLabel`) memulangkan DUA elemen dan seluruh spec
+  // yang memakai pembantu ini mati dengan "strict mode violation" — kegagalan
+  // yang menuduh spec-nya padahal yang berubah komponennya.
+  await page.getByLabel("Password", { exact: true }).fill(pass);
   await page.getByRole("button", { name: "Masuk" }).click();
 }
 
@@ -132,15 +137,28 @@ export async function masukLewatSesi(
   email: string,
   pass: string,
 ) {
-  const { token } = await sesiApi(request, email, pass);
-  const profil = await request.get(`${BASE}/api/profil`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  expect(profil.ok(), "ambil profil untuk menanam sesi").toBeTruthy();
-  const user = await profil.json();
+  /*
+   * SESINYA DIAMBIL APA ADANYA DARI BALASAN LOGIN, bukan disusun ulang dari
+   * `/profil` — dan `sesiApi` di atas sudah menuliskan alasannya:
+   * *"Badan login SUDAH berbentuk `AuthState` … tak perlu disusun ulang dari
+   * /profil."* Versi pertama fungsi ini menyusunnya ulang, dan kedua bentuk
+   * itu TIDAK sama:
+   *
+   *   login  → { sub, email, nama, role, company_id, branch_id, is_super_admin }
+   *   profil → { email, nama, role, cabang, employee_code }
+   *
+   * Sesi tanpa `company_id`/`branch_id`/`sub` cukup untuk halaman kasir —
+   * yang kebetulan satu-satunya yang dikunjungi spec lama — dan DIAM-DIAM
+   * gagal untuk halaman bergerbang peran: `/pengaturan/meja` memantulkan
+   * pengunjungnya ke `/dashboard`, jadi premis "layarnya terbuka" runtuh
+   * tanpa satu galat pun. Terukur saat spec mutasi ditulis: `getByText(nama)`
+   * tak pernah menemukan apa pun, dan yang salah bukan pemilihnya melainkan
+   * halaman yang tak pernah terbuka.
+   */
+  const sesi = await sesiApi(request, email, pass);
   await page.addInitScript(
     ([kunci, isi]) => window.localStorage.setItem(kunci as string, isi as string),
-    ["kakarut.auth", JSON.stringify({ token, user })] as const,
+    ["kakarut.auth", JSON.stringify(sesi)] as const,
   );
   await page.goto("/");
 }

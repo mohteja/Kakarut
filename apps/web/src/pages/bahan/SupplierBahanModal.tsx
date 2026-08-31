@@ -38,7 +38,7 @@ export function SupplierBahanModal({
     queryKey: ["supplier"],
     queryFn: () => api<SupplierDto[]>("/supplier"),
   });
-  const { data: terpasang, isLoading } = useQuery({
+  const { data: terpasang, isLoading, error: terpasangGagal } = useQuery({
     queryKey: [cacheKey, bahan.id],
     queryFn: () => api<BahanSupplierDto[]>(jalur),
   });
@@ -220,7 +220,17 @@ export function SupplierBahanModal({
           <button onClick={onClose} className={btnSecondary}>
             Batal
           </button>
-          <button onClick={() => simpan.mutate()} disabled={simpan.isPending} className={btnPrimary}>
+          {/*
+            * Simpan DITAHAN saat daftar terpasang gagal dimuat: `pilih` tetap
+            * kosong, dan menyimpan kekosongan itu MELEPAS seluruh supplier
+            * bahan ini. Menahan simpan di atas bacaan yang gagal adalah
+            * perbaikannya, bukan kelonggaran.
+            */}
+          <button
+            onClick={() => simpan.mutate()}
+            disabled={simpan.isPending || Boolean(terpasangGagal)}
+            className={btnPrimary}
+          >
             {simpan.isPending ? "Menyimpan…" : "Simpan"}
           </button>
         </div>

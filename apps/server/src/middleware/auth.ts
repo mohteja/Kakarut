@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import type { Context, MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import jwt from "jsonwebtoken";
@@ -266,7 +267,7 @@ export async function resolveBranchId(c: Context<AppEnv>): Promise<string> {
     .select({ id: branches.id })
     .from(branches)
     .where(and(eq(branches.companyId, auth.company_id!), eq(branches.isActive, true)))
-    .orderBy(branches.createdAt)
+    .orderBy(branches.createdAt, branches.id)
     .limit(1);
   if (!first) throw new HTTPException(404, { message: "Perusahaan belum punya cabang" });
   return first.id;
@@ -309,4 +310,79 @@ export async function branchUntukTulis(
     throw new HTTPException(403, { message: pesanTolak });
   }
   return branchId;
+}
+
+/**
+ * SYARAT CABANG untuk peran yang terikat — satu pintu untuk arah BACA/`:id`.
+ *
+ * `resolveBranchId` menjawab *"cabang mana yang aktif"* dan `branchUntukTulis`
+ * menjawab *"boleh menulis ke cabang yang diminta?"*. Keduanya dipakai di
+ * pintu yang MEMILIH cabang. Yang tak pernah punya pintu: baris yang dialamati
+ * lewat `:id`/`:key` — di situ tak ada cabang yang dipilih, hanya baris yang
+ * disebut, dan aturannya diam-diam menghilang.
+ *
+ * Terukur lewat HTTP (2026-08-27, satu perusahaan, dua cabang, kasir terikat
+ * "Pusat" menembak baris "Cabang Uji 46"):
+ *
+ *   PUT    /open-bill/:id            → 200; `customer_nama` ditimpa, qty 2 → 9
+ *   DELETE /open-bill/:id            → 200; bill ditutup, SEMUA barisnya
+ *                                      `batal`, dan `pesanan_logs` mencatatnya
+ *                                      atas nama cabang korban
+ *   GET    /open-bill/:id            → 200 berisi nama pelanggan + itemnya
+ *   GET    /stok/opname/sesi/:id     → 200 berisi selisih, catatan, pelaku
+ *   GET    /penyimpanan/:id/bahan    → 200 berisi isi rak cabang lain
+ *   PATCH  /produksi/faktur/:key     → 200 (peran `kitchen` terikat cabang)
+ *   DELETE /produksi/faktur/:key     → 200; `deleted_at` terisi
+ *
+ * `null`/`undefined` untuk owner/admin adalah JAWABAN, bukan kelalaian: mereka memang
+ * lintas cabang, dan `undefined` di dalam `and(...)` drizzle memang berarti
+ * "tanpa syarat ini".
+ *
+ * MELEMPAR, tidak jatuh terbuka. `kondisiFaktur` di `penerimaan/routes.ts`
+ * dulu menulis `terikatCabang(role) && auth.branch_id` — peran terikat yang
+ * kebetulan tak punya cabang lolos ke SELURUH perusahaan, sementara
+ * `resolveBranchId` pada keadaan yang persis sama menjawab 403. Dua pintu ke
+ * keadaan yang sama, dua jawaban; yang dipakai di sini yang menolak.
+ */
+export function cabangTerikat(c: Context<AppEnv>): string | null {
+  const auth = c.get("auth");
+  if (!terikatCabang(auth.role)) return null;
+  if (!auth.branch_id) throw new HTTPException(403, { message: "Akun tanpa cabang" });
+  return auth.branch_id;
+}
+
+/**
+ * Bentuk SQL dari aturan yang sama — untuk kueri yang mengurung di `.where`.
+ *
+ * Dua bentuk dari SATU aturan, bukan dua aturan: sebagian pintu memuat
+ * barisnya dulu lalu membandingkan di JavaScript (`loadDetail`), sebagian
+ * menyaring langsung di SQL. Yang disatukan keputusannya — "peran ini terikat
+ * cabang mana, dan apa yang terjadi bila ia tak punya cabang" — bukan
+ * kalimatnya.
+ */
+export function syaratCabang(c: Context<AppEnv>, kolom: PgColumn): SQL | undefined {
+  const b = cabangTerikat(c);
+  return b ? eq(kolom, b) : undefined;
+}
+
+/**
+ * SYARAT CABANG DI DALAM `/produksi` & `/pembelian` — divisi cabang saja.
+ *
+ * Aturannya sudah tertulis di `app.ts`, dan sapuan ini hampir melanggarnya:
+ * kedua prefiks itu digerbang `izinkanManajemenAtauKaryawanCk`, jadi `tim`
+ * yang SAMPAI ke sini pasti `tim` yang lokasi kerjanya Central Kitchen —
+ * *"CK memang tempatnya memproduksi & membeli bahan"*. Merekalah yang belanja
+ * dan memegang notanya, untuk cabang mana pun.
+ *
+ * Yang terikat cabang di sini `kitchen` & `bar`: dua divisi produksi cabang
+ * store, dan komentar gerbangnya sudah menyebutnya — *"kunci per-request tetap
+ * lewat `terikatCabang`"*. Versi pertama pengurungan ini memakai
+ * `syaratCabang` apa adanya dan menutup jalur CK; uji PASANGAN §93 di
+ * `verify-api` yang menangkapnya (*"karyawan CK menyimpan laporan harga →
+ * 200"* jadi 404), bukan pembacaan ulang.
+ */
+export function syaratCabangDivisi(c: Context<AppEnv>, kolom: PgColumn): SQL | undefined {
+  const role = c.get("auth").role;
+  if (role !== "kitchen" && role !== "bar") return undefined;
+  return syaratCabang(c, kolom);
 }

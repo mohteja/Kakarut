@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { kalimatLama, petaKelasKueri, situsKueriWeb } from "./util/kueri-web";
 
 /**
  * GAGAL MEMUAT ≠ TIDAK ADA.
@@ -27,87 +28,143 @@ import { fileURLToPath } from "node:url";
  *
  * Penyapu ini menandai bentuknya, bukan niatnya, jadi ia juga menangkap halaman
  * BARU yang menyalin pola lama.
+ *
+ * ── BENTUK KETIGA, ditambahkan 2026-08-27 ───────────────────────────────────
+ *
+ * Pengecualian "daftar pilihan" di atas BENAR, dan tetap. Yang keliru adalah
+ * anggapan bahwa ia mencakup semua yang bukan kalimat. Ada bentuk ketiga:
+ * **ANGKA**. `(pengajuanNav ?? []).length` yang dirender sebagai LENCANA bukan
+ * daftar pilihan — lencana yang lenyap memang mengklaim sesuatu: *"tidak ada
+ * yang menunggu."*
+ *
+ * Terukur di peramban sungguhan (satu pengajuan menunggu, `page.route()`
+ * membalas 500): jaringan sehat → lencana **"1"**; gagal → lencana **LENYAP**,
+ * dan **tak satu pun** kalimat di layar menyebutkan kegagalan itu. Di
+ * `Layout.tsx`, yang tampil di SETIAP layar, dengan poll 30–60 detik.
+ *
+ * Dan dua batas mesin lama ikut dicabut, keduanya membuatnya melaporkan
+ * kebersihan yang tak ada:
+ *   1. ia REGEX (`const { … } = useQuery(`) → buta pada `const q = useQuery(…)`;
+ *   2. aturan `?? []`-nya menuntut koalesens menempel LANGSUNG pada nama
+ *      `data` → tiap balasan berbentuk `{ rows: … }` lolos. `TransferStokPage`
+ *      merender "Belum ada transfer stok." saat gagal, dan gerbang ini tak
+ *      pernah melihatnya.
+ *
+ * Mesinnya kini `test/util/kueri-web.ts` (AST atas TSX). Angka sesudah sapuan:
+ * `GALAT` 76 → **97** · `ANGKA` 24 → **3** (terdaftar) · `KALIMAT` 1 → **0**.
  */
 const AKAR = fileURLToPath(new URL("../../../", import.meta.url));
 const WEB = AKAR + "apps/web/src/";
 
-function semuaSumber(dir: string): string[] {
-  const hasil: string[] = [];
-  for (const nama of readdirSync(dir)) {
-    if (nama === "node_modules" || nama === "dist") continue;
-    const p = dir + nama;
-    if (statSync(p).isDirectory()) hasil.push(...semuaSumber(p + "/"));
-    else if (/\.tsx$/.test(nama)) hasil.push(p);
-  }
-  return hasil;
-}
+const situs = situsKueriWeb();
+const peta = petaKelasKueri(situs);
 
-const BERKAS = semuaSumber(WEB);
-
-/** Tiap destructuring `const { … } = useQuery(` beserta berkas & barisnya. */
-const kueri = BERKAS.flatMap((p) => {
-  const isi = readFileSync(p, "utf8");
-  const keluar: { berkas: string; baris: number; bidang: string; isi: string }[] = [];
-  for (const m of isi.matchAll(/const\s*\{([^}]*)\}\s*=\s*useQuery\(/g)) {
-    keluar.push({
-      berkas: p.slice(AKAR.length),
-      baris: isi.slice(0, m.index).split("\n").length,
-      bidang: m[1],
-      isi,
-    });
-  }
-  return keluar;
-});
+/**
+ * Situs yang meruntuhkan kegagalan jadi ANGKA dan MEMANG boleh — beserta
+ * alasan yang bisa diperiksa. Ketiganya keputusan INTERNAL, bukan klaim yang
+ * dibaca orang: tak satu pun angkanya sampai ke layar sebagai jumlah.
+ */
+const ANGKA_INTERNAL = new Map<string, string>([
+  [
+    "pages/menu/MenuFormPage.tsx:menus",
+    "`menus?.find(…)` memilih menu DASAR untuk varian; `.komponen.length ?? 0 > 0` cuma memutuskan apakah form kemasan ditampilkan — tak ada jumlah yang dibaca orang",
+  ],
+  [
+    "pages/produksi/FakturFormPage.tsx:resepRingkas",
+    "`(resepRingkas[b.id] ?? 0) > 0` menyaring bahan mana yang layak ditawarkan di picker — daftar pilihan, kelas yang memang dikecualikan di atas",
+  ],
+  [
+    "pages/resep/ResepPage.tsx:ringkas",
+    "`const n = ringkas ? (ringkas[b.id] ?? 0) : null` — SUDAH membedakan 'belum tahu' dari nol, dan merender `null` apa adanya. Justru contoh bentuk yang benar",
+  ],
+]);
 
 describe("daftar kosong tak pernah mengaku kosong saat pemuatannya gagal", () => {
   it("penyapunya benar-benar menemukan kueri (bukan hijau karena buta)", () => {
     // Tanpa patokan ini, regex yang berhenti cocok akan membuat uji di bawah
     // lulus dengan daftar kosong — penjaga yang tak menjaga apa pun.
-    expect(kueri.length, "tak satu pun `useQuery` terbaca").toBeGreaterThan(50);
-    expect(new Set(kueri.map((k) => k.berkas)).size).toBeGreaterThan(20);
+    expect(situs.length, "tak satu pun `useQuery` terbaca").toBeGreaterThan(150);
+    expect(new Set(situs.map((k) => k.berkas)).size).toBeGreaterThan(20);
+    expect(peta.get("GALAT") ?? 0, "kelas GALAT kosong — pemindainya rusak").toBeGreaterThan(50);
   });
 
-  it("tiap kueri yang menyetir keadaan-kosong lewat `?? []` juga membaca galatnya", () => {
-    /**
-     * Yang ditandai: `data` yang di-`?? []` LALU dipakai sebagai keadaan-kosong
-     * (`.length === 0`) — langsung maupun lewat satu alias
-     * (`const semua = supplier ?? []` … `semua.length === 0`). Alias itu bukan
-     * kasus karangan: begitulah `SupplierPage` ditulis, dan penyapu versi
-     * pertama melewatkannya.
-     *
-     * Yang SENGAJA tidak ditandai: `?? []` yang cuma disuapkan ke `.map()`
-     * (dropdown, checklist). Daftar pilihan yang kosong tak MENGKLAIM apa pun —
-     * ia hanya tak menawarkan apa-apa. Yang berbahaya adalah kalimat.
-     *
-     * Karena itu penyapu ini menjaring BENTUK yang sudah terbukti salah, bukan
-     * mengaku menjaring semuanya. Patokan per-berkas di bawah menahan sembilan
-     * tempat yang memang pernah keliru.
-     */
-    const lalai = kueri
-      .filter((k) => !/\berror\b|\bisError\b/.test(k.bidang))
-      .filter((k) => {
-        const dm = /data(?:\s*:\s*(\w+))?/.exec(k.bidang);
-        if (!dm) return false;
-        const nama = dm[1] ?? "data";
-        // Langsung: `(supplier ?? []).length === 0`
-        if (new RegExp(`\\(\\s*\\b${nama}\\b\\s*\\?\\?\\s*\\[\\]\\s*\\)\\.length\\s*===\\s*0`).test(k.isi)) {
-          return true;
-        }
-        // Satu lompatan alias: `const semua = supplier ?? [];` … `semua.length === 0`
-        for (const a of k.isi.matchAll(
-          new RegExp(`const\\s+(\\w+)\\s*=\\s*\\b${nama}\\b\\s*\\?\\?\\s*\\[\\]\\s*;`, "g"),
-        )) {
-          if (new RegExp(`\\b${a[1]}\\b\\.length\\s*===\\s*0`).test(k.isi)) return true;
-        }
-        return false;
-      })
+  it("INTI kalimat: keadaan-kosong ber-kalimat selalu membaca galatnya", () => {
+    const lalai = situs
+      .filter((k) => k.kelas === "KALIMAT")
       .map((k) => `${k.berkas}:${k.baris}`);
-
     expect(
       lalai,
       "kueri di atas memakai `?? []` untuk keadaan-kosong tapi tak pernah membaca `error` — " +
         "layar akan mengaku 'belum ada' padahal cuma gagal dimuat",
     ).toEqual([]);
+  });
+
+  it("INTI angka: lencana & jumlah yang gagal dimuat tak boleh terbaca NOL", () => {
+    /*
+     * Bentuk ketiga. Pengecualian "daftar pilihan" tak berlaku di sini:
+     * lencana yang lenyap MENGKLAIM "tidak ada yang menunggu", dan terukur
+     * begitulah `Layout.tsx` berperilaku sebelum vena ini.
+     */
+    const asing = situs
+      .filter((k) => k.kelas === "ANGKA")
+      .map((k) => `${k.berkas}:${k.data}`)
+      .filter((k) => !ANGKA_INTERNAL.has(k));
+    expect(
+      asing,
+      `hasil kueri diruntuhkan jadi ANGKA yang dirender, tanpa pernah membaca galatnya:\n${asing.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("INTI formulir: bacaan gagal tak boleh jadi formulir kosong yang bisa disimpan", () => {
+    /*
+     * Bentuk KEEMPAT, dan satu-satunya yang MERUSAK, bukan sekadar
+     * menyesatkan: nilai tersimpan dituang ke state lewat `useEffect`, jadi
+     * bacaan yang gagal membuat formulirnya terbuka KOSONG — lalu tombol
+     * simpannya menulis kekosongan itu ke atas data nyata.
+     *
+     * Terukur di peramban pada `StokAwalPage`: 90 baris saldo pembuka
+     * tersimpan di basis data, `GET /stok/awal` dibalas 500 → 0 input terisi,
+     * tak satu pun kalimat kegagalan, dan tombol simpannya tetap ada.
+     */
+    const asing = situs
+      .filter((k) => k.kelas === "ISI_FORM")
+      .map((k) => `${k.berkas}:${k.baris} (${k.data})`);
+    expect(
+      asing,
+      `data mengisi formulir yang bisa disimpan, tanpa pernah membaca galatnya:\n${asing.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("BATAS ditulis: `LAIN` bukan klaim bersih", () => {
+    /*
+     * `LAIN` berarti "tak cocok dengan satu pun bentuk klaim yang DIKENAL"
+     * (kalimat, angka, formulir) — bukan "terbukti tak berbahaya". Angkanya
+     * dipaku supaya penyusutannya terlihat dan pertumbuhannya ditanyai, bukan
+     * supaya ia dianggap beres.
+     */
+    expect(peta.get("LAIN") ?? 0).toBeLessThanOrEqual(45);
+  });
+
+  it("daftar internal ditagih dua arah", () => {
+    const ada = new Set(
+      situs.filter((k) => k.kelas === "ANGKA").map((k) => `${k.berkas}:${k.data}`),
+    );
+    const usang = [...ANGKA_INTERNAL.keys()].filter((k) => !ada.has(k));
+    expect(usang, `entri sudah membaca galatnya — hapus: ${usang.join(", ")}`).toEqual([]);
+  });
+
+  it("KENAIKAN INSTRUMEN tak melonggarkan: vonis aturan REGEX lama tereproduksi", () => {
+    /*
+     * Aturan lama dipertahankan sebagai fungsi (`kalimatLama`) dan dijalankan
+     * ulang di sini. Ia harus tetap menemukan NOL — sama seperti sebelum
+     * putaran ini. Kalau suatu saat ia menemukan sesuatu yang mesin AST
+     * lewatkan, yang baru itulah yang salah.
+     */
+    const lama = situs
+      .filter((k) => k.data && k.kelas !== "GALAT")
+      .filter((k) => kalimatLama(k.data!, readFileSync(WEB + k.berkas, "utf8")))
+      .map((k) => `${k.berkas}:${k.baris}`);
+    expect(lama, "aturan lama menemukan yang baru lewatkan").toEqual([]);
   });
 
   it("`TabelResponsif` menyediakan jalannya, dan memakainya untuk KEDUA tampilan", () => {
@@ -139,5 +196,57 @@ describe("daftar kosong tak pernah mengaku kosong saat pemuatannya gagal", () =>
     for (const [berkas, jangkar] of pin) {
       expect(readFileSync(WEB + berkas, "utf8"), berkas).toContain(jangkar);
     }
+  });
+});
+
+describe("BUKTI MERAH: gerbangnya benar-benar bisa menuduh", () => {
+  const sapu = (isi: string) => situsKueriWeb([{ nama: "palsu/Palsu.tsx", isi }]);
+
+  it("kueri baru yang dirender sebagai JUMLAH → ANGKA", () => {
+    const k = sapu(
+      'function P() { const { data: rows } = useQuery({}); return <b>{(rows ?? []).length}</b>; }',
+    );
+    expect(k).toHaveLength(1);
+    expect(k[0].kelas).toBe("ANGKA");
+  });
+
+  it("bentuk `const q = useQuery(…)` — yang mesin REGEX lama buta padanya", () => {
+    const k = sapu('function P() { const q = useQuery({}); return <b>{(q ?? []).length}</b>; }');
+    expect(k, "bentuk non-destructuring tak terbaca — populasinya menyusut diam-diam").toHaveLength(
+      1,
+    );
+    expect(k[0].kelas).toBe("ANGKA");
+  });
+
+  it("koalesens pada PROPERTI — bentuk yang aturan lama lewatkan", () => {
+    const k = sapu(
+      'function P() { const { data: r } = useQuery({}); return <div>{(r?.rows ?? []).length === 0 ? "Belum ada apa-apa." : null}</div>; }',
+    );
+    expect(k[0]?.kelas).toBe("KALIMAT");
+    // …dan aturan LAMA memang tak melihatnya — itulah batas yang dicabut.
+    expect(kalimatLama("r", 'const { data: r } = useQuery({}); (r?.rows ?? []).length === 0')).toBe(
+      false,
+    );
+  });
+
+  it("PASANGAN: membaca galatnya → GALAT, dan daftar PILIHAN tetap dikecualikan", () => {
+    expect(
+      sapu('function P() { const { data: rows, error } = useQuery({}); return <b>{(rows ?? []).length}{String(error)}</b>; }')[0]
+        ?.kelas,
+    ).toBe("GALAT");
+    // Dropdown: kosongnya tak mengklaim apa pun — pengecualian yang TETAP.
+    expect(
+      sapu('function P() { const { data: rows } = useQuery({}); return <select>{(rows ?? []).map((r) => <option/>)}</select>; }')[0]
+        ?.kelas,
+    ).toBe("PILIHAN");
+  });
+
+  it("PASANGAN: angka yang TAK sampai ke layar bukan tuduhan", () => {
+    // Kalibrasi yang mencabut tiga tuduhan palsu (`SatuanSelect`, `ResepPage`,
+    // `StokAwalPage`): hitungan internal tak dibaca siapa pun.
+    const k = sapu(
+      'function P() { const { data: rows } = useQuery({}); const n = (rows ?? []).length; if (n > 0) pakai(); return <hr/>; }',
+    );
+    expect(k[0]?.kelas).not.toBe("ANGKA");
   });
 });

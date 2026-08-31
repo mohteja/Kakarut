@@ -18,6 +18,7 @@ import {
   type RekapAbsenRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { kunciAntrean } from "../../lib/kunci";
 import { attendances, branches, companies, memberships, users } from "../../db/schema";
 import { tanggalDi } from "../../lib/time";
 import { requireRole, resolveBranchId, type AppEnv, cabangDariQuery} from "../../middleware/auth";
@@ -46,6 +47,9 @@ const KoordinatBody = {
 export const ClockBody = z.object({ kode: z.string().trim().min(1), ...KoordinatBody }).strict();
 /** Absen SENDIRI (tombol absen di aplikasi) — tanpa kode, atas nama pemanggil. */
 export const SelfBody = z.object(KoordinatBody).strict();
+
+/** `db` atau transaksinya — sama seperti `produksi/log.ts` & `dokumen/nomor.ts`. */
+type DbAtauTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function timezoneOf(companyId: string): Promise<string> {
   const [company] = await db
@@ -128,13 +132,19 @@ export async function cekRadius(
  * menemukan sesi yang dibuka di hari sebelumnya.
  */
 async function capHariSebelumnya(
+  /**
+   * WAJIB transaksi yang sama dengan penulisnya. Bacaan ini ikut memutuskan
+   * tipe cap berikutnya, jadi kalau ia terjadi di LUAR kunci, penahannya cuma
+   * hiasan: dua permintaan tetap bisa memutuskan dari bacaan yang sama.
+   */
+  exec: DbAtauTx,
   companyId: string,
   branchId: string,
   userId: string,
   tanggal: string,
   acuan: Date,
 ): Promise<CapAbsen | null> {
-  const [row] = await db
+  const [row] = await exec
     .select({
       tipe: attendances.tipe,
       waktu: attendances.waktu,
@@ -150,7 +160,7 @@ async function capHariSebelumnya(
         lt(attendances.waktu, acuan),
       ),
     )
-    .orderBy(desc(attendances.waktu))
+    .orderBy(desc(attendances.waktu), desc(attendances.id))
     .limit(1);
   return row ? { tipe: row.tipe, waktu_ms: row.waktu.getTime(), tanggal: row.attendDate } : null;
 }
@@ -172,43 +182,110 @@ export async function catatAbsen(opts: {
   /** waktu kejadian (sinkron offline); bila kosong pakai waktu server */
   waktu?: Date;
 }): Promise<AbsenResult> {
-  const tanggal = tanggalDi(await timezoneOf(opts.companyId), opts.waktu);
-  const acuan = opts.waktu ?? new Date();
-  const [last] = await db
-    .select({ tipe: attendances.tipe, waktu: attendances.waktu })
-    .from(attendances)
-    .where(
-      and(
-        eq(attendances.companyId, opts.companyId),
-        eq(attendances.branchId, opts.branchId),
-        eq(attendances.userId, opts.userId),
-        eq(attendances.attendDate, tanggal),
-        // untuk cap susulan (offline), alternasi masuk/keluar dihitung dari cap
-        // yang waktunya SEBELUM cap ini (bukan cap terbaru absolut)
-        ...(opts.waktu ? [lt(attendances.waktu, opts.waktu)] : []),
-      ),
-    )
-    .orderBy(desc(attendances.waktu))
-    .limit(1);
-  const { tipe, tanggal_sesi } = capAbsenBerikutnya(
-    last ? { tipe: last.tipe, waktu_ms: last.waktu.getTime(), tanggal } : null,
-    last
-      ? null
-      : await capHariSebelumnya(opts.companyId, opts.branchId, opts.userId, tanggal, acuan),
-    acuan.getTime(),
-  );
-  const [ins] = await db
-    .insert(attendances)
-    .values({
-      companyId: opts.companyId,
-      branchId: opts.branchId,
-      userId: opts.userId,
-      tipe,
-      attendDate: tanggal_sesi ?? tanggal,
-      fotoUrl: opts.fotoUrl,
-      ...(opts.waktu ? { waktu: opts.waktu } : {}),
-    })
-    .returning({ waktu: attendances.waktu });
+  const tz = await timezoneOf(opts.companyId);
+  /*
+   * BACA → PUTUSKAN → TULIS, DAN KETIGANYA DI DALAM SATU KUNCI.
+   *
+   * Tipe cap berikutnya adalah fungsi dari cap TERAKHIR — alternasi murni:
+   * terakhir "masuk" → "keluar", selain itu → "masuk". Tanpa penahan, dua
+   * permintaan bersamaan membaca cap terakhir yang SAMA, memutuskan tipe yang
+   * SAMA, lalu menulis dua-duanya.
+   *
+   * TERUKUR lewat HTTP sebelum kunci ini ada — dua `POST /absensi/saya`
+   * SERENTAK ber-`client_ref` berbeda, dari keadaan "belum absen", tiga kali
+   * berturut-turut:
+   *
+   *     masuk -> masuk    ·  rekap `keluar`: null   (3 dari 3)
+   *
+   * Orangnya tercatat datang dan TIDAK PERNAH PULANG. Empat ketukan serentak
+   * menghasilkan `masuk -> keluar -> keluar -> masuk`.
+   *
+   * KENAPA `denganKlaimIdempoten` TAK MENUTUPNYA. Kedua rute di bawah memang
+   * berklaim `client_ref`, dan itu menutup pengiriman ULANG permintaan yang
+   * sama. Ketukan ganda di kios bersama — atau ponsel yang menyinkronkan cap
+   * offline saat orangnya menekan tombol kios — adalah dua permintaan yang
+   * memang BERBEDA: dua `client_ref`, dua klaim, dua-duanya lolos.
+   *
+   * KENAPA BUKAN INDEKS UNIK. Alternasi tak bisa ditulis sebagai kesamaan
+   * kolom — seseorang boleh punya banyak pasang masuk/keluar dalam sehari —
+   * jadi tak ada tupel yang bisa dijadikan unik. Ini persis pembagian yang
+   * sudah ditulis `lib/kunci.ts`: aturan yang melarang baris BARU harus
+   * dikunci atas NAMA aturannya.
+   *
+   * KUNCINYA TANPA TANGGAL, dan itu disengaja: sesi hadir melintasi tengah
+   * malam (`sesiHadirTerbuka` + `BATAS_LINTAS_HARI_JAM`), jadi lingkup
+   * invariannya (perusahaan, cabang, orang) — bukan (…, tanggal). Cap pukul
+   * 00:30 yang menutup sesi kemarin harus menunggu giliran yang sama dengan
+   * cap yang membukanya.
+   */
+  const ins = await db.transaction(async (tx) => {
+    await kunciAntrean(tx, "absen", opts.companyId, opts.branchId, opts.userId);
+    /*
+     * STEMPELNYA DIAMBIL DI DALAM KUNCI, dan itu bukan kerapian.
+     *
+     * Versi pertama perbaikan ini memasang kuncinya tapi membiarkan `waktu`
+     * jatuh ke bawaan kolom, `now()` — yang di Postgres adalah waktu
+     * TRANSAKSI DIMULAI, bukan waktu barisnya ditulis. Urutan transaksi
+     * dimulai TIDAK sama dengan urutan kunci diberikan: empat permintaan bisa
+     * memulai transaksinya pada t1<t2<t3<t4 lalu mendapat giliran kunci dalam
+     * urutan lain. Keputusannya berselang-seling dengan benar — sebab tiap
+     * pemegang kunci membaca cap terakhir yang sudah ter-commit — tapi
+     * `waktu` yang tersimpan mengurutkannya kembali ke urutan MULAI. Dibaca
+     * ulang menurut `waktu`, alternasinya patah lagi.
+     *
+     * TERUKUR sesudah kunci dipasang dan sebelum stempel ini dipindahkan:
+     * **5 dari 25** putaran empat-ketukan-serentak melanggar alternasi
+     * (mis. `masuk@41.340 → masuk@41.347 → keluar@41.348 → masuk@41.350`).
+     * Kuncinya benar; yang salah jam yang dipakai menuliskannya.
+     *
+     * `new Date()` di sini dievaluasi SESUDAH kunci dipegang, jadi ia menaik
+     * searah urutan giliran — dan baris yang ditulis selalu lebih baru
+     * daripada baris yang baru saja dibacanya.
+     */
+    const acuan = opts.waktu ?? new Date();
+    const tanggal = tanggalDi(tz, acuan);
+    const [last] = await tx
+      .select({ tipe: attendances.tipe, waktu: attendances.waktu })
+      .from(attendances)
+      .where(
+        and(
+          eq(attendances.companyId, opts.companyId),
+          eq(attendances.branchId, opts.branchId),
+          eq(attendances.userId, opts.userId),
+          eq(attendances.attendDate, tanggal),
+          // untuk cap susulan (offline), alternasi masuk/keluar dihitung dari cap
+          // yang waktunya SEBELUM cap ini (bukan cap terbaru absolut)
+          ...(opts.waktu ? [lt(attendances.waktu, opts.waktu)] : []),
+        ),
+      )
+      .orderBy(desc(attendances.waktu), desc(attendances.id))
+      .limit(1);
+    const { tipe, tanggal_sesi } = capAbsenBerikutnya(
+      last ? { tipe: last.tipe, waktu_ms: last.waktu.getTime(), tanggal } : null,
+      last
+        ? null
+        : await capHariSebelumnya(tx, opts.companyId, opts.branchId, opts.userId, tanggal, acuan),
+      acuan.getTime(),
+    );
+    const [baris] = await tx
+      .insert(attendances)
+      .values({
+        companyId: opts.companyId,
+        branchId: opts.branchId,
+        userId: opts.userId,
+        tipe,
+        attendDate: tanggal_sesi ?? tanggal,
+        fotoUrl: opts.fotoUrl,
+        // SELALU disebut — bukan lagi jatuh ke bawaan `now()` kolomnya, yang
+        // adalah waktu transaksi DIMULAI dan karena itu tak searah dengan
+        // urutan giliran kunci. Untuk cap susulan (offline) nilainya sama
+        // seperti sebelumnya: `opts.waktu`.
+        waktu: acuan,
+      })
+      .returning({ waktu: attendances.waktu });
+    return { ...baris, tipe };
+  });
+  const tipe = ins.tipe;
   return {
     user_id: opts.userId,
     nama: opts.nama,
@@ -255,11 +332,13 @@ export async function sedangHadir(
         eq(attendances.attendDate, tanggal),
       ),
     )
-    .orderBy(desc(attendances.waktu))
+    .orderBy(desc(attendances.waktu), desc(attendances.id))
     .limit(1);
   const buka = sesiHadirTerbuka(
     last ? { tipe: last.tipe, waktu_ms: last.waktu.getTime(), tanggal } : null,
-    last ? null : await capHariSebelumnya(companyId, branchId, userId, tanggal, pada),
+    // `db`, bukan transaksi: `sedangHadir` hanya MEMBACA — ia tak memutuskan
+    // apa pun yang lalu ditulis, jadi tak ada balapan untuk ditahan di sini.
+    last ? null : await capHariSebelumnya(db, companyId, branchId, userId, tanggal, pada),
     pada.getTime(),
   );
   return buka !== null;

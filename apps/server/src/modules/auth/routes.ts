@@ -1,12 +1,13 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { env } from "../../config/env";
 import { appBaseUrl } from "../../lib/base-url";
+import { kunciAntrean } from "../../lib/kunci";
 import { bentrokUnikPada } from "../../lib/pg-galat";
 import { db } from "../../db/client";
 import {
@@ -102,54 +103,229 @@ const batasReset = rl(
 );
 
 /** Verifikasi token email: batasi per IP → cegah tebak token brute-force. */
+/*
+ * BATAS PER IP, DINAIKKAN 20 → 60 SAAT TAUTAN DIGANTI KODE — dan angkanya
+ * naik justru karena penjagaannya menguat, bukan melemah.
+ *
+ * 20 dikalibrasi untuk alur yang TAK PERNAH DIKETIK SIAPA PUN: tautan 64-hex
+ * ditekan sekali, berhasil, selesai. Sebuah kode 6 angka salah ketik, dan
+ * orang yang salah ketik akan mencoba lagi — lalu minta kode baru, lalu
+ * mencoba lagi. Satu orang wajar menghabiskan 4–5 percobaan, dan kantor
+ * ber-NAT yang mendaftarkan lima karyawan sekaligus menabrak 20 sebelum
+ * seorang pun selesai. Batas yang menghukum pemakaian normal bukan penjagaan;
+ * ia cuma memindahkan kegagalan ke tempat yang lebih membingungkan.
+ *
+ * YANG MENAHAN TEBAKAN BUKAN BATAS INI, melainkan `MAKS_PERCOBAAN`: tiap kode
+ * mati sesudah lima tebakan salah, dan matinya PERMANEN — tak seperti batas
+ * laju yang pulih sendiri seperempat jam kemudian. Peluang menembus satu akun
+ * karena itu 5 : 1.000.000, berapa pun besar batas di sini. Sebelum ada kode,
+ * penjaga per-percobaan itu tak ada sama sekali (token 32 byte memang tak bisa
+ * ditebak, jadi tak perlu) — jadi angka di bawah menanggung beban yang kini
+ * ditanggung tempat yang tepat.
+ *
+ * Sisanya yang masih dijaga di sini: SEBARAN dari satu IP ke banyak akun.
+ * 60 per 15 menit = 240 per jam ≈ 48 akun yang bisa disenggol tiap jam, dengan
+ * peluang 5 : 1.000.000 masing-masing.
+ */
 const batasVerifikasiCek = rl(
   rateLimit({
     windowMs: 15 * 60_000,
-    max: 20,
+    max: 60,
     key: (c) => `verif:${ipKlien(c)}`,
     message: "Terlalu banyak percobaan — coba lagi beberapa menit lagi.",
   }),
 );
 
-/** Kirim ulang verifikasi: batasi per (IP + email) → cegah bom email. */
+/*
+ * Kirim ulang verifikasi: batasi per (IP + email) → cegah bom email.
+ *
+ * 6 → 8 saat jarak 2 menit dipasang: 15 menit memuat 7,5 kiriman yang MENURUTI
+ * jaraknya, jadi ember 6 akan menolak orang yang justru patuh — dan menolaknya
+ * dengan kalimat yang berbeda ("terlalu banyak permintaan"), sehingga ia tak
+ * bisa tahu bahwa yang salah cuma sabarnya. Jaraknya kini aturan yang
+ * mengikat; ember ini tinggal jaring pengaman.
+ */
 const batasVerifikasiKirim = rl(
   rateLimit({
     windowMs: 15 * 60_000,
-    max: 6,
+    max: 8,
     key: async (c) => `verifkirim:${ipKlien(c)}:${await emailDariBody(c)}`,
     message: "Terlalu banyak permintaan — coba lagi beberapa menit lagi.",
   }),
 );
 
 /**
- * Buat token verifikasi email untuk seorang user + kirim tautannya. Balikkan
- * URL verifikasi bila email BELUM dikonfigurasi (bantuan dev/non-produksi);
- * di produksi tidak pernah dibocorkan.
+ * KODE VERIFIKASI 6 DIGIT — berlaku selama ini, sama dengan tautan reset
+ * password di berkas yang sama.
+ *
+ * Bukan 24 jam seperti tautan yang digantikannya, dan bukan pula 10 menit
+ * seperti kebiasaan OTP: rahasianya jauh lebih lemah daripada 32 byte acak
+ * (sejuta kemungkinan), jadi umurnya tak boleh panjang — tapi yang paling
+ * sering menggagalkan verifikasi adalah email yang datang terlambat, dan umur
+ * yang terlalu pendek mengubah keterlambatan itu jadi jalan buntu. Satu jam
+ * memberi ruang untuk keduanya, dan tombol "Kirim ulang" ada untuk sisanya.
  */
-async function kirimTautanVerifikasi(
+const VERIFIKASI_MENIT = 60;
+
+/**
+ * Percobaan SALAH yang ditoleransi untuk satu kode. Inilah yang membuat 6 digit
+ * aman, bukan panjangnya: menebak sejuta kemungkinan dengan lima kesempatan
+ * berpeluang 1 : 200.000 — dan sesudah kesempatan kelima kodenya mati, bukan
+ * cuma tertahan batas laju yang akan pulih sendiri semenit kemudian.
+ */
+const MAKS_PERCOBAAN = 5;
+
+/**
+ * JARAK MINIMUM ANTAR PENGIRIMAN KODE untuk satu akun.
+ *
+ * Sebelum ini jaraknya cuma ada di React (`setJeda(60)`) — 60 detik, di KLIEN,
+ * dan hilang begitu halamannya dimuat ulang. Itu kenyamanan tampilan, bukan
+ * penahan: sisi server hanya punya ember 15 menit yang tak mengatur jarak sama
+ * sekali, jadi enam kiriman boleh beruntun dalam enam detik.
+ *
+ * Angkanya dipulangkan ke klien (`retry_after_detik`) alih-alih disalin ke
+ * sana, supaya tak ada dua angka yang bisa menyimpang.
+ */
+const JEDA_KIRIM_ULANG_DETIK = 120;
+
+/** Kode 6 digit, dari sumber acak kriptografis (bukan `Math.random`). */
+function kodeVerifikasi(): string {
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+/**
+ * Sidik kode: user id IKUT di-hash.
+ *
+ * Kode 6 digit bisa sama untuk dua akun pada saat yang sama. Meng-hash kodenya
+ * telanjang membuat satu kode berlaku untuk akun mana pun yang kebetulan
+ * memegangnya — dan itu bukan kekeliruan teoretis: verifikasi yang berhasil
+ * LANGSUNG memberi sesi.
+ */
+function sidikKode(userId: string, kode: string): string {
+  return hashToken(`${userId}:${kode}`);
+}
+
+/**
+ * Buat kode verifikasi email untuk seorang user + kirimkan. Balikkan kodenya
+ * bila email BELUM dikonfigurasi (bantuan dev/non-produksi); di produksi tidak
+ * pernah dibocorkan.
+ *
+ * JARAKNYA DIJAGA DI SINI, bukan di rutenya — alasan yang sama dengan
+ * pencarian shift di `createSale`: pemanggil berikutnya tak bisa lupa
+ * memakainya. Aman untuk pendaftaran, sebab akun yang baru lahir belum punya
+ * kode hidup, jadi penjaganya no-op di sana.
+ *
+ * KODE LAMA DIMATIKAN LEBIH DULU, dan itu bukan kerapian. Orang yang emailnya
+ * belum masuk akan menekan "Kirim ulang" berkali-kali; membiarkan kode-kode
+ * sebelumnya hidup berarti setiap penekanan menambah satu rahasia 6 digit yang
+ * masih bisa ditebak, masing-masing dengan jatah percobaannya sendiri. Sesudah
+ * lima kali kirim ulang, peluang menebak naik lima kali lipat. Satu kode hidup
+ * per akun adalah cara batas percobaan itu tetap berarti.
+ */
+async function kirimKodeVerifikasi(
   userId: string,
   email: string,
   nama: string,
   baseUrl: string,
-): Promise<string | undefined> {
+): Promise<{ kode: string; url: string } | undefined> {
+  const kode = kodeVerifikasi();
+  /*
+   * DUA JALAN MASUK UNTUK SATU PENERBITAN — kode 6 angka DAN tautan 64-hex.
+   *
+   * Kodenya jalan utama (web), sebab tautan verifikasi punya tiga cara gagal
+   * yang tak bisa ditambal: sekali pakai (muat ulang → "kedaluwarsa" padahal
+   * masih 24 jam), dipotong klien email, dan membuka peramban LAIN sehingga
+   * sesi auto-login mendarat di perangkat yang salah.
+   *
+   * Tautannya tetap ada karena `docs/API-CONTRACT.md` menuliskannya sebagai
+   * alur daftar APLIKASI PONSEL: register → tangkap deep link
+   * `APP_BASE_URL/verifikasi-email?token=…` → `verify-email { token }`.
+   * Mencabutnya berarti mematikan pendaftaran dari ponsel sampai repo ponsel
+   * menyusul — dan mereka tak melakukan apa pun yang salah.
+   *
+   * DUA BARIS, bukan satu baris berkolom baru: baris tautannya berbentuk
+   * PERSIS SAMA dengan baris yang terbit sebelum kode ada, jadi cabang
+   * `{ token }` di `verify-email` tak perlu tahu apa-apa tentang perubahan ini
+   * dan baris lama di produksi tetap bekerja tanpa cabang khusus. Tak ada
+   * migrasi yang dibutuhkan.
+   */
   const raw = randomBytes(32).toString("hex");
-  await db.insert(emailVerificationTokens).values({
-    userId,
-    tokenHash: hashToken(raw),
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 jam
-  });
   const url = `${baseUrl}/verifikasi-email?token=${raw}`;
+  const dikirim = await db.transaction(async (tx) => {
+    /*
+     * "Baca kode terakhir lalu tulis kode baru" adalah balapan, dan akibatnya
+     * bukan sekadar dua email: dua tekanan yang berpapasan sama-sama melihat
+     * "tak ada yang baru", sama-sama mengirim, lalu yang KEDUA mematikan kode
+     * yang barusan dikirimkan yang pertama. Orangnya menerima dua email dan
+     * hanya satu yang berlaku — tanpa cara menebak yang mana.
+     */
+    await kunciAntrean(tx, "verifikasi-email", userId);
+    const [hidup] = await tx
+      .select({ createdAt: emailVerificationTokens.createdAt })
+      .from(emailVerificationTokens)
+      .where(
+        and(
+          eq(emailVerificationTokens.userId, userId),
+          isNull(emailVerificationTokens.usedAt),
+          // Kode KEDALUWARSA tak boleh menahan kirim ulang — kalau ia menahan,
+          // orang yang kodenya mati justru terkunci dari satu-satunya jalan
+          // keluarnya. Sama untuk kode yang MATI karena jatah tebakannya habis:
+          // salah ketik lima kali bukan alasan menunggu dua menit.
+          gt(emailVerificationTokens.expiresAt, new Date()),
+        ),
+      )
+      // Pemutus seri wajib: tanpa `id`, dua baris berdetik sama bisa bertukar
+      // urutan antar pemanggilan dan "yang terbaru" berhenti berarti.
+      .orderBy(desc(emailVerificationTokens.createdAt), desc(emailVerificationTokens.id))
+      .limit(1);
+    if (hidup && Date.now() - hidup.createdAt.getTime() < JEDA_KIRIM_ULANG_DETIK * 1000) {
+      /*
+       * DITOLAK TANPA MENYENTUH APA PUN — dan urutan ini yang paling mudah
+       * salah. Mematikan kode lama lebih dulu lalu menolak mengirim akan
+       * MENGHANCURKAN kode yang sedang diketik orangnya, dan ia tak menerima
+       * gantinya: satu tekanan tombol mengubah keadaan yang benar jadi jalan
+       * buntu.
+       */
+      return false;
+    }
+    await tx
+      .update(emailVerificationTokens)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(emailVerificationTokens.userId, userId),
+          isNull(emailVerificationTokens.usedAt),
+        ),
+      );
+    const kedaluwarsa = new Date(Date.now() + VERIFIKASI_MENIT * 60 * 1000);
+    /*
+     * Keduanya milik SATU penerbitan, dan seluruh invarian yang sudah dipaku
+     * tetap berlaku apa adanya karena itu: pematian "seluruh baris hidup milik
+     * akun" mematikan keduanya sekaligus (jadi memakai salah satu jalan
+     * mematikan yang lain), penjaga jarak membaca baris hidup TERBARU dan
+     * keduanya seumur, dan penghitung tebakan salah menaikkan `percobaan` pada
+     * seluruh baris hidup — jadi lima tebakan kode yang salah mematikan
+     * tautannya juga. Yang terakhir disebut apa adanya, bukan disembunyikan:
+     * itu satu penerbitan, dan jalan keluarnya tetap "kirim ulang".
+     */
+    await tx.insert(emailVerificationTokens).values([
+      { userId, tokenHash: sidikKode(userId, kode), expiresAt: kedaluwarsa },
+      { userId, tokenHash: hashToken(raw), expiresAt: kedaluwarsa },
+    ]);
+    return true;
+  });
+  if (!dikirim) return undefined;
   try {
     await kirimEmail({
       to: email,
-      subject: "Verifikasi email Terakasir",
-      html: suratVerifikasi(nama, url, raw),
+      subject: "Kode verifikasi Terakasir",
+      html: suratVerifikasi(nama, kode, VERIFIKASI_MENIT, url),
     });
   } catch {
     /* best-effort: jangan gagalkan permintaan bila email error */
   }
   if (!(await emailTerkonfigurasi()) && process.env.NODE_ENV !== "production") {
-    return url;
+    return { kode, url };
   }
   return undefined;
 }
@@ -171,7 +347,7 @@ export const authRoutes = new Hono<AppEnv>()
     // oracle enumerasi (penebak password tetap dapat pesan generik di atas).
     if (!user.isSuperAdmin && !user.emailVerifiedAt) {
       throw new HTTPException(403, {
-        message: "Email belum diverifikasi. Cek email Anda atau minta tautan verifikasi baru.",
+        message: "Email belum diverifikasi. Cek email Anda atau minta kode verifikasi baru.",
       });
     }
     // User tanpa perusahaan TETAP boleh masuk → diarahkan ke onboarding
@@ -201,7 +377,7 @@ export const authRoutes = new Hono<AppEnv>()
   .post("/register", batasRegister, zValidator("json", RegisterSchema), async (c) => {
     const { nama, email, password } = c.req.valid("json");
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
-    let devUrl: string | undefined;
+    let dev: { kode: string; url: string } | undefined;
     if (!existing) {
       const passwordHash = bcrypt.hashSync(password, 10);
       /*
@@ -232,17 +408,22 @@ export const authRoutes = new Hono<AppEnv>()
           if (bentrokUnikPada(e, "users_email_unique")) return null;
           throw e;
         });
-      if (user) devUrl = await kirimTautanVerifikasi(user.id, email, nama, appBaseUrl(c));
+      if (user) dev = await kirimKodeVerifikasi(user.id, email, nama, appBaseUrl(c));
     }
     // Respons NETRAL & IDENTIK untuk email baru maupun yang sudah terdaftar →
-    // menutup total celah enumerasi akun (di produksi dev_verify_url tak pernah
+    // menutup total celah enumerasi akun (di produksi dev_verify_kode tak pernah
     // ada, jadi respons byte-per-byte sama). TIDAK ada auto-login: pengguna wajib
     // klik tautan verifikasi di email dulu (mengaktifkan akun).
     return c.json({
       ok: true,
       message:
-        "Jika email valid, kami telah mengirim tautan verifikasi. Silakan cek email Anda (berlaku 24 jam).",
-      ...(devUrl ? { dev_verify_url: devUrl } : {}),
+        "Jika email valid, kami telah mengirim KODE verifikasi 6 digit. Cek email Anda " +
+        `dan masukkan kodenya (berlaku ${VERIFIKASI_MENIT} menit).`,
+      // Ikut dipulangkan di sini supaya layar kode langsung menampilkan hitung
+      // mundurnya: pendaftaran BARU SAJA mengirim kode, jadi tombol "kirim
+      // ulang" yang tampak siap ditekan akan ditolak diam-diam oleh jaraknya.
+      retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
+      ...(dev ? { dev_verify_kode: dev.kode, dev_verify_url: dev.url } : {}),
     });
   })
   // Lupa password: selalu balas 200 (jangan bocorkan apakah email terdaftar).
@@ -342,30 +523,111 @@ export const authRoutes = new Hono<AppEnv>()
       return c.json({ ok: true });
     },
   )
-  // Verifikasi email dari tautan (?token=...). Sukses → tandai terverifikasi +
-  // langsung beri sesi (auto-login) agar user lanjut ke onboarding tanpa login
-  // manual. Token sekali pakai (hash), berlaku 24 jam.
+  /**
+   * Verifikasi email dengan KODE 6 DIGIT yang diketik di layar tempat orangnya
+   * mendaftar. Sukses → tandai terverifikasi + langsung beri sesi (auto-login).
+   *
+   * KENAPA KODE, BUKAN TAUTAN. Tautan 64-hex yang digantikannya gagal dengan
+   * tiga cara yang semuanya terukur di lapangan:
+   *   · sekali pakai — membuka tautannya untuk KEDUA kali (muat ulang, tombol
+   *     Kembali sesudah pengalihan otomatis, atau pemindai tautan milik penyedia
+   *     email yang memuatnya lebih dulu) menjawab "tidak valid atau sudah
+   *     kedaluwarsa", padahal umurnya masih 24 jam. Pesannya menyalahkan waktu
+   *     untuk keadaan yang sebetulnya "sudah dipakai";
+   *   · URL sepanjang itu dipotong sebagian klien email;
+   *   · tautannya membuka peramban LAIN — daftar di laptop, klik di ponsel, dan
+   *     sesi auto-login-nya mendarat di perangkat yang salah.
+   * Kode diketik di tab yang sedang terbuka, jadi ketiganya hilang sekaligus.
+   *
+   * BALASAN GAGALNYA NETRAL, dan itu disengaja sampai terasa kurang ramah:
+   * "kode salah" dan "email itu tak terdaftar" dijawab kalimat yang SAMA. Rute
+   * `/register` di berkas ini membayar mahal untuk tak bisa dipakai menebak
+   * akun mana yang ada (balasannya identik byte-per-byte); membalas
+   * "sisa 3 percobaan" di sini akan mengembalikan celah itu lewat pintu
+   * belakang. Yang menggantikan keramahan itu tombol "Kirim ulang" di layarnya
+   * — jalan keluarnya tak perlu didiagnosis kalau selalu ada.
+   */
   .post(
     "/verify-email",
     batasVerifikasiCek,
-    zValidator("json", z.object({ token: z.string().min(1) }).strict()),
+    zValidator(
+      "json",
+      z
+        .object({
+          email: z.string().trim().toLowerCase().email().optional(),
+          kode: z.string().trim().regex(/^\d{6}$/, "Kode harus 6 angka").optional(),
+          /**
+           * TRANSISI: tautan 64-hex yang sudah terlanjur ada di kotak masuk
+           * orang saat perubahan ini terpasang. Dibiarkan tetap bekerja sampai
+           * yang terakhir kedaluwarsa sendiri — mencabutnya seketika akan
+           * memutus orang yang sedang berada di tengah pendaftarannya, dan
+           * mereka tak melakukan apa pun yang salah.
+           */
+          token: z.string().min(1).optional(),
+        })
+        .strict()
+        .refine((v) => v.token != null || (v.email != null && v.kode != null), {
+          message: "Email dan kode 6 angka wajib diisi",
+        }),
+    ),
     async (c) => {
-      const { token } = c.req.valid("json");
-      const [row] = await db
-        .select()
-        .from(emailVerificationTokens)
-        .where(
-          and(
-            eq(emailVerificationTokens.tokenHash, hashToken(token)),
-            isNull(emailVerificationTokens.usedAt),
-            gt(emailVerificationTokens.expiresAt, new Date()),
-          ),
-        );
-      if (!row) {
-        throw new HTTPException(400, {
-          message: "Tautan verifikasi tidak valid atau sudah kedaluwarsa",
-        });
+      const { email, kode, token } = c.req.valid("json");
+      const SALAH = "Kode verifikasi salah atau sudah kedaluwarsa — minta kode baru.";
+
+      let row: typeof emailVerificationTokens.$inferSelect | undefined;
+      if (token != null) {
+        [row] = await db
+          .select()
+          .from(emailVerificationTokens)
+          .where(
+            and(
+              eq(emailVerificationTokens.tokenHash, hashToken(token)),
+              isNull(emailVerificationTokens.usedAt),
+              gt(emailVerificationTokens.expiresAt, new Date()),
+            ),
+          );
+      } else {
+        const [calon] = await db.select().from(users).where(eq(users.email, email!));
+        if (calon) {
+          [row] = await db
+            .select()
+            .from(emailVerificationTokens)
+            .where(
+              and(
+                eq(emailVerificationTokens.userId, calon.id),
+                eq(emailVerificationTokens.tokenHash, sidikKode(calon.id, kode!)),
+                isNull(emailVerificationTokens.usedAt),
+                gt(emailVerificationTokens.expiresAt, new Date()),
+              ),
+            );
+          if (!row) {
+            /*
+             * KODE SALAH — jatahnya dipotong, dan barisnya MATI di percobaan
+             * terakhir. Satu pernyataan, sebab dua permintaan yang berpapasan
+             * kalau tidak akan sama-sama membaca `percobaan` yang sama lalu
+             * menuliskan angka yang sama: penebak yang menembak berbarengan
+             * akan mendapat jatah lebih banyak daripada yang mengantre.
+             *
+             * `usedAt` diisi lewat CASE di pernyataan yang sama, jadi tak ada
+             * jendela antara "jatahnya habis" dan "barisnya mati".
+             */
+            await db
+              .update(emailVerificationTokens)
+              .set({
+                percobaan: sql`${emailVerificationTokens.percobaan} + 1`,
+                usedAt: sql`CASE WHEN ${emailVerificationTokens.percobaan} + 1 >= ${MAKS_PERCOBAAN} THEN now() ELSE NULL END`,
+              })
+              .where(
+                and(
+                  eq(emailVerificationTokens.userId, calon.id),
+                  isNull(emailVerificationTokens.usedAt),
+                  gt(emailVerificationTokens.expiresAt, new Date()),
+                ),
+              );
+          }
+        }
       }
+      if (!row) throw new HTTPException(400, { message: SALAH });
       const [user] = await db.select().from(users).where(eq(users.id, row.userId));
       if (!user || user.deletedAt || !user.isActive) {
         throw new HTTPException(400, { message: "Akun tidak aktif" });
@@ -399,7 +661,7 @@ export const authRoutes = new Hono<AppEnv>()
       return c.json(await buatSesi(terverifikasi));
     },
   )
-  // Kirim ulang tautan verifikasi. Selalu balas 200 (jangan bocorkan status
+  // Kirim ulang KODE verifikasi. Selalu balas 200 (jangan bocorkan status
   // email). Benar-benar mengirim hanya bila akun ada, aktif, & BELUM verifikasi.
   .post(
     "/resend-verification",
@@ -408,11 +670,21 @@ export const authRoutes = new Hono<AppEnv>()
     async (c) => {
       const { email } = c.req.valid("json");
       const [user] = await db.select().from(users).where(eq(users.email, email));
-      let devUrl: string | undefined;
+      let dev: { kode: string; url: string } | undefined;
       if (user && !user.deletedAt && user.isActive && !user.emailVerifiedAt) {
-        devUrl = await kirimTautanVerifikasi(user.id, email, user.nama, appBaseUrl(c));
+        dev = await kirimKodeVerifikasi(user.id, email, user.nama, appBaseUrl(c));
       }
-      return c.json({ ok: true, ...(devUrl ? { dev_verify_url: devUrl } : {}) });
+      /*
+       * `retry_after_detik` dipulangkan SELALU dan nilainya TETAP — email yang
+       * terdaftar dan yang tidak menerima angka yang sama persis, jadi tak ada
+       * oracle baru yang dibuka di pintu yang seluruh rute di sekitarnya sudah
+       * susah payah tutup.
+       */
+      return c.json({
+        ok: true,
+        retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
+        ...(dev ? { dev_verify_kode: dev.kode, dev_verify_url: dev.url } : {}),
+      });
     },
   )
   /**

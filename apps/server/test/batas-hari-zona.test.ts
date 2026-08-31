@@ -247,6 +247,21 @@ describe("tak ada jembatan tanggal→instant baru yang lewat UTC", () => {
       potongan: "const naif = Date.parse(`${tanggal}T00:00:00Z`);",
       alasan: "titik awal awalHariDi sendiri — justru ini yang mengoreksinya",
     },
+    {
+      berkas: "lib/waktu-kejadian.ts",
+      potongan: "const t = new Date(`${tanggal}T00:00:00Z`).getTime();",
+      alasan:
+        "kedua sisinya digeser SAMA (tanggal ini vs hari UTC), jadi offsetnya " +
+        "saling menghapus dan yang dipakai cuma SELISIH HARI-nya. Zona " +
+        "perusahaan memang tak bisa diketahui di sini — saringannya berjalan " +
+        "di Zod, sebelum company_id dibaca — dan itulah sebabnya batasnya " +
+        "diberi slack satu hari, ditulis di kodenya",
+    },
+    {
+      berkas: "lib/waktu-kejadian.ts",
+      potongan: "const h = new Date(`${hariUtc(sekarang)}T00:00:00Z`).getTime();",
+      alasan: "pasangan baris di atas — sisi pembanding dari selisih yang sama",
+    },
   ];
 
   function semuaTs(dir: string): string[] {

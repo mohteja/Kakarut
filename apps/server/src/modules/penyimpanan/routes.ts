@@ -18,6 +18,7 @@ import {
 } from "../../db/schema";
 import {
   branchUntukTulis,
+  syaratCabang,
   pastikanCabang,
   requireRole,
   resolveBranchId,
@@ -349,6 +350,8 @@ export const penyimpananRoutes = new Hono<AppEnv>()
         and(
           eq(storageLocations.id, locId),
           eq(storageLocations.companyId, auth.company_id!),
+          // Rak milik satu cabang — 404 untuk peran terikat cabang lain.
+          syaratCabang(c, storageLocations.branchId),
         ),
       );
     if (!loc)

@@ -36,6 +36,13 @@ function toDto(row: typeof suppliers.$inferSelect): SupplierDto {
   };
 }
 
+/**
+ * Transaksi pembelian yang dikirim di kartu supplier. Sama dengan
+ * `BATAS_TRANSAKSI_MEMBER` di sisi member — dua kartu yang memotong di angka
+ * berbeda hanya membingungkan orang yang membandingkannya.
+ */
+const BATAS_TRANSAKSI_SUPPLIER = 500;
+
 export const supplierRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -127,7 +134,8 @@ export const supplierRoutes = new Hono<AppEnv>()
       .leftJoin(branches, eq(productions.branchId, branches.id))
       .where(condsTransaksi)
       .orderBy(desc(productions.waktu), desc(productions.id))
-      .limit(500);
+      // `+ 1`: pembeda "tepat 500" dari "lebih dari 500".
+      .limit(BATAS_TRANSAKSI_SUPPLIER + 1);
     const [ringkas] = await db
       .select({
         total_belanja: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)::float8`,
@@ -155,11 +163,19 @@ export const supplierRoutes = new Hono<AppEnv>()
         ),
       )
       .orderBy(desc(ingredientSuppliers.isUtama), asc(ingredients.nama));
+    // Separuh aturannya sudah benar sejak awal: `ringkas` dihitung di SQL
+    // TANPA batas, jadi "Total belanja" tak ikut mengecil saat daftarnya
+    // dipotong. Separuh keduanya baru dipasang di sini — mengatakannya.
+    const terpotong = rows.length > BATAS_TRANSAKSI_SUPPLIER;
     const kartu: SupplierKartu = {
       supplier: toDto(sup),
       total_belanja: Number(ringkas?.total_belanja ?? 0),
       jumlah_transaksi: ringkas?.jumlah_transaksi ?? 0,
-      rows: rows.map((r) => ({ ...r, waktu: r.waktu.toISOString() })),
+      rows: (terpotong ? rows.slice(0, BATAS_TRANSAKSI_SUPPLIER) : rows).map((r) => ({
+        ...r,
+        waktu: r.waktu.toISOString(),
+      })),
+      rows_terpotong: terpotong,
       bahan,
     };
     return c.json(kartu);

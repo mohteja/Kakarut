@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { btnPrimary, inputClass } from "../components/ui";
+import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 
@@ -15,7 +15,7 @@ export function LoginPage() {
   // Bila login gagal karena email belum diverifikasi → tawarkan kirim ulang.
   const [belumVerif, setBelumVerif] = useState(false);
   const [verifKirim, setVerifKirim] = useState<"idle" | "loading" | "sent">("idle");
-  const [verifDevUrl, setVerifDevUrl] = useState<string | null>(null);
+  const [verifDevKode, setVerifDevUrl] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -39,7 +39,7 @@ export function LoginPage() {
     setVerifKirim("loading");
     try {
       const res = await kirimUlangVerifikasi(email);
-      setVerifDevUrl(res.dev_verify_url ?? null);
+      setVerifDevUrl(res.dev_verify_kode ?? null);
       setVerifKirim("sent");
     } catch {
       setVerifKirim("idle");
@@ -94,13 +94,12 @@ export function LoginPage() {
             <label htmlFor="password" className="mb-1 block text-sm font-medium text-stone-700">
               Password
             </label>
-            <input
+            <InputPassword
               id="password"
-              type="password"
               required
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
               placeholder="••••••••"
             />
           </div>
@@ -109,22 +108,37 @@ export function LoginPage() {
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {verifKirim === "sent" ? (
                 <>
-                  <div>Tautan verifikasi baru sudah dikirim (bila email valid). Cek email Anda.</div>
-                  {verifDevUrl && (
-                    <a href={verifDevUrl} className="mt-1 block break-all font-mono underline">
-                      {verifDevUrl}
-                    </a>
+                  <div>Kode verifikasi baru sudah dikirim (bila email valid). Cek email Anda.</div>
+                  {verifDevKode && (
+                    <div className="mt-1 font-mono text-base tracking-widest">{verifDevKode}</div>
                   )}
+                  <Link
+                    to={`/verifikasi-email?email=${encodeURIComponent(email)}`}
+                    className="mt-1 block font-semibold underline"
+                  >
+                    Masukkan kodenya →
+                  </Link>
                 </>
               ) : (
-                <button
-                  type="button"
-                  onClick={kirimUlang}
-                  disabled={verifKirim === "loading" || !email}
-                  className="font-semibold underline disabled:opacity-60"
-                >
-                  {verifKirim === "loading" ? "Mengirim…" : "Kirim ulang tautan verifikasi"}
-                </button>
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={kirimUlang}
+                    disabled={verifKirim === "loading" || !email}
+                    className="font-semibold underline disabled:opacity-60"
+                  >
+                    {verifKirim === "loading" ? "Mengirim…" : "Kirim ulang kode verifikasi"}
+                  </button>
+                  {/* Kodenya mungkin MASIH BERLAKU (60 menit) — orang yang
+                      emailnya sudah masuk tak perlu memicu kiriman baru cuma
+                      untuk sampai ke layar isiannya. */}
+                  <Link
+                    to={`/verifikasi-email?email=${encodeURIComponent(email)}`}
+                    className="block underline"
+                  >
+                    Sudah punya kodenya? Masukkan di sini →
+                  </Link>
+                </div>
               )}
             </div>
           )}

@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { zTanggal } from "../../lib/tanggal-query";
 import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -155,7 +156,7 @@ async function riwayat(kolom: "sale" | "bill", id: string): Promise<PesananLogRo
     .from(pesananLogs)
     .leftJoin(users, eq(pesananLogs.userId, users.id))
     .where(kolom === "sale" ? eq(pesananLogs.saleId, id) : eq(pesananLogs.openBillId, id))
-    .orderBy(desc(pesananLogs.waktu))
+    .orderBy(desc(pesananLogs.waktu), desc(pesananLogs.id))
     .limit(200);
   return rows.map((r) => ({
     waktu: r.waktu.toISOString(),
@@ -339,7 +340,14 @@ export const pesananRoutes = new Hono<AppEnv>()
       "query",
       z.object({
         branch_id: z.string().uuid().optional(),
-        tanggal: z.string().optional(),
+        /*
+         * SARINGAN papan, bukan nilai yang disimpan — jadi yang dituntut
+         * BENTUKNYA, bukan posisi waktunya (melihat papan kemarin itu wajar).
+         * Sebelumnya `z.string()` telanjang, dan terukur:
+         * `GET /pesanan?tanggal=bukan-tanggal` → **500 "Terjadi kesalahan pada
+         * server"**. String tak tervalidasi sampai ke jalur tanggal.
+         */
+        tanggal: zTanggal.optional(),
         status: z.enum(["dikerjakan", "selesai", "batal"]).optional(),
       }),
     ),

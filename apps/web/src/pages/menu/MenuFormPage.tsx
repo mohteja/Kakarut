@@ -22,6 +22,7 @@ import {
   Modal,
   PageTitle,
   Spinner,
+  SpinnerAtauGalat,
   btnPrimary,
   btnSecondary,
   inputClass,
@@ -49,11 +50,11 @@ export function MenuFormPage() {
   const { isPro } = useCompanyMode();
   const { cabang } = useBranch();
 
-  const { data: bahan } = useQuery({
+  const { data: bahan, error: bahanGagal } = useQuery({
     queryKey: ["bahan", "ringkas"],
     queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
-  const { data: kategori } = useQuery({
+  const { data: kategori, error: kategoriGagal } = useQuery({
     queryKey: ["kategori"],
     queryFn: () => api<Kategori[]>("/kategori"),
   });
@@ -62,7 +63,7 @@ export function MenuFormPage() {
     queryFn: () => api<MenuDto[]>("/menu"),
   });
   // Muat via /menu/:id (bukan daftar aktif) agar menu nonaktif tetap bisa diedit
-  const { data: menuEdit } = useQuery({
+  const { data: menuEdit, error: menuEditGagal } = useQuery({
     queryKey: ["menu", id],
     queryFn: () => api<MenuDto>(`/menu/${id}`),
     enabled: Boolean(id),
@@ -286,6 +287,15 @@ export function MenuFormPage() {
     },
   });
 
+  /*
+   * Syarat ini berkurung, dan justru itu yang membuatnya tak terlihat: regex
+   * gerbang `spinner-abadi` memakai `[^)]*`, yang tak bisa melewati kurung
+   * dalam — barisnya tak pernah COCOK, bukan diloloskan beralasan. Ketiga
+   * bacaannya tak membaca galatnya, jadi mode sunting berputar selamanya
+   * begitu salah satunya gagal.
+   */
+  const gagalMuat = bahanGagal ?? kategoriGagal ?? menuEditGagal;
+  if (gagalMuat) return <SpinnerAtauGalat error={gagalMuat} apa="Data menu" />;
   if (!bahan || !kategori || (id && !menuEdit)) return <Spinner />;
 
   return (

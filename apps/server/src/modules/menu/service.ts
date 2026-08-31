@@ -15,6 +15,7 @@ import {
 } from "@kakarut/shared";
 import { db, type Db, type Tx } from "../../db/client";
 import { ingredients, menuBranches, menuCategories, menuComponents, menus } from "../../db/schema";
+import { kunciBackfillKode } from "../../lib/kunci";
 import { hitungSaldoCabang } from "../stok/service";
 
 type MenuRow = typeof menus.$inferSelect;
@@ -313,9 +314,19 @@ type BackfillRow = { id: string; companyId: string; nama: string; kode: string |
 /**
  * Isi kode untuk menu lama yang belum punya (dipanggil saat boot & seed).
  * Idempotent: hanya menyentuh baris kode NULL. Kode digenerate dari nama &
- * dijamin unik per perusahaan.
+ * unik per perusahaan.
+ *
+ * Bentuk yang sama persis dengan `backfillKodeBahan`, termasuk kelemahannya:
+ * keunikannya dijamin Set di dalam SATU proses, dan `menus.kode` tak punya
+ * indeks unik. Dijalankan dalam transaksi + advisory lock — lihat
+ * `lib/kunci.ts` untuk angka yang mengukurnya.
  */
 export async function backfillKodeMenu(dbx: Db | Tx): Promise<number> {
+  return dbx.transaction(async (tx) => backfillKodeMenuTx(tx));
+}
+
+async function backfillKodeMenuTx(dbx: Tx): Promise<number> {
+  await kunciBackfillKode(dbx, "menu");
   const rows: BackfillRow[] = await dbx
     .select({ id: menus.id, companyId: menus.companyId, nama: menus.nama, kode: menus.kode })
     .from(menus)

@@ -6,6 +6,7 @@
 import { asc, eq } from "drizzle-orm";
 import type { Db, Tx } from "../../db/client";
 import { ingredients } from "../../db/schema";
+import { kunciBackfillKode } from "../../lib/kunci";
 import { kodeDariNama, kodeUnik } from "../menu/service";
 
 /** Himpunan kode terpakai (uppercase) di sebuah perusahaan, kecuali `selfId`. */
@@ -65,9 +66,23 @@ type BackfillRow = { id: string; companyId: string; nama: string; kode: string |
 /**
  * Isi kode untuk bahan lama yang belum punya (dipanggil saat boot & seed).
  * Idempotent: hanya menyentuh baris kode NULL. Kode digenerate dari nama &
- * dijamin unik per perusahaan.
+ * unik per perusahaan.
+ *
+ * "Unik" itu dijamin oleh `dipakai`, sebuah Set yang hidup di dalam SATU
+ * proses — dan `ingredients.kode` TIDAK punya indeks unik yang menangkapnya
+ * kalau jaminan itu meleset. Dua instance yang boot bersamaan sama-sama
+ * membaca "kode NULL", sama-sama menurunkan kode yang sama dari nama yang
+ * sama, lalu sama-sama menulis. TERUKUR: 232 bahan, dua backfill serentak →
+ * **2 kode ganda**. Karena itu seluruhnya dijalankan dalam transaksi +
+ * advisory lock, persis seperti `backfillEmployeeCode` yang sudah lebih dulu
+ * begitu (dan yang komentarnya sudah menuliskan sebabnya).
  */
 export async function backfillKodeBahan(dbx: Db | Tx): Promise<number> {
+  return dbx.transaction(async (tx) => backfillKodeBahanTx(tx));
+}
+
+async function backfillKodeBahanTx(dbx: Tx): Promise<number> {
+  await kunciBackfillKode(dbx, "bahan");
   const rows: BackfillRow[] = await dbx
     .select({
       id: ingredients.id,

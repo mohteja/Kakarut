@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { halamanQuery } from "../../lib/halaman-query";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -187,7 +188,10 @@ export const transferRoutes = new Hono<AppEnv>()
   /** Daftar faktur transfer (terbaru dulu) — dikelompokkan per faktur. */
   .get("/", async (c) => {
     const auth = c.get("auth");
-    const perPage = Math.min(200, Math.max(1, Number(c.req.query("per_page") ?? "50") || 50));
+    // `page` sengaja tak dipakai: pintu ini menerima `per_page` tapi TIDAK
+    // berhalaman — ia daftar ber-langit-langit. Karena itu yang benar di sini
+    // penanda pemotongan (idiom putaran 23), bukan nomor halaman.
+    const { perPage } = halamanQuery(c, { bawaan: 50, maks: 200 });
     // Peran terkunci cabang hanya melihat transfer yang menyangkut cabangnya
     // (sebagai pengirim ATAU penerima); manajemen melihat semuanya.
     const kunci =
@@ -216,10 +220,14 @@ export const transferRoutes = new Hono<AppEnv>()
       )
       .where(kondisi)
       .groupBy(productions.fakturId)
-      .orderBy(desc(sql`MAX(${productions.waktu})`))
-      .limit(perPage);
-    const fakturIds = fakturTerbaru.map((f) => f.faktur_id).filter((id): id is string => !!id);
-    if (fakturIds.length === 0) return c.json({ rows: [] });
+      .orderBy(desc(sql`MAX(${productions.waktu})`), productions.fakturId)
+      // `+ 1`: pembeda "tepat sejumlah batas" dari "lebih dari batas".
+      .limit(perPage + 1);
+    const terpotong = fakturTerbaru.length > perPage;
+    const fakturIds = (terpotong ? fakturTerbaru.slice(0, perPage) : fakturTerbaru)
+      .map((f) => f.faktur_id)
+      .filter((id): id is string => !!id);
+    if (fakturIds.length === 0) return c.json({ rows: [], rows_terpotong: false });
     const rows = await db
       .select({
         id: productions.id,
@@ -304,7 +312,7 @@ export const transferRoutes = new Hono<AppEnv>()
     }
     const daftar = [...byFaktur.values()];
     for (const f of daftar) f.status = statusFaktur(f.items);
-    return c.json({ rows: daftar });
+    return c.json({ rows: daftar, rows_terpotong: terpotong });
   })
   /** Buat faktur transfer + langsung KIRIM (menunggu diterima di tujuan). */
   .post("/", zValidator("json", TransferBody), async (c) => {

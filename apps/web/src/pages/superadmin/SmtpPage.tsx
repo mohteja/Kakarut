@@ -7,6 +7,7 @@ import {
   PageTitle,
   Spinner,
   SpinnerAtauGalat,
+  InputPassword,
   btnPrimary,
   btnSecondary,
   inputClass,
@@ -169,13 +170,11 @@ export function SmtpPage() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Password</label>
-              <input
-                type="password"
+              <InputPassword
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 placeholder={data.has_password ? "•••••••• (tersimpan)" : "App Password"}
                 autoComplete="new-password"
-                className={inputClass}
               />
             </div>
           </div>

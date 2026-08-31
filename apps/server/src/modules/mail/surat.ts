@@ -37,13 +37,40 @@ function blokKodeEmail(raw: string): string {
   );
 }
 
-/** Badan surat verifikasi email pendaftaran. */
-export function suratVerifikasi(nama: string, url: string, raw: string): string {
+/**
+ * Badan surat verifikasi email pendaftaran — KODE 6 DIGIT dulu, tautan sesudahnya.
+ *
+ * Kodenya dicetak besar dan berjarak antarangka: yang dilakukan orang dengan
+ * email ini adalah MEMBACANYA lalu mengetiknya di layar sebelah, dan digit
+ * yang berdempetan adalah digit yang salah ketik.
+ *
+ * URUTANNYA BUKAN SELERA. Tautan ditaruh DI BAWAH kode, dan lebih kecil, sebab
+ * tautan adalah jalan yang paling rapuh dari keduanya: ia sekali pakai, bisa
+ * dipotong klien email, bisa dibuka lebih dulu oleh pemindai tautan penyedia
+ * email (sehingga mati sebelum orangnya sempat), dan bisa membuka peramban
+ * LAIN sehingga sesi auto-login mendarat di perangkat yang salah. Menaruhnya
+ * di atas mengundang orang memakai jalan yang paling sering gagal.
+ *
+ * Ia tetap ada karena aplikasi PONSEL menangkapnya sebagai deep link —
+ * `docs/API-CONTRACT.md` menuliskan alur itu, dan mencabutnya berarti
+ * mematikan pendaftaran dari ponsel.
+ */
+export function suratVerifikasi(
+  nama: string,
+  kode: string,
+  menit: number,
+  url: string,
+): string {
   return (
     `<p>Halo ${lolosHtml(nama)},</p>` +
-    `<p>Terima kasih sudah mendaftar Terakasir. Klik tautan di bawah untuk memverifikasi email &amp; mengaktifkan akun (berlaku 24 jam):</p>` +
-    `<p><a href="${lolosAtribut(url)}">Verifikasi email saya</a></p>` +
-    blokKodeEmail(raw) +
+    `<p>Terima kasih sudah mendaftar Terakasir. Masukkan kode ini di halaman verifikasi untuk mengaktifkan akun (berlaku ${lolosHtml(String(menit))} menit):</p>` +
+    `<p style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:32px;` +
+    `font-weight:700;letter-spacing:8px;background:#f4f4f5;color:#111;` +
+    `padding:16px 18px;border-radius:8px;border:1px solid #e4e4e7;` +
+    `text-align:center">${lolosHtml(kode)}</p>` +
+    `<p>Jangan berikan kode ini kepada siapa pun. Kami tidak pernah memintanya lewat telepon atau chat.</p>` +
+    `<p style="font-size:13px;color:#71717a">Membuka email ini dari aplikasi Terakasir di ponsel? ` +
+    `<a href="${lolosAtribut(url)}">Verifikasi lewat tautan</a> — sekali pakai.</p>` +
     `<p>Abaikan email ini bila Anda tidak mendaftar.</p>`
   );
 }

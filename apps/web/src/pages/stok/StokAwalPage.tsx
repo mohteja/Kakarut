@@ -33,7 +33,7 @@ export function StokAwalPage() {
     queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
   });
   // Nilai stok awal tersimpan (untuk mengisi ulang / edit) + tanggal terkunci.
-  const { data: tersimpan } = useQuery({
+  const { data: tersimpan, error: tersimpanGagal } = useQuery({
     queryKey: ["stok-awal", branchQuery],
     queryFn: () => api<StokAwalTersimpan>(`/stok/awal${branchQuery}`),
   });
@@ -162,6 +162,32 @@ export function StokAwalPage() {
         </div>
       </header>
 
+      {/*
+        * BACAAN YANG GAGAL TAK BOLEH MENYAMAR JADI "BELUM ADA".
+        *
+        * Nilai tersimpan mengisi formulir ini lewat efek. Bila bacaannya gagal
+        * efeknya tak pernah jalan, `awal` tetap `{}`, dan layar menyajikan
+        * formulir KOSONG — tak terbedakan dari "belum pernah diisi". Yang
+        * terjadi berikutnya bukan kebingungan melainkan PEKERJAAN: orang
+        * mengetik ulang saldo yang sudah ada, dan `POST /stok/awal` MENGGANTI
+        * baris lama bahan-bahan itu beserta tanggalnya.
+        *
+        * Terukur di peramban (2026-08-27): dengan 90 baris saldo pembuka
+        * tersimpan di basis data dan `GET /stok/awal` dibalas 500 — 0 input
+        * terisi, TAK SATU PUN kalimat kegagalan di layar, dan tombol
+        * simpannya tetap ada.
+        *
+        * Menahan simpan di sini adalah perbaikannya, bukan kelonggaran:
+        * menyimpan DI ATAS bacaan yang gagal persis kerusakan yang dicegah.
+        */}
+      {tersimpanGagal && (
+        <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <b>Saldo pembuka tersimpan gagal dimuat.</b> Form ini{" "}
+          <b>bukan berarti kosong</b> — nilai yang sudah ada tak terbaca, jadi menyimpan
+          sekarang bisa menggantinya. Muat ulang halaman ini dulu.
+        </div>
+      )}
+
       <div className="border-b border-stone-200 bg-blue-50 px-4 py-2 text-xs text-blue-800">
         <b>Saldo pembuka</b>: stok yang sudah ada sebelum memakai aplikasi. Nilai yang diisi{" "}
         <b>menjadi saldo</b> bahan pada <b>tanggal di bawah</b> (bukan ditambah). Ini{" "}
@@ -233,7 +259,7 @@ export function StokAwalPage() {
         )}
         <button
           onClick={() => setKonfirmasi(true)}
-          disabled={terisi === 0 || salahKetik.length > 0}
+          disabled={terisi === 0 || salahKetik.length > 0 || Boolean(tersimpanGagal)}
           className={`${btnPrimary} w-full py-3 text-base`}
         >
           Simpan Stok Awal ({terisi} bahan)

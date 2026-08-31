@@ -151,14 +151,20 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 > Bentuk sesi (dipakai login/verify-email/onboarding): `{ token, user: AuthUser, company: {…} | null, branch: {id,nama} | null }`. **`company` bisa `null`** untuk user yang belum punya perusahaan (dan super-admin) — klien harus menangani: `company == null && !is_super_admin` → arahkan ke **onboarding** (buat perusahaan / terima undangan).
 >
-> **PENTING — `register` TIDAK lagi mengembalikan sesi.** Alur daftar sekarang: `register` (email verifikasi dikirim) → user klik tautan di email → `verify-email` (baru di sini sesi diterbitkan). Lihat detail di bawah.
+> **PENTING — `register` TIDAK lagi mengembalikan sesi.** Alur daftar sekarang: `register` (email verifikasi dikirim) → user **memasukkan kode 6 angka** ATAU membuka tautan di email → `verify-email` (baru di sini sesi diterbitkan). Kode dan tautan berasal dari **satu penerbitan**; memakai salah satunya mematikan yang lain. Lihat detail di bawah.
 >
-> **PRASYARAT PRODUKSI — SMTP wajib aktif.** `register`, `verify-email`, `resend-verification`, `forgot-password`, dan undangan karyawan semuanya bergantung pada email **benar-benar terkirim**. Field bantuan `dev_verify_url` / `dev_reset_url` **hanya** muncul saat email server BELUM dikonfigurasi **dan** `NODE_ENV !== "production"` — di produksi tidak pernah dibocorkan. Tanpa SMTP aktif di produksi, alur daftar/verifikasi/reset **mati total** (server tetap balas `200` netral demi anti-enumerasi, tapi tak ada email masuk). Super-admin WAJIB mengatur SMTP di panel sistem + memastikan tes kirim berhasil sebelum go-live.
+> **PRASYARAT PRODUKSI — SMTP wajib aktif.** `register`, `verify-email`, `resend-verification`, `forgot-password`, dan undangan karyawan semuanya bergantung pada email **benar-benar terkirim**. Field bantuan `dev_verify_kode` / `dev_verify_url` / `dev_reset_url` **hanya** muncul saat email server BELUM dikonfigurasi **dan** `NODE_ENV !== "production"` — di produksi tidak pernah dibocorkan. Tanpa SMTP aktif di produksi, alur daftar/verifikasi/reset **mati total** (server tetap balas `200` netral demi anti-enumerasi, tapi tak ada email masuk). Super-admin WAJIB mengatur SMTP di panel sistem + memastikan tes kirim berhasil sebelum go-live.
 
 - `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: sesi (`company` bisa null bila user belum punya perusahaan) — error: **401** email/password salah **atau akun dihapus/nonaktif**; **403** `{ error: "Email belum diverifikasi. …" }` bila email **belum diverifikasi** (dicek SETELAH password benar; super-admin dikecualikan). Klien: tangani `403` → tampilkan layar "verifikasi email" dengan tombol **kirim ulang** (panggil `/resend-verification`). **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — user tanpa perusahaan login sukses dgn `company: null`; 403 di login kini KHUSUS email belum terverifikasi.)**
-- `POST /api/auth/register` — [public] — req: `{ nama, email (email valid, lowercase), password (min 8) }` — res: **200** `{ ok: true, message, dev_verify_url? }` — **TANPA sesi** (tidak auto-login). Respons **selalu netral** (anti-enumerasi akun): baik email baru maupun email yang sudah terdaftar mengembalikan `200` yang sama — **tak ada lagi `409`**. Untuk email baru, tautan verifikasi dikirim via email. `dev_verify_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi. — error: **400** validasi. Setelah ini, arahkan user ke layar "cek email Anda".
-- `POST /api/auth/verify-email` — [public] — req: `{ token }` — res: **sesi** `{ token, user, company, branch }` (auto-login begitu email terverifikasi) — error: **400** token tidak valid/kedaluwarsa/terpakai **atau** akun nonaktif. Token berasal dari tautan email `APP_BASE_URL/verifikasi-email?token=…`. **Untuk klien yang tempel-manual (mobile tanpa deep link):** email verifikasi juga menampilkan **kode yang mudah disalin** — nilainya **identik** dengan parameter `token` pada URL tautan itu. Jadi baik hasil deep-link maupun kode yang ditempel user dikirim sebagai `{ token }` yang sama. Simpan sesi yang dikembalikan seperti hasil login.
-- `POST /api/auth/resend-verification` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_verify_url? }` — SELALU 200 (netral; tak bocorkan status email). Benar-benar mengirim tautan hanya bila akun ADA, aktif, & BELUM terverifikasi. Dibatasi rate limit (429 + `Retry-After`).
+- `POST /api/auth/register` — [public] — req: `{ nama, email (email valid, lowercase), password (min 8) }` — res: **200** `{ ok: true, message, retry_after_detik, dev_verify_kode?, dev_verify_url? }` — **TANPA sesi** (tidak auto-login). Respons **selalu netral** (anti-enumerasi akun): baik email baru maupun email yang sudah terdaftar mengembalikan `200` yang sama — **tak ada lagi `409`**. Untuk email baru, email berisi **KODE 6 ANGKA** (jalan utama) **dan** tautan verifikasi (untuk deep link mobile) — keduanya dari **satu penerbitan**: memakai salah satunya mematikan yang lain. `retry_after_detik` (tetap `120`) = jarak minimum sebelum kode berikutnya boleh diminta; nilainya SAMA untuk email terdaftar maupun tidak, jadi ia tak membocorkan apa pun — pakai untuk hitung mundur tombol "kirim ulang". `dev_verify_kode`/`dev_verify_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi. — error: **400** validasi. Setelah ini, arahkan user ke layar "masukkan kode".
+- `POST /api/auth/verify-email` — [public] — req: **`{ email, kode }` ATAU `{ token }`** — res: **sesi** `{ token, user, company, branch }` (auto-login begitu email terverifikasi) — error: **400** kode/token salah, kedaluwarsa, atau terpakai **atau** akun nonaktif.
+  - **`{ email, kode }`** — `kode` = **6 angka** dari email. Dipakai web, dan bisa dipakai mobile bila lebih suka layar isian daripada deep link.
+  - **`{ token }`** — 64 hex dari tautan `APP_BASE_URL/verifikasi-email?token=…`. **Jalur deep link mobile, tidak berubah.**
+  - ⚠️ **BERUBAH:** kalimat lama *"kode yang mudah disalin nilainya identik dengan parameter `token`"* **sudah tidak berlaku**. Kode dan token kini dua rahasia BERBEDA dari satu penerbitan — menempel kode 6 angka ke medan `{ token }` akan **ditolak 400**. Kirim kode sebagai `{ email, kode }`.
+  - **Balasan gagalnya NETRAL dan sengaja tak bisa didiagnosis:** "kode salah" dan "email tak terdaftar" dijawab kalimat yang sama, supaya rute ini tak jadi alat menebak akun mana yang ada. Klien **tidak boleh** menyimpulkan apa pun dari teksnya — sediakan tombol **kirim ulang** sebagai jalan keluarnya.
+  - **Jatah tebakan: 5.** Kode mati **permanen** sesudah lima tebakan salah (bukan tertahan batas laju yang pulih sendiri); sesudah itu satu-satunya jalan adalah kirim ulang, dan kirim ulang **langsung boleh** (kode yang sudah mati tak menahan jaraknya).
+  - **Umur kode: 60 menit.** Simpan sesi yang dikembalikan seperti hasil login.
+- `POST /api/auth/resend-verification` — [public] — req: `{ email }` — res: **200** `{ ok: true, retry_after_detik, dev_verify_kode?, dev_verify_url? }` — SELALU 200 (netral; tak bocorkan status email). Benar-benar mengirim hanya bila akun ADA, aktif, & BELUM terverifikasi **dan** kode hidup terakhirnya sudah lebih tua dari `retry_after_detik` (**120 dtk**). **JARAK 2 MENIT itu dijaga server, bukan cuma tampilan** — tekanan yang terlalu cepat dibalas `200` yang sama tetapi **tidak** mengirim apa pun, dan **tidak** merusak kode yang sedang dipegang user (kode lamanya tetap berlaku). Klien: pakai `retry_after_detik` untuk hitung mundur, dan **simpan tenggatnya** supaya muat-ulang layar tak membuat tombolnya tampak siap padahal server akan menolak. Dibatasi rate limit juga (429 + `Retry-After`).
 - `POST /api/auth/forgot-password` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_reset_url? }` — SELALU 200 (tak bocorkan apakah email ada). Bila akun aktif: token reset dibuat + tautan dikirim via email. `dev_reset_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi.
 - `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` (tanpa sesi — pengguna login ulang dengan password baru) — error: **400** token tidak valid/kedaluwarsa/terpakai. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB); email reset juga menampilkan **kode yang mudah disalin** (identik dengan parameter `token`) untuk klien tempel-manual. **Efek samping:** menaikkan token_version user → semua token lama user itu jadi **401** (lihat bagian Autentikasi).
 - `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null, branch: {id,nama} | null }` — error: **401**
@@ -1501,12 +1507,18 @@ Laporan:
 - **Definisi DTO lengkap** ada di **Lampiran A** (isi utuh
   `packages/shared/src/types.ts`) dan konstanta (`UserRole`, `PANDUAN_MARKUP`,
   enum) di `packages/shared/src/constants.ts`.
-- **Alur daftar mobile disarankan:** `POST /api/auth/register` (balas `200`
-  netral, **tanpa sesi**) → tampilkan layar "cek email Anda" → user buka tautan
-  email (`APP_BASE_URL/verifikasi-email?token=…`, tangkap via **deep link**) →
-  `POST /api/auth/verify-email` `{ token }` → **simpan sesi** yang dikembalikan
-  (sama seperti hasil login). Sediakan tombol **Kirim ulang** →
-  `POST /api/auth/resend-verification` `{ email }`.
+- **Alur daftar mobile — TIDAK BERUBAH, dan itu disengaja:** `POST /api/auth/register`
+  (balas `200` netral, **tanpa sesi**) → tampilkan layar "cek email Anda" → user
+  buka tautan email (`APP_BASE_URL/verifikasi-email?token=…`, tangkap via
+  **deep link**) → `POST /api/auth/verify-email` `{ token }` → **simpan sesi**
+  yang dikembalikan. Sediakan tombol **Kirim ulang** →
+  `POST /api/auth/resend-verification` `{ email }`, dan **hormati
+  `retry_after_detik`** (120 dtk) pada tombol itu.
+- **Alternatif yang kini tersedia (opsional untuk mobile):** layar isian **kode
+  6 angka** → `POST /api/auth/verify-email` `{ email, kode }`. Berguna bila deep
+  link tak bisa diandalkan (tautan dipotong klien email, atau dibuka lebih dulu
+  oleh pemindai tautan penyedia email sehingga mati sebelum user menekannya).
+  **Jangan** mengirim kode 6 angka lewat medan `{ token }` — ditolak 400.
 - **Alur login mobile disarankan:** `POST /api/auth/login` → **`403`** = email
   belum diverifikasi (tampilkan layar verifikasi + tombol kirim ulang); sukses →
   simpan `token` di secure storage → set header `Authorization: Bearer <token>`
@@ -2623,7 +2635,20 @@ export interface SupplierKartu {
   total_belanja: number;
   /** jumlah faktur pembelian yang menyebut supplier ini */
   jumlah_transaksi: number;
+  /** maksimal 500 baris, TERBARU dulu — selebihnya `rows_terpotong` */
   rows: SupplierKartuRow[];
+  /**
+   * `rows` dipotong; masih ada transaksi yang lebih lama.
+   *
+   * Kembar `CustomerDetail.transaksi_terpotong`, dan alasannya sama. Kartu ini
+   * sudah melakukan separuh aturannya dengan benar — `total_belanja` &
+   * `jumlah_transaksi` dihitung di SQL TANPA batas, jadi angkanya tidak ikut
+   * mengecil saat daftarnya dipotong. Yang kurang separuh keduanya: yang
+   * membaca daftar sepanjang 500 tak punya cara tahu bahwa transaksi ke-501
+   * ada, dan halaman kartu supplier menyaring di peramban — jadi baris yang
+   * tak terkirim tak pernah ada baginya.
+   */
+  rows_terpotong: boolean;
   bahan: { ingredient_id: string; nama: string; is_utama: boolean }[];
 }
 

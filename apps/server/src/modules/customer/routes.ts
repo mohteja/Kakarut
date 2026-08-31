@@ -10,6 +10,7 @@ import type {
   MemberCariRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
+import { KOLOM_CUSTOMER } from "../../db/kolom-publik";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import { branches, customers, sales } from "../../db/schema";
 import type { AppEnv } from "../../middleware/auth";
@@ -33,7 +34,7 @@ export const memberCariRoutes = new Hono<AppEnv>().get("/", async (c) => {
     .select({ id: customers.id, nama: customers.nama, wa: customers.wa })
     .from(customers)
     .where(filter)
-    .orderBy(desc(customers.updatedAt))
+    .orderBy(desc(customers.updatedAt), desc(customers.id))
     .limit(8);
   return c.json(rows satisfies MemberCariRow[]);
 });
@@ -98,7 +99,7 @@ export const customerRoutes = new Hono<AppEnv>()
         .leftJoin(sales, and(eq(sales.customerId, customers.id), isNull(sales.deletedAt)))
         .where(filter)
         .groupBy(customers.id)
-        .orderBy(sql`MAX(${sales.waktu}) DESC NULLS LAST`)
+        .orderBy(sql`MAX(${sales.waktu}) DESC NULLS LAST`, customers.id)
         .limit(BATAS_MEMBER + 1),
       // Hitungan sebenarnya, TANPA batas — judul halaman menyebut "Member (N)"
       // dan N itu harus jumlah member yang cocok, bukan jumlah yang terkirim.
@@ -149,7 +150,7 @@ export const customerRoutes = new Hono<AppEnv>()
         .from(sales)
         .leftJoin(branches, eq(sales.branchId, branches.id))
         .where(milikMember)
-        .orderBy(desc(sales.waktu))
+        .orderBy(desc(sales.waktu), desc(sales.id))
         .limit(BATAS_TRANSAKSI_MEMBER + 1),
     ]);
     const iso = (d: Date | string) => (d instanceof Date ? d.toISOString() : String(d));
@@ -197,7 +198,7 @@ export const customerRoutes = new Hono<AppEnv>()
         catatan: body.catatan ?? null,
       })
       .onConflictDoNothing()
-      .returning();
+      .returning(KOLOM_CUSTOMER);
     if (!row) throw new HTTPException(409, { message: `Member dengan WA ${wa} sudah terdaftar` });
     return c.json(row, 201);
   })
@@ -232,7 +233,7 @@ export const customerRoutes = new Hono<AppEnv>()
           updatedAt: new Date(),
         })
         .where(and(eq(customers.id, id), eq(customers.companyId, auth.company_id!)))
-        .returning(),
+        .returning(KOLOM_CUSTOMER),
     );
     if (!row) throw new HTTPException(404, { message: "Member tidak ditemukan" });
     return c.json(row);

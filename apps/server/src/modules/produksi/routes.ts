@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { halamanQuery } from "../../lib/halaman-query";
 import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
+import { SEPULUH_TAHUN, SETAHUN, zTanggalKejadian, zTanggalRencana } from "../../lib/waktu-kejadian";
 import { BATAS_QTY_STOK, BATAS_UANG } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import {
@@ -63,6 +65,7 @@ import { kolomBarisPindah, kolomPindahCabang } from "./pindah";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import {
   branchUntukTulis,
+  syaratCabangDivisi,
   pastikanAnggotaAktif,
   pastikanCabang,
   resolveBranchId,
@@ -116,7 +119,13 @@ const FakturEditBody = z.object({
   storage_location_id: z.string().uuid().nullish(),
   /** ganti pelaksana karyawan (khusus jalur produksi); null = kosongkan */
   worker_id: z.string().uuid().nullish(),
-  prod_date: zTanggal
+  /*
+   * Tanggal PRODUKSI/BELANJA baris ini — kejadian, jadi tak boleh maju.
+   * Terukur: `prod_date: "2099-06-01"` diterima 200, dan saldo menjumlah
+   * `pr.prod_date < ${dari}` — stok masuknya tak pernah terhitung di jendela
+   * mana pun sampai tahun itu tiba.
+   */
+  prod_date: zTanggalKejadian(SETAHUN)
     .optional(),
 }).strict();
 
@@ -171,7 +180,13 @@ const TahapBody = z.object({
          * masa simpan bahan (tanggal masuk + masa_simpan_hari); diabaikan
          * untuk target tahap lain.
          */
-        exp: zTanggal
+        /*
+         * Kedaluwarsa = RENCANA: ia memang menunjuk masa depan. Yang dijaga
+         * kedua ujungnya — terukur `exp: "1900-01-01"` diterima, membuat lot
+         * yang baru tiba kedaluwarsa seketika; tanpa batas atas tak ada yang
+         * menghalangi tahun 9999.
+         */
+        exp: zTanggalRencana(SEPULUH_TAHUN, SETAHUN)
           .nullish(),
       }),
     )
@@ -478,6 +493,15 @@ async function bacaBarisLaporan(
   companyId: string,
   fakturId: string,
   items: { id: string; total_harga: number }[],
+  /**
+   * Syarat cabang pemanggil (undefined untuk owner/admin).
+   *
+   * Dioper, bukan dibaca sendiri: pembantu ini tak punya `Context`. Tanpanya,
+   * peran `kitchen`/`bar`/`tim` yang terikat satu cabang melaporkan harga
+   * faktur cabang LAIN — dan harga itu menggerakkan `hitungAcuanBaru`, yang
+   * mengubah harga acuan seluruh perusahaan.
+   */
+  kurung: SQL | undefined,
 ) {
   if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
     throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
@@ -496,6 +520,7 @@ async function bacaBarisLaporan(
     .where(
       and(
         eq(productions.companyId, companyId),
+        kurung,
         eq(productions.fakturId, fakturId),
         eq(productions.tipe, "beli"),
         isNull(productions.deletedAt),
@@ -999,6 +1024,27 @@ async function tahapSebagian(k: KonteksTahap) {
             ...(item.harga != null ? { totalHarga: item.harga, hargaTebakan: false } : {}),
             // exp lot saat masuk stok (otomatis dari masa simpan / override)
             ...(masukStok ? { expDate: expBaris(b, item.exp) } : {}),
+            /*
+             * SIAPA yang menulis angka yang kini tampil.
+             *
+             * `updatedBy` dilihat manusia: ia dipulangkan sebagai `diubah_oleh`
+             * dan dirender layar Tambah Stok. Aturannya sudah ditulis di pintu
+             * sebelah — `PATCH /faktur/:key` membuka `set`-nya dengan
+             * `updatedBy: auth.sub` — tapi pintu INI, yang mengubah `qty`,
+             * `totalHarga`, DAN `hargaTebakan`, tak ikut.
+             *
+             * Terukur (2026-08-27): owner membuat faktur 10 pcs Rp50.000 lalu
+             * menyuntingnya (⇒ `diubah_oleh` = Owner); pengguna KEDUA menaikkan
+             * tahap dengan qty 14 ⇒ `qty=14`, `total_harga=70000`,
+             * `harga_tebakan=true` — dan `diubah_oleh` **masih Owner**. Layar
+             * menyebut orang yang menulis 50.000 sebagai penulis 70.000.
+             *
+             * `confirmedBy` TETAP ditulis di tempatnya: ia menjawab pertanyaan
+             * lain ("siapa menerima"), dan menyatukan keduanya menghapus satu
+             * fakta.
+             */
+            updatedBy: auth.sub,
+            updatedAt: now,
           })
           .where(kunci)
           .returning({ id: productions.id });
@@ -1728,8 +1774,40 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         }
         tujuanStorage = tujuan_storage_id;
       }
-      await db.transaction(async (tx) => {
-        await tx
+      /*
+       * PREDIKATNYA HARUS MENYEBUT TRANSISI YANG SEDANG DILAKUKANNYA.
+       *
+       * Versi pertama mengklaim `status = 'menunggu'` — dan itu bukan keadaan
+       * yang berubah saat pengiriman. Yang berubah `branch_id` & `dikirim_at`;
+       * statusnya TETAP 'menunggu' di cabang tujuan (di sana ia berarti
+       * "menunggu diterima"). Jadi predikatnya tetap benar sesudah pengiriman
+       * pertama, dan permintaan kedua yang berpapasan mencocokkan baris yang
+       * sama lagi.
+       *
+       * Permintaan BERURUTAN memang sudah tertahan saringan `siap` di atas
+       * (sesudah pindah, `branchId === tujuanBranchId`). Yang lolos hanya yang
+       * benar-benar berpapasan: keduanya membaca sebelum salah satunya menulis.
+       * `catatHasilIdempoten` di ekor rute tak menutupnya — ia MENCATAT hasil
+       * sesudah kerjanya selesai, bukan mengklaim sebelum.
+       *
+       * TERUKUR sebelum `dikirim_at IS NULL` ditambahkan, dua permintaan
+       * serentak atas satu faktur, di KEDUA pintu (`/produksi/kirim` dan
+       * `/pembelian/kirim`):
+       *
+       *     kode 200 & 200 · keduanya melaporkan `jumlah_baris: 7`
+       *     jejak faktur "Dikirim ke …": 2 untuk satu pengiriman
+       *
+       * Batas kerusakannya ikut diukur, dan sengaja disebut supaya tak terbaca
+       * lebih besar dari adanya: baris TIDAK berganda (7 → 7), `dari_branch_id`
+       * tetap satu (COALESCE di `kolomPindahCabang` memang menahannya), dan
+       * stoknya tidak dobel. Yang rusak JEJAKNYA — dan sebuah jejak faktur yang
+       * mengatakan barang dikirim dua kali adalah catatan yang menuduh orang.
+       *
+       * Idiomnya sudah baku di basis kode ini (`pengajuan/routes.ts:336`):
+       * UPDATE bersyarat + periksa barisnya + 409/404.
+       */
+      const dipindah = await db.transaction(async (tx) => {
+        const kena = await tx
           .update(productions)
           .set({
             // Jalur ini SUDAH benar sejak awal; disatukan ke helper supaya tak
@@ -1752,20 +1830,41 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
                 siap.map((b) => b.id),
               ),
               eq(productions.status, "menunggu" as const),
+              // KLAIMNYA: hanya baris yang BELUM berangkat. `dikirim_at` tak
+              // pernah dikosongkan siapa pun (dua penulisnya cuma menyetel),
+              // dan `/tolak`/`/batal-tolak` "hanya memindahkan status, tak
+              // menyentuh satu pun angka" — jadi tak ada kirim-ulang sah yang
+              // ikut tertutup di sini.
+              isNull(productions.dikirimAt),
               isNull(productions.deletedAt),
             ),
-          );
+          )
+          .returning({ id: productions.id });
+        // Kalah balapan: yang lain sudah memberangkatkannya. Jejaknya TIDAK
+        // ditulis — satu pengiriman, satu jejak.
+        if (kena.length === 0) return 0;
         await catatLogFaktur(tx, {
           companyId: auth.company_id!,
           branchId: ckId,
           fakturId,
           jalur: tipe,
           aksi: `Dikirim ke ${store.nama}`,
-          detail: `${siap.length} baris`,
+          detail: `${kena.length} baris`,
           userId: auth.sub,
         });
+        return kena.length;
       });
-      const hasilKirim = { ok: true, tujuan: store.nama, jumlah_baris: siap.length };
+      if (dipindah === 0) {
+        // 409, bukan 400: keduanya sudah dipakai rute ini untuk arti berbeda —
+        // 400 "tak ada yang siap dikirim", 409 "sudah dikirim orang lain".
+        throw new HTTPException(409, {
+          message: `Faktur ini baru saja dikirim ke ${store.nama} dari perangkat lain`,
+        });
+      }
+      // `jumlah_baris` dari baris yang BENAR-BENAR pindah, bukan dari bacaan
+      // awal: balasan yang menghitung dari `siap` melaporkan pekerjaan yang
+      // mungkin dikerjakan orang lain.
+      const hasilKirim = { ok: true, tujuan: store.nama, jumlah_baris: dipindah };
       // Ledger bersama: replay antrean offline ber-ref sama dibalas
       // `sudah_ada`, bukan 400 mesin-status yang terbaca "gagal" palsu.
       if (badan.client_ref) {
@@ -2215,6 +2314,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           auth.company_id!,
           c.req.param("fakturId"),
           items,
+          syaratCabangDivisi(c, productions.branchId),
         );
         const acuanBaru = await hitungAcuanBaru(db, auth.company_id!, byId, target);
         const idBahan = [...acuanBaru.keys()];
@@ -2340,6 +2440,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           auth.company_id!,
           c.req.param("fakturId"),
           items,
+          syaratCabangDivisi(c, productions.branchId),
         );
         await db.transaction(async (tx) => {
           for (const [id, totalHarga] of target) {
@@ -2456,8 +2557,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       const sampai = tanggalQuery(c, "sampai");
       // dukung juga ?tanggal= (satu hari) demi kompatibilitas
       const satuHari = tanggalQuery(c, "tanggal");
-      const page = Math.max(1, Number(c.req.query("page") ?? "1") || 1);
-      const perPage = Math.min(200, Math.max(1, Number(c.req.query("per_page") ?? "20") || 20));
+      const { page, perPage, offset } = halamanQuery(c, { bawaan: 20, maks: 200 });
 
       // Cabang PENGIRIM tetap melihat faktur yang sudah terkirim: baris yang
       // pindah ke cabang tujuan menyimpan jejak dari/asal — tanpa ini tim CK
@@ -2547,9 +2647,20 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .orderBy(
           sql`MAX(CASE WHEN ${productions.status} NOT IN ('dikonfirmasi', 'ditolak') THEN 1 ELSE 0 END) DESC`,
           sql`MIN(${productions.waktu}) DESC`,
+          // PEMUTUS SERI — tanpa ini halamannya tumpang-tindih, dan yang
+          // hilang tak meninggalkan gejala. Kedua kunci di atas AGREGAT, jadi
+          // dua faktur yang berwaktu sama tak punya urutan sama sekali; dan
+          // waktu yang sama bukan kebetulan langka: konfirmasi massal menulis
+          // SATU `new Date()` ke semua barisnya (`:1288`), dan satu permintaan
+          // "Tambah Stok dari Menu" melahirkan sampai lima faktur dalam satu
+          // transaksi — `now()` stabil per transaksi. Terukur pada 60 faktur
+          // seri: `per_page=5`, seluruh halaman ditelusuri, 56 faktur berbeda
+          // terkumpul dari `total: 60` — EMPAT tak muncul di halaman mana pun.
+          // `keyExpr` adalah kunci GRUP-nya, jadi ia unik per baris hasil.
+          keyExpr,
         )
         .limit(perPage)
-        .offset((page - 1) * perPage);
+        .offset(offset);
       const keys = keyRows.map((r) => r.key);
 
       const select = {
@@ -2769,6 +2880,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             eq(productions.companyId, auth.company_id!),
             eq(productions.tipe, tipe),
             isNull(productions.deletedAt),
+            syaratCabangDivisi(c, productions.branchId),
             cocokFaktur(key),
           ),
         );
@@ -2822,6 +2934,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             eq(productions.companyId, auth.company_id!),
             eq(productions.tipe, tipe),
             isNull(productions.deletedAt),
+            syaratCabangDivisi(c, productions.branchId),
             cocokFaktur(key),
           ),
         )
@@ -2846,6 +2959,7 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
             eq(productions.companyId, auth.company_id!),
             eq(productions.tipe, tipe),
             isNull(productions.deletedAt),
+            syaratCabangDivisi(c, productions.branchId),
             cocokFaktur(key),
           ),
         )

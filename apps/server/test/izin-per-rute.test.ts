@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { butaKomentar } from "../src/scripts/buta-komentar";
-import { seimbang, semuaRute, SRV, type Rute } from "./util/rute";
+import { semuaRute, SRV, type Rute } from "./util/rute";
+import { aliasBerkas, aliasPeran, penjagaPrefiks, peranEfektif, PERAN } from "./util/izin";
 
 /**
  * SIAPA YANG EFEKTIF BISA MASUK TIAP PINTU — dan apakah itu disengaja.
@@ -33,79 +34,6 @@ import { seimbang, semuaRute, SRV, type Rute } from "./util/rute";
  *
  * SESUDAH: `bar` → 403, `owner` → 201 (pasangan).
  */
-const PERAN = ["owner", "admin", "cashier", "tim", "kitchen", "bar"] as const;
-type Peran = (typeof PERAN)[number];
-
-/**
- * Penjaga prefiks di `app.ts`, dibaca dengan kurung SEIMBANG.
- *
- * Versi pertama memakai `\.use\(\s*"([^"]+)"\s*,\s*([^)]*)\)` — dan `[^)]*`
- * berhenti di `)` PERTAMA, jadi `requireRole("owner", "admin")` tak pernah
- * terbaca: 3 dari 15 penjaga terlihat, dan `/laporan/*` tercatat terbuka untuk
- * keenam peran. Uji PREMIS di bawah memaku jumlahnya supaya kebutaan itu tak
- * bisa kembali diam-diam.
- */
-export function penjagaPrefiks(app: string): { prefiks: string; peran: Set<string> }[] {
-  const out: { prefiks: string; peran: Set<string> }[] = [];
-  for (const m of app.matchAll(/\.use\(\s*"([^"]+)"/g)) {
-    const jalur = m[1].replace(/\/\*$/, "");
-    const mw = seimbang(app, app.indexOf("(", m.index!), "(", ")");
-    let peran: Set<string> | null = null;
-    const rr = mw.match(/requireRole\(([^)]*)\)/);
-    if (rr) peran = new Set([...rr[1].matchAll(/"(\w+)"/g)].map((x) => x[1]));
-    else if (mw.includes("izinkanProduksi"))
-      peran = new Set(["owner", "admin", "tim", "kitchen", "bar"]);
-    else if (mw.includes("izinkanManajemenAtauKaryawanCk"))
-      peran = new Set(["owner", "admin", "tim"]);
-    else if (mw.includes("requireSuperAdmin")) peran = new Set(["super"]);
-    if (peran) out.push({ prefiks: jalur, peran });
-  }
-  return out;
-}
-
-/** Alias tingkat modul: `const bolehAturMeja = requireRole("owner","admin","cashier")`. */
-export function aliasPeran(src: string): Map<string, Set<string>> {
-  const m = new Map<string, Set<string>>();
-  for (const a of src.matchAll(/const (\w+)\s*=\s*requireRole\(([^)]*)\)/g)) {
-    m.set(a[1], new Set([...a[2].matchAll(/"(\w+)"/g)].map((x) => x[1])));
-  }
-  return m;
-}
-
-const cacheAlias = new Map<string, Map<string, Set<string>>>();
-function aliasBerkas(berkas: string): Map<string, Set<string>> {
-  let m = cacheAlias.get(berkas);
-  if (!m) {
-    m = aliasPeran(butaKomentar(readFileSync(berkas, "utf8")));
-    cacheAlias.set(berkas, m);
-  }
-  return m;
-}
-
-export function peranEfektif(
-  r: Rute,
-  guards: { prefiks: string; peran: Set<string> }[],
-  alias: Map<string, Set<string>>,
-): string[] {
-  let peran = new Set<string>(PERAN);
-  for (const g of guards) {
-    if (r.jalur === g.prefiks || r.jalur.startsWith(`${g.prefiks}/`)) {
-      if (g.peran.has("super")) return ["super"];
-      peran = new Set([...peran].filter((x) => g.peran.has(x)));
-    }
-  }
-  for (const rr of r.isi.matchAll(/requireRole\(([^)]*)\)/g)) {
-    const set = new Set([...rr[1].matchAll(/"(\w+)"/g)].map((x) => x[1]));
-    peran = new Set([...peran].filter((x) => set.has(x)));
-  }
-  for (const [nama, set] of alias) {
-    if (new RegExp(`\\b${nama}\\b`).test(r.isi)) {
-      peran = new Set([...peran].filter((x) => set.has(x)));
-    }
-  }
-  return [...peran].sort();
-}
-
 /**
  * Prefiks yang pintu TULIS-nya memang terbuka untuk keenam peran — beserta
  * alasan yang bisa diperiksa. Ini bukan daftar "belum sempat": tiap baris

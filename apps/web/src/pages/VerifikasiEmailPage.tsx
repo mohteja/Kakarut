@@ -1,66 +1,240 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { btnPrimary } from "../components/ui";
+import { btnPrimary, inputClass } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
+import { bacaLokal, tulisLokal } from "../lib/simpanan";
 
 /**
- * Verifikasi email dari tautan (?token=...). Dijalankan otomatis saat halaman
- * dibuka: sukses → dapat sesi (auto-login) & dialihkan ke beranda; gagal →
- * pesan + tautan ke halaman Masuk (bisa minta tautan baru dari sana).
+ * TENGGAT KIRIM ULANG, DISIMPAN PER EMAIL — supaya tombolnya tak berbohong.
+ *
+ * Hitung mundur yang cuma hidup di state React hilang begitu halamannya dimuat
+ * ulang: tombolnya kembali tampak siap, ditekan, dan servernya menolak
+ * diam-diam karena jaraknya belum lewat. Orangnya melihat "kode baru sudah
+ * dikirim" untuk email yang tak pernah berangkat.
+ *
+ * Yang disimpan TENGGATNYA (epoch md), bukan sisa detiknya — sisa detik yang
+ * disimpan akan tetap sebesar itu berapa lama pun tabnya tertutup.
+ *
+ * Per email, sebab satu perangkat bisa dipakai mendaftarkan beberapa akun
+ * (pemilik yang menyiapkan akun karyawannya), dan jarak milik satu akun tak
+ * ada urusannya dengan akun lain.
+ */
+const kunciJeda = (email: string) => `kakarut.verifJeda:${email.trim().toLowerCase()}`;
+
+/** "1:59" untuk sisa yang masih semenit lebih; "45 dtk" untuk sisanya. */
+function jamPasir(detik: number): string {
+  if (detik < 60) return `${detik} dtk`;
+  return `${Math.floor(detik / 60)}:${String(detik % 60).padStart(2, "0")}`;
+}
+
+function sisaJeda(email: string): number {
+  if (!email) return 0;
+  const mentah = bacaLokal(kunciJeda(email));
+  const tenggat = mentah ? Number(mentah) : 0;
+  if (!Number.isFinite(tenggat)) return 0;
+  return Math.max(0, Math.ceil((tenggat - Date.now()) / 1000));
+}
+
+/**
+ * Verifikasi email dengan KODE 6 DIGIT yang diketik di layar ini.
+ *
+ * KENAPA BUKAN TAUTAN LAGI. Bentuk sebelumnya — buka `?token=<64 hex>`, halaman
+ * memverifikasi sendiri saat dimuat — gagal dengan tiga cara yang semuanya
+ * berakhir di layar merah "tautan tidak valid atau sudah kedaluwarsa" padahal
+ * umurnya masih 24 jam:
+ *
+ * 1. **Sekali pakai.** Muat ulang halamannya, atau tekan Kembali sesudah
+ *    pengalihan otomatis, dan percobaan KEDUA yang gagal — bukan yang pertama.
+ *    Yang terlihat pemakai: "baru saja daftar, sudah kedaluwarsa".
+ * 2. **Pemindai tautan** milik penyedia email/antivirus membuka tautannya
+ *    lebih dulu, jadi kodenya sudah terpakai sebelum orangnya sempat menekan.
+ * 3. **Peramban yang berbeda.** Daftar di laptop, tautannya terbuka di ponsel —
+ *    dan karena verifikasi yang berhasil langsung memberi sesi, sesinya
+ *    mendarat di perangkat yang salah.
+ *
+ * Kode diketik di tab yang sedang terbuka, jadi ketiganya hilang sekaligus.
+ *
+ * DAN TOMBOL "KIRIM ULANG" ADA DI LAYAR INI, bukan cuma di halaman Masuk. Itu
+ * bagian yang paling sering hilang: pesan gagalnya SENGAJA netral (server tak
+ * boleh membedakan "kode salah" dari "email tak terdaftar" — lihat catatan di
+ * `POST /auth/verify-email`), jadi ia tak bisa mendiagnosis apa pun. Yang
+ * menggantikan diagnosis itu jalan keluar yang selalu terlihat.
  */
 export function VerifikasiEmailPage() {
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
-  const { verifikasiEmail } = useAuth();
+  const { verifikasiEmail, verifikasiEmailTautan, kirimUlangVerifikasi } = useAuth();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<"proses" | "sukses" | "gagal">(
-    token ? "proses" : "gagal",
-  );
-  const [error, setError] = useState<string | null>(
-    token ? null : "Tautan tidak valid — token tidak ada.",
-  );
+
+  const [email, setEmail] = useState(() => params.get("email") ?? "");
+  const [kode, setKode] = useState("");
+  const [status, setStatus] = useState<"isi" | "proses" | "sukses">(token ? "proses" : "isi");
+  const [error, setError] = useState<string | null>(null);
+  const [kirimUlang, setKirimUlang] = useState<"diam" | "loading" | "terkirim">("diam");
+  const [jeda, setJeda] = useState(() => sisaJeda(params.get("email") ?? ""));
   const sudahJalan = useRef(false);
 
+  function sukses() {
+    setStatus("sukses");
+    // Sudah punya sesi → App merutekan "/" ke onboarding / dashboard.
+    setTimeout(() => navigate("/", { replace: true }), 900);
+  }
+
+  /*
+   * TRANSISI: tautan lama yang sudah telanjur ada di kotak masuk orang tetap
+   * bekerja. Dicoba sekali saja (`sudahJalan`) — di React StrictMode efek ini
+   * berjalan dua kali, dan percobaan kedua atas token sekali pakai akan
+   * menampilkan kegagalan atas verifikasi yang SEBENARNYA berhasil.
+   */
   useEffect(() => {
     if (!token || sudahJalan.current) return;
-    sudahJalan.current = true; // cegah verifikasi ganda (React StrictMode)
-    verifikasiEmail(token)
-      .then(() => {
-        setStatus("sukses");
-        // Sudah punya sesi → App merutekan "/" ke onboarding / dashboard.
-        setTimeout(() => navigate("/", { replace: true }), 900);
-      })
-      .catch((err) => {
-        setStatus("gagal");
-        setError(err instanceof Error ? err.message : "Verifikasi gagal");
+    sudahJalan.current = true;
+    verifikasiEmailTautan(token)
+      .then(sukses)
+      .catch(() => {
+        // Tautannya mati — TAPI jalur kode masih terbuka, jadi layarnya jatuh
+        // ke formulir, bukan ke jalan buntu seperti versi sebelumnya.
+        setStatus("isi");
+        setError("Tautan ini sudah tidak berlaku. Masukkan kode 6 angka dari email Anda.");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  /*
+   * Hitung mundurnya dibaca ULANG dari tenggat tersimpan, bukan dikurangi satu
+   * per detik dari angka di memori. Tab yang tertidur (ponsel yang dikunci)
+   * membuat `setTimeout` melambat; menghitung dari jam membuat sisa waktunya
+   * tetap benar berapa pun timernya meleset.
+   */
+  useEffect(() => {
+    if (jeda <= 0) return;
+    const t = setTimeout(() => setJeda(sisaJeda(email)), 1000);
+    return () => clearTimeout(t);
+  }, [jeda, email]);
+
+  // Ganti email → jedanya ikut ganti: yang ditahan server adalah AKUNNYA.
+  useEffect(() => {
+    setJeda(sisaJeda(email));
+  }, [email]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (kode.length !== 6 || !email) return;
+    setError(null);
+    setStatus("proses");
+    try {
+      await verifikasiEmail(email, kode);
+      sukses();
+    } catch (err) {
+      setStatus("isi");
+      setError(err instanceof Error ? err.message : "Verifikasi gagal");
+    }
+  }
+
+  async function onKirimUlang() {
+    if (!email || jeda > 0) return;
+    setKirimUlang("loading");
+    setError(null);
+    try {
+      const res = await kirimUlangVerifikasi(email);
+      setKirimUlang("terkirim");
+      // Angkanya dari SERVER (`retry_after_detik`) — yang menahan servernya,
+      // jadi menyalin 120 ke sini cuma menyiapkan dua angka yang bisa
+      // menyimpang. Cadangannya dipakai hanya bila balasannya tak membawanya.
+      const detik = res.retry_after_detik ?? 120;
+      tulisLokal(kunciJeda(email), String(Date.now() + detik * 1000));
+      setJeda(detik);
+    } catch (err) {
+      setKirimUlang("diam");
+      setError(err instanceof Error ? err.message : "Gagal mengirim kode");
+    }
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-stone-900 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl">
         <Logo className="mx-auto h-16 w-16 shadow-lg" />
         <h1 className="mt-3 text-2xl font-bold text-stone-800">Verifikasi Email</h1>
-        <div className="mt-6">
-          {status === "proses" && (
-            <p className="text-sm text-stone-500">Memverifikasi email Anda…</p>
-          )}
-          {status === "sukses" && (
-            <div className="rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
-              ✅ Email berhasil diverifikasi. Mengalihkan…
+
+        {status === "sukses" ? (
+          <div className="mt-6 rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
+            ✅ Email berhasil diverifikasi. Mengalihkan…
+          </div>
+        ) : (
+          <form onSubmit={onSubmit} className="mt-6 space-y-4 text-left">
+            <p className="text-sm text-stone-500">
+              Masukkan kode 6 angka yang kami kirim ke email Anda.
+            </p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-stone-600">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+                className={inputClass}
+              />
             </div>
-          )}
-          {status === "gagal" && (
-            <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-stone-600">Kode 6 angka</label>
+              <input
+                // `inputMode="numeric"` memunculkan papan angka di ponsel, dan
+                // `one-time-code` membuat iOS/Android menawarkan kodenya
+                // langsung dari notifikasi email — dua hal yang menghapus
+                // separuh kesalahan ketik sebelum terjadi.
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={kode}
+                // Angka saja: menempel kode dari email sering ikut membawa
+                // spasi atau baris baru, dan menolaknya diam-diam di server
+                // akan terbaca sebagai "kode saya salah".
+                onChange={(e) => setKode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                required
+                className={`${inputClass} text-center font-mono text-2xl tracking-[0.4em]`}
+              />
+            </div>
+
+            {error && (
               <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
-              <Link to="/login" className={`${btnPrimary} block w-full text-center`}>
-                Ke halaman Masuk
-              </Link>
-            </div>
-          )}
-        </div>
+            )}
+            {kirimUlang === "terkirim" && !error && (
+              <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                Kode baru sudah dikirim (bila email valid). Cek email Anda.
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={status === "proses" || kode.length !== 6}
+              className={`${btnPrimary} w-full disabled:opacity-50`}
+            >
+              {status === "proses" ? "Memverifikasi…" : "Verifikasi"}
+            </button>
+
+            <button
+              type="button"
+              onClick={onKirimUlang}
+              disabled={kirimUlang === "loading" || jeda > 0 || !email}
+              className="w-full text-sm font-medium text-orange-600 hover:underline disabled:cursor-not-allowed disabled:text-stone-400 disabled:no-underline"
+            >
+              {kirimUlang === "loading"
+                ? "Mengirim…"
+                : jeda > 0
+                  ? `Kirim ulang kode (${jamPasir(jeda)})`
+                  : "Kirim ulang kode"}
+            </button>
+
+            <Link
+              to="/login"
+              className="block text-center text-sm text-stone-500 hover:text-orange-600 hover:underline"
+            >
+              Ke halaman Masuk
+            </Link>
+          </form>
+        )}
       </div>
     </div>
   );

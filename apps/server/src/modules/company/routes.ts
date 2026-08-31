@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
+import { KOLOM_COMPANY } from "../../db/kolom-publik";
 import { branches, companies } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
@@ -40,7 +41,7 @@ export const companyRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
     const [row] = await db
-      .select()
+      .select(KOLOM_COMPANY)
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     if (!row) throw new HTTPException(404, { message: "Perusahaan tidak ditemukan" });
@@ -159,6 +160,6 @@ export const companyRoutes = new Hono<AppEnv>()
         updatedAt: new Date(),
       })
       .where(eq(companies.id, auth.company_id!))
-      .returning();
+      .returning(KOLOM_COMPANY);
     return c.json(row);
   });

@@ -22,6 +22,8 @@ import {
 } from "../../db/schema";
 import {
   branchUntukTulis,
+  cabangTerikat,
+  syaratCabang,
   resolveBranchId,
   terikatCabang,
   type AppEnv,
@@ -124,12 +126,26 @@ async function resolveMeja(companyId: string, branchId: string, mejaId?: string 
   return { mejaId: m.id, mejaLabel: m.nama, tipe: m.tipe };
 }
 
-async function loadDetail(companyId: string, id: string): Promise<OpenBillDetail | null> {
+/**
+ * `kurung` = cabang yang MENGURUNG pemanggil (null bila owner/admin).
+ *
+ * Tanpa parameter ini `GET /open-bill/:id` membalas 200 berisi bill cabang
+ * lain — terukur: kasir "Pusat" membaca nama pelanggan & item milik "Cabang
+ * Uji 46". Kurungannya diletakkan di sini, bukan di tiap pemanggil, karena
+ * keempat pemanggilnya (detail, slip, bon, dan balasan sesudah PUT) menuju
+ * keadaan yang sama.
+ */
+async function loadDetail(
+  companyId: string,
+  id: string,
+  kurung: string | null,
+): Promise<OpenBillDetail | null> {
   const [bill] = await db.select().from(openBills).where(eq(openBills.id, id));
   // Bill yang sudah ditutup (dibayar atau dibatalkan) tak lagi bisa dilanjutkan
   // kasir — sama seperti ia tak muncul di daftar. Barisnya tetap ada untuk
   // papan pesanan & jejak audit, tapi jalur kasir memperlakukannya hilang.
   if (!bill || bill.companyId !== companyId || bill.closedAt) return null;
+  if (kurung && bill.branchId !== kurung) return null;
   const items = await db.select().from(openBillItems).where(eq(openBillItems.billId, id));
   return {
     id: bill.id,
@@ -273,7 +289,7 @@ export const openBillRoutes = new Hono<AppEnv>()
   })
   .get("/:id", async (c) => {
     const auth = c.get("auth");
-    const detail = await loadDetail(auth.company_id!, c.req.param("id"));
+    const detail = await loadDetail(auth.company_id!, c.req.param("id"), cabangTerikat(c));
     if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     return c.json(detail);
   })
@@ -290,7 +306,7 @@ export const openBillRoutes = new Hono<AppEnv>()
    */
   .get("/:id/slip", async (c) => {
     const auth = c.get("auth");
-    const detail = await loadDetail(auth.company_id!, c.req.param("id"));
+    const detail = await loadDetail(auth.company_id!, c.req.param("id"), cabangTerikat(c));
     if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
 
     const [comp] = await db
@@ -360,7 +376,7 @@ export const openBillRoutes = new Hono<AppEnv>()
    */
   .get("/:id/bon", async (c) => {
     const auth = c.get("auth");
-    const detail = await loadDetail(auth.company_id!, c.req.param("id"));
+    const detail = await loadDetail(auth.company_id!, c.req.param("id"), cabangTerikat(c));
     if (!detail) throw new HTTPException(404, { message: "Bill tidak ditemukan" });
 
     const [comp] = await db
@@ -536,14 +552,19 @@ export const openBillRoutes = new Hono<AppEnv>()
         409,
       );
     }
-    return c.json(await loadDetail(auth.company_id!, hasil.id), 201);
+    return c.json(await loadDetail(auth.company_id!, hasil.id, cabangTerikat(c)), 201);
   })
   .put("/:id", zValidator("json", BillBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const id = c.req.param("id");
     const [existing] = await db.select().from(openBills).where(eq(openBills.id, id));
-    if (!existing || existing.companyId !== auth.company_id!) {
+    const kurung = cabangTerikat(c);
+    if (
+      !existing ||
+      existing.companyId !== auth.company_id! ||
+      (kurung && existing.branchId !== kurung)
+    ) {
       throw new HTTPException(404, { message: "Bill tidak ditemukan" });
     }
     /**
@@ -919,7 +940,7 @@ export const openBillRoutes = new Hono<AppEnv>()
       return null;
     });
     if (konflik) return c.json(konflik, 409);
-    return c.json(await loadDetail(auth.company_id!, id));
+    return c.json(await loadDetail(auth.company_id!, id, cabangTerikat(c)));
   })
   /**
    * BATALKAN bill (bukan hapus keras lagi).
@@ -941,6 +962,7 @@ export const openBillRoutes = new Hono<AppEnv>()
           and(
             eq(openBills.id, c.req.param("id")),
             eq(openBills.companyId, auth.company_id!),
+            syaratCabang(c, openBills.branchId),
             isNull(openBills.closedAt),
           ),
         )

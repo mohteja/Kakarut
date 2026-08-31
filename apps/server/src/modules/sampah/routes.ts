@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { SampahRow } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { productions, sales } from "../../db/schema";
+import { potongLarik } from "../../lib/potong";
 import type { AppEnv } from "../../middleware/auth";
 
 /**
@@ -33,8 +34,6 @@ const BATAS_SAMPAH = 300;
  * bahwa daftarnya dipotong. Build lama menerima 300 terbaru tanpa spanduk;
  * yang tak pernah terjadi: melempar.
  */
-const HEADER_TERPOTONG = "X-Kakarut-Terpotong";
-
 const PulihkanBody = z.object({
   jenis: z.enum(["penjualan", "pembelian", "produksi"]),
   key: z.string(),
@@ -77,7 +76,7 @@ export const sampahRoutes = new Hono<AppEnv>()
     LEFT JOIN users pb ON pb.id = s.cashier_user_id
     LEFT JOIN users ph ON ph.id = s.deleted_by
     WHERE s.company_id = ${companyId} AND s.deleted_at IS NOT NULL
-    ORDER BY s.deleted_at DESC
+    ORDER BY s.deleted_at DESC, s.id DESC
     LIMIT ${BATAS_SAMPAH + 1}
   `);
 
@@ -97,7 +96,7 @@ export const sampahRoutes = new Hono<AppEnv>()
     LEFT JOIN users ph ON ph.id = pr.deleted_by
     WHERE pr.company_id = ${companyId} AND pr.deleted_at IS NOT NULL
     GROUP BY COALESCE(pr.faktur_id::text, pr.id::text), pr.tipe
-    ORDER BY MAX(pr.deleted_at) DESC
+    ORDER BY MAX(pr.deleted_at) DESC, COALESCE(pr.faktur_id::text, pr.id::text), pr.tipe
     LIMIT ${BATAS_SAMPAH + 1}
   `);
 
@@ -130,9 +129,7 @@ export const sampahRoutes = new Hono<AppEnv>()
       }),
     ].sort((a, b) => (a.dihapus_pada < b.dihapus_pada ? 1 : -1));
 
-    const terpotong = rows.length > BATAS_SAMPAH;
-    if (terpotong) c.header(HEADER_TERPOTONG, String(BATAS_SAMPAH));
-    return c.json(terpotong ? rows.slice(0, BATAS_SAMPAH) : rows);
+    return c.json(potongLarik(c, rows, BATAS_SAMPAH));
   })
   /**
    * PULIHKAN dari Tempat Sampah: batalkan soft-delete. Penjualan per id;

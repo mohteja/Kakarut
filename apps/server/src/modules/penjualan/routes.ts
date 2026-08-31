@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db } from "../../db/client";
+import { KOLOM_SALE } from "../../db/kolom-publik";
 import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
 import { bolehLihatBiaya, qtyDitagih, waktuKertas } from "@kakarut/shared";
 import { opsiKertasDariQuery, responsSlip } from "../print/kertas";
@@ -107,7 +108,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
             "kasir_belum_dibuka",
           );
         }
-        const result = await createSale({
+        // `shift_susulan` hanya berarti bagi jalur SINKRON (yang menyebut
+        // shiftnya sendiri); di jalur online ia selalu false. Tidak ikut
+        // dibalas supaya bentuk respons `POST /penjualan` tak berubah.
+        const { shift_susulan: _susulan, ...result } = await createSale({
           companyId: auth.company_id!,
           branchId,
           cashierUserId: auth.sub,
@@ -235,7 +239,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
   .get("/:id", async (c) => {
     const auth = c.get("auth");
     const [sale] = await db
-      .select()
+      .select(KOLOM_SALE)
       .from(sales)
       .where(
         and(
@@ -291,7 +295,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
   .get("/:id/slip", async (c) => {
     const auth = c.get("auth");
     const [sale] = await db
-      .select()
+      .select(KOLOM_SALE)
       .from(sales)
       .where(
         and(

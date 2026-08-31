@@ -32,9 +32,16 @@ function selisihInfo(selisih: number | null) {
  * harus dicari tidak akan ketemu.
  */
 function PerluAccPanel({ onDetail }: { onDetail: (id: string) => void }) {
+  const [terpotong, setTerpotong] = useState<number | null>(null);
   const { data = [], error: gagal } = useQuery({
     queryKey: ["shift-selisih", "menunggu"],
-    queryFn: () => api<SelisihKasRow[]>("/shift/selisih?status=menunggu"),
+    queryFn: () =>
+      api<SelisihKasRow[]>("/shift/selisih?status=menunggu", {
+        bacaHeader: (h) => {
+          const n = Number(h.get("X-Kakarut-Terpotong"));
+          setTerpotong(Number.isFinite(n) && n > 0 ? n : null);
+        },
+      }),
     refetchInterval: 60_000,
   });
   /*
@@ -64,8 +71,21 @@ function PerluAccPanel({ onDetail }: { onDetail: (id: string) => void }) {
   return (
     <Card className="mb-4 border-amber-300 bg-amber-50/60 p-4">
       <div className="mb-2 text-sm font-bold text-amber-900">
-        ⏳ Selisih kas menunggu keputusan Anda ({data.length})
+        ⏳ Selisih kas menunggu keputusan Anda ({data.length}
+        {terpotong !== null ? "+" : ""})
       </div>
+      {/*
+        Angka di judul panel ini adalah PANJANG DAFTAR, bukan jumlah yang
+        menunggu. Selama server memotong, keduanya beda — dan "(50)" yang
+        terbaca sebagai "tinggal 50" pada antrean yang sebenarnya lebih
+        panjang persis kebohongan yang panel ini dibuat untuk mencegah.
+      */}
+      {terpotong !== null && (
+        <div className="mb-2 rounded-lg border border-amber-300 bg-white p-2 text-xs text-amber-900">
+          Menampilkan <b>{terpotong} terbaru</b>. Masih ada selisih yang <b>lebih lama</b> menunggu
+          keputusan — dan yang paling lama menunggu justru yang paling mudah terlupakan.
+        </div>
+      )}
       <div className="space-y-2">
         {data.map((s) => {
           const info = selisihInfo(s.selisih);

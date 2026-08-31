@@ -65,7 +65,7 @@ async function ambilKelompok(sejak: Date, saring?: "4xx" | "5xx", cari?: string)
     .from(errorLogs)
     .where(and(...kondisi))
     .groupBy(errorLogs.sidik)
-    .orderBy(desc(sql`max(${errorLogs.waktu})`))
+    .orderBy(desc(sql`max(${errorLogs.waktu})`), errorLogs.sidik)
     .limit(LIMIT_KELOMPOK);
 
   return rows.map(
@@ -167,7 +167,7 @@ export const adminErrorLogRoutes = new Hono<AppEnv>()
       .leftJoin(users, eq(users.id, errorLogs.userId))
       .leftJoin(companies, eq(companies.id, errorLogs.companyId))
       .where(and(eq(errorLogs.sidik, sidik), gte(errorLogs.waktu, sejak)))
-      .orderBy(desc(errorLogs.waktu))
+      .orderBy(desc(errorLogs.waktu), desc(errorLogs.id))
       .limit(LIMIT_KEJADIAN);
 
     const dto: ErrorLogDetailDto = {

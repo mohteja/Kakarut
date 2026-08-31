@@ -1,3 +1,4 @@
+import { halamanQuery } from "../../lib/halaman-query";
 import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
@@ -23,7 +24,7 @@ import { awalHariDi, tambahHari } from "../../lib/time";
 
 /** penerima kiriman — siapa yang menekan Terima/Tolak */
 const penerima = alias(users, "penerima_kiriman");
-import { resolveBranchId, terikatCabang, type AppEnv } from "../../middleware/auth";
+import { cabangTerikat, resolveBranchId, syaratCabang, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { catatLogFaktur } from "../produksi/log";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
 
@@ -72,7 +73,7 @@ function cteMenggantung(companyId: string) {
                (SELECT p2.dari_branch_id FROM productions p2
                  WHERE p2.faktur_id = pr.faktur_id AND p2.dari_branch_id IS NOT NULL LIMIT 1),
                (SELECT fl.branch_id FROM faktur_logs fl
-                 WHERE fl.faktur_id = pr.faktur_id ORDER BY fl.waktu ASC LIMIT 1)
+                 WHERE fl.faktur_id = pr.faktur_id ORDER BY fl.waktu ASC, fl.id ASC LIMIT 1)
              ) AS asal_faktur
       FROM productions pr
       WHERE pr.company_id = ${companyId}
@@ -125,9 +126,15 @@ function kondisiFaktur(c: Context<AppEnv>, fakturId: string) {
     KIRIMAN_MASUK,
     isNull(productions.deletedAt),
   ];
-  if (terikatCabang(auth.role) && auth.branch_id) {
-    conds.push(eq(productions.branchId, auth.branch_id));
-  }
+  /*
+   * Dulu `terikatCabang(auth.role) && auth.branch_id` — dan bagian kedua itu
+   * membuatnya JATUH TERBUKA: peran terikat yang kebetulan tak punya cabang
+   * lolos ke SELURUH perusahaan, sementara `resolveBranchId` pada keadaan yang
+   * persis sama menjawab 403 "Akun tanpa cabang". Dua pintu ke keadaan yang
+   * sama, dua jawaban. Sekarang keduanya memakai `syaratCabang`.
+   */
+  const kurung = syaratCabang(c, productions.branchId);
+  if (kurung) conds.push(kurung);
   return conds;
 }
 
@@ -236,8 +243,10 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const semuaCabang = !terikatCabang(auth.role) && c.req.query("branch_id") === "all";
     const branchId = semuaCabang ? null : await resolveBranchId(c);
-    const perPage = Math.min(Math.max(Number(c.req.query("per_page")) || 20, 1), 100);
-    const page = Math.max(Number(c.req.query("page")) || 1, 1);
+    // Batas 100 dipertahankan apa adanya: menaikkannya mengubah apa yang
+    // dilihat klien, dan itu keputusan tersendiri. Yang berubah cuma cara
+    // membacanya — satu rumah, `lib/halaman-query.ts`.
+    const { page, perPage, offset } = halamanQuery(c, { bawaan: 20, maks: 100 });
     // Disaring dulu: nilainya dipakai menyusun batas waktu, dan teks yang
     // bukan tanggal menghasilkan Invalid Date yang diam-diam ikut ke
     // pembanding — bukan penolakan yang bisa dibaca pemakainya.
@@ -301,7 +310,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
        */
       .orderBy(desc(sql`MAX(${productions.confirmedAt})`), desc(productions.fakturId))
       .limit(perPage)
-      .offset((page - 1) * perPage);
+      .offset(offset);
 
     const [{ total } = { total: 0 }] = await db
       .select({ total: sql<number>`COUNT(DISTINCT ${productions.fakturId})::int` })
@@ -455,10 +464,10 @@ export const penerimaanRoutes = new Hono<AppEnv>()
      * tanpa cabang asal di sini, tandanya tak akan pernah muncul untuk mereka.
      * Owner/admin melihat semuanya.
      */
-    const kunciCabang =
-      terikatCabang(auth.role) && auth.branch_id
-        ? sql`AND (g.branch_id = ${auth.branch_id} OR g.asal_faktur = ${auth.branch_id})`
-        : sql``;
+    const terikat = cabangTerikat(c);
+    const kunciCabang = terikat
+      ? sql`AND (g.branch_id = ${terikat} OR g.asal_faktur = ${terikat})`
+      : sql``;
     /*
      * BERLANGIT-LANGIT, DAN AGREGATNYA TETAP ATAS POPULASI PENUH.
      *
@@ -499,7 +508,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         ON dn.company_id = ${auth.company_id!} AND dn.ref_id = g.faktur_id
       WHERE ${MENGGANTUNG}
         ${kunciCabang}
-      ORDER BY g.waktu ASC
+      ORDER BY g.waktu ASC, g.id ASC
       LIMIT ${BATAS_ANOMALI}
     `);
     /*
@@ -728,6 +737,20 @@ export const penerimaanRoutes = new Hono<AppEnv>()
                   confirmedBy: auth.sub,
                   confirmedAt: now,
                   waktu: now,
+                  /*
+                   * Pintu ini mengubah `qty` DAN memprorata `totalHarga`, jadi
+                   * ia menulis angka yang dilihat manusia — dan `diubah_oleh`
+                   * (yakni `updatedBy`) yang tampil di sebelahnya harus
+                   * menyebut penulisnya, bukan orang sebelumnya.
+                   *
+                   * `confirmedBy` di atas TETAP: "siapa menerima" dan "siapa
+                   * menulis angkanya" dua fakta berbeda; menyatukannya
+                   * menghapus satu. Saudara-saudaranya di berkas ini (`/terima`,
+                   * `/tolak`, `/batal-tolak`) TIDAK ikut: ketiganya hanya
+                   * memindahkan status, tak menyentuh satu pun angka.
+                   */
+                  updatedBy: auth.sub,
+                  updatedAt: now,
                 })
                 .where(
                   and(

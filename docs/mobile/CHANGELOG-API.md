@@ -3932,3 +3932,49 @@ dibutuhkan.
 Untuk perubahan yang mengubah **arti** sebuah field (bukan menambah field baru),
 selalu tulis rumus atau definisi barunya secara eksplisit — jenis perubahan itu
 yang paling sering lolos dari review karena bentuk JSON-nya tidak berubah.
+
+## Verifikasi email: kode 6 angka BERDAMPINGAN dengan tautan
+
+> Sudah di-merge ke production
+>
+> Tidak ada migrasi yang menyentuh data mobile. **Alur deep link yang sekarang
+> dipakai aplikasi TETAP BEKERJA tanpa perubahan kode apa pun.**
+
+🟡 **PERLU DICEK** — build yang ada **tidak pecah**. Yang berubah: email
+verifikasi kini memuat **kode 6 angka** (jalan utama untuk web) **di atas**
+tautan deep link. Tautannya masih diterbitkan, masih 64 hex, masih
+`APP_BASE_URL/verifikasi-email?token=…`, dan `POST /auth/verify-email
+{ token }` masih memulangkan sesi seperti biasa.
+
+**SATU HAL YANG BENAR-BENAR BERUBAH, dan wajib dibaca kalau layar verifikasi
+mobile punya kotak "tempel kode":**
+
+Kontrak lama berbunyi *"email verifikasi juga menampilkan kode yang mudah
+disalin — nilainya **identik** dengan parameter `token`"*, jadi kode yang
+ditempel user boleh dikirim sebagai `{ token }`. **Itu tidak lagi benar.**
+Kode 6 angka dan token tautan kini **dua rahasia berbeda** dari satu
+penerbitan. Menempel kode 6 angka ke medan `{ token }` akan **ditolak 400**.
+
+- Kalau layar tempel-kode itu **ada** → kirim sebagai **`{ email, kode }`**.
+- Kalau **tidak ada** (hanya deep link) → tak ada yang perlu dikerjakan.
+
+**Medan baru pada balasan** `register` dan `resend-verification`:
+
+| Medan | Arti |
+| --- | --- |
+| `retry_after_detik` | **120**. Jarak minimum sebelum kode berikutnya boleh diminta. Nilainya TETAP dan SAMA untuk email terdaftar maupun tidak — tak membocorkan apa pun. |
+| `dev_verify_kode` | Hanya-dev, seperti `dev_verify_url`. Tak pernah muncul di produksi. |
+
+**JARAK 2 MENIT DIJAGA SERVER, bukan cuma tampilan.** Tekanan "kirim ulang"
+yang terlalu cepat tetap dibalas `200` netral, tetapi **tidak mengirim apa
+pun** — dan **tidak merusak** kode/tautan yang sedang dipegang user (yang lama
+tetap berlaku). Untuk tombol kirim ulang: pakai `retry_after_detik`, dan
+**simpan tenggatnya** — hitung mundur yang cuma hidup di memori akan tampak
+siap lagi sesudah layarnya dibuka ulang, lalu ditolak diam-diam oleh server.
+
+**Batas lain yang perlu diketahui:** kode/tautan berlaku **60 menit**; kode
+mati **permanen** sesudah **5** tebakan salah (sesudah itu kirim ulang
+**langsung** boleh — kode yang sudah mati tak menahan jaraknya); dan balasan
+gagal `verify-email` **sengaja netral** — "kode salah" dan "email tak
+terdaftar" dijawab kalimat yang sama, jadi jangan menyimpulkan apa pun dari
+teksnya. Sediakan tombol kirim ulang sebagai jalan keluarnya.

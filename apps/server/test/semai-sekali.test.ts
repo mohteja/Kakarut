@@ -70,10 +70,11 @@ const DIIZINKAN: Entri[] = [
   },
   {
     berkas: "pages/resep/ResepPage.tsx",
-    deps: "langkahServer, selectedId",
+    deps: "langkahServer, langkahGagal, selectedId",
     jenis: "semai",
     tanda: "langkahTersemai.current === selectedId",
-    catatan: "draft langkah masak — semai ulang juga melepas foto (_id baru)",
+    catatan:
+      "draft langkah masak — semai ulang juga melepas foto (_id baru). `langkahGagal` masuk deps 2026-08-27: tanpanya efek ini MENGOSONGKAN langkah saat bacaannya gagal (`if (!langkahServer) setLangkah([])`), lalu Simpan Resep menulis kosong itu ke atas langkah yang nyata",
   },
   {
     berkas: "pages/resep/ResepPage.tsx",

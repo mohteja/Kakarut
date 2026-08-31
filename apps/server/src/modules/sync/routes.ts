@@ -16,18 +16,18 @@ import { bukaShift } from "../shift/routes";
 import { pangkasLedgerSync } from "./idempoten";
 import { SaleBody } from "../penjualan/routes";
 import { catatAbsen, cekRadius, ClockBody, SelfBody } from "../absensi/routes";
+import { pastikanWaktuKejadian, SKEW_MENIT } from "../../lib/waktu-kejadian";
 
 /** Batas antrean & usia perintah (disepakati dgn tim mobile). */
 const MAKS_PERINTAH = 100;
-/**
- * Usia maksimal perintah, per tipe. `penjualan` sengaja jauh lebih longgar:
- * uangnya sudah diterima kasir, jadi menolak antrean lama = transaksi hilang
- * permanen. Perangkat cadangan / outlet event bisa offline berminggu-minggu.
- * Tipe lain tetap 7 hari — mengubah stok jauh ke belakang justru berbahaya.
+/*
+ * Batas usia & skew perintah PINDAH RUMAH ke `lib/waktu-kejadian.ts` — bukan
+ * disalin. Aturannya sudah lengkap dan beralasan di sini, dan justru itu
+ * masalahnya: ia hidup di SATU pintu sementara sembilan medan waktu lain yang
+ * datang dari klien cuma memvalidasi bentuknya. Angkanya tak berubah, dan
+ * `waktu-klien.test.ts` memakunya supaya pemindahan ini tak diam-diam
+ * melonggarkan apa pun.
  */
-const MAKS_UMUR_HARI: Record<string, number> = { penjualan: 30 };
-const MAKS_UMUR_HARI_DEFAULT = 7;
-const SKEW_MENIT = 5;
 /**
  * Toleransi transaksi susulan: sale yang `waktu`-nya jatuh SETELAH sebuah shift
  * ditutup masih dibukukan ke shift itu selama tidak lebih dari sekian jam dan
@@ -150,7 +150,7 @@ async function resolveCabangSync(auth: SyncAuth, payloadBranchId?: string | null
     .select({ id: branches.id })
     .from(branches)
     .where(and(eq(branches.companyId, auth.company_id!), eq(branches.isActive, true)))
-    .orderBy(branches.createdAt)
+    .orderBy(branches.createdAt, branches.id)
     .limit(1);
   if (!first) throw new HTTPException(404, { message: "Perusahaan belum punya cabang" });
   return first.id;
@@ -371,7 +371,7 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
         sql`(${shifts.closedAt} IS NULL OR ${shifts.closedAt} >= ${waktu})`,
       ),
     )
-    .orderBy(desc(shifts.openedAt))
+    .orderBy(desc(shifts.openedAt), desc(shifts.id))
     .limit(1);
 
   // Tahap 2 — shift tertutup terdekat sebelum `waktu`.
@@ -388,7 +388,7 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
           lte(shifts.closedAt, waktu),
         ),
       )
-      .orderBy(desc(shifts.closedAt))
+      .orderBy(desc(shifts.closedAt), desc(shifts.id))
       .limit(1);
     if (terdekat?.closedAt) {
       const [comp] = await db
@@ -419,13 +419,26 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     );
   }
 
-  // Rekap dihitung saat dibaca, jadi cukup tandai agar pembaca tahu angka
-  // penutupan awal bisa berbeda dari rekap terkini.
-  const susulan = shift.closedAt != null;
-  if (susulan) {
-    await db.update(shifts).set({ adaTransaksiSusulan: true }).where(eq(shifts.id, shift.id));
-  }
-  const result = await createSale({
+  /*
+   * PENANDA SUSULAN TIDAK LAGI DITULIS DI SINI — dan itu perbaikan, bukan
+   * kelalaian. Dulu ia ditulis persis di titik ini, dari `shift.closedAt` yang
+   * SUDAH DIBACA di atas, SEBELUM penjualannya ada. Dua cacat lahir dari satu
+   * bentuk itu, dan keduanya terukur lewat HTTP:
+   *
+   *   · tanpa balapan sama sekali — `createSale` melempar (menu tak ada, bill
+   *     sudah dibayar) dan penandanya tetap tertulis. Terukur: shift berbunyi
+   *     `ada_transaksi_susulan: true` dengan NOL transaksi, dan tak ada yang
+   *     pernah mencabutnya.
+   *   · dengan balapan — shift ditutup di sela bacaan dan penulisan. Terukur 11
+   *     dari 20 putaran: rekap penutupan tak menghitung penjualannya,
+   *     penjualannya tetap masuk shift, dan penandanya tetap `false`.
+   *
+   * Kini `createSale` yang menuliskannya — DI DALAM transaksi penjualan dan di
+   * bawah kunci baris shift — jadi ia ikut batal bila penjualannya batal, dan
+   * `closed_at` yang dibacanya tak bisa basi. Yang dibalas ke mobile adalah
+   * TULISAN itu, bukan bacaan di atas.
+   */
+  const { shift_susulan: susulan, ...result } = await createSale({
     companyId: auth.company_id!,
     branchId,
     cashierUserId: auth.sub,
@@ -781,15 +794,7 @@ export const syncRoutes = new Hono<AppEnv>().post("/", batasSync, zValidator("js
     let simpanKode: number;
     let simpanHasil: unknown;
     try {
-      const t = waktu.getTime();
-      if (Number.isNaN(t)) throw new HTTPException(400, { message: "waktu tidak valid" });
-      if (t > sekarang + SKEW_MENIT * 60_000) {
-        throw new HTTPException(400, { message: "waktu kejadian di masa depan" });
-      }
-      const maksUmur = MAKS_UMUR_HARI[cmd.tipe] ?? MAKS_UMUR_HARI_DEFAULT;
-      if (t < sekarang - maksUmur * 86_400_000) {
-        throw new HTTPException(400, { message: `waktu kejadian lebih dari ${maksUmur} hari lalu` });
-      }
+      pastikanWaktuKejadian(waktu.getTime(), cmd.tipe, sekarang);
       const exec = EKSEKUTOR[cmd.tipe];
       const { kode, data } = await exec({ auth, authHeader }, cmd.payload, waktu);
       if (kode >= 400) {

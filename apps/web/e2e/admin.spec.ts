@@ -10,7 +10,7 @@ const SA_PASS = process.env.E2E_SA_PASS ?? "SuperAdmin123!";
 test("super-admin melihat status sistem & daftar migrasi terpasang", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill(SA_EMAIL);
-  await page.getByLabel("Password").fill(SA_PASS);
+  await page.getByLabel("Password", { exact: true }).fill(SA_PASS);
   await page.getByRole("button", { name: "Masuk" }).click();
   await expect(page).toHaveURL(/\/superadmin/);
 

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { spinnerTurunan } from "./util/kueri-web";
 
 /**
  * Penjaga SPINNER ABADI.
@@ -91,6 +92,12 @@ describe("tak ada spinner abadi di web", () => {
       for (const m of isi.matchAll(pola)) {
         const nama = m[1];
         // Bukan dari useQuery (mis. state lokal) → bukan urusan penjaga ini.
+        //
+        // PENGECUALIAN INI BENAR untuk state yang benar-benar lokal, dan
+        // KELIRU justru ketika state itu hanya pernah diisi dari data kueri:
+        // `if (isLoading || rows === null) return <Spinner/>` dengan `rows`
+        // yang diisi efek dari `bahan` berputar selamanya. Cakupannya dicabut
+        // oleh arah kedua di bawah (`spinnerTurunan`), bukan penilaiannya.
         if (!query.has(nama)) continue;
         if (query.get(nama)) continue; // `error` dibaca → cabang galat mungkin
         const baris = isi.slice(0, m.index).split("\n").length;
@@ -109,5 +116,75 @@ describe("tak ada spinner abadi di web", () => {
     // Wajib menyerah saat ada galat, bukan tetap memutar spinner.
     const badan = ui.slice(ui.indexOf("export function SpinnerAtauGalat"));
     expect(badan).toMatch(/if\s*\(\s*!error\s*\)\s*return\s*<Spinner/);
+  });
+});
+
+describe("arah kedua: spinner abadi yang tak berbentuk `!data`", () => {
+  /*
+   * Gerbang di atas jujur, dan batasnya tertulis — tapi ia buta pada DUA
+   * bentuk lain, dan keduanya nyata di repo ini:
+   *
+   *   1. KEADAAN TURUNAN. `if (isLoading || rows === null)` dengan `rows`
+   *      hanya diisi efek dari data kueri. Pengecualian "state lokal" di atas
+   *      melewatkannya.
+   *   2. SYARAT BERKURUNG. `if (!bahan || !kategori || (id && !menuEdit))` —
+   *      regex di atas memakai `[^)]*`, yang tak bisa melewati kurung dalam,
+   *      jadi barisnya **tak pernah cocok**. Bukan diloloskan beralasan:
+   *      tak terlihat. `menuEdit` tak membaca galatnya, dan mode sunting
+   *      `MenuFormPage` berputar selamanya.
+   *
+   * Yang dituntut sama seperti gerbang lama: bacaan yang memberi makan
+   * syaratnya WAJIB membaca `error`, supaya cabang galat mungkin ada.
+   */
+  const semua = spinnerTurunan();
+
+  it("PREMIS: penyapunya benar-benar menemukan penjaga spinner", () => {
+    expect(semua.length, "tak satu pun penjaga spinner terbaca").toBeGreaterThan(0);
+  });
+
+  it("INTI: tak ada penjaga spinner yang bergantung bacaan tanpa galat", () => {
+    const lalai = semua
+      .filter((x) => !x.bacaGalat)
+      .map((x) => `${x.berkas}:${x.baris} [${x.state}] ${x.syarat}`);
+    expect(
+      lalai,
+      `spinner ini tak pernah berhenti sesudah bacaannya gagal:\n${lalai.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("BUKTI MERAH: kedua bentuk buta itu kini tertangkap", () => {
+    const turunan = spinnerTurunan([
+      {
+        nama: "palsu/A.tsx",
+        isi: 'function P() { const { data: bahan } = useQuery({}); const [rows, setRows] = useState(null); useEffect(() => { setRows(bahan); }, [bahan]); if (isLoading || rows === null) return <Spinner />; return <hr/>; }',
+      },
+    ]);
+    expect(turunan.filter((x) => !x.bacaGalat), "bentuk KEADAAN TURUNAN tak tertangkap").not.toEqual(
+      [],
+    );
+    const kurung = spinnerTurunan([
+      {
+        nama: "palsu/B.tsx",
+        isi: 'function P() { const { data: a } = useQuery({}); const { data: b } = useQuery({}); if (!a || (id && !b)) return <Spinner />; return <hr/>; }',
+      },
+    ]);
+    expect(kurung.filter((x) => !x.bacaGalat), "bentuk BERKURUNG tak tertangkap").not.toEqual([]);
+  });
+
+  it("PASANGAN: yang membaca galatnya, dan state yang benar-benar lokal, tak dituduh", () => {
+    const sehat = spinnerTurunan([
+      {
+        nama: "palsu/C.tsx",
+        isi: 'function P() { const { data: a, error } = useQuery({}); if (!a) return <Spinner />; return <b>{String(error)}</b>; }',
+      },
+    ]);
+    expect(sehat.filter((x) => !x.bacaGalat)).toEqual([]);
+    const lokal = spinnerTurunan([
+      {
+        nama: "palsu/D.tsx",
+        isi: 'function P() { const [menuOpen, setMenuOpen] = useState(false); if (!menuOpen) return <Spinner />; return <hr/>; }',
+      },
+    ]);
+    expect(lokal, "state yang benar-benar lokal ikut dituduh").toEqual([]);
   });
 });

@@ -177,21 +177,42 @@ describe("keluaran perakit surat: suntikan mati, nama wajar tetap terbaca", () =
     expect(html).toContain("&lt;/b&gt;"); // suntikannya jadi TEKS yang terlihat
   });
 
-  it("verifikasi & reset: nama ber-HTML tak menambah satu pun tag", () => {
-    for (const html of [
-      suratVerifikasi(JAHAT, "https://kakarut.app/verifikasi-email?token=abc", "abc"),
-      suratReset(JAHAT, "https://kakarut.app/reset-password?token=abc", "abc"),
-    ]) {
-      expect((html.match(/<a\b/g) ?? []).length).toBe(1);
-      expect(html).not.toContain('<a href="https://penyerang.example">');
-    }
+  it("reset: nama ber-HTML tak menambah satu pun tag", () => {
+    const html = suratReset(JAHAT, "https://kakarut.app/reset-password?token=abc", "abc");
+    expect((html.match(/<a\b/g) ?? []).length).toBe(1);
+    expect(html).not.toContain('<a href="https://penyerang.example">');
+  });
+
+  /**
+   * ASERSI INI DULU BERBUNYI "TAK ADA TAUTAN SAMA SEKALI", dan itu benar
+   * selama satu putaran — lalu salah, dan diganti alih-alih dilonggarkan.
+   *
+   * Tautannya kembali karena `docs/API-CONTRACT.md` menuliskan alur daftar
+   * APLIKASI PONSEL di atasnya: register → tangkap deep link
+   * `APP_BASE_URL/verifikasi-email?token=…` → `verify-email { token }`.
+   * Mencabut tautannya mematikan pendaftaran dari ponsel sampai repo ponsel
+   * menyusul.
+   *
+   * Yang dijaga karena itu bukan lagi "nol tautan" melainkan **tepat satu**:
+   * nama pemakai ikut ke dalam badan surat, dan nama ber-HTML yang tak dilolos
+   * bisa menyelipkan `<a>` KEDUA yang menuju ke mana pun ia mau — di dalam
+   * email yang dikirim atas nama kami, ke orang yang baru saja mendaftar.
+   */
+  it("verifikasi: TEPAT SATU tautan, dan nama ber-HTML tak bisa menambah yang kedua", () => {
+    const html = suratVerifikasi(JAHAT, "123456", 60, URL_SAH);
+    expect(html.match(/<a\b/g) ?? [], "jumlah tautan di surat verifikasi").toHaveLength(1);
+    expect(html).not.toContain('<a href="https://penyerang.example">');
+    expect(html).toContain("&lt;/b&gt;"); // suntikannya jadi TEKS yang terlihat
+    // Tautan yang SAH tetap utuh — pelolosnya tak boleh merusak jalan ponsel.
+    expect(html).toContain(`href="${URL_SAH}"`);
+    // Dan kodenya tetap ada: ia jalan utamanya, tautannya cuma pendamping.
+    expect(html).toContain("123456");
   });
 
   it("url ber-tanda-kutip tak keluar dari atributnya", () => {
     const url = 'https://kakarut.app" onmouseover="jahat()" x="';
     for (const html of [
       suratUndangan("PT Waras", url),
-      suratVerifikasi("Budi", url, "abc"),
       suratReset("Budi", url, "abc"),
     ]) {
       // Kutipnya jadi `&quot;` — jadi `onmouseover` tinggal teks di dalam href,

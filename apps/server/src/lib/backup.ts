@@ -280,7 +280,7 @@ export async function terapkanRetensi(): Promise<{ dibuang: number; gagal: numbe
     .select({ id: backupRuns.id, objectKey: backupRuns.objectKey })
     .from(backupRuns)
     .where(eq(backupRuns.status, "sukses"))
-    .orderBy(desc(backupRuns.waktu));
+    .orderBy(desc(backupRuns.waktu), desc(backupRuns.id));
   const berlebih = sukses.slice(env.BACKUP_KEEP);
   let dibuang = 0;
   let gagal = 0;
@@ -309,7 +309,7 @@ export async function backupSuksesTerakhir(): Promise<Date | null> {
     .select({ waktu: backupRuns.waktu })
     .from(backupRuns)
     .where(eq(backupRuns.status, "sukses"))
-    .orderBy(desc(backupRuns.waktu))
+    .orderBy(desc(backupRuns.waktu), desc(backupRuns.id))
     .limit(1);
   return row?.waktu ?? null;
 }
@@ -330,7 +330,7 @@ export async function zonaWaktuCadangan(): Promise<string> {
       .from(companies)
       .where(eq(companies.isActive, true))
       .groupBy(companies.timezone)
-      .orderBy(desc(sql`count(*)`))
+      .orderBy(desc(sql`count(*)`), companies.timezone)
       .limit(1);
     return row?.tz || ZONA_BAWAAN;
   } catch {

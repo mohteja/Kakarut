@@ -118,13 +118,13 @@ export function ReceiptModal({
 }) {
   const { auth } = useAuth();
   const { settings, isThermal, canAutoPrint, printReceipt, printOrderSlip } = usePrinter();
-  const { data: company } = useQuery({
+  const { data: company, error: companyGagal } = useQuery({
     queryKey: ["company"],
     queryFn: () => api<CompanyStruk>("/company"),
   });
   // Struk per cabang: alamat/telepon & footer dari CABANG transaksi
   // (fallback ke data perusahaan bila kosong — data lama tetap tercetak benar).
-  const { data: daftarCabang } = useQuery({
+  const { data: daftarCabang, error: cabangGagal } = useQuery({
     queryKey: ["cabang"],
     queryFn: () => api<CabangStruk[]>("/cabang"),
   });
@@ -366,6 +366,26 @@ export function ReceiptModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-xs rounded-xl bg-white p-5 shadow-xl">
+        {/*
+          * KOP STRUK yang gagal dimuat: jatuh ke bawaan, dan bawaannya DISEBUT.
+          *
+          * `company` & `daftarCabang` mengisi nama usaha, alamat, dan footer
+          * struk — dokumen yang diserahkan ke pelanggan. Bila bacaannya gagal,
+          * `?? true` / `?? null` di bawah membuat struk tetap tercetak dengan
+          * nilai bawaan, diam-diam.
+          *
+          * Yang dipasang di sini peringatan di LAYAR, bukan penghalang cetak:
+          * menolak mencetak struk karena kopnya gagal dimuat akan menahan
+          * transaksi yang uangnya sudah diterima. Aturan yang dipakai sudah
+          * bernama di ledger ini — "jatuh ke bawaan itu jujur HANYA bila
+          * balasannya menyebut apa yang dipakai".
+          */}
+        {(companyGagal || cabangGagal) && (
+          <div className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <b>Kop struk gagal dimuat</b> — nama usaha/alamat/footer memakai nilai bawaan.
+            Struk tetap bisa dicetak; periksa kepalanya sebelum diserahkan.
+          </div>
+        )}
         <div id="struk-pratinjau" className="font-mono text-xs text-stone-800">
           {isiStruk}
         </div>

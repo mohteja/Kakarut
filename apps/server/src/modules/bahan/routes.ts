@@ -480,7 +480,7 @@ async function riwayatHargaBahan(
     eq(productions.status, "dikonfirmasi"),
     isNull(productions.deletedAt),
   );
-  const urutan = [desc(productions.prodDate), desc(productions.waktu)] as const;
+  const urutan = [desc(productions.prodDate), desc(productions.waktu), desc(productions.id)] as const;
   /*
     DUA KUERI, DAN ITU YANG MEMBUAT PEMOTONGANNYA AMAN.
 

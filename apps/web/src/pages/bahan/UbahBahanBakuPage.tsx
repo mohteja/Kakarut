@@ -3,7 +3,15 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { BahanDto, KategoriDto } from "@kakarut/shared";
 import { angkaDari, teksAngka } from "@kakarut/shared";
-import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
+import {
+  Card,
+  ErrorText,
+  PageTitle,
+  Spinner,
+  SpinnerAtauGalat,
+  btnPrimary,
+  btnSecondary,
+} from "../../components/ui";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { api } from "../../lib/api";
 import { BahanEditorGrid, angkaTakTerbaca, type BahanEditorRow } from "./BahanEditorGrid";
@@ -43,7 +51,7 @@ export function UbahBahanBakuPage() {
   const ids = (params.get("ids") ?? "").split(",").filter(Boolean);
   const [kelolaKategori, setKelolaKategori] = useState(false);
 
-  const { data: bahan, isLoading } = useQuery({
+  const { data: bahan, isLoading, error: bahanGagal } = useQuery({
     queryKey: ["bahan", "ringkas"],
     queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
@@ -134,6 +142,18 @@ export function UbahBahanBakuPage() {
     },
   });
 
+  /*
+   * `rows` HANYA diisi efek dari `bahan`. Bacaan yang gagal ⇒ `isLoading`
+   * false, `bahan` undefined, efeknya tak pernah jalan, `rows` tetap `null` —
+   * dan syarat ini tetap benar SELAMANYA. Layarnya berputar tanpa kalimat dan
+   * tanpa apa pun yang bisa ditekan.
+   *
+   * Gerbang `spinner-abadi` melewatkannya karena bentuknya bukan `!data`
+   * melainkan keadaan TURUNAN, dan pengecualiannya sendiri menuliskan itu
+   * ("state lokal → bukan urusan penjaga ini"). Pengecualian itu benar untuk
+   * state yang benar-benar lokal; `rows` tidak.
+   */
+  if (bahanGagal) return <SpinnerAtauGalat error={bahanGagal} apa="Bahan baku" />;
   if (isLoading || rows === null) return <Spinner />;
 
   return (

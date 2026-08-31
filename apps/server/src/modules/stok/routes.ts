@@ -1,8 +1,10 @@
 import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
+import { SEPULUH_TAHUN, zTanggalKejadian } from "../../lib/waktu-kejadian";
 import { toleransiBanding, SKALA_QTY_STOK_KOLOM } from "../../lib/batas-angka";
 import { randomUUID } from "node:crypto";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
+import { potongLarik } from "../../lib/potong";
 import { alias } from "drizzle-orm/pg-core";
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -25,6 +27,7 @@ import {
 } from "../../db/schema";
 import {
   branchUntukTulis,
+  syaratCabang,
   pastikanCabang,
   requireRole,
   resolveBranchId,
@@ -35,6 +38,11 @@ import { hargaPerUnit, ringkasNilaiStok } from "@kakarut/shared";
 import { awalHariDi, tanggalDi } from "../../lib/time";
 import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { fifoBahan, hitungSaldoCabang, kartuStok, qtyDiJalan } from "./service";
+
+/**
+ * Baris penyesuaian stok yang dikirim ke layar antrean putusan.
+ */
+const BATAS_PENYESUAIAN = 300;
 
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -96,7 +104,20 @@ const StokAwalBody = OpnameBody.omit({ client_ref: true, device_id: true }).exte
    * ditambahkan BERSAMA penanganannya — bukan mendahului.
    */
   /** tanggal berlaku saldo pembuka (YYYY-MM-DD, zona perusahaan). Default hari ini. */
-  tanggal: zTanggal
+  /*
+   * Saldo pembuka boleh MUNDUR jauh — onboarding wajar mencatat "stok awal per
+   * 1 Januari" — tapi tak boleh MAJU: hitungan stok tak pernah terjadi besok.
+   * Dan itu yang terukur rusak: `tanggal: "2099-01-01"` diterima 201, layar
+   * Stok melaporkan saldo 500 sementara kartu stok hari yang sama melaporkan
+   * 0 — baseline dicari `opname_date < ${dari}` dan tahun 2099 tak pernah
+   * cocok. Dua tampilan stok yang sama berselisih seluruh saldonya, diam-diam.
+   *
+   * Sisi LAMPAU-nya sengaja longgar (sepuluh tahun), dan itu bukan tebakan:
+   * `verify-api` sendiri sudah lama menembak saldo pembuka bertanggal
+   * **2020-01-01** sebagai jalur yang sah. Yang terukur rusak sisi masa
+   * depannya; mengetatkan sisi yang tak rusak hanya akan memutus alur nyata.
+   */
+  tanggal: zTanggalKejadian(SEPULUH_TAHUN)
     .optional(),
 });
 
@@ -275,7 +296,8 @@ export const stokRoutes = new Hono<AppEnv>()
         FROM stock_opnames so
         WHERE so.branch_id = pr.branch_id AND so.ingredient_id = pr.ingredient_id
           AND so.penyesuaian_status = 'disetujui'
-        ORDER BY so.created_at DESC
+        -- PEMUTUS SERI: baseline saldo (lihat catatan di stok/service.ts)
+        ORDER BY so.created_at DESC, so.id DESC
         LIMIT 1
       ) b ON TRUE
       WHERE pr.company_id = ${auth.company_id!} AND pr.branch_id = ${branchId}
@@ -765,13 +787,25 @@ export const stokRoutes = new Hono<AppEnv>()
       .leftJoin(klarUser, eq(stockOpnames.klarifikasiBy, klarUser.id))
       .leftJoin(setujuUser, eq(stockOpnames.disetujuiBy, setujuUser.id))
       .where(and(...conds))
-      .orderBy(desc(stockOpnames.createdAt))
-      .limit(300);
+      .orderBy(desc(stockOpnames.createdAt), desc(stockOpnames.id))
+      // `+ 1`: pembeda "tepat sejumlah batas" dari "lebih dari batas".
+      .limit(BATAS_PENYESUAIAN + 1);
+    /**
+     * ANTREAN PUTUSAN, sama seperti selisih kas: layar Penyesuaian Stok
+     * menghitung berapa yang `siapDisetujui` dari daftar INI. Potongan yang
+     * senyap membuat penghitung itu berkata "tinggal segini" atas antrean
+     * yang sebenarnya lebih panjang — dan yang tak terkirim tak akan pernah
+     * disetujui siapa pun. Larik telanjang, jadi penandanya lewat header.
+     */
     return c.json(
-      rows.map((r) => ({
-        ...r,
-        klarifikasi_status: r.klarifikasi_status ?? "belum",
-      })),
+      potongLarik(
+        c,
+        rows.map((r) => ({
+          ...r,
+          klarifikasi_status: r.klarifikasi_status ?? "belum",
+        })),
+        BATAS_PENYESUAIAN,
+      ),
     );
   })
   /**
@@ -987,7 +1021,7 @@ export const stokRoutes = new Hono<AppEnv>()
         ),
       )
       .groupBy(stockOpnames.sessionId)
-      .orderBy(desc(sql`max(${stockOpnames.createdAt})`))
+      .orderBy(desc(sql`max(${stockOpnames.createdAt})`), stockOpnames.sessionId)
       .limit(200);
 
     // resolusi nama user (opsional)
@@ -1045,6 +1079,9 @@ export const stokRoutes = new Hono<AppEnv>()
       .where(
         and(
           eq(stockOpnames.companyId, auth.company_id!),
+          // Sesi opname MILIK satu cabang: tanpa syarat ini, kasir cabang lain
+          // membaca selisih, catatan, dan pelakunya (terukur 200).
+          syaratCabang(c, stockOpnames.branchId),
           eq(stockOpnames.sessionId, c.req.param("sessionId")),
         ),
       )
@@ -1242,7 +1279,7 @@ export const stokRoutes = new Hono<AppEnv>()
       .where(
         and(eq(stockOpnames.companyId, auth.company_id!), eq(stockOpnames.branchId, branchId)),
       )
-      .orderBy(desc(stockOpnames.createdAt))
+      .orderBy(desc(stockOpnames.createdAt), desc(stockOpnames.id))
       .limit(200);
     return c.json(rows);
   });

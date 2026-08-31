@@ -347,7 +347,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const [perPage, setPerPage] = useState(20);
   const [page, setPage] = useState(1);
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, error: daftarGagal } = useQuery({
     queryKey: [t.endpoint, branchQuery, dari, sampai, perPage, page],
     queryFn: () => {
       const p = new URLSearchParams();
@@ -654,9 +654,16 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-stone-700">
           Riwayat {tipe === "produksi" ? "Produksi" : "Pembelian"}{" "}
-          <span className="text-sm font-normal text-stone-400">({total} faktur)</span>
+          {/*
+            * "(0 faktur)" saat gagal dimuat adalah pernyataan, bukan keadaan —
+            * dan `Rp0` pengeluaran di sebelahnya lebih buruk lagi. Gagal
+            * memuat ditulis apa adanya.
+            */}
+          <span className="text-sm font-normal text-stone-400">
+            ({daftarGagal ? "gagal dimuat" : `${total} faktur`})
+          </span>
         </h2>
-        {tipe === "beli" && totalPengeluaran > 0 && (
+        {tipe === "beli" && !daftarGagal && totalPengeluaran > 0 && (
           <div className="text-sm text-stone-500">
             Pengeluaran terkonfirmasi{dari || sampai ? " (rentang)" : ""}:{" "}
             <b>{formatRupiah(totalPengeluaran)}</b>
