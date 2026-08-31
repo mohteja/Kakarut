@@ -190,6 +190,12 @@ const BATAS_TRANSAKSI_SHIFT = 300;
 const BATAS_SELISIH = 50;
 
 /**
+ * Riwayat shift TERTUTUP per cabang. Angkanya tak berubah — yang berubah,
+ * daftarnya kini mengaku saat ia pendek karena dipotong. Lihat rute `GET /`.
+ */
+const BATAS_RIWAYAT_SHIFT = 50;
+
+/**
  * Berapa banyak yang DIAMBIL saat statusnya masih harus dihitung di JS.
  * Lebih besar dari [BATAS_SELISIH] karena penyaringannya terjadi sesudah
  * query — memotong di 50 lebih dulu membuang baris yang justru diminta.
@@ -634,7 +640,21 @@ export const shiftRoutes = new Hono<AppEnv>()
     });
     return c.json(hasil);
   })
-  // riwayat shift (yang sudah ditutup) di cabang
+  /*
+   * Riwayat shift (yang sudah ditutup) di cabang — dan ia MENGATAKAN kapan
+   * dirinya dipotong.
+   *
+   * Ini riwayat UANG. Owner yang menggulir sampai bawah lalu berhenti membaca
+   * "tak ada shift sebelum ini" — dan daftar yang dipotong diam-diam terlihat
+   * PERSIS seperti daftar yang memang segitu isinya. TERUKUR lewat rutenya
+   * sendiri: 51 shift tertutup di satu cabang → balasannya 50 baris, tanpa
+   * header, tanpa medan. Tak ada satu pun cara membedakannya dari "memang 50".
+   *
+   * `BATAS + 1` diambil, lalu `potongLarik` yang memotongnya kembali ke batas
+   * dan memasang headernya — satu baris lebih itulah yang membedakan "pas 50"
+   * dari "50 dari sekian". Bentuk larik telanjangnya TIDAK berubah: build
+   * ponsel lama membacanya `as List` (lihat `lib/potong.ts`).
+   */
   .get("/", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
@@ -647,9 +667,10 @@ export const shiftRoutes = new Hono<AppEnv>()
         ),
       )
       .orderBy(desc(shifts.openedAt), desc(shifts.id))
-      .limit(50);
+      .limit(BATAS_RIWAYAT_SHIFT + 1);
     // Riwayat = shift yang SUDAH ditutup, jadi tak ada yang dibutakan di sini.
-    return c.json(await Promise.all(rows.map((r) => toDto(r, auth.role))));
+    const dipakai = potongLarik(c, rows, BATAS_RIWAYAT_SHIFT);
+    return c.json(await Promise.all(dipakai.map((r) => toDto(r, auth.role))));
   })
   /**
    * Daftar selisih kas untuk owner/admin — sumber badge "perlu ACC".

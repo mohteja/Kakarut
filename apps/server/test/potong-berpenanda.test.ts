@@ -39,8 +39,19 @@ interface Alasan {
   teks: string;
 }
 
-/** Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar. */
-const MAKS_UTANG = 8;
+/**
+ * Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar.
+ *
+ * NOL sejak 2026-08-31 — kedelapan pemotongan senyap terakhir dibayar dalam
+ * satu putaran, dan nolnya berarti sesuatu yang bisa diperiksa: tiap
+ * pemotongan di `src` entah mengumumkan dirinya (header atau kunci badan),
+ * entah terdaftar `sah` beserta alasan kenapa kosongnya punya arti yang benar.
+ *
+ * Ia TIDAK berarti tak ada pemotongan lain di luar populasi yang disapu
+ * `util/potong.ts` — batasnya ditulis di sana, dan `slice`/`take` murni di JS
+ * tetap tak terlihat.
+ */
+const MAKS_UTANG = 0;
 
 /** kunci: `berkas` → teks argumen `.limit(…)` → alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
@@ -102,18 +113,6 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "bukan di sini.",
     },
   },
-  "modules/laporan/routes.ts": {
-    "200": {
-      kelas: "utang",
-      jumlah: 1,
-      teks:
-        "UTANG. Statistik lama-pengerjaan per menu dihitung dari 200 baris " +
-        "sajian terakhir. Komentar di atasnya sudah mengakui bagian tersulitnya " +
-        "— baris MANA yang lolos berubah antar muat — lalu potongannya sendiri " +
-        "tak dikatakan. Laporan yang diam soal itu terbaca sebagai laporan " +
-        "atas seluruh periode.",
-    },
-  },
   "modules/meja/routes.ts": {
     "50": {
       kelas: "sah",
@@ -125,28 +124,43 @@ const daftar: Record<string, Record<string, Alasan>> = {
     },
   },
   "modules/perlengkapan/service.ts": {
-    "100": {
-      kelas: "utang",
+    /*
+     * KETIGANYA BERBENTUK SAMA, dan bentuknya sudah punya preseden di berkas
+     * ini: `stok/service.ts` → `ambilEvents`. Servicenya MENGAMBIL `BATAS + 1`;
+     * yang memotong dan memasang headernya routes-nya, sebab `Context` hidup
+     * di sana. Pemindai ini berlingkup satu FUNGSI — batas yang ditulis
+     * terang-terangan di `util/potong.ts` — jadi ia tak bisa melihat satu hop
+     * ke pemanggil.
+     *
+     * Yang membuat ketiga entri ini bukan janji kosong: gerbang
+     * "rute yang memotong WAJIB mengumumkannya" di `pemotongan-terungkap`
+     * MEMAKU ketiga rutenya. Mencabut `potongLarik` dari salah satunya
+     * memerahkan gerbang itu, bukan diam-diam membuat entri ini jadi bohong.
+     */
+    "BATAS_OPNAME_PERLENGKAPAN + 1": {
+      kelas: "sah",
       jumlah: 1,
       teks:
-        "UTANG. Riwayat sesi opname perlengkapan — kembar `stok/routes.ts` " +
-        "yang juga masih utang. Keduanya antrean tinjauan.",
+        "Riwayat sesi opname perlengkapan. Penandanya ADA, hanya tidak di " +
+        "fungsi ini: `GET /perlengkapan/opname/riwayat` memanggil " +
+        "`potongLarik(c, rows, BATAS_OPNAME_PERLENGKAPAN)` — dan rute itu " +
+        "dipaku gerbang 'rute yang memotong wajib mengumumkannya'.",
     },
-    "200": {
-      kelas: "utang",
+    "BATAS_BELI_PERLENGKAPAN + 1": {
+      kelas: "sah",
       jumlah: 1,
       teks:
-        "UTANG. Daftar pembelian perlengkapan, diurut agar yang masih " +
-        "menunggu aksi naik ke atas. Justru karena urutannya begitu, potongan " +
-        "di 200 memotong ekor riwayatnya — dan tak ada yang mengatakannya.",
+        "Daftar pembelian perlengkapan. Sama: `GET /perlengkapan/beli` yang " +
+        "memanggil `potongLarik`. Urutannya menaruh yang butuh aksi di atas, " +
+        "jadi yang terpotong justru ekor riwayatnya — dan kini dikatakan.",
     },
-    "50": {
-      kelas: "utang",
+    "BATAS_KIRIMAN_PERLENGKAPAN + 1": {
+      kelas: "sah",
       jumlah: 1,
       teks:
-        "UTANG. Riwayat kiriman perlengkapan antar cabang — 50 terakhir, dan " +
-        "cabang penerima memakai layar ini untuk memastikan kirimannya sudah " +
-        "tercatat. Potongan yang senyap terbaca sebagai 'tak pernah dikirim'.",
+        "Riwayat kiriman perlengkapan antar cabang. Sama: " +
+        "`GET /perlengkapan/kiriman` yang memanggil `potongLarik`. Cabang " +
+        "penerima memakai layar ini untuk memastikan kirimannya tercatat.",
     },
   },
   "modules/pesanan/routes.ts": {
@@ -176,32 +190,6 @@ const daftar: Record<string, Record<string, Alasan>> = {
       teks:
         "Delapan saran pembelian teratas. Ini memang daftar SARAN; " +
         "melengkapinya justru akan membuatnya tak terpakai.",
-    },
-  },
-  "modules/shift/routes.ts": {
-    "50": {
-      kelas: "utang",
-      jumlah: 1,
-      teks:
-        "UTANG. Riwayat shift yang sudah ditutup — 50 terakhir, tanpa kabar. " +
-        "Ini riwayat UANG; owner yang menggulir ke bawah dan berhenti " +
-        "menyimpulkan shift sebelum itu tak ada.",
-    },
-  },
-  "modules/stok/routes.ts": {
-    "200": {
-      kelas: "utang",
-      jumlah: 2,
-      teks:
-        "UTANG. Riwayat sesi opname dan barisnya. Kembar pintu penyesuaian " +
-        "yang diperbaiki putaran ini — dikerjakan berikutnya, bukan diklaim beres.",
-    },
-    "300": {
-      kelas: "utang",
-      jumlah: 1,
-      teks:
-        "UTANG (SQL mentah). Daftar stok mendekati kedaluwarsa. Layar ini " +
-        "dipakai memutuskan apa yang harus dijual duluan.",
     },
   },
   "modules/stok/service.ts": {

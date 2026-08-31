@@ -11,7 +11,7 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
-import { api } from "../../lib/api";
+import { api, bacaTerpotong } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas } from "../../lib/format";
 
 const SEBAB_LABEL: Record<MenuPriceLogRow["sebab"], string> = {
@@ -27,10 +27,7 @@ function Rincian({ row }: { row: AnalisisHargaRow }) {
     queryKey: ["menu-riwayat-harga", row.id],
     queryFn: () =>
       api<MenuPriceLogRow[]>(`/menu/${row.id}/riwayat-harga`, {
-        bacaHeader: (h) => {
-          const n = Number(h.get("X-Kakarut-Terpotong"));
-          setTerpotong(Number.isFinite(n) && n > 0 ? n : null);
-        },
+        bacaHeader: bacaTerpotong(setTerpotong),
       }),
   });
 

@@ -26,6 +26,53 @@ tanpa akses repo server.
 ---
 
 
+## Delapan daftar yang dipotong kini MENGATAKANNYA
+
+> Tidak ada migrasi, dan **tidak ada bentuk balasan yang berubah**. Tujuh rute
+> berbalasan larik kini mengirim header `X-Kakarut-Terpotong` bila daftarnya
+> benar-benar terpotong; satu laporan berbalasan objek mendapat medan baru
+> `riwayat_terpotong`.
+
+🟡 **PERLU DICEK** — build mobile yang ada **tetap jalan tanpa perubahan**:
+badan responsnya tetap larik telanjang (build lama membacanya `as List`), dan
+header lewat begitu saja pada klien yang tak memintanya.
+
+Yang berubah, dan kenapa layar mobile mungkin perlu ikut menampilkannya:
+daftar-daftar ini **selalu** dipotong server, juga sebelum perubahan ini —
+bedanya dulu potongannya **tidak dikatakan**, jadi daftar pendek terlihat
+persis seperti daftar yang memang segitu isinya. Terukur di server:
+**51 shift tertutup di satu cabang → `GET /shift` memulangkan 50 baris, tanpa
+satu pun tanda.**
+
+| Rute | Batas | Cara ia berkata |
+| --- | --- | --- |
+| `GET /api/shift` | 50 | header |
+| `GET /api/stok/exp` | 300 | header |
+| `GET /api/stok/opname/riwayat` | 200 | header |
+| `GET /api/stok/opname` | 200 | header |
+| `GET /api/perlengkapan/opname/riwayat` | 100 | header |
+| `GET /api/perlengkapan/beli` | 200 | header |
+| `GET /api/perlengkapan/kiriman` | 50 | header |
+| `GET /api/laporan/durasi-pesanan` | 200 | medan `riwayat_terpotong` |
+
+**Cara membacanya** — sama persis dengan yang sudah dipakai `GET /api/sampah`
+dan `GET /api/stok/penyesuaian`: header **`X-Kakarut-Terpotong: <n>`** berisi
+jumlah baris yang dikirim. **Tidak ada header sama sekali** berarti daftarnya
+memang lebih pendek dari batasnya — bukan `0`. `core/api_client.dart` sudah
+punya pembacanya.
+
+**Yang masih jadi utang di sisi ponsel** (tercatat di
+`docs/audit/vena-audit.md`): `GET /api/stok/penyesuaian` sudah mengirim header
+ini sejak lama dan **belum dirender** layar mobilenya. Delapan rute di atas
+menambah daftar itu bila tak ikut ditampilkan.
+
+**`riwayat_terpotong` pada `LaporanDurasiPesanan`**: `bool` (bukan nullable).
+`per_menu`, `jumlah`, dan `rata_detik` **tidak** ikut terpotong — ketiganya
+lahir dari agregat `GROUP BY` tanpa batas, jadi statistiknya tetap atas seluruh
+rentang. Yang pendek hanya `riwayat`.
+
+---
+
 ## Angka BIAYA hanya untuk manajemen (owner/admin)
 
 > Tidak ada migrasi. **Medan biaya kini `null`** untuk peran non-manajemen

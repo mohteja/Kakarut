@@ -10,7 +10,7 @@ import {
   btnSecondary,
 } from "../components/ui";
 import { TabelResponsif } from "../components/TabelResponsif";
-import { api } from "../lib/api";
+import { api, bacaTerpotong } from "../lib/api";
 import { formatRupiah, formatWaktu } from "../lib/format";
 
 const JENIS: Record<SampahRow["jenis"], { label: string; cls: string }> = {
@@ -35,10 +35,7 @@ export function TempatSampahPage() {
     queryKey: ["sampah"],
     queryFn: () =>
       api<SampahRow[]>("/sampah", {
-        bacaHeader: (h) => {
-          const n = Number(h.get("X-Kakarut-Terpotong"));
-          setTerpotong(Number.isFinite(n) && n > 0 ? n : null);
-        },
+        bacaHeader: bacaTerpotong(setTerpotong),
       }),
   });
   const list = data ?? [];

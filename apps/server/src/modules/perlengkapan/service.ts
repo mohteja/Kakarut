@@ -41,6 +41,23 @@ import { nomorUntukRefs, terbitkanNomor } from "../dokumen/nomor";
 import { kunciKirimCabang } from "../stok/service";
 
 /** Tanggal lokal hari ini pada zona waktu perusahaan. */
+/**
+ * TIGA DAFTAR DI BERKAS INI DIPOTONG, dan dulu ketiganya diam soal itu.
+ *
+ * Batasnya tidak berubah — yang berubah, servicenya kini mengambil SATU BARIS
+ * LEBIH dan routes-nya memanggil `potongLarik` (lihat `lib/potong.ts`), jadi
+ * pemakainya diberi tahu lewat header `X-Kakarut-Terpotong`. Tetapannya hidup
+ * di sini, bukan disalin ke routes, supaya kedua sisi tak bisa bergeser
+ * sendiri: yang mengambil `BATAS + 1` dan yang memotong ke `BATAS` harus
+ * selalu angka yang sama.
+ *
+ * Bentuk larik telanjangnya SENGAJA tak berubah jadi objek: build ponsel lama
+ * membacanya `as List`, dan repo ini tak punya gerbang versi klien.
+ */
+export const BATAS_OPNAME_PERLENGKAPAN = 100;
+export const BATAS_BELI_PERLENGKAPAN = 200;
+export const BATAS_KIRIMAN_PERLENGKAPAN = 50;
+
 export async function tanggalPerusahaan(companyId: string): Promise<string> {
   const [comp] = await db
     .select({ timezone: companies.timezone })
@@ -786,7 +803,8 @@ export async function riwayatOpnamePerlengkapan(companyId: string, branchId: str
     )
     .groupBy(supplyMutations.sessionId)
     .orderBy(desc(sql`MIN(${supplyMutations.waktu})`), supplyMutations.sessionId)
-    .limit(100);
+    // SATU baris lebih: pemotongannya diumumkan routes-nya lewat `potongLarik`.
+    .limit(BATAS_OPNAME_PERLENGKAPAN + 1);
   const nomorMap = await nomorUntukRefs(
     db,
     companyId,
@@ -1621,7 +1639,12 @@ export async function daftarBeliPerlengkapan(
       desc(supplyPurchases.createdAt),
       desc(supplyPurchases.id),
     )
-    .limit(200);
+    /*
+     * SATU baris lebih. Justru karena urutannya menaruh yang "butuh aksi" di
+     * atas, potongan di batas ini memotong EKOR RIWAYATNYA — dan itu bagian
+     * yang paling mudah disalahbaca sebagai "tak pernah ada".
+     */
+    .limit(BATAS_BELI_PERLENGKAPAN + 1);
   // nomor BP-: ref = faktur_id (baris warisan tanpa faktur → ref = id baris)
   const nomorMap = await nomorUntukRefs(
     db,
@@ -1737,8 +1760,13 @@ export async function daftarKirimanPerlengkapan(companyId: string, branchId: str
         sql`(${supplyTransfers.dariBranchId} = ${branchId} OR ${supplyTransfers.keBranchId} = ${branchId})`,
       ),
     )
+    /*
+     * SATU baris lebih. Cabang PENERIMA memakai layar ini untuk memastikan
+     * kirimannya sudah tercatat; potongan yang senyap di sini terbaca sebagai
+     * "tak pernah dikirim".
+     */
     .orderBy(desc(supplyTransfers.waktu), desc(supplyTransfers.id))
-    .limit(50);
+    .limit(BATAS_KIRIMAN_PERLENGKAPAN + 1);
   const nomorMap = await nomorUntukRefs(
     db,
     companyId,

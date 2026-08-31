@@ -201,3 +201,24 @@ export async function api<T = unknown>(
   opts.bacaHeader?.(res.headers);
   return data;
 }
+
+/**
+ * PEMBACA `X-Kakarut-Terpotong`, SATU RUMAH — bukan disalin per layar.
+ *
+ * Delapan layar memerlukan bentuk yang persis sama: baca headernya, dan
+ * anggap "tak terpotong" bila nilainya bukan angka positif. Disalin, ia
+ * pelan-pelan berbeda — dan salah satu salinannya juga melanggar aturan
+ * rumah "jangan `Number()` mentah di layar" (`angka-input.test.ts`), yang
+ * memang benar: `Number()` di sebuah `.tsx` hampir selalu berarti isian
+ * pengguna sedang diurai tanpa penjaga. Di sini ia bukan isian melainkan
+ * header dari server sendiri, dan penjagaannya ditulis satu kali.
+ *
+ * `null` berarti "tak dipotong"; angka berarti "sekian yang ditampilkan, dan
+ * masih ada sisanya".
+ */
+export function bacaTerpotong(set: (n: number | null) => void) {
+  return (h: Headers) => {
+    const n = Number(h.get("X-Kakarut-Terpotong"));
+    set(Number.isFinite(n) && n > 0 ? n : null);
+  };
+}

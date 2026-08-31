@@ -16096,6 +16096,72 @@ cek "PASANGAN §282: alasannya menyebut 'belum ditutup', bukan 'tak punya selisi
      | jq '(.error|test("belum ditutup"))|if . then 1 else 0 end')"
 tutup_aktif280
 
+# §283 — PENANDA PEMOTONGAN YANG JUJUR: DIAM SAAT DAFTARNYA MEMANG PENDEK
+#
+# Delapan pemotongan senyap terakhir dibayar putaran ini. Yang dijaga DI SINI
+# bukan sisi terpotongnya — data seed terlalu kecil untuk itu, dan menyuntik
+# 300 baris lewat HTTP di sembilan pintu akan memperlambat gerbang ini demi
+# satu bit informasi. Sisi terpotongnya dipaku uji statis
+# (`pemotongan-terungkap.test.ts`: tiap rute ber-`potongLarik` wajib mengambil
+# `BATAS + 1`, wajib punya pembaca di layar) dan DIUKUR sekali lewat HTTP:
+#
+#   51 shift tertutup di satu cabang → GET /shift memulangkan 50 baris
+#   sebelum : tanpa header, tanpa medan — tak beda dari "memang cuma 50"
+#   sesudah : X-Kakarut-Terpotong: 50
+#
+# Yang dijaga di sini sisi SEBALIKNYA, dan justru itu yang paling mudah salah:
+# penanda yang SELALU menyala. Kueri yang lupa `+ 1` membuat daftar berjumlah
+# tepat `BATAS` dituduh terpotong; peringatan yang menyala tanpa sebab adalah
+# peringatan yang orang belajar abaikan, dan gerbang statis di atas tak bisa
+# melihatnya sebab bentuk kodenya benar.
+#
+# Sekaligus PREMIS bagi dirinya sendiri: tiap asersi "tak ada header" hanya
+# berarti bila daftarnya memang lebih pendek dari batasnya — jadi panjangnya
+# ikut diperiksa, bukan diandaikan.
+echo
+echo "── §283 penanda pemotongan jujur: diam saat daftarnya memang pendek ──"
+
+# tanpaPotong <keterangan> <batas> <path…>
+tanpaPotong283() {
+  local ket="$1" batas="$2" path="$3" hdr n
+  # `header_of`, bukan `grep` sendiri: di bawah `set -e`, `grep` yang TIDAK
+  # menemukan apa-apa memulangkan 1 dan mematikan skrip ini — dan "tak ada
+  # header" justru keadaan yang sedang diuji seksi ini.
+  n=$(api "$OWNER" GET "$path" | jq 'length')
+  hdr=$(header_of "x-kakarut-terpotong" -H "Authorization: Bearer $OWNER" "$BASE/api$path")
+  cek "premis §283 $ket: daftarnya lebih pendek dari batas ($n < $batas)" "V == 1" \
+    "$([ "$n" -lt "$batas" ] && echo 1 || echo 0)"
+  cek "§283 $ket TIDAK berkata terpotong" "V == 1" \
+    "$([ -z "$hdr" ] && echo 1 || echo 0)"
+}
+
+tanpaPotong283 "riwayat shift"            50  "/shift?branch_id=$CB213"
+tanpaPotong283 "stok mendekati exp"      300  "/stok/exp?hari=7"
+tanpaPotong283 "riwayat sesi opname"     200  "/stok/opname/riwayat"
+tanpaPotong283 "baris opname"            200  "/stok/opname"
+tanpaPotong283 "opname perlengkapan"     100  "/perlengkapan/opname/riwayat"
+tanpaPotong283 "pembelian perlengkapan"  200  "/perlengkapan/beli"
+tanpaPotong283 "kiriman perlengkapan"     50  "/perlengkapan/kiriman"
+
+# Laporan durasi memulangkan OBJEK, jadi penandanya kunci badan — dan medannya
+# WAJIB ADA walau bernilai false: klien tak bisa membedakan "tidak terpotong"
+# dari "server versi lama" bila kuncinya kadang hilang.
+HARI283=$(date -u +%Y-%m-%d)
+LAP283=$(api "$OWNER" GET "/laporan/durasi-pesanan?dari=$HARI283&sampai=$HARI283")
+cek "§283 laporan durasi MEMBAWA medan riwayat_terpotong" "V == 1" \
+  "$(echo "$LAP283" | jq 'has("riwayat_terpotong") | if . then 1 else 0 end')"
+cek "§283 medannya boolean, bukan null" "V == 1" \
+  "$(echo "$LAP283" | jq '((.riwayat_terpotong|type) == "boolean") | if . then 1 else 0 end')"
+cek "premis §283: riwayatnya memang lebih pendek dari batas 200" "V == 1" \
+  "$(echo "$LAP283" | jq '((.riwayat|length) < 200) | if . then 1 else 0 end')"
+cek "§283 laporan kecil TIDAK berkata terpotong" "V == 1" \
+  "$(echo "$LAP283" | jq '(.riwayat_terpotong == false) | if . then 1 else 0 end')"
+
+# PASANGAN: pintu yang SUDAH memakai idiom ini sejak lama tak boleh bergeser
+# perilakunya gara-gara pembantunya dipakai tujuh pintu baru.
+cek "PASANGAN §283: sampah kecil tetap tanpa header" "V == 1" \
+  "$(test -z "$(header_of "x-kakarut-terpotong" -H "Authorization: Bearer $OWNER" "$BASE/api/sampah")" && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

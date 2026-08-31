@@ -27,6 +27,15 @@ import type { Context } from "hono";
 import { resolveBranchId, type AppEnv } from "../../middleware/auth";
 import { tanggalQuery } from "../../lib/tanggal-query";
 import { tanggalDi } from "../../lib/time";
+
+/**
+ * Riwayat penyelesaian sajian yang dikirim ke layar Lama Pesanan.
+ *
+ * Angkanya tak berubah; yang berubah, daftarnya kini mengaku lewat
+ * `riwayat_terpotong` di badan balasan. Bentuk objek, jadi idiomnya kunci
+ * badan — bukan header (lihat `lib/potong.ts`).
+ */
+const BATAS_RIWAYAT_DURASI = 200;
 import { omzetDitagihSql, sumQtyDitagihSql } from "../../lib/porsi-ditagih";
 import { rataPerPorsi } from "../../lib/bep";
 import { loadKatalog, toMenuDto } from "../menu/service";
@@ -484,7 +493,12 @@ export const laporanRoutes = new Hono<AppEnv>()
        * karena tak pernah salah dengan cara yang sama dua kali.
        */
       .orderBy(desc(saleItems.pesananStatusAt), desc(saleItems.id))
-      .limit(200);
+      // SATU BARIS LEBIH dari batasnya — itulah cara tahu daftarnya terpotong.
+      .limit(BATAS_RIWAYAT_DURASI + 1);
+    const riwayatTerpotong = riwayat.length > BATAS_RIWAYAT_DURASI;
+    const riwayatDipakai = riwayatTerpotong
+      ? riwayat.slice(0, BATAS_RIWAYAT_DURASI)
+      : riwayat;
 
     const per_menu = perMenu.map((r) => {
       const target = r.target == null ? null : Number(r.target);
@@ -516,7 +530,19 @@ export const laporanRoutes = new Hono<AppEnv>()
       bertarget: per_menu.filter((r) => r.target_detik != null).length,
       lewat_target: per_menu.filter((r) => r.lewat_target).length,
       per_menu,
-      riwayat: riwayat.map((r) => ({
+      /*
+       * PENANDANYA, dan alasan utang lamanya perlu DIRALAT.
+       *
+       * Entri vena ini dulu berbunyi "statistik lama-pengerjaan per menu
+       * dihitung dari 200 baris sajian terakhir". Tidak: `per_menu` dan
+       * `jumlah` lahir dari kueri agregat `GROUP BY` di atas yang TIDAK
+       * dibatasi, jadi angkanya selalu atas seluruh rentang. Yang dipotong
+       * cuma `riwayat` — dan itu tetap salah selama ia diam, sebab `jumlah`
+       * tampil tepat di atasnya: "1.284 sajian" lalu daftar berisi 200,
+       * tanpa satu kata pun menjelaskan selisihnya.
+       */
+      riwayat_terpotong: riwayatTerpotong,
+      riwayat: riwayatDipakai.map((r) => ({
         nomor: r.nomor,
         menu_nama: r.menu_nama,
         oleh: r.oleh ?? null,

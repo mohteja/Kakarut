@@ -50,6 +50,148 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Delapan pemotongan senyap terakhir — dan lubang yang perbaikannya akan memperbesar 8× — server + web — 2026-08-31 — `MAKS_UTANG` 8 → 0
+
+- **Vena ini sudah empat putaran berjalan**, dan sisanya tinggal 8 situs
+  `utang` di 4 berkas. Aturannya sudah ditulis panjang di
+  `modules/customer/routes.ts:50`, rumahnya sudah ada (`src/lib/potong.ts`),
+  idiomnya sudah dipakai belasan kali. Yang tersisa: memakainya di pintu yang
+  belum. Tanda tangan yang sama lagi.
+
+- **TERUKUR lewat HTTP, satu pintu utuh** — `GET /shift`, riwayat UANG, yang
+  paling tajam dari kedelapannya. 51 shift tertutup disuntik ke satu cabang,
+  dan **premisnya dibuktikan dari balasan rutenya sendiri** (0 → 50 baris),
+  bukan dari `SELECT count(*)`:
+
+  ```
+  sebelum : 50 baris · tanpa header · tanpa medan
+  sesudah : 50 baris · X-Kakarut-Terpotong: 50
+  ```
+
+  Lima puluh baris tanpa satu pun tanda tak bisa dibedakan dari "cabang ini
+  memang belum pernah menutup shift sebelum itu". Owner yang menggulir sampai
+  bawah membaca daftar yang habis sebagai riwayat yang habis.
+
+- **Kedelapan pintu, satu idiom** — tujuh berbalasan larik telanjang memakai
+  `potongLarik` + header (bentuk larik SENGAJA tak berubah jadi objek: build
+  ponsel lama membacanya `as List`); satu berbalasan objek memakai kunci badan:
+
+  | pintu | batas | cara |
+  |---|---|---|
+  | `GET /shift` | 50 | header |
+  | `GET /stok/exp` | 300 | header (`LIMIT` di templat `sql`) |
+  | `GET /stok/opname/riwayat` | 200 | header |
+  | `GET /stok/opname` | 200 | header |
+  | `GET /perlengkapan/opname/riwayat` | 100 | header |
+  | `GET /perlengkapan/beli` | 200 | header |
+  | `GET /perlengkapan/kiriman` | 50 | header |
+  | `GET /laporan/durasi-pesanan` | 200 | `riwayat_terpotong` |
+
+  Tujuh layar web ikut menampilkannya, dengan kalimat yang berbeda per layar —
+  spanduk yang berbunyi sama di tujuh tempat adalah spanduk yang orang berhenti
+  membaca.
+
+### Lubang yang putaran ini akan memperbesar 8×, ditutup lebih dulu
+
+- Sudah ada aturan mekanis untuk medan DTO (*"tiap penanda `terpotong` wajib
+  dibaca web"*). **Tak ada padanannya untuk header** — dan justru bentuk
+  header-lah yang bertambah tujuh di sini. Gerbang baru: tiap rute yang
+  memanggil `potongLarik` wajib (a) mengambil `BATAS + 1`, dan (b) punya
+  pembaca di layar.
+
+- **Gerbang itu langsung menemukan dua pintu LAMA yang tak berpembaca**, dan
+  keduanya dicatat apa adanya, bukan dibereskan diam-diam:
+  - `GET /stok/opname` — **tak ada klien sama sekali**: tak satu layar web
+    memanggilnya, dan `docs/API-CONTRACT.md` pun tak menyebutnya. Ia hanya
+    diketuk verify-api. Headernya tetap dipasang; entrinya menyebut faktanya.
+  - `GET /stok/penyesuaian` — **hanya-ponsel**: ada di kontrak, tak ada di web.
+    Headernya dikirim sejak lama dan sisi ponselnya belum merendernya — utang
+    yang memang sudah terdaftar di berkas ini.
+
+- **Gerbangnya salah tiga kali sebelum satu tuduhan pun sah**, dan tiap
+  kekeliruan mengajarinya satu bentuk:
+  1. jalur dicocokkan utuh → `AnalisisHargaPage` yang SUDAH membaca headernya
+     tertuduh, sebab web menulis `/menu/${row.id}/riwayat-harga` bukan
+     `/menu/:id/…`. Diperbaiki: dicocokkan per potongan literal;
+  2. tanpa batas segmen, `/stok/opname` cocok dengan `/stok/opname/riwayat`
+     yang memang sudah dibaca — rute yang benar-benar tak berpembaca
+     dinyatakan "sudah dibaca" oleh tetangganya sendiri;
+  3. syarat se-BERKAS → `StokPage.tsx` menyebut `/stok/opname` sebagai tautan
+     navigasi DAN memakai `bacaHeader` untuk `/stok/exp`. Diperbaiki:
+     `bacaHeader` dicari di PANGGILAN yang sama, jendelanya dipotong sampai
+     `api(` berikutnya — bukan sekian ratus aksara, sebab batas yang bergeser
+     saat kodenya tumbuh adalah cara gerbang berhenti berlaku tanpa ada yang
+     memutuskan begitu.
+
+- **`BATAS + 1` dipaku terpisah**, dan itu bukan kelebihan: `potongLarik`
+  memasang headernya hanya bila `rows.length > batas`, jadi kueri yang
+  mengambil TEPAT `batas` membuat penandanya tak pernah menyala sementara
+  gerbang "sudah pakai potongLarik" tetap hijau. **Satu karakter cukup untuk
+  mengembalikan seluruh cacat yang putaran ini bayar.**
+
+### Dua koreksi atas catatan lama, ditulis bukan diwarisi
+
+- **Alasan utang `laporan` SALAH.** Ia berbunyi *"statistik lama-pengerjaan per
+  menu dihitung dari 200 baris sajian terakhir"*. Tidak: `per_menu`, `jumlah`,
+  dan `rata_detik` lahir dari agregat `GROUP BY` yang **tak dibatasi**. Yang
+  dipotong hanya `riwayat` — dan itu tetap salah selama ia diam, sebab
+  `jumlah` tampil tepat di atasnya. Layarnya kini menautkan keduanya
+  ("menampilkan 200 dari 1.284"), pola yang sama dengan `ShiftDetailModal`.
+
+- **`Number()` mentah di layar**, dan gerbang `angka-input` yang benar. Pola
+  `bacaHeader` yang kusalin ke enam layar memuat `Number(h.get(...))`, dan
+  aturan rumah melarang `Number()` mentah di `.tsx` — aturan yang benar, sebab
+  `Number()` di layar hampir selalu berarti isian pengguna sedang diurai tanpa
+  penjaga. Jawabannya bukan mengecualikan, melainkan **satu rumah**:
+  `bacaTerpotong` di `lib/api.ts`, dan **kedelapan** salinan (termasuk empat
+  yang sudah ada sebelum putaran ini) dipindah ke sana.
+
+- **Gerbang `query-punya-rumah` memerah karena baris bergeser** — entrinya
+  berkunci `berkas:baris`, dan dua entri bergeser 26 dan 10 baris. Nomornya
+  diperbarui, gerbangnya tidak dilonggarkan; kelemahan kuncinya ditulis di
+  berkasnya dan **didaftarkan sebagai vena tersendiri** di bawah. Repo ini
+  sudah memilih kunci BERKAS + JUMLAH di gerbang lain justru karena ini.
+
+- **BUKTI MERAH — tiga, satu per gerbang baru:**
+  1. `+ 1` dicabut dari `GET /shift` → *"mengambil SATU BARIS LEBIH"* merah;
+  2. `potongLarik` diganti `rows.slice` di `GET /perlengkapan/kiriman` →
+     *"DIPAKU: tujuh pintu…"* merah menyebut rutenya;
+  3. `bacaHeader` dicabut dari layar `/stok/exp` → *"potongannya sampai ke
+     layar"* merah.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - **Yang diukur lewat HTTP satu pintu, bukan delapan.** Ketujuh lainnya
+    memakai pembantu yang sama persis dan dipaku uji statis. Menyuntik 300
+    baris di sembilan pintu akan memperlambat gerbang demi satu bit.
+  - §283 menjaga sisi **penandanya jujur** (diam saat daftarnya memang
+    pendek) — sisi terpotongnya milik uji statis. Peringatan yang menyala
+    tanpa sebab adalah peringatan yang orang belajar abaikan, dan gerbang
+    statis tak bisa melihat bentuk kegagalan itu.
+  - "Dibaca layar" berarti ADA berkas web yang menyebut jalurnya dan memakai
+    `bacaHeader` di panggilan yang sama. Ia **tidak** membuktikan spanduknya
+    benar-benar dirender.
+  - `MAKS_UTANG` 0 tak berarti tak ada pemotongan lain — `slice`/`take` murni
+    di JS tetap di luar populasi yang disapu `util/potong.ts`.
+  - **Fikstur kunci kontrak di repo ponsel** (`../kakarut-mobile/test/fikstur/
+    kunci-kontrak-server.txt`) ikut disegarkan supaya gerbangnya hijau di
+    mesin yang punya kedua repo. Perubahan itu **belum di-commit di repo
+    ponsel** — ia butuh PR-nya sendiri di sana.
+
+- **Berkas:** `modules/shift/routes.ts` · `stok/routes.ts` ·
+  `perlengkapan/{service,routes}.ts` · `laporan/routes.ts` ·
+  `packages/shared/src/types.ts` · `lib/api.ts` (+`bacaTerpotong`) · tujuh
+  layar web · `test/{potong-berpenanda,pemotongan-terungkap,query-punya-rumah,
+  changelog-stempel-rilis}.test.ts` · `scripts/verify-api.sh` (§283, 20 asersi)
+  · `docs/API-CONTRACT.md` (header didokumentasikan — ia tak pernah ada di
+  kontrak, juga untuk `/sampah` yang memakainya sejak lama) ·
+  `docs/mobile/CHANGELOG-API.md` (🟡).
+
+- **Gerbang:** typecheck bersih · `npm test` **2.607** (214 berkas) · build web
+  · `verify-api.sh` **3.363 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` **27/27** · Playwright **13/13**.
+
+---
+
 ## Dua utang balapan terakhir — satu DIBAYAR, satu DICABUT — server — 2026-08-31 — `MAKS_UTANG` 2 → 0
 
 - **Entri venanya sendiri yang menagih peninjauan**, dan alasannya tertulis:
@@ -8268,9 +8410,21 @@ berlaku di situ).
       siapa pun**~~ — UTANG DIBAYAR, lihat entri di atas. 400 → 200, dan alat
       ukur §280 yang ikut mati karena perbaikan ini diganti + dibuktikan masih
       bisa menuduh (3 pelanggaran). `F` 50 → 48
-- [ ] **Pemotongan daftar yang tak dikatakan** — 23 situs tersisa (14 `sah`,
-      **9 `utang` yang jumlahnya dipaku**), plus sisi ponsel `GET
-      /stok/penyesuaian` yang headernya dikirim tapi belum dirender
+- [x] ~~**Pemotongan daftar yang tak dikatakan**~~ — SELESAI di sisi server,
+      lihat entri di atas. **`MAKS_UTANG` 8 → 0**; tujuh pintu memakai header,
+      satu memakai kunci badan, tujuh layar web ikut menampilkannya. Aturan
+      mekanis BARU: tiap rute ber-`potongLarik` wajib mengambil `BATAS + 1`
+      DAN punya pembaca di layar
+- [ ] **`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`** — dan baris
+      bergeser. Dua entri memerah 2026-08-31 karena vena lain menambah komentar
+      di atasnya, tanpa satu pun perilaku berubah. Repo ini sudah memilih kunci
+      BERKAS + JUMLAH di `kueri-terkurung-tenant` justru karena ini; gerbang
+      yang menuduh karena baris berpindah mengajari pembacanya mengabaikan
+      gerbang. Belum diukur berapa gerbang lain yang berkunci baris
+- [ ] **Header `X-Kakarut-Terpotong` belum dirender ponsel** — kini **delapan**
+      rute mengirimnya (`/stok/penyesuaian` yang lama + tujuh yang dibayar
+      2026-08-31). `core/api_client.dart` sudah punya pembacanya; layarnya
+      yang belum. Repo ponsel berumah lain
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama

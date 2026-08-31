@@ -20,7 +20,7 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import { api } from "../../lib/api";
+import { api, bacaTerpotong } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
 import { KartuPerlengkapanModal } from "../perlengkapan/KartuPerlengkapanModal";
 
@@ -70,9 +70,18 @@ export function StokPerlengkapanTab({
     queryFn: () => api<BelanjaPerlengkapanDto>(`/perlengkapan/belanja${branchQuery}`),
     enabled: isManajemen,
   });
+  /*
+   * Riwayat kiriman dipotong server di 50 terakhir. Cabang PENERIMA memakai
+   * daftar ini untuk memastikan kirimannya sudah tercatat — potongan yang
+   * senyap di sini terbaca sebagai "tak pernah dikirim".
+   */
+  const [kirimanTerpotong, setKirimanTerpotong] = useState<number | null>(null);
   const { data: kiriman = [] } = useQuery({
     queryKey: ["perlengkapan-kiriman", branchQuery],
-    queryFn: () => api<KirimanPerlengkapanDto[]>(`/perlengkapan/kiriman${branchQuery}`),
+    queryFn: () =>
+      api<KirimanPerlengkapanDto[]>(`/perlengkapan/kiriman${branchQuery}`, {
+        bacaHeader: bacaTerpotong(setKirimanTerpotong),
+      }),
   });
   // kiriman MASUK yang menunggu diterima cabang ini (stok belum pindah)
   const kirimanMasuk = kiriman.filter((k) => k.status === "dikirim");
@@ -107,6 +116,13 @@ export function StokPerlengkapanTab({
   return (
     <>
       {/* Kiriman CK → cabang yang MENUNGGU diterima (stok belum pindah) */}
+      {kirimanTerpotong !== null && (
+        <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          Riwayat kiriman perlengkapan menampilkan <b>{kirimanTerpotong} terakhir</b>. Kiriman
+          yang <b>lebih lama</b> tidak ikut terbaca di layar ini — termasuk saat Anda mengecek
+          apakah sebuah kiriman sudah tercatat.
+        </div>
+      )}
       {kirimanMasuk.length > 0 && (
         <Card className="mb-3 border-blue-200 bg-blue-50/50 px-4 py-3">
           <div className="mb-2 text-sm font-semibold text-blue-900">
@@ -623,9 +639,13 @@ export function RiwayatOpnameModal({
 }) {
   const queryClient = useQueryClient();
   const [buka, setBuka] = useState<string | null>(null);
+  const [sesiTerpotong, setSesiTerpotong] = useState<number | null>(null);
   const { data: sesi = [], isLoading } = useQuery({
     queryKey: ["perlengkapan-opname", branchQuery],
-    queryFn: () => api<OpnamePerlengkapanSesiRow[]>(`/perlengkapan/opname/riwayat${branchQuery}`),
+    queryFn: () =>
+      api<OpnamePerlengkapanSesiRow[]>(`/perlengkapan/opname/riwayat${branchQuery}`, {
+        bacaHeader: bacaTerpotong(setSesiTerpotong),
+      }),
   });
   const { data: detail } = useQuery({
     queryKey: ["perlengkapan-opname", "sesi", buka],
@@ -652,6 +672,12 @@ export function RiwayatOpnameModal({
         <div className="py-8 text-center text-sm text-stone-400">Belum ada sesi opname.</div>
       ) : (
         <div className="space-y-2">
+          {sesiTerpotong !== null && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              Menampilkan <b>{sesiTerpotong} sesi opname terakhir</b>. Yang lebih lama tidak ikut
+              ditampilkan.
+            </div>
+          )}
           {sesi.map((s) => (
             <div key={s.session_id} className="rounded-lg border border-stone-200">
               <button
