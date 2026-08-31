@@ -31,7 +31,7 @@ import { grafPanggilan } from "./util/panggilan";
  *   C    35  kunci saringnya ikut dioper ke PANGGILAN BERNAMA ber-`company_id`
  *   E    68  memang LINTAS perusahaan: auth, panel super admin, cadangan, seed
  *   P     6  terkurung lewat KONDISI yang dioper — DIBUKTIKAN graf panggilan
- *   F    50  tak teresolusi mekanis → DIPILAH TANGAN, daftarnya di bawah
+ *   F    48  tak teresolusi mekanis → DIPILAH TANGAN, daftarnya di bawah
  *
  * Angka-angka itu bergerak 2026-08-27 ketika instrumennya pindah ke pohon
  * sintaks — bukan karena aturannya berubah, melainkan karena BUKTINYA akhirnya
@@ -40,6 +40,15 @@ import { grafPanggilan } from "./util/panggilan";
  * lewat GRAF PANGGILAN lintas berkas — dan pemanggil BARU yang mengoper
  * kondisi tanpa tenant menjatuhkan buktinya. Rinciannya di
  * `docs/audit/vena-audit.md`.
+ *
+ * Turun lagi 2026-08-31, dari 50 ke 48, dan ini kebalikan dari pelonggaran:
+ * dua situs `modules/shift/routes.ts` (`/selisih/putuskan`) KELUAR dari daftar
+ * tangan karena buktinya jadi terbaca mesin. Rutenya kini memanggil
+ * `rekapWindow(db, row.companyId, …)` untuk menurunkan kelayakan keputusan dari
+ * aturan hidup (§282), dan panggilan bernama ber-tenant itulah yang membuat
+ * penulisan sesudahnya terbaca sebagai kelas C. Alasan tulisan tangannya —
+ * *"`row` shift datang dari query terkurung"* — tidak berubah isinya; yang
+ * berubah cuma siapa yang bisa membacanya.
  *
  * Diukur juga lewat HTTP dengan DUA tenant sungguhan (id milik tenant A
  * dibuktikan terbaca oleh A lebih dulu): sebelas rute detail ber-`:id`
@@ -77,8 +86,6 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
     "`hitungUlangBiayaPenjualan(tx, saleId, companyId, …)` menerima companyId sebagai PARAMETER dan memakainya di kueri pertamanya; dua situs baru menyaring `saleId` yang sudah lolos kueri itu di fungsi yang sama" }],
   ["modules/penjualan/service.ts", { situs: 1, alasan:
     "bill dimuat `eq(openBills.companyId, params.companyId)` + `.for(\"update\")`, baru barisnya dibaca & bill-nya ditutup lewat id itu" }],
-  ["modules/shift/routes.ts", { situs: 2, alasan:
-    "`row` shift datang dari query terkurung; pembacaan/penulisan lanjutan memakai `row.id` sebagai penjaga balapan" }],
   ["modules/stok/routes.ts", { situs: 2, alasan:
     "`users.id in userIds` / `= reviewerId` — nama petugas dari tabel `users` yang global, kuncinya dari baris terkurung" }],
   ["modules/customer/service.ts", { situs: 1, alasan:

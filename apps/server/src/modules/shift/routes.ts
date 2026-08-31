@@ -1031,20 +1031,63 @@ export const shiftRoutes = new Hono<AppEnv>()
       const [row] = await db
         .select({
           id: shifts.id,
+          companyId: shifts.companyId,
+          branchId: shifts.branchId,
+          openedAt: shifts.openedAt,
           closedAt: shifts.closedAt,
+          modalAwal: shifts.modalAwal,
+          uangFisik: shifts.uangFisik,
           selisihStatus: shifts.selisihStatus,
         })
         .from(shifts)
         .where(and(eq(shifts.id, c.req.param("id")), eq(shifts.companyId, auth.company_id!)));
       if (!row) throw new HTTPException(404, { message: "Shift tidak ditemukan" });
-      if (row.closedAt == null || row.selisihStatus == null) {
+      if (row.closedAt == null) {
+        throw new HTTPException(400, { message: "Shift ini belum ditutup" });
+      }
+      /*
+       * KELAYAKANNYA DITURUNKAN DARI ATURAN YANG HIDUP, bukan dari kolom beku —
+       * dan itu perbaikan sebuah pintu yang berselisih dengan pintu sebelahnya.
+       *
+       * `selisih_status` menyimpan KEPUTUSAN, dan ia NULL selama belum ada yang
+       * memutuskan. Rute ini dulu membaca NULL sebagai "tak ada yang perlu
+       * diputuskan" — padahal `statusSelisih` (aturan yang dipakai layar shift
+       * DAN antrean `GET /shift/selisih`) menurunkan "menunggu" dari selisih
+       * HARI INI, bukan dari kolom itu. Angka shift tidak berhenti bergerak
+       * saat ditutup: penjualan sinkron bertanggal mundur bisa mendarat di
+       * jendela shift yang sudah lama tertutup.
+       *
+       * TERUKUR, dan bukan kasus pinggir: shift ditutup PAS (uang fisik
+       * 100.000 = kas sistem 100.000, kolom beku NULL), lalu satu penjualan
+       * tunai 11.000 tersinkron ke jendelanya. Sesudah itu
+       *
+       *   layar shift          : status_selisih "menunggu", selisih −11.000
+       *   GET /shift/selisih   : baris ini ADA di antrean menunggu
+       *   POST …/putuskan      : 400 "tak punya selisih kas yang perlu diputuskan"
+       *
+       * Owner melihat baris yang menuntut keputusannya, menekannya, dan ditolak
+       * rutenya sendiri — dan kekurangan 11.000 itu tak pernah bisa ditutup
+       * siapa pun. Putaran `statusSelisih` memperbaiki TAMPILAN dan ANTREANNYA;
+       * pintu KEPUTUSANNYA tertinggal.
+       */
+      const rekap = await rekapWindow(
+        db,
+        row.companyId,
+        row.branchId,
+        row.id,
+        row.openedAt,
+        row.closedAt,
+      );
+      const selisihHidup = (row.uangFisik ?? 0) - (row.modalAwal + rekap.penjualan_tunai);
+      const statusHidup = statusSelisih(row.closedAt, row.selisihStatus, selisihHidup);
+      if (statusHidup === "pas") {
         throw new HTTPException(400, {
           message: "Shift ini tak punya selisih kas yang perlu diputuskan",
         });
       }
-      if (row.selisihStatus !== "menunggu") {
+      if (statusHidup !== "menunggu") {
         throw new HTTPException(409, {
-          message: `Selisih shift ini sudah ${row.selisihStatus} — tidak bisa diputuskan lagi`,
+          message: `Selisih shift ini sudah ${statusHidup} — tidak bisa diputuskan lagi`,
         });
       }
       if (body.status === "ditolak" && !body.alasan_tolak?.trim()) {
@@ -1058,9 +1101,22 @@ export const shiftRoutes = new Hono<AppEnv>()
           disetujuiAt: new Date(),
           tolakAlasan: body.status === "ditolak" ? body.alasan_tolak!.trim() : null,
         })
-        // Guard balapan: dua owner menekan tombol bersamaan → yang kedua
-        // tidak menimpa keputusan pertama.
-        .where(and(eq(shifts.id, row.id), eq(shifts.selisihStatus, "menunggu")))
+        /*
+         * Guard balapan: dua owner menekan tombol bersamaan → yang kedua tidak
+         * menimpa keputusan pertama.
+         *
+         * `IS NULL` ikut diterima sejak kelayakannya diturunkan dari aturan
+         * hidup: selisih yang MUNCUL sesudah penutupan berkolom beku NULL, dan
+         * syarat `= 'menunggu'` saja akan menolak setiap keputusan atasnya —
+         * memindahkan jalan buntunya dari penjaga di atas ke sini, tanpa satu
+         * pun asersi berubah warna.
+         */
+        .where(
+          and(
+            eq(shifts.id, row.id),
+            or(isNull(shifts.selisihStatus), eq(shifts.selisihStatus, "menunggu")),
+          ),
+        )
         .returning({ id: shifts.id });
       /*
        * Hasilnya DIPERIKSA, bukan dibuang. Penjaga di atas sudah mencegah

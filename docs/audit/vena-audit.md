@@ -50,6 +50,132 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Utang DIBAYAR: selisih yang muncul SESUDAH shift ditutup — dan alat ukur §280 yang ikut mati karenanya — server — 2026-08-31
+
+- **Utang ini kudaftarkan sendiri putaran lalu**, di bagian "BATAS YANG
+  DIAKUI" entri `execPenjualan`, dengan kalimat yang sudah menyebut angkanya:
+  *"menolak 400 … Terukur 20 dari 20."* Kewajiban pertama karena itu bukan
+  membaca kode melainkan **mengukur ulang lewat HTTP**, di basis data segar
+  yang baru di-seed.
+
+- **Tanda tangannya, lagi, dan persis kata per kata seperti yang ditulis di
+  kepala berkas ini**: aturannya sudah dipikirkan, ditulis, dan dikomentari
+  panjang — `statusSelisih` punya 24 baris komentar yang menjelaskan kenapa
+  status harus diturunkan dari angka HIDUP dan bukan dari kolom beku. Penjaga
+  itu dipasang di **dua** pintu (DTO shift dan antrean `GET /shift/selisih`);
+  pintu **ketiga** ke keadaan yang sama — `POST /:id/selisih/putuskan` —
+  dibiarkan membaca kolom bekunya.
+
+- **TERUKUR lewat HTTP sebelum apa pun disentuh** (satu shift, satu penjualan
+  11.000):
+
+  ```
+  tutup PAS       {"status_selisih":"pas","selisih":0,"kas_sistem":100000}
+  sinkron susulan {"kode":201,"susulan":true}
+  layar sesudah   {"status_selisih":"menunggu","selisih":-11000,"kas_sistem":111000}
+  antrean owner   GET /shift/selisih?status=menunggu → baris ini ADA (1)
+  owner menekan   400 {"error":"Shift ini tak punya selisih kas yang perlu diputuskan"}
+  ```
+
+  Owner melihat baris yang menuntut keputusannya, menekannya, dan **ditolak
+  rutenya sendiri**. Kekurangan 11.000 itu tak bisa ditutup siapa pun — bukan
+  ditunda, melainkan tak punya jalan sama sekali.
+
+- **SESUDAH perbaikan, skenario yang sama:**
+
+  ```
+  owner menekan   200 → status_selisih "disetujui"
+  layar akhir     selisih_disetujui_oleh "Owner Basooopa", selisih_diputus_pada terisi
+  menekan lagi    409
+  ```
+
+- **Perbaikannya menurunkan kelayakan dari aturan yang hidup**, bukan menambah
+  cabang khusus: rutenya memanggil `rekapWindow` lalu `statusSelisih` — dua
+  fungsi yang SAMA dengan yang dipakai layar dan antrean — sehingga ketiga
+  pintu tak bisa lagi berselisih tanpa ketiganya ikut berubah. Dua efek ikutan
+  yang disebut apa adanya:
+  - shift yang **belum ditutup** kini dijawab "Shift ini belum ditutup", bukan
+    "tak punya selisih kas" — dua sebab berbeda dulu jatuh ke satu pesan yang
+    salah untuk salah satunya;
+  - guard balapan keputusan-ganda dilonggarkan jadi
+    `selisih_status IS NULL OR = 'menunggu'`. Tanpa itu jalan buntunya cuma
+    **pindah** dari penjaga di atas ke `WHERE` — dan bukti merah di bawah
+    menunjukkan bentuk kegagalannya persis: 409, bukan 400.
+
+- **YANG PALING MAHAL DARI PUTARAN INI BUKAN CACATNYA, MELAINKAN APA YANG
+  DIRUSAK PERBAIKANNYA.** §280b — gerbang balapan yang kupasang putaran lalu —
+  membaca kolom beku `selisih_status` **lewat rute ini**: 400 = NULL, 200 =
+  "menunggu". Sesudah perbaikan, rute itu menjawab **200 di kedua keadaan**,
+  jadi syarat `PUT=400` di dalam `LANGGAR280` menjadi **mustahil** dan
+  gerbangnya berubah jadi hiasan — hijau selamanya, tanpa satu asersi pun
+  berubah warna dan tanpa satu baris pun di §280 disentuh. Diukur, bukan
+  disimpulkan: shift yang rekap penutupannya melewatkan penjualannya dijawab
+  **200**.
+
+  > Alat ukur yang menumpang pada perilaku rute lain bisa berubah jadi hiasan
+  > tanpa satu baris pun di seksi yang memakainya disentuh.
+
+  Alat ukurnya diganti dengan yang membaca boolean itu **langsung**:
+  `selisih_alasan`, ditulis penutupan persis dari `perluAcc`
+  (`perluAcc ? (selisih_alasan || catatan) : null`), jadi shiftnya ditutup
+  dengan `catatan`. Terukur di kedua sisi, satu penjualan 11.000:
+  `rekap menghitung → selisih_alasan "probe280"` · `penjualan susulan →
+  selisih_alasan NULL` — sementara `status_selisih` berbunyi "menunggu" di
+  **keduanya**, dan itulah sebabnya medan DTO itu tak bisa dipakai.
+
+- **BUKTI MERAH — tiga, dan yang ketiga menjaga alat ukurnya sendiri**
+  (tiap kali: kode dicabut → DB segar → verify-api penuh):
+  1. penurunan `statusSelisih` diganti `row.selisihStatus ?? "pas"` (perilaku
+     lama) → **5 asersi §282 merah**, seluruh premisnya tetap hijau;
+  2. pelonggaran guard balapan dicabut → **4 asersi §282 merah**, dan
+     kegagalannya berbunyi **409** — jalan buntunya memang pindah ke `WHERE`,
+     persis seperti yang ditulis komentarnya;
+  3. kunci baris shift di `POST /shift/tutup` dicabut → **§280b merah dengan 3
+     pelanggaran** memakai alat ukur BARU. Tanpa langkah ketiga ini, "§280b
+     tetap hijau" hanya berarti alat ukurnya diganti, bukan bahwa ia masih
+     bisa menuduh.
+
+- **PASANGAN — pengetatan/pelonggaran tak boleh menutup atau melubangi jalan
+  yang sah:** shift yang benar-benar "pas" tetap **400** · shift yang belum
+  ditutup tetap **400**, dengan alasan yang menyebut sebab sebenarnya ·
+  memutuskan **dua kali** tetap **409** · §152 (alur selisih kas yang sudah
+  ada) tetap hijau seluruhnya.
+
+- **Efek samping yang menguntungkan, dan diperiksa bukan diterima**: dua situs
+  kelas `F` di `modules/shift/routes.ts` KELUAR dari `DIPILAH_TANGAN` di
+  `kueri-terkurung-tenant.test.ts` — panggilan `rekapWindow(db, row.companyId,
+  …)` membuat pengurungan tenant-nya terbaca MESIN sebagai kelas C. Alasan
+  tulisan tangannya tidak berubah isinya; yang berubah cuma siapa yang bisa
+  membacanya. **`F` 50 → 48.** Yang menagihnya bukan aku melainkan uji
+  "daftar pilahannya masih ADA — bukan kuburan berkas basi", yang memerah
+  karena berkasnya berhenti punya situs F.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - §282 mengukur **satu** shift per keadaan, bukan tangga; ia menjaga
+    kesepakatan antar pintu, bukan balapan. Balapannya milik §280.
+  - Alat ukur `selisih_alasan` membaca `perluAcc` **hanya bila shiftnya
+    ditutup dengan `catatan`** — dan kedua seksi yang memakainya memang
+    menutup begitu. Ditutup tanpa `catatan`, medannya NULL di kedua keadaan
+    dan alat ukurnya buta. Ini tertulis di kepala §280 supaya penulis
+    berikutnya tak menghapus `catatan`-nya sebagai "kerapian".
+  - Pintu keempat ke keadaan yang sama belum disapu mekanis: tak ada gerbang
+    yang menagih "setiap pembaca `selisih_status` memakai `statusSelisih`".
+    Yang ada baru §282, yang menjaga kesepakatan antara antrean dan rute
+    keputusan — dua pintu, bukan seluruh populasi.
+
+- **Berkas:** `modules/shift/routes.ts` (kelayakan diturunkan dari
+  `rekapWindow` + `statusSelisih`; 400 "belum ditutup" dipisahkan; guard
+  balapan menerima `IS NULL`) · `scripts/verify-api.sh` (§282 baru — 15
+  asersi; §280b/c alat ukurnya diganti + kepala seksinya menuliskan sebabnya)
+  · `test/kueri-terkurung-tenant.test.ts` (`shift/routes.ts` keluar dari
+  daftar tangan, `F` 50 → 48).
+
+- **Gerbang:** typecheck bersih · `npm test` **2.580** (214 berkas) · build web
+  · `verify-api.sh` **3.344 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` 26/26 · Playwright **13/13**.
+
+---
+
 ## Utang DIBAYAR: balapan `execPenjualan` — penjaganya ada, dipasang di pintu yang tak melewatinya — server — 2026-08-31
 
 - **Entrinya sendiri menyebut batasnya**: *"Jalur ini memang sudah dijaga
@@ -8008,16 +8134,10 @@ berlaku di situ).
       `pastikanSuperAdmin`). Keduanya ditulis SEBELUM `lomba.ts` bisa menembus
       transaksi, jadi kelasnya dinilai dengan mata yang lebih buruk dari yang
       sekarang — layak ditinjau ulang, bukan dipercaya
-- [ ] **Selisih kas yang MUNCUL sesudah shift ditutup tak bisa diputuskan
-      siapa pun** — TERUKUR 20 dari 20 selama vena `execPenjualan`:
-      `POST /shift/:id/selisih/putuskan` menolak **400** ("tak punya selisih
-      yang perlu diputuskan") bila kolom beku `selisih_status` NULL, padahal
-      layar shift DAN antrean `GET /shift/selisih?status=menunggu`
-      menampilkannya sebagai "menunggu" — keduanya memakai `statusSelisih` yang
-      dihitung dari angka HIDUP. Owner melihat baris yang perlu diputuskan,
-      menekannya, dan ditolak rutenya. Sisa dari putaran `statusSelisih`, yang
-      memperbaiki tampilan dan antreannya tetapi **tidak rute keputusannya** —
-      bentuk yang sama persis dengan yang berkas ini ada untuk mencari
+- [x] ~~**Selisih kas yang MUNCUL sesudah shift ditutup tak bisa diputuskan
+      siapa pun**~~ — UTANG DIBAYAR, lihat entri di atas. 400 → 200, dan alat
+      ukur §280 yang ikut mati karena perbaikan ini diganti + dibuktikan masih
+      bisa menuduh (3 pelanggaran). `F` 50 → 48
 - [ ] **Pemotongan daftar yang tak dikatakan** — 23 situs tersisa (14 `sah`,
       **9 `utang` yang jumlahnya dipaku**), plus sisi ponsel `GET
       /stok/penyesuaian` yang headernya dikirim tapi belum dirender

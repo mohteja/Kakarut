@@ -15661,11 +15661,28 @@ rm -f /tmp/kk279-*
 #       penutupan tak menghitung penjualannya (0 dari 20 sempat menghitung),
 #       penjualannya tetap masuk shift, dan penandanya tetap false.
 #
-# KOLOM BEKU `selisih_status` DIBACA LEWAT `POST /:id/selisih/putuskan`, dan
-# itu satu-satunya cara melihatnya dari HTTP: rute itu 400 bila kolomnya NULL
-# (= rekap penutupan TIDAK menghitung penjualannya) dan 200 bila "menunggu"
-# (= rekap penutupan MENGHITUNGNYA). `status_selisih` di DTO tak bisa dipakai —
-# ia diturunkan dari angka HIDUP, jadi kedua keadaan itu terbaca sama.
+# ALAT UKURNYA: `selisih_alasan`, dan shiftnya ditutup DENGAN `catatan`.
+#
+# Yang perlu dibaca seksi ini adalah `perluAcc` di detik penutupan — "apakah
+# rekap penutupan menghitung penjualannya?". `status_selisih` di DTO tak bisa
+# dipakai: ia diturunkan dari angka HIDUP, jadi kedua keadaan terbaca sama
+# ("menunggu"). Tapi `selisih_alasan` ditulis penutupannya PERSIS dari boolean
+# itu — `perluAcc ? (selisih_alasan || catatan) : null` — jadi menutup dengan
+# `catatan` membuat medannya berbunyi bila rekapnya menghitung, dan NULL bila
+# tidak. TERUKUR, satu penjualan 11.000 di kedua sisi:
+#
+#   rekap menghitung : selisih −11.000 · selisih_alasan "probe280"
+#   penjualan susulan: selisih −11.000 · selisih_alasan NULL
+#   (status_selisih "menunggu" di KEDUANYA — itu sebabnya ia tak dipakai)
+#
+# VERSI PERTAMA MEMAKAI `POST /:id/selisih/putuskan` sebagai alat ukur — 400
+# bila kolomnya NULL, 200 bila "menunggu" — dan itu berhenti benar begitu rute
+# tersebut diperbaiki (§282): ia kini menurunkan kelayakannya dari aturan
+# hidup, jadi ia menjawab 200 di KEDUA keadaan. Terukur sesudah perbaikan itu:
+# shift yang rekapnya melewatkan penjualannya dijawab 200, bukan 400 — dan
+# `LANGGAR280` jadi mustahil naik. Gerbang yang tak pernah bisa merah adalah
+# hiasan; alat ukur yang menumpang pada perilaku rute lain bisa berubah jadi
+# hiasan tanpa satu baris pun di seksi ini disentuh.
 #
 # Gerbang statis hanya melihat kuncinya TERTULIS; yang di sini melihat ia
 # MENAHAN — dan melihat pula bahwa penandanya tak berbalik jadi cerewet.
@@ -15758,20 +15775,20 @@ for D280 in 0.004 0.007 0.012 0.020 0.033 0.055 0.090 0.150; do
   W=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
   rm -f /tmp/kk280-s
   ( api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W")" > /tmp/kk280-s ) &
-  ( sleep "$D280"; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null ) &
+  ( sleep "$D280"; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000,"catatan":"probe280"}' > /dev/null ) &
   wait
   KODE=$(jq -r '.hasil[0].kode // 0' /tmp/kk280-s 2>/dev/null || echo 0)
   [ "$KODE" = "201" ] && MASUK280=$((MASUK280+1))
-  # Kolom BEKU `selisih_status` cuma bisa dibaca lewat sini: 400 = NULL (rekap
-  # penutupan TIDAK menghitung penjualannya) · 200 = "menunggu" (ia MENGHITUNG).
-  # `status_selisih` di DTO tak bisa dipakai — ia diturunkan dari angka HIDUP.
-  PUT=$(status_code_body "$OWNER" POST "/shift/$S/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"probe 280"}')
-  [ "$PUT" = "200" ] && TERHITUNG280=$((TERHITUNG280+1))
   D280H=$(api "$REISS105" GET "/shift/$S")
+  # `perluAcc` di detik penutupan, dibaca dari medan yang ditulis boolean itu
+  # sendiri: berbunyi bila rekap penutupan MENGHITUNG penjualannya, NULL bila
+  # tidak. Lihat "ALAT UKURNYA" di kepala seksi ini.
+  ALASAN=$(echo "$D280H" | jq -r '.selisih_alasan // "null"')
+  [ "$ALASAN" != "null" ] && TERHITUNG280=$((TERHITUNG280+1))
   FLAG=$(echo "$D280H" | jq -r '.ada_transaksi_susulan')
   NTX=$(echo "$D280H" | jq -r '.transaksi|length')
   [ "$FLAG" = "true" ] && TUTUPMENANG280=$((TUTUPMENANG280+1))
-  if [ "$KODE" = "201" ] && [ "$NTX" = "1" ] && [ "$PUT" = "400" ] && [ "$FLAG" = "false" ]; then
+  if [ "$KODE" = "201" ] && [ "$NTX" = "1" ] && [ "$ALASAN" = "null" ] && [ "$FLAG" = "false" ]; then
     LANGGAR280=$((LANGGAR280+1))
   fi
 done
@@ -15792,12 +15809,13 @@ S280C=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id //
 W280C=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 rm -f /tmp/kk280c-s
 ( api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W280C")" > /tmp/kk280c-s ) &
-( sleep 0.4; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null ) &
+( sleep 0.4; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000,"catatan":"probe280c"}' > /dev/null ) &
 wait
-PUT280C=$(status_code_body "$OWNER" POST "/shift/$S280C/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"probe §280c"}')
-cek "premis §280c: rekap penutupan MEMANG menghitung penjualannya" "V == 200" "$PUT280C"
+D280C=$(api "$REISS105" GET "/shift/$S280C")
+cek "premis §280c: rekap penutupan MEMANG menghitung penjualannya" "V == 1" \
+  "$(echo "$D280C" | jq '(.selisih_alasan != null)|if . then 1 else 0 end')"
 cek "PASANGAN §280: yang sudah terhitung TIDAK ditandai susulan" "V == 0" \
-  "$(api "$REISS105" GET "/shift/$S280C" | jq '(.ada_transaksi_susulan)|if . then 1 else 0 end')"
+  "$(echo "$D280C" | jq '(.ada_transaksi_susulan)|if . then 1 else 0 end')"
 rm -f /tmp/kk280c-s
 
 # PASANGAN: penjaga penutupan-ganda yang SUDAH ADA harus selamat dari
@@ -15965,6 +15983,118 @@ cek "PASANGAN §281: akunnya kini bisa masuk" "V == 1" \
 # bukan tebakan, dan memotong jatah karenanya akan membuat salah ketik biasa
 # menghabiskan kesempatan orang.
 cek "PASANGAN §281: kode berbentuk salah ditolak 400" "V == 400" "$(verif281 "$EM281" "123")"
+
+# §282 — SELISIH YANG MUNCUL SESUDAH PENUTUPAN TETAP BISA DIPUTUSKAN
+#
+# Tanda tangan yang sama lagi: aturannya sudah dipikirkan, ditulis, dan
+# dikomentari panjang; penjaganya dipasang di SATU pintu, dan pintu lain ke
+# keadaan yang sama dibiarkan terbuka.
+#
+# `statusSelisih` — aturan yang dipakai layar shift DAN antrean
+# `GET /shift/selisih` — menurunkan statusnya dari selisih HARI INI, sebab
+# angka shift tidak berhenti bergerak saat ditutup: penjualan sinkron
+# bertanggal mundur bisa mendarat di jendela shift yang sudah lama tertutup.
+# `POST /:id/selisih/putuskan` tak ikut berubah; ia tetap membaca KOLOM BEKU
+# `selisih_status`, yang NULL selama belum ada yang memutuskan.
+#
+# TERUKUR lewat HTTP sebelum diperbaiki, dan angkanya bukan kasus pinggir —
+# 20 dari 20 percobaan:
+#
+#   tutup PAS        {"status_selisih":"pas","selisih":0,"kas_sistem":100000}
+#   sinkron susulan  {"kode":201,"susulan":true}
+#   layar sesudah    {"status_selisih":"menunggu","selisih":-11000}
+#   antrean owner    GET /shift/selisih?status=menunggu → baris ini ADA
+#   owner menekan    400 "tak punya selisih kas yang perlu diputuskan"
+#
+# Owner melihat baris yang menuntut keputusannya, menekannya, dan ditolak
+# rutenya sendiri — dan kekurangan 11.000 itu tak pernah bisa ditutup siapa pun.
+#
+# Yang dijaga di sini adalah KESEPAKATAN ANTAR PINTU: apa pun yang muncul di
+# antrean `?status=menunggu` harus bisa diputuskan. Karena itu antreannya
+# dibaca lebih dulu dan hasilnya dijadikan PREMIS, bukan diasumsikan — bila
+# suatu hari antreannya berhenti memuat baris ini, seksi ini harus memerah
+# sebagai "premis", bukan diam-diam berhenti menguji apa pun.
+echo
+echo "── §282 selisih yang muncul sesudah penutupan tetap bisa diputuskan ──"
+
+pastikanHadir "$REISS105" "§282"
+tutup_aktif280
+
+S282=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+cek "premis §282: shift uji terbuka" "V == 1" \
+  "$([ -n "$S282" ] && [ "$S282" != "null" ] && echo 1 || echo 0)"
+
+# Ditutup PAS — dan itu PREMISnya, bukan latar: seluruh temuan ini bergantung
+# pada kolom bekunya NULL. Ditutup TANPA `catatan`, supaya `selisih_alasan`
+# ikut NULL dan tak ada jalan lain yang diam-diam mengisi kolom itu.
+T282=$(api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}')
+cek "premis §282: penutupannya PAS (kolom beku selisih_status NULL)" "V == 1" \
+  "$(echo "$T282" | jq '(.status_selisih=="pas" and .selisih==0 and .selisih_alasan==null)|if . then 1 else 0 end')"
+
+# Penjualan tunai SUSULAN mendarat di jendela shift yang sudah tertutup.
+W282=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+R282=$(api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W282")")
+cek "premis §282: penjualan susulannya memang mendarat (201 + bertanda)" "V == 1" \
+  "$(echo "$R282" | jq '(.hasil[0].kode==201 and .hasil[0].data.ada_transaksi_susulan==true)|if . then 1 else 0 end')"
+
+D282=$(api "$REISS105" GET "/shift/$S282")
+cek "premis §282: layar shift kini berkata 'menunggu' dengan selisih != 0" "V == 1" \
+  "$(echo "$D282" | jq '(.status_selisih=="menunggu" and .selisih!=0)|if . then 1 else 0 end')"
+# Kolom bekunya TETAP NULL — dibaca dari medan yang ditulis boolean `perluAcc`
+# penutupan (lihat "ALAT UKURNYA" di §280). Tanpa premis ini, "200" di bawah
+# bisa saja datang dari kolom beku yang kebetulan sudah terisi.
+cek "premis §282: kolom bekunya TETAP NULL (bukan ikut berubah sendiri)" "V == 1" \
+  "$(echo "$D282" | jq '(.selisih_alasan == null)|if . then 1 else 0 end')"
+cek "premis §282: antrean owner MEMANG memuat baris ini" "V == 1" \
+  "$(api "$OWNER" GET '/shift/selisih?status=menunggu' \
+     | jq --arg s "$S282" '[.[]|select(.id==$s)]|length')"
+
+# INTINYA: yang muncul di antrean itu bisa diputuskan.
+#
+# Kode DAN badan ditangkap dari SATU panggilan — memanggilnya dua kali (sekali
+# untuk kodenya, sekali untuk badannya) membuat panggilan kedua dijawab 409
+# oleh penjaga keputusan-ganda, dan asersinya lalu menguji hal lain.
+R282P=$(curl -s -w '\n%{http_code}' -X POST "$BASE/api/shift/$S282/selisih/putuskan" \
+  -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+  -d '{"status":"disetujui"}')
+P282=${R282P%$'\n'*}
+cek "§282 selisih susulan BISA diputuskan owner (bukan 400)" "V == 200" "${R282P##*$'\n'}"
+cek "§282 keputusannya BENAR-BENAR tersimpan (siapa + kapan + status)" "V == 1" \
+  "$(api "$REISS105" GET "/shift/$S282" \
+     | jq '(.status_selisih=="disetujui" and .selisih_disetujui_oleh!=null and .selisih_diputus_pada!=null)|if . then 1 else 0 end')"
+cek "§282 balasannya sendiri sudah berkata disetujui" "V == 1" \
+  "$(echo "$P282" | jq '(.status_selisih=="disetujui")|if . then 1 else 0 end')"
+cek "§282 sesudah diputus ia HILANG dari antrean menunggu" "V == 0" \
+  "$(api "$OWNER" GET '/shift/selisih?status=menunggu' \
+     | jq --arg s "$S282" '[.[]|select(.id==$s)]|length')"
+
+# PASANGAN 1: pelonggaran ini tak boleh melubangi penjaga keputusan-ganda.
+# Kolom bekunya kini "disetujui", dan `IS NULL` di WHERE guard balapan tak
+# boleh membuat keputusan kedua menimpa yang pertama.
+cek "PASANGAN §282: memutuskan DUA KALI tetap 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST "/shift/$S282/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"berubah pikiran"}')"
+
+# PASANGAN 2: shift yang selisihnya SUNGGUH pas tetap ditolak 400 — pelonggaran
+# ini menurunkan kelayakannya dari aturan hidup, bukan menghapus kelayakannya.
+tutup_aktif280
+S282B=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null
+cek "premis §282: shift pasangan memang berstatus 'pas'" "V == 1" \
+  "$(api "$REISS105" GET "/shift/$S282B" | jq '(.status_selisih=="pas")|if . then 1 else 0 end')"
+cek "PASANGAN §282: shift yang benar-benar PAS tetap ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/shift/$S282B/selisih/putuskan" '{"status":"disetujui"}')"
+
+# PASANGAN 3: shift yang BELUM ditutup ditolak juga — dan dengan alasan yang
+# menyebut sebab sebenarnya, bukan "tak punya selisih". Dulu keduanya jatuh ke
+# satu pesan yang salah untuk salah satunya.
+tutup_aktif280
+S282C=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+cek "PASANGAN §282: shift yang BELUM ditutup ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/shift/$S282C/selisih/putuskan" '{"status":"disetujui"}')"
+cek "PASANGAN §282: alasannya menyebut 'belum ditutup', bukan 'tak punya selisih'" "V == 1" \
+  "$(api "$OWNER" POST "/shift/$S282C/selisih/putuskan" '{"status":"disetujui"}' \
+     | jq '(.error|test("belum ditutup"))|if . then 1 else 0 end')"
+tutup_aktif280
 
 if [ "$FAIL" -gt 0 ]; then
   echo
