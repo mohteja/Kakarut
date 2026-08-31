@@ -86,14 +86,44 @@ async function sesiApi(request: APIRequestContext, email: string, pass: string) 
  */
 const sesiTersimpan = new Map<string, { token: string; user: unknown }>();
 
+/**
+ * PASTIKAN HADIR — dan namanya sengaja tak lagi "absen masuk", sebab itulah
+ * kekeliruan yang membuat fungsi ini salah selama ini.
+ *
+ * `POST /absensi/saya` adalah **TOGGLE**, bukan "pastikan masuk": ia mencatat
+ * KEBALIKAN dari cap terakhir. Versi lama menembaknya tanpa melihat keadaan
+ * dan menerima 201/409 sebagai "beres" — jadi pada kasir yang SUDAH hadir ia
+ * justru MEMULANGKANNYA, dan `POST /shift/buka` sesudahnya ditolak "Absen
+ * masuk dulu". Yang terlihat di spec: judul "Kasir Belum Dibuka" tak pernah
+ * hilang, di layar yang tak ada hubungannya dengan absen.
+ *
+ * verify-api sudah membayar pelajaran ini (lihat `pastikanHadir` di
+ * `scripts/verify-api.sh` dan §188 yang melahirkannya) dan menuliskannya
+ * panjang lebar — lalu pintu e2e-nya dibiarkan terbuka. Ia tak pernah menggigit
+ * karena keadaan sisa KEBETULAN selalu "belum hadir"; begitu verify-api
+ * tumbuh dan meninggalkan kasir dalam keadaan `keluar`, ia menggigit.
+ *
+ * Yang dibaca `GET /absensi/status`, bukan `.tipe` dari toggle-nya: status itu
+ * memanggil `sedangHadir`, fungsi yang SAMA PERSIS dengan gerbang
+ * `POST /shift/buka`. Selama keduanya satu sumber, jawabannya tak bisa
+ * menyimpang.
+ */
 export async function absenMasuk(request: APIRequestContext, email: string, pass: string) {
   const { token } = await sesiApi(request, email, pass);
-  const absen = await request.post(`${BASE}/api/absensi/saya`, {
-    headers: { Authorization: `Bearer ${token}` },
-    data: { foto_url: "https://example.com/e2e-absen.jpg" },
-  });
-  // 201 = baru absen, 409 = sudah absen hari ini. Keduanya memenuhi syarat.
-  expect([201, 409], `absen masuk (status ${absen.status()})`).toContain(absen.status());
+  const h = { Authorization: `Bearer ${token}` };
+  const hadir = async () => {
+    const r = await request.get(`${BASE}/api/absensi/status`, { headers: h });
+    return ((await r.json()) as { hadir?: boolean }).hadir === true;
+  };
+  if (!(await hadir())) {
+    await request.post(`${BASE}/api/absensi/saya`, {
+      headers: h,
+      data: { foto_url: "https://example.com/e2e-absen.jpg" },
+    });
+  }
+  expect(await hadir(), `${email} tidak berhasil dibuat HADIR — /shift/buka pasti ditolak`).toBe(
+    true,
+  );
   return token;
 }
 
