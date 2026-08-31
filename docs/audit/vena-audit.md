@@ -50,6 +50,105 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Tulisan yang tak menyentuh satu baris pun — server — 2026-08-31 — **BERSIH**
+
+- **Kenapa vena ini ada**: putaran 28 bertanya *"baris mana yang
+  DIPULANGKAN"*. Dualnya tak pernah ditanyakan: **berapa baris yang benar-benar
+  DISENTUH, dan adakah yang memeriksanya?** `UPDATE … WHERE id = $1 AND
+  company_id = $2` yang tak cocok baris apa pun BUKAN galat bagi Postgres — ia
+  sukses dengan `rowCount = 0`. Kalau rutenya lalu membalas `{ ok: true }`,
+  orang yang menekan Simpan diberi tahu bahwa perubahannya tersimpan atas baris
+  yang tak pernah disentuh. Tak ada gejala, tak ada galat, tak ada cara menebak
+  dari layar.
+
+- **Populasi, terhitung dari pohon sintaks**: **161 penulisan** Drizzle lewat
+  `db`/`tx` (**120** `update` · **41** `delete`) →
+
+  | kelas | jumlah | dasar |
+  |---|---|---|
+  | `DILIHAT` | **79** | hasilnya diikat/dikembalikan/dipakai |
+  | `DIJAGA` | **39** | hasilnya dibuang, tapi ada penolakan 404 di fungsinya |
+  | `BUTA` | **43** | hasilnya dibuang, tak ada penjaga terlihat |
+
+  Dari 123 penulisan yang ada di berkas rute, **23** berkelas `BUTA`.
+
+- **HASILNYA: BERSIH — dan satu angka menjelaskan seluruhnya:**
+
+      penulisan BUTA yang `where`-nya menyebut PARAMETER RUTE: 0
+
+  Ke-23 itu semuanya menulis ke baris yang **tidak dipilih pemanggil**:
+  `auth.company_id` dari token, daftar id yang barusan dibaca sendiri, baris
+  token yang sudah divalidasi, sesi opname yang sedang dibuat. Nol baris di
+  situ normal — impor CSV massal, hapus-lalu-sisip (UPSERT), retensi, backfill
+  — bukan kegagalan.
+
+- **DIUKUR LEWAT HTTP, seluruh populasi, bukan disimpulkan dari kode.** Ke-54
+  rute pengubah ber-parameter ditembak dengan UUID acak (yang pasti tak ada di
+  basis data mana pun):
+
+  | jawaban | jumlah |
+  |---|---|
+  | 404 / 400 / 403 | **54** |
+  | **2xx** | **0** |
+
+  Daftar rutenya **diturunkan dari sumber** (`app.ts` → prefiks mount ×
+  `modules/*/routes.ts` → metode + jalur ber-`:param`), bukan diketik — daftar
+  yang diketik adalah cara rute berikutnya lahir tanpa dijaga, kesalahan yang
+  sudah dibayar tiga putaran berturut-turut.
+
+- **Yang berubah karena itu bukan kodenya, melainkan siapa yang menjaganya.**
+  Ke-54 pintu benar hari ini sebab tiap penulisnya ingat; tak ada satu pun
+  gerbang yang menjaganya tetap begitu, dan "ingat" adalah persis yang gagal di
+  pintu ke-55. Vena ini memasang dua lapis untuk satu aturan:
+
+  | lapis | menjawab | tak bisa dielakkan dengan |
+  |---|---|---|
+  | `test/tulisan-hasilnya-dilihat.test.ts` (10 uji) | bentuk KODE | menulis kode berbeda |
+  | §276 `verify-api.sh` (3 asersi, 54 tembakan) | perilaku SUNGGUHAN | menulis penalaran yang salah |
+
+- **Aturan yang dipaku bukan angka sembarangan melainkan INVARIAN**: *pemanggil
+  tak boleh bisa MENAMAI baris bagi penulisan yang hasilnya tak diperiksa siapa
+  pun.* Selama itu benar, "id tak dikenal" tak pernah bisa dijawab "tersimpan".
+  Menuduh ke-43 `BUTA` akan salah — sebagian besar memang massal — dan gerbang
+  yang menuduh impor CSV adalah gerbang yang ditutup orang.
+
+- **Bukti merah, dua arah, pada pohon SUNGGUHAN**: penjaga
+  `DELETE /kategori/:id` dicabut dan `where`-nya diganti `c.req.param("id")` →
+  gerbang unit merah menyebut `modules/kategori/routes.ts:110
+  delete(menuCategories)` · penjaganya saja dicabut lalu ditembak lewat HTTP →
+  **§276 merah dan MENYEBUT rutenya**: `DELETE/kategori/:id(200)`.
+  **PASANGAN**: rute itu ternyata **dijaga dua kali** (409 "masih dipakai
+  menu", lalu 404) — pencabutan pertama tak cukup untuk memerahkannya, dan itu
+  ketahuan justru karena bukti merahnya dijalankan alih-alih diasumsikan.
+
+- **PASANGAN yang menentukan**: §276 tak boleh "lolos" karena semua
+  permintaannya ditolak lebih awal (token rusak, prefiks salah, server mati).
+  Satu rute pengubah dengan id SUNGGUHAN wajib tetap berhasil — dan itu
+  diasersi tersendiri. Tanpa pasangan ini, sapuan yang menembak alamat yang
+  keliru akan terbaca sebagai kebersihan sempurna.
+
+- **Kelas kedua yang disapu di putaran yang sama, juga BERSIH**: **efek yang
+  tak bisa di-rollback DI DALAM transaksi** — email, `fetch`, tulisan berkas,
+  timer. Populasi **72** panggilan `.transaction(`, **0** pelanggaran. Sebuah
+  email yang terkirim di dalam transaksi yang kemudian gagal tak bisa ditarik
+  kembali; di repo ini bentuk itu tak ada.
+
+- **Batas detektor, ditulis jujur**: penjaga dicari di FUNGSI PEMBUNGKUS
+  TERLUAR — sengaja longgar, sebab menuduh handler yang penjaganya beberapa
+  baris di atas lebih mahal daripada membebaskan lalu memilah tangan;
+  konsekuensinya penjaga yang tinggal di pembantu bersama tak terlihat ·
+  `rowCount` tak dilacak, hanya "nilainya dipakai atau tidak" · **SQL mentah
+  (`db.execute(sql\`UPDATE …\`)`) bukan populasi ini** dan punya jalur sendiri ·
+  §276 memakai token OWNER saja; peran lain tak disapu.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.556** (213 berkas, +10 uji) ·
+  **`verify-api.sh` 3.285 lolos / 0 gagal** (DB segar; §276 baru) ·
+  `audit:invarian` **26/26**. **Playwright e2e tidak dijalankan** — `apps/web`
+  tak tersentuh satu baris pun, dan `src` server pun tidak: putaran ini menambah
+  GERBANG, bukan mengubah perilaku.
+
+---
+
 ## Urutan yang tidak MENENTUKAN, dan baris yang dipilihnya — server — 2026-08-31
 
 - **Kenapa vena ini ada**: putaran 23 menghitung 86 pemotongan dan bertanya

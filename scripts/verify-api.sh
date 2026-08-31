@@ -15319,6 +15319,90 @@ cek "PASANGAN: bentuk balasannya tak berubah (total & per_page tetap ada)" "V ==
 cek "PASANGAN: saldo stok tetap terbaca sebagai angka" "V == 1" \
   "$(api "$OWNER" GET "/stok" | jq 'if (.. | objects | has("saldo")) // false then 1 else (if type == "array" or has("rows") then 1 else 0 end) end' | head -1)"
 
+# §276 — TULISAN YANG TAK MENYENTUH SATU BARIS PUN TAK BOLEH BILANG "OK"
+#
+# Dual dari §275. Di sana pertanyaannya "baris mana yang DIPULANGKAN"; di sini
+# "berapa baris yang benar-benar DISENTUH, dan adakah yang memeriksanya".
+#
+# Terukur baca-saja saat seksi ini ditulis: 161 penulisan lewat `db`/`tx`
+# (120 update, 41 delete), dan **82 di antaranya membuang hasilnya** — tak
+# satu pun `.returning()` yang nilainya dibaca, tak satu pun `rowCount` yang
+# dicek. Sebagian besar memang benar (impor massal, hapus-lalu-sisip, backfill),
+# tapi bentuk yang berbahaya ada di antaranya: `UPDATE … WHERE id = $1 AND
+# company_id = $2` yang tak cocok baris apa pun lalu membalas 200 "tersimpan".
+# Orangnya percaya sudah tersimpan; tak ada gejala apa pun.
+#
+# Ke-54 pintu di bawah SEMUANYA benar hari ini — dan itu yang dipaku. Tak ada
+# gerbang yang menjaganya tetap begitu: tiap pintu benar karena penulisnya
+# ingat, dan "ingat" adalah persis yang gagal di pintu ke-55.
+#
+# DAFTAR RUTENYA DITURUNKAN DARI SUMBER, BUKAN DIKETIK. Daftar yang diketik
+# adalah cara rute berikutnya lahir tanpa dijaga — kesalahan yang sudah dibayar
+# tiga putaran berturut-turut (`potongLarik`, `kunciBackfillKode`, dan daftar
+# kolom rahasia).
+echo
+echo "── §276 tulisan yang tak menyentuh baris tak boleh bilang ok ──"
+
+RUTE276="$(python3 - "$(dirname "$0")/../apps/server/src" <<'PYEOF'
+import re, sys, os
+SRC = sys.argv[1]
+app = open(f"{SRC}/app.ts", encoding="utf8").read()
+vd = {}
+for vars_, d in re.findall(r'import \{([^}]*)\} from "\./modules/([^"]+)/routes"', app):
+    for v in vars_.split(","):
+        v = v.strip()
+        if v:
+            vd[v] = d
+mount = {}
+for pfx, v in re.findall(r'\.route\("([^"]+)",\s*(\w+)\)', app):
+    if v in vd:
+        mount.setdefault(vd[v], []).append(pfx)
+out = set()
+for d in sorted(set(vd.values())):
+    f = f"{SRC}/modules/{d}/routes.ts"
+    if not os.path.exists(f):
+        continue
+    isi = open(f, encoding="utf8").read()
+    for m, path in re.findall(r'\.(post|patch|put|delete)\("(/[^"]*)"', isi):
+        if ":" not in path:
+            continue
+        for pfx in mount.get(d, []):
+            out.add((m.upper(), (pfx.rstrip("/") + path).replace("//", "/")))
+for m, p in sorted(out):
+    print(m, p)
+PYEOF
+)"
+
+JML276="$(echo "$RUTE276" | grep -c .)"
+# CAKUPAN dipaku: penghitung yang rusak memulangkan nol, dan nol terbaca
+# sebagai "semua lolos". 54 saat ditulis.
+cek "menyapu rute pengubah ber-parameter (bukan lolos karena kosong)" "V >= 40" "$JML276"
+
+DUA276=0
+NAMA276=""
+while read -r M P; do
+  [ -z "$M" ] && continue
+  # UUID acak: tak mungkin ada di basis data mana pun.
+  PACAK="$(echo "$P" | sed "s#:[a-zA-Z_]*#$(cat /proc/sys/kernel/random/uuid)#g")"
+  KODE="$(curl -s -o /dev/null -w '%{http_code}' -X "$M" "$BASE/api$PACAK" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{}')"
+  case "$KODE" in
+    2*) DUA276=$((DUA276 + 1)); NAMA276="$NAMA276 $M$P($KODE)" ;;
+  esac
+done <<EOF
+$RUTE276
+EOF
+
+cek "tak satu pun membalas 2xx atas id yang TAK ADA —$NAMA276" "V == 0" "$DUA276"
+
+# PASANGAN: sapuannya tak boleh "lolos" hanya karena semua permintaannya
+# ditolak lebih awal (token rusak, prefiks salah, server mati). Satu rute
+# pengubah dengan id SUNGGUHAN harus tetap berhasil.
+KAT276="$(api "$OWNER" POST /kategori '{"nama":"Kategori §276"}' | jq -r '.id // empty')"
+cek "PASANGAN: id SUNGGUHAN tetap bisa diubah (sapuannya tak asal menolak)" "V == 1" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/kategori/$KAT276" \
+      -H "Authorization: Bearer $OWNER" | grep -qE '^2' && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
