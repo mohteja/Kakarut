@@ -50,6 +50,101 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Penulisan yang GAGAL di layar — web — 2026-08-31 — **BERSIH** (10 tuduhan dicabut)
+
+- **Kenapa vena ini ada**: putaran 19–22 menutup sisi BACA di layar — `useQuery`
+  yang gagal menyamar jadi "tidak ada". Instrumennya dibangun untuk itu
+  (`test/util/kueri-web.ts`, AST atas `.tsx`). Sisi TULIS tak pernah kebagian,
+  dan bentuk kegagalannya lebih sunyi: **`useMutation` yang gagal tidak
+  melempar dan tidak merender apa pun** — `onSuccess` sekadar tak jalan.
+  Tombolnya ditekan, tak ada yang berubah, tak ada yang dikatakan. Di
+  `kueri-web.ts`, `useMutation` muncul SATU kali, cuma sebagai petunjuk bahwa
+  sebuah berkas punya tombol simpan.
+
+- **Populasi**: **124 pengikatan `useMutation`** di **64 berkas** (nol yang tak
+  bernama) · **tak ada jaring pengaman global** — `main.tsx:12` menyetel
+  `defaultOptions: { queries: … }` saja, tanpa `MutationCache` ber-`onError`.
+
+  | kelas | jumlah |
+  |---|---|
+  | `TERLIHAT` (galatnya sampai ke JSX) | **115** |
+  | `ONERROR` | **8** |
+  | `SENYAP` | **1**, terdaftar beralasan |
+
+- **HASILNYA BERSIH — dan angka itu baru sah SESUDAH detektornya dibetulkan,
+  sebab generasi pertamanya menuduh SEPULUH pintu yang benar.** Yang dicabut:
+  empat di `PenerimaanPage`, tiga di `MejaPage`, dua di `OnboardingPage`, satu
+  di `BahanPage`. Ini pencabutan terbesar sejak putaran 25.
+
+- **Kenapa salah**: repo ini sudah memecahkan kelas ini dengan idiom yang
+  LEBIH BAIK daripada `<ErrorText error={x.error}/>` telanjang. `lib/galat.ts`
+  menyediakan
+
+      galatTerbaru(...mutasi: { error: unknown; submittedAt: number }[])
+
+  yang menerima **objek mutasinya**, bukan `.error`-nya, lalu memulangkan galat
+  aksi yang paling BARU ditekan — supaya dua tombol di satu layar tak berebut
+  satu slot pesan. Dipakai persis di ketiga berkas yang kutuduh
+  (`PenerimaanPage:269`, `MejaPage:295`, `OnboardingPage:133`). Pemindai yang
+  hanya kenal `x.error` melihatnya sebagai kesunyian. **Penjaganya ada di
+  tempat yang tak dilihat pemindai** — pelajaran putaran 25, dibayar lagi.
+
+- **Yang kesepuluh beda lagi, dan itu bentuk keempat yang sah**:
+  `BahanPage.hapusBanyak` membawa kegagalannya di **nilai SUKSESNYA** —
+  `Promise.allSettled` atas satu DELETE per bahan, lalu daftar id yang gagal
+  dipulangkan dan `onSuccess` menyusunnya jadi kalimat per-bahan. Mutasi itu
+  tak pernah menolak, jadi `.error`-nya memang selalu kosong. Terdaftar
+  beralasan, `MAKS_UTANG = 1`.
+
+- **DIUKUR DI PERAMBAN, dengan kegagalan yang DIPAKSA SECARA NYATA** — bukan
+  `page.route` yang memalsukan balasan: mejanya dihapus lewat API SESUDAH layar
+  memuat daftarnya, lalu tombol hapus di layar ditekan. Itu balapan yang
+  sesungguhnya (dua orang, dua perangkat), dan server menjawab 404 aslinya.
+  Premis "mejanya memang tampil" dibuktikan lebih dulu. **Kalimat kegagalannya
+  muncul.** Bukti merahnya dijalankan, bukan diasumsikan: `<ErrorText>` dicabut
+  dari `MejaPage` → spec-nya memerah tepat di asersi itu; dikembalikan → hijau.
+
+- **TIGA CACAT DI ALAT UKUR SENDIRI, ditemukan karena spec barunya dijalankan
+  bersama tetangganya** (Aturan 7):
+
+  | cacat | bagaimana ketahuan |
+  |---|---|
+  | suite e2e duduk PERSIS di langit-langit kuota login (10 per IP+email per 5 menit) | menambah satu spec → `stok-awal-gagal` memerah dengan `TypeError: … reading 'length'`, yaitu **429 yang menyamar jadi bentuk data** |
+  | `masukLewatSesi` menyusun sesi dari `/profil`, yang **bukan** bentuk `AuthState` | sesi tanpa `company_id`/`branch_id`/`sub` → `/pengaturan/meja` memantul ke `/dashboard`, dan premisnya runtuh tanpa satu galat pun |
+  | 2 worker, cache sesi hidup per MODUL | tiap worker membayar login lagi; kuotanya habis walau cache-nya benar |
+
+  Yang kedua paling tajam: `sesiApi` di berkas yang SAMA sudah menuliskan
+  *"Badan login SUDAH berbentuk `AuthState` … tak perlu disusun ulang dari
+  /profil"* — dan `masukLewatSesi` menyusunnya ulang dari `/profil`. **Komentar
+  dan kode bertentangan di satu berkas**, dan yang salah kodenya.
+
+- **Yang diperbaiki karena itu bukan kode produk melainkan alat ukurnya**:
+  `masukLewatSesi` memakai `AuthState` apa adanya · `playwright.config.ts`
+  dipatok `workers: 1` dengan alasan tertulis (kuota login DAN spec yang
+  berbagi satu basis data yang dimutasi).
+
+- **Bukti merah dua arah** pada pohon SUNGGUHAN: `<ErrorText>` dicabut dari
+  `MejaPage` → gerbang unit merah menyebut ketiga mutasinya
+  (`toggle`, `hapus`, `simpanTataLetak`) DAN spec peramban merah di asersinya.
+  **PASANGAN**: `useQuery` tak ikut masuk populasi (sisi BACA punya gerbangnya
+  sendiri) · `x.isPending`/`x.mutate(…)` yang mengalir ke JSX **tidak**
+  membebaskan — kalau iya, gerbang ini membebaskan hampir semua situs.
+
+- **Batas detektor, ditulis jujur**: aliran ditelusuri dalam SATU berkas — galat
+  yang dioper sebagai prop ke komponen di berkas lain terbaca `TERLIHAT` tanpa
+  diperiksa ujungnya · `alert()`/`console.error` tidak dihitung "terlihat" ·
+  `mutateAsync` di dalam `try/catch` bentuk kelima yang TIDAK dikenali (nol di
+  repo saat ini) · hanya `useMutation` yang diikat ke nama yang masuk populasi.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.567** (214 berkas, +11 uji) ·
+  **`verify-api.sh` 3.285 lolos / 0 gagal** (DB segar) · `audit:invarian`
+  **26/26** · **Playwright 11/11 hijau** (DB segar; dijalankan karena
+  `apps/web` tersentuh). **Tak satu baris pun kode PRODUK berubah** —
+  `apps/web/src` dan `apps/server/src` sama-sama tak tersentuh: putaran ini
+  menambah gerbang dan membetulkan alat ukur.
+
+---
+
 ## Tulisan yang tak menyentuh satu baris pun — server — 2026-08-31 — **BERSIH**
 
 - **Kenapa vena ini ada**: putaran 28 bertanya *"baris mana yang
