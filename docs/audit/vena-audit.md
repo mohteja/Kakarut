@@ -50,6 +50,114 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Utang DIBAYAR: balapan `catatAbsen` — server — 2026-08-31
+
+- **Kenapa entri ini ada**: putaran 24 menyapu 58 situs periksa-dulu-baru-tulis,
+  menutup dua, dan memilah sembilan sisanya jadi **4 `sah`** + **5 `utang`**
+  yang jumlahnya dipaku `MAKS_UTANG = 5` **dengan syarat tertulis bahwa batas
+  itu wajib TURUN**. Ini putaran pertama yang membayarnya — dan yang membuatnya
+  layak dicatat bukan perbaikannya melainkan bahwa batasnya benar-benar turun.
+
+- **Bentuknya**, `modules/absensi/routes.ts` — tiga langkah tanpa transaksi dan
+  tanpa penahan apa pun: **baca** cap terakhir → **putuskan** tipe berikutnya
+  (`capAbsenBerikutnya`, alternasi murni) → **tulis**. Skema mengonfirmasi tak
+  ada jaring: `attendances` cuma punya `id` primary key + dua indeks BIASA.
+
+- **TERUKUR LEWAT HTTP SEBELUM SATU BARIS DIUBAH** — dua `POST /absensi/saya`
+  **serentak** ber-`client_ref` berbeda, dari keadaan "belum absen", diulang
+  tiga kali:
+
+  | | deret cap | rekap `keluar` |
+  |---|---|---|
+  | **sebelum** (3 dari 3) | `masuk → masuk` | **null** |
+  | **sesudah** (3 dari 3) | `masuk → keluar` | terisi |
+
+  Orangnya tercatat **datang dan tidak pernah pulang**. Empat ketukan serentak,
+  kasus yang membuka putaran ini: `masuk → keluar → keluar → masuk` sebelum,
+  `masuk → keluar → masuk → keluar` sesudah. Cap sejenis berurutan **1 → 0**.
+
+- **KLAIM PUTARAN 24 DIPERIKSA, BUKAN DIULANG.** Catatan lama menulis *"rekap
+  absen yang dipakai menghitung kehadiran ikut salah"*, dan aku sempat menduga
+  itu berlebihan — rekap memakai `min(waktu) filter (tipe='masuk')` /
+  `max(...) filter (tipe='keluar')`, dan agregat min/max bisa saja selamat dari
+  cap ganda. **Diukur: tidak selamat.** Dua `masuk` tanpa `keluar` membuat
+  `max(...) filter (tipe='keluar')` memulangkan **null**, dan hari itu tampil
+  sebagai hadir tanpa jam pulang. Catatan putaran 24 benar apa adanya.
+
+- **Kenapa idempotensi yang sudah ada TIDAK menutupnya**: kedua rute memang
+  berklaim `client_ref` (`denganKlaimIdempoten`), dan itu menutup pengiriman
+  ULANG permintaan yang sama. Ketukan ganda di kios bersama — atau ponsel yang
+  menyinkronkan cap offline saat orangnya menekan tombol kios — adalah dua
+  permintaan yang memang BERBEDA: dua `client_ref`, dua klaim, dua-duanya lolos.
+  Itu sebabnya penahannya harus di `catatAbsen`, bukan di pintunya: keempat
+  pemanggilnya (`absensi/routes.ts` ×2, `sync/routes.ts` ×2) lewat satu fungsi.
+
+- **Perbaikannya memakai penahan yang sudah ada, bukan yang baru**:
+  `db.transaction` + `kunciAntrean(tx, "absen", companyId, branchId, userId)`.
+  `lib/kunci.ts` tak disentuh — ia sudah menuliskan persis kasus ini: *"aturan
+  yang melarang baris BARU … barisnya belum ada saat diperiksa, jadi tak ada
+  yang bisa dipegang `FOR UPDATE`"*.
+
+- **INDEKS UNIK DIPERTIMBANGKAN DAN DITOLAK, dengan alasan**: alternasi tak
+  bisa ditulis sebagai kesamaan kolom — seseorang boleh punya banyak pasang
+  masuk/keluar dalam sehari — jadi tak ada tupel yang bisa dijadikan unik.
+  Migrasi skema karena itu **tidak** dilakukan; catatan utang lama menyebut
+  "tak punya indeks unik" sebagai gejala, bukan sebagai resep.
+
+- **KUNCINYA TANPA TANGGAL, dan itu disengaja**: sesi hadir melintasi tengah
+  malam (`sesiHadirTerbuka` + `BATAS_LINTAS_HARI_JAM`), jadi lingkup
+  invariannya (perusahaan, cabang, orang). Cap pukul 00:30 yang menutup sesi
+  kemarin harus menunggu giliran yang sama dengan cap yang membukanya.
+  `capHariSebelumnya` ikut menerima `tx` — bacaan yang memutuskan tapi terjadi
+  di LUAR kunci membuat penahannya cuma hiasan.
+
+- **DUA GERBANG UNTUK SATU ATURAN**, dan yang kedua bukan hiasan:
+
+  | lapis | menjawab | tak bisa dielakkan dengan |
+  |---|---|---|
+  | `test/lomba-tulis.test.ts` | kuncinya **tertulis** | menulis kode berbeda |
+  | **§277** `verify-api.sh` | kuncinya **menahan** | menulis penalaran yang salah |
+
+  Gerbang statis tak bisa membuktikan sebuah penahan benar-benar menahan; §277
+  menembak empat permintaan BENAR-BENAR bersamaan (`&` lalu `wait`) dan
+  menyusun deretnya dari balasan rutenya sendiri.
+
+- **`MAKS_UTANG` 5 → 4**, dan entri `catatAbsen` dihapus dari daftar. Gerbangnya
+  sendiri yang menyuruh: begitu kuncinya dipasang ia memerah dengan
+  *"catatAbsen: sudah tak tertuduh — hapus entrinya"* — daftar pengecualian
+  yang basi ditolak sekeras pelanggaran.
+
+- **Bukti merah dua arah, dijalankan bukan diasumsikan**: kunci dicabut →
+  gerbang statis merah menyebut `modules/absensi/routes.ts:222 [transaction]
+  TELANJANG tabel=attendances`, **dan** §277 merah menyebut deretnya:
+  `keluar -> masuk -> masuk -> keluar`. **PASANGAN**: ketukan berikutnya tetap
+  MEMBALIK tipe cap terakhir — kunci menyerialkan, ia tak mengubah aturannya.
+
+- **SATU GERBANG LAIN MENANGKAPKU, dan ia benar**: `verify-api-token.test.ts`
+  menolak §277 versi pertama karena memakai `$KASIR`, yang **mati** sejak §105
+  mengganti password kasir dan menaikkan `token_version`. Kegagalan token mati
+  MENYAMAR jadi *"harusnya 200, dapat 401"* — bug produk palsu — dan gerbang
+  itu ada persis untuk itu. Ia menangkapku dalam 227 ms, sebelum satu detik
+  Postgres terpakai.
+
+- **Batas yang diakui**: kunci ini menyerialkan `catatAbsen` saja. Penulisan
+  `attendances` dari jalur lain (bila kelak lahir) tak ikut tertahan kecuali ia
+  memakai kunci bernama sama — dan itu alasan kuncinya DIBERI NAMA, bukan
+  ditanam di satu tempat · jeda-minimum antar-ketukan **tidak** ditambahkan:
+  sesudah perbaikan ketukan ganda menghasilkan `masuk` lalu `keluar`, dan
+  apakah itu yang diinginkan produk adalah keputusan tersendiri, bukan bagian
+  dari utang ini.
+
+- **Gerbang**: `typecheck` bersih · `npm test` **2.567** (214 berkas) ·
+  **`verify-api.sh` 3.288 lolos / 0 gagal** (DB segar; §277 baru, 3 asersi) ·
+  `audit:invarian` **26/26**. **Playwright e2e tidak dijalankan** — `apps/web`
+  tak tersentuh satu baris pun (`git status` sebagai buktinya).
+
+- **Utang balapan tersisa: 4** — `tibaBeliPerlengkapan`, `execPenjualan`,
+  pembuatan penyewa, `pastikanSuperAdmin`.
+
+---
+
 ## Penulisan yang GAGAL di layar — web — 2026-08-31 — **BERSIH** (10 tuduhan dicabut)
 
 - **Kenapa vena ini ada**: putaran 19–22 menutup sisi BACA di layar — `useQuery`

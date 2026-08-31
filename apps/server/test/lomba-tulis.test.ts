@@ -29,7 +29,7 @@ interface Alasan {
 }
 
 /** Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar. */
-const MAKS_UTANG = 5;
+const MAKS_UTANG = 4;
 
 /** kunci: `berkas` -> nama fungsi -> alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
@@ -69,17 +69,6 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "Catatan bebas owner pada satu laporan kebersihan. Sama seperti nama " +
         "area: penulis terakhir menang, dan tak ada hitungan yang bergantung " +
         "padanya.",
-    },
-  },
-  "modules/absensi/routes.ts": {
-    catatAbsen: {
-      kelas: "utang",
-      teks:
-        "UTANG. Cap absen berikutnya (masuk/keluar) ditentukan dari cap " +
-        "TERAKHIR yang dibaca, lalu disisipkan — dan `attendances` tak punya " +
-        "indeks unik apa pun (hanya dua indeks biasa). Ketukan ganda bisa " +
-        "menyisipkan dua cap masuk berurutan. Bukan uang, tapi rekap absen " +
-        "yang dipakai menghitung kehadiran ikut salah.",
     },
   },
   "modules/perlengkapan/service.ts": {

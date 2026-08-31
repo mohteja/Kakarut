@@ -15403,6 +15403,84 @@ cek "PASANGAN: id SUNGGUHAN tetap bisa diubah (sapuannya tak asal menolak)" "V =
   "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/kategori/$KAT276" \
       -H "Authorization: Bearer $OWNER" | grep -qE '^2' && echo 1 || echo 0)"
 
+# §277 — ALTERNASI ABSEN BERTAHAN SAAT DUA KETUKAN BERPAPASAN
+#
+# Membayar utang balapan `catatAbsen` yang dicatat putaran 24 dengan namanya:
+# *"cap absen berikutnya ditentukan dari cap TERAKHIR yang dibaca, dan
+# `attendances` tak punya indeks unik apa pun."*
+#
+# Tipe cap berikutnya adalah fungsi murni dari cap terakhir — terakhir "masuk"
+# → "keluar", selain itu → "masuk". Tanpa penahan, dua permintaan bersamaan
+# membaca cap terakhir yang SAMA, memutuskan tipe yang SAMA, lalu menulis
+# dua-duanya.
+#
+# TERUKUR sebelum kuncinya dipasang, dua ketukan SERENTAK dari keadaan "belum
+# absen", tiga kali berturut-turut:
+#
+#     masuk -> masuk        rekap `keluar`: null   (3 dari 3)
+#
+# Orangnya tercatat datang dan TIDAK PERNAH PULANG. Empat ketukan serentak
+# menghasilkan `masuk -> keluar -> keluar -> masuk`.
+#
+# Klaim `client_ref` yang sudah ada TIDAK menutupnya: ia menutup pengiriman
+# ULANG permintaan yang sama, sementara ketukan ganda adalah dua permintaan
+# yang memang berbeda — dua `client_ref`, dua klaim, dua-duanya lolos.
+#
+# Seksi ini menembak permintaannya BENAR-BENAR BERSAMAAN (`&` lalu `wait`) dan
+# menyusun deretnya dari balasan rutenya sendiri. Gerbang statis
+# (`test/lomba-tulis.test.ts`) hanya bisa melihat bahwa kuncinya TERTULIS; yang
+# di sini melihat bahwa ia MENAHAN.
+echo
+echo "── §277 alternasi absen bertahan saat ketukan berpapasan ──"
+
+# Token kasir: `$REISS105`, bukan `$KASIR`. §105 mengganti password kasir dan
+# menaikkan `token_version`, jadi `$KASIR` mati sejak itu — dan kegagalannya
+# MENYAMAR jadi "harusnya 200, dapat 401". `verify-api-token.test.ts` menjaga
+# aturan itu, dan ia menangkap seksi ini sebelum satu detik Postgres terpakai.
+rm -f /tmp/kk277-*.json
+for i in 1 2 3 4; do
+  curl -s -o "/tmp/kk277-$i.json" -X POST "$BASE/api/absensi/saya" \
+    -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
+    -d "{\"foto_url\":\"https://example.com/e277-$i.jpg\",\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" &
+done
+wait
+
+A277="$(python3 - <<'PYEOF'
+import glob, json
+cap = []
+for f in sorted(glob.glob("/tmp/kk277-*.json")):
+    try:
+        d = json.load(open(f))
+    except Exception:
+        continue
+    if isinstance(d, dict) and d.get("tipe") and d.get("waktu"):
+        cap.append((d["waktu"], d["tipe"]))
+cap.sort()
+tipe = [t for _, t in cap]
+ganda = sum(1 for a, b in zip(tipe, tipe[1:]) if a == b)
+print(json.dumps({"n": len(tipe), "ganda": ganda, "deret": " -> ".join(tipe)}))
+PYEOF
+)"
+
+# PREMIS lebih dulu: kalau tak satu pun ketukan berhasil, "nol cap sejenis
+# berurutan" benar secara hampa. Nol yang terbaca sebagai bersih adalah
+# kesalahan yang sudah dibayar berkali-kali di ledger ini.
+cek "premis: keempat ketukan serentak diterima" "V == 4" "$(echo "$A277" | jq '.n')"
+
+cek "tak ada dua cap SEJENIS berurutan — $(echo "$A277" | jq -r '.deret')" "V == 0" \
+  "$(echo "$A277" | jq '.ganda')"
+
+# PASANGAN: kuncinya menyerialkan, ia tak boleh MENGUBAH aturannya. Satu
+# ketukan berikutnya (tak berbarengan) tetap membalik tipe cap terakhir.
+T277="$(echo "$A277" | jq -r '.deret | split(" -> ") | last')"
+L277="$(api "$REISS105" POST /absensi/saya \
+  "{\"foto_url\":\"https://example.com/e277-lanjut.jpg\",\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" \
+  | jq -r '.tipe')"
+cek "PASANGAN: ketukan berikutnya tetap MEMBALIK ($T277 → $L277)" "V == 1" \
+  "$([ "$T277" != "$L277" ] && [ -n "$L277" ] && [ "$L277" != "null" ] && echo 1 || echo 0)"
+
+rm -f /tmp/kk277-*.json
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
