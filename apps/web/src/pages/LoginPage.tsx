@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
+import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
 
 export function LoginPage() {
   const { login, masukTamu, kirimUlangVerifikasi } = useAuth();
@@ -15,6 +16,14 @@ export function LoginPage() {
   // Bila login gagal karena email belum diverifikasi → tawarkan kirim ulang.
   const [belumVerif, setBelumVerif] = useState(false);
   const [verifKirim, setVerifKirim] = useState<"idle" | "loading" | "sent">("idle");
+  const [verifJeda, setVerifJeda] = useState(0);
+  // Tenggatnya tersimpan per email, jadi hitung mundurnya benar walau
+  // halamannya baru dimuat — bukan cuma selama tab ini hidup.
+  useEffect(() => {
+    setVerifJeda(sisaJeda(email));
+    const t = setInterval(() => setVerifJeda(sisaJeda(email)), 1000);
+    return () => clearInterval(t);
+  }, [email]);
   const [verifDevKode, setVerifDevUrl] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
@@ -35,11 +44,23 @@ export function LoginPage() {
     }
   }
 
+  /*
+   * HITUNG MUNDURNYA IKUT DI SINI, dan sebelumnya tidak.
+   *
+   * Tombol ini dulu tak membaca `retry_after_detik` sama sekali dan selalu
+   * menampilkan "sudah dikirim" — termasuk pada detik-detik ketika server
+   * memang sedang menahan kiriman itu (jarak 2 menit per akun). Layar sebelah
+   * (`VerifikasiEmailPage`) sudah membayar aturan ini lengkap dengan
+   * alasannya; pintu kedua ke keadaan yang sama dibiarkan terbuka. Rumahnya
+   * kini satu: `lib/jeda-verifikasi.ts`.
+   */
   async function kirimUlang() {
+    if (sisaJeda(email) > 0) return;
     setVerifKirim("loading");
     try {
       const res = await kirimUlangVerifikasi(email);
       setVerifDevUrl(res.dev_verify_kode ?? null);
+      setVerifJeda(tulisJeda(email, res.retry_after_detik));
       setVerifKirim("sent");
     } catch {
       setVerifKirim("idle");
@@ -124,10 +145,14 @@ export function LoginPage() {
                   <button
                     type="button"
                     onClick={kirimUlang}
-                    disabled={verifKirim === "loading" || !email}
+                    disabled={verifKirim === "loading" || !email || verifJeda > 0}
                     className="font-semibold underline disabled:opacity-60"
                   >
-                    {verifKirim === "loading" ? "Mengirim…" : "Kirim ulang kode verifikasi"}
+                    {verifKirim === "loading"
+                      ? "Mengirim…"
+                      : verifJeda > 0
+                        ? `Kirim ulang kode verifikasi (${jamPasir(verifJeda)})`
+                        : "Kirim ulang kode verifikasi"}
                   </button>
                   {/* Kodenya mungkin MASIH BERLAKU (60 menit) — orang yang
                       emailnya sudah masuk tak perlu memicu kiriman baru cuma

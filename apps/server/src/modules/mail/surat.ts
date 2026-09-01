@@ -75,6 +75,59 @@ export function suratVerifikasi(
   );
 }
 
+/**
+ * Versi TEKS-POLOS surat verifikasi.
+ *
+ * Bukan hiasan: sampai hari ini setiap surat yang keluar dari aplikasi ini
+ * adalah surat HTML-SAJA — `Pesan.text` ada di tipenya, cabang SMTP
+ * meneruskannya, tapi tak ada satu pemanggil pun yang mengisinya, dan cabang
+ * Resend malah membuangnya. Surat HTML-saja berisi kode 6 angka dan satu
+ * tautan punya profil spam yang tinggi.
+ *
+ * Ia juga jawaban bagi pembaca yang klien emailnya memang menolak HTML — di
+ * situ surat lama tampil kosong.
+ *
+ * URL-nya dicetak MENTAH di sini, tidak seperti versi HTML yang
+ * menyembunyikannya di balik anchor. Di teks-polos tak ada tempat lain untuk
+ * menaruhnya, dan orang yang menyalinnya butuh alamatnya, bukan katanya.
+ */
+export function suratVerifikasiTeks(nama: string, kode: string, menit: number, url: string): string {
+  return [
+    `Halo ${nama},`,
+    "",
+    "Terima kasih sudah mendaftar Terakasir. Masukkan kode ini di halaman",
+    `verifikasi untuk mengaktifkan akun (berlaku ${menit} menit):`,
+    "",
+    `    ${kode}`,
+    "",
+    "Jangan berikan kode ini kepada siapa pun. Kami tidak pernah memintanya",
+    "lewat telepon atau chat.",
+    "",
+    "Membuka email ini dari aplikasi Terakasir di ponsel? Verifikasi lewat",
+    `tautan berikut (sekali pakai): ${url}`,
+    "",
+    "Abaikan email ini bila Anda tidak mendaftar.",
+  ].join("\n");
+}
+
+/** Versi TEKS-POLOS surat atur ulang password. Lihat catatan di atas. */
+export function suratResetTeks(nama: string, url: string, raw: string): string {
+  return [
+    `Halo ${nama},`,
+    "",
+    "Ada permintaan atur ulang password akun Terakasir Anda. Buka tautan",
+    "berikut (berlaku 1 jam):",
+    "",
+    `    ${url}`,
+    "",
+    "Bila tautannya terpotong, kode ini bisa ditempel manual:",
+    "",
+    `    ${raw}`,
+    "",
+    "Abaikan email ini bila Anda tidak meminta.",
+  ].join("\n");
+}
+
 /** Badan surat atur ulang password. */
 export function suratReset(nama: string, url: string, raw: string): string {
   return (

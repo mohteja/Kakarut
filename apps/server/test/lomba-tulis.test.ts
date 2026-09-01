@@ -46,6 +46,22 @@ const MAKS_UTANG = 0;
 
 /** kunci: `berkas` -> nama fungsi -> alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
+  "modules/mail/service.ts": {
+    catatPercobaan: {
+      kelas: "sah",
+      teks:
+        "Penulis-terakhir-menang memang arti yang benar di sini, dan taruhannya " +
+        "nol. Tabelnya CINCIN 200 baris riwayat percobaan kirim email: setiap " +
+        "baris berdiri sendiri (tak ada yang di-update, tak ada agregat yang " +
+        "dibaca ulang), dan yang 'diperiksa lalu ditulis' cuma pemangkasan " +
+        "ekornya — SELECT id di luar 200 terbaru, lalu DELETE. Dua pencatatan " +
+        "yang berpapasan paling buruk membuat cincinnya berisi 199 atau 201 " +
+        "baris sesaat, lalu pencatatan berikutnya merapikannya sendiri. " +
+        "Mengunci antrean untuk itu berarti menaruh kunci di jalur KIRIM SURAT " +
+        "demi kerapian sebuah daftar diagnostik — ongkos yang jauh lebih besar " +
+        "daripada yang dibelinya.",
+    },
+  },
   "modules/auth/routes.ts": {
     "POST /reset-password": {
       kelas: "sah",

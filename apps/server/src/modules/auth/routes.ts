@@ -24,8 +24,8 @@ import {
   lewatiRateLimit,
   rateLimit,
 } from "../../middleware/rateLimit";
-import { emailTerkonfigurasi, kirimEmailDiam } from "../mail/service";
-import { suratReset, suratVerifikasi } from "../mail/surat";
+import { catatTakDicoba, emailTerkonfigurasi, kirimEmailDiam } from "../mail/service";
+import { suratReset, suratResetTeks, suratVerifikasi, suratVerifikasiTeks } from "../mail/surat";
 import { autoTerimaUndanganEmail } from "../onboarding/service";
 import { GUEST } from "../../seed/guest";
 import { buatSesi } from "./session";
@@ -314,7 +314,16 @@ async function kirimKodeVerifikasi(
     ]);
     return true;
   });
-  if (!dikirim) return undefined;
+  if (!dikirim) {
+    /*
+     * DITAHAN JARAKNYA — sah, dan tetap dicatat. Dari luar keadaan ini tak
+     * bisa dibedakan dari "terkirim": rutenya membalas 200 yang sama persis.
+     * Barisnya inilah satu-satunya tempat orang bisa melihat bahwa surat yang
+     * ditunggu memang tak pernah berangkat.
+     */
+    await catatTakDicoba("verifikasi-email", email, "jarak_kirim_ulang");
+    return undefined;
+  }
   /*
    * KEGAGALANNYA TAK DIPULANGKAN KE PEMINTA, dan itu keputusan, bukan
    * kelalaian: rute pemanggilnya (`/register`, `/resend-verification`) sengaja
@@ -333,6 +342,7 @@ async function kirimKodeVerifikasi(
       to: email,
       subject: "Kode verifikasi Terakasir",
       html: suratVerifikasi(nama, kode, VERIFIKASI_MENIT, url),
+      text: suratVerifikasiTeks(nama, kode, VERIFIKASI_MENIT, url),
     },
     "verifikasi-email",
   );
@@ -388,7 +398,16 @@ export const authRoutes = new Hono<AppEnv>()
   // sendiri saat daftar). Selesai → langsung login (kembalikan sesi).
   .post("/register", batasRegister, zValidator("json", RegisterSchema), async (c) => {
     const { nama, email, password } = c.req.valid("json");
-    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+    const [existing] = await db
+      .select({
+        id: users.id,
+        nama: users.nama,
+        deletedAt: users.deletedAt,
+        isActive: users.isActive,
+        emailVerifiedAt: users.emailVerifiedAt,
+      })
+      .from(users)
+      .where(eq(users.email, email));
     let dev: { kode: string; url: string } | undefined;
     if (!existing) {
       const passwordHash = bcrypt.hashSync(password, 10);
@@ -421,6 +440,41 @@ export const authRoutes = new Hono<AppEnv>()
           throw e;
         });
       if (user) dev = await kirimKodeVerifikasi(user.id, email, nama, appBaseUrl(c));
+      else await catatTakDicoba("verifikasi-email", email, "balapan_pendaftaran");
+    } else if (existing.deletedAt) {
+      await catatTakDicoba("verifikasi-email", email, "akun_terhapus");
+    } else if (!existing.isActive) {
+      await catatTakDicoba("verifikasi-email", email, "akun_nonaktif");
+    } else if (existing.emailVerifiedAt) {
+      // Sudah terverifikasi: jalannya MASUK, bukan verifikasi ulang. Tak ada
+      // surat yang berguna untuk dikirim — tapi keputusannya dicatat, sebab
+      // dari luar ia tampak persis seperti pendaftaran yang berhasil.
+      await catatTakDicoba("verifikasi-email", email, "akun_terverifikasi");
+    } else {
+      /*
+       * AKUN SUDAH ADA, AKTIF, TAPI BELUM TERVERIFIKASI → KODENYA DIKIRIM.
+       *
+       * Sebelumnya cabang ini tak mengirim apa pun, dan itu PERANGKAP yang
+       * paling mahal di seluruh alur ini: orang yang kodenya tak sampai akan
+       * melakukan hal yang paling wajar — mengisi formulir daftar sekali lagi
+       * — dan dijawab "kami telah mengirim KODE verifikasi 6 digit. Cek email
+       * Anda" oleh cabang yang secara struktural tak pernah menyentuh penyedia
+       * email. Terukur lewat HTTP pada 2026-09-01: pendaftaran kedua tak
+       * menulis satu baris token pun, tak mengirim apa pun, dan meninggalkan
+       * NOL jejak, sementara balasannya identik dengan yang pertama.
+       *
+       * TAK ADA KEMAMPUAN BARU YANG DIBUKA. Badan responsnya tak berubah
+       * sedikit pun — `dev` sengaja TIDAK diisi di sini, sehingga jawaban untuk
+       * email yang sudah terdaftar tetap identik byte-per-byte dengan jawaban
+       * untuk email baru, di produksi maupun di dev. Suratnya hanya pergi ke
+       * pemilik alamat itu sendiri, dan `/resend-verification` sudah menawarkan
+       * kemampuan yang persis sama kepada siapa pun yang tahu alamatnya —
+       * dengan penjaga yang sama pula: `batasRegister` 20/IP/jam di depan, dan
+       * jarak 120 detik per akun di dalam `kirimKodeVerifikasi`.
+       *
+       * Yang dihapus cuma perangkapnya.
+       */
+      await kirimKodeVerifikasi(existing.id, email, existing.nama, appBaseUrl(c));
     }
     // Respons NETRAL & IDENTIK untuk email baru maupun yang sudah terdaftar →
     // menutup total celah enumerasi akun (di produksi dev_verify_kode tak pernah
@@ -450,7 +504,22 @@ export const authRoutes = new Hono<AppEnv>()
       const { email } = c.req.valid("json");
       const [user] = await db.select().from(users).where(eq(users.email, email));
       let devUrl: string | undefined;
-      if (user && !user.deletedAt && user.isActive) {
+      /*
+       * SATU RANTAI, bukan dua blok berdampingan — dan itu bukan gaya.
+       * Gerbang `otp-senyap-tercatat` menilai RANTAI yang salah satu lengannya
+       * mengirim: bentuk "tiga if pencatat, lalu satu if pengirim di
+       * sebelahnya" lolos dari penilaian itu tanpa satu asersi pun berubah
+       * warna, karena rantai pencatatnya tak punya lengan yang mengirim. Ditulis
+       * sebagai satu rantai, tiap lengan wajib berakhir pada salah satu dari
+       * dua hal, dan lengan yang lahir kemudian ikut tertagih.
+       */
+      if (!user) {
+        await catatTakDicoba("reset-password", email, "email_tak_dikenal");
+      } else if (user.deletedAt) {
+        await catatTakDicoba("reset-password", email, "akun_terhapus");
+      } else if (!user.isActive) {
+        await catatTakDicoba("reset-password", email, "akun_nonaktif");
+      } else {
         const raw = randomBytes(32).toString("hex");
         await db.insert(passwordResetTokens).values({
           userId: user.id,
@@ -466,6 +535,7 @@ export const authRoutes = new Hono<AppEnv>()
             to: email,
             subject: "Reset password Terakasir",
             html: suratReset(user.nama, url, raw),
+            text: suratResetTeks(user.nama, url, raw),
           },
           "reset-password",
         );
@@ -685,7 +755,21 @@ export const authRoutes = new Hono<AppEnv>()
       const { email } = c.req.valid("json");
       const [user] = await db.select().from(users).where(eq(users.email, email));
       let dev: { kode: string; url: string } | undefined;
-      if (user && !user.deletedAt && user.isActive && !user.emailVerifiedAt) {
+      /*
+       * EMPAT CABANG DIAM, dan keempatnya dulu tak meninggalkan jejak apa pun.
+       * Yang terakhir paling mahal: sekali `emailVerifiedAt` terisi, alamat ini
+       * PERMANEN diam — tak ada rute yang mengosongkannya kembali — sementara
+       * layarnya tetap berkata "Kode baru sudah dikirim".
+       */
+      if (!user) {
+        await catatTakDicoba("verifikasi-email", email, "email_tak_dikenal");
+      } else if (user.deletedAt) {
+        await catatTakDicoba("verifikasi-email", email, "akun_terhapus");
+      } else if (!user.isActive) {
+        await catatTakDicoba("verifikasi-email", email, "akun_nonaktif");
+      } else if (user.emailVerifiedAt) {
+        await catatTakDicoba("verifikasi-email", email, "akun_terverifikasi");
+      } else {
         dev = await kirimKodeVerifikasi(user.id, email, user.nama, appBaseUrl(c));
       }
       /*

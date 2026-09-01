@@ -3,38 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { btnPrimary, inputClass } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
-import { bacaLokal, tulisLokal } from "../lib/simpanan";
-
-/**
- * TENGGAT KIRIM ULANG, DISIMPAN PER EMAIL — supaya tombolnya tak berbohong.
- *
- * Hitung mundur yang cuma hidup di state React hilang begitu halamannya dimuat
- * ulang: tombolnya kembali tampak siap, ditekan, dan servernya menolak
- * diam-diam karena jaraknya belum lewat. Orangnya melihat "kode baru sudah
- * dikirim" untuk email yang tak pernah berangkat.
- *
- * Yang disimpan TENGGATNYA (epoch md), bukan sisa detiknya — sisa detik yang
- * disimpan akan tetap sebesar itu berapa lama pun tabnya tertutup.
- *
- * Per email, sebab satu perangkat bisa dipakai mendaftarkan beberapa akun
- * (pemilik yang menyiapkan akun karyawannya), dan jarak milik satu akun tak
- * ada urusannya dengan akun lain.
- */
-const kunciJeda = (email: string) => `kakarut.verifJeda:${email.trim().toLowerCase()}`;
-
-/** "1:59" untuk sisa yang masih semenit lebih; "45 dtk" untuk sisanya. */
-function jamPasir(detik: number): string {
-  if (detik < 60) return `${detik} dtk`;
-  return `${Math.floor(detik / 60)}:${String(detik % 60).padStart(2, "0")}`;
-}
-
-function sisaJeda(email: string): number {
-  if (!email) return 0;
-  const mentah = bacaLokal(kunciJeda(email));
-  const tenggat = mentah ? Number(mentah) : 0;
-  if (!Number.isFinite(tenggat)) return 0;
-  return Math.max(0, Math.ceil((tenggat - Date.now()) / 1000));
-}
+import { bacaLokal } from "../lib/simpanan";
+import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
 
 /**
  * Verifikasi email dengan KODE 6 DIGIT yang diketik di layar ini.
@@ -139,12 +109,7 @@ export function VerifikasiEmailPage() {
     try {
       const res = await kirimUlangVerifikasi(email);
       setKirimUlang("terkirim");
-      // Angkanya dari SERVER (`retry_after_detik`) — yang menahan servernya,
-      // jadi menyalin 120 ke sini cuma menyiapkan dua angka yang bisa
-      // menyimpang. Cadangannya dipakai hanya bila balasannya tak membawanya.
-      const detik = res.retry_after_detik ?? 120;
-      tulisLokal(kunciJeda(email), String(Date.now() + detik * 1000));
-      setJeda(detik);
+      setJeda(tulisJeda(email, res.retry_after_detik));
     } catch (err) {
       setKirimUlang("diam");
       setError(err instanceof Error ? err.message : "Gagal mengirim kode");
