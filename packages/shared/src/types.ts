@@ -144,6 +144,8 @@ export interface PercobaanEmailDto {
   sebab: string | null;
   penyedia: string | null;
   pesan: string | null;
+  /** id pesan dari penyedia — jembatan ke catatan mereka sendiri */
+  pesan_id: string | null;
 }
 
 export interface TemuanSetelanDto {

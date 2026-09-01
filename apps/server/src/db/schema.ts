@@ -479,6 +479,17 @@ export const emailPercobaan = pgTable(
     penyedia: text("penyedia"),
     /** pesan galat penyedia, dipotong */
     pesan: text("pesan"),
+    /**
+     * ID pesan dari penyedianya sendiri (`messageId` SMTP / `id` Resend).
+     *
+     * Jembatan ke catatan MEREKA: baris "Terkirim" di sini cuma berarti
+     * penyedianya menerima alamat itu — nasib sesudahnya (delivered, bounced,
+     * blocked) tercatat di tempat lain, dan tanpa id ini tak ada cara
+     * mencocokkan satu baris di panel dengan satu pesan di sana. Pada Gmail
+     * SMTP, pantulannya mendarat sebagai surat "Mail Delivery Subsystem" di
+     * kotak masuk akun pengirim, dan `Message-ID`-nya yang menghubungkan.
+     */
+    pesanId: text("pesan_id"),
   },
   (t) => [index("email_percobaan_waktu_idx").on(t.waktu)],
 );

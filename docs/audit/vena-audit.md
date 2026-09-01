@@ -50,6 +50,94 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## TERJAWAB: bug OTP bukan bug email — layar yang menjanjikan surat yang tak akan datang — web + server — 2026-09-01
+
+- **Babak ketiga dari satu laporan, dan yang terakhir.** Instrumen babak kedua
+  (riwayat percobaan kirim email) menjawabnya dalam **satu baris**, dibaca
+  pemilik repo dari panelnya sendiri:
+
+  ```
+  <alamat>   verifikasi-email   Tidak dikirim   "Akun sudah terverifikasi — tak perlu kode lagi"
+  ```
+
+  **Tak ada bug pengiriman email.** Akunnya sudah terverifikasi — kemungkinan
+  besar oleh kode yang berhasil semalam itu — dan server BENAR menolak
+  menerbitkan kode baru. Penyedianya Gmail SMTP, pengirimnya alamat yang
+  berbeda dari yang mendaftar; tak satu pun dari hipotesis email terbukti,
+  dan tak perlu.
+
+- **Yang salah layarnya, dan bentuknya lingkaran tanpa ujung.** Tiga layar
+  MENGKLAIM satu hal yang tak selalu benar — *"kami sudah mengirim kode 6
+  angka"*, *"Kode baru sudah dikirim"* — lalu mendorong orangnya ke layar
+  tunggu; `/resend-verification` dari sana juga no-op untuk akun terverifikasi
+  (`routes.ts:688`) sambil menampilkan kalimat yang sama. Tak satu pun layar
+  menyebut jalan keluarnya: **Masuk**. Pemilik repo terjebak di situ dua hari.
+
+- **Kendalanya nyata dan dihormati**: respons server sengaja identik
+  byte-per-byte untuk email terdaftar dan tidak. Mengatakan *"akun ini sudah
+  terverifikasi"* membuka kembali enumerasi. Server karena itu **tak diubah
+  sedikit pun** (dipaku PASANGAN §285). Yang diubah: kalimat yang
+  MENGASUMSIKAN satu kemungkinan diganti kalimat yang MENYEBUT keduanya —
+  *"Jika alamat ini baru, kodenya sedang dikirim. Jika akunnya sudah aktif,
+  tidak ada kode yang dikirim — langsung Masuk saja"* — dan tautan Masuk
+  disejajarkan dengan tombol kode, bukan lagi abu-abu kecil di bawahnya.
+  Satu rumah: `web/src/lib/pesan-verifikasi.ts`, sebab tiga salinan yang
+  menyimpang sudah menggigit di jalur yang sama (hitung mundur `LoginPage`).
+
+- **Dan satu celah lagi ditemukan di jalur yang sama, satu lapis lebih dalam:
+  "Terkirim" yang belum tentu terkirim.** Jawaban penyedia dibuang di KEDUA
+  cabang `kirimEmail`. `sendMail` nodemailer **resolve walau penerimanya
+  ditolak** (`info.rejected`), jadi pada Gmail SMTP yang dipakai pemilik repo,
+  penerima yang ditolak tercatat "Terkirim". Balasan Resend `{id}` juga
+  dibuang, jadi baris "Terkirim" tak bisa dicocokkan ke pesan mana pun di
+  catatan penyedia. Kini: `rejected` tak kosong → **gagal** dengan alamatnya
+  disebut; `messageId`/`id` disimpan di kolom baru `pesan_id` dan tampil di
+  panel — jembatan ke catatan penyedia (pada Gmail: pantulan *"Mail Delivery
+  Subsystem"* di kotak masuk pengirim). **"Terkirim" kini berarti penyedianya
+  menerima alamat itu**, bukan "panggilannya tak melempar".
+
+- **Gerbang baru** `janji-surat-tak-berlebih.test.ts` (10 asersi): tiga layar
+  peminta kode disapu mekanis — dilarang menulis klaim "sudah dikirim" inline,
+  wajib mengimpor rumahnya, dan tiap kalimat di rumah itu wajib menyebut DUA
+  kemungkinan (`Jika` ×2) dan jalan keluar `Masuk`; layar bukan-Masuk wajib
+  menautkan `/login`; `penerimaDitolak` diuji murni (dua bentuk bercampur,
+  kosong, dan alamat yang tak boleh jadi `[object Object]`). **Bukti merah
+  tiga arah** + **§285 merah** saat pintu `akun_terverifikasi` berhenti
+  mencatat.
+
+- **Detektornya salah sekali lagi, dan lagi-lagi diperbaiki bukan
+  didaftarkan**: aturan "wajib menautkan /login" menuduh `LoginPage` — yang
+  jelas tak perlu menautkan dirinya sendiri. Aturannya ditulis ulang menurut
+  NIATNYA (orang yang terjebak harus punya jalan keluar yang terlihat), dan
+  halaman Masuk memenuhinya dengan cara paling sederhana: ia sudah di sana.
+
+- **§285** mereproduksi keadaan pemilik repo PERSIS lewat HTTP — daftar,
+  verifikasi lewat rutenya (bukan `UPDATE users`), daftar ulang — dan memaku
+  tiga hal: barisnya `tak_dicoba / akun_terverifikasi`, balasannya identik
+  dengan email yang belum pernah ada, dan `forgot-password` untuk akun itu
+  MEMANG mencoba mengirim (satu-satunya jalur surat yang tersisa baginya).
+
+- **Merah palsu ketiga hari ini, buatanku sendiri, dan dicatat**: aset
+  ber-hash memerah karena aku mem-build web SESUDAH server menyala — server
+  melayani `index.html` lama yang menunjuk aset yang sudah tak ada. CI
+  membangun web SEBELUM menyalakan server; urutan prosedur lokalku yang salah,
+  dan prosedur di rencana diperbaiki: **build dulu, baru server**.
+
+- **Batas yang ditulis jujur**:
+  - pemindai gerbangnya leksikal — ia menjaga BENTUK kalimat (dua `Jika`, kata
+    `Masuk`), bukan mutunya; mutu dijaga mata manusia;
+  - `pesan_id` jembatan, bukan jawaban: nasib sesudah "diterima penyedia"
+    (delivered/bounced) tetap hanya terbaca di catatan penyedia;
+  - **ponsel** punya perangkap layar yang sama DAN masih pada alur token lama;
+    digarap terpisah atas keputusan pemilik repo, dan kalimat baru ini ikut
+    dipasang di sana saat itu.
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` **218 berkas / 2651
+  uji** · `verify-api.sh` **3380 lolos, 0 gagal** · `audit:invarian` 27/27 ·
+  Playwright 13/13.
+
+---
+
 ## Surat yang tak pernah DICOBA dikirim — server + web — 2026-09-01 — **LAPORAN BUG NYATA (lanjutan)**
 
 - **Putaran sebelumnya menjawab pertanyaan yang salah, dan itu ketahuan dari
@@ -8978,6 +9066,10 @@ berlaku di situ).
       bug yang sama; lihat entri di atas. 7 pintu membalas "cek email Anda"
       tanpa menyentuh penyedia, nol jejak. Alat yang cuma bisa melaporkan
       KEGAGALAN tak bisa membedakan "berhasil" dari "tak pernah terjadi"
+- [x] ~~**Bug OTP — TERJAWAB oleh instrumennya sendiri**~~ — lihat entri di
+      atas. Bukan bug email: akunnya sudah terverifikasi. Yang salah layar
+      yang menjanjikan surat yang tak akan datang, plus "Terkirim" yang belum
+      tentu terkirim (`info.rejected` dibuang). Keduanya dibayar dan dijaga
 - [ ] **Ponsel masih pada alur TOKEN lama untuk verifikasi email** — layarnya
       meminta "salin token di tautan, lalu tempel di bawah"
       (`verifikasi_email_page.dart:134-159`) sementara surat kini dipimpin kode
