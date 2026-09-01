@@ -47,6 +47,7 @@ function percobaanDto(row: PercobaanEmail): PercobaanEmailDto {
     sebab: row.sebab,
     penyedia: row.penyedia,
     pesan: row.pesan,
+    pesan_id: row.pesanId,
   };
 }
 

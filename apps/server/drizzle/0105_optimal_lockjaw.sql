@@ -1,0 +1,1 @@
+ALTER TABLE "email_percobaan" ADD COLUMN "pesan_id" text;

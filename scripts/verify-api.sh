@@ -16388,6 +16388,67 @@ curl -s -o /dev/null -X POST "$BASE/api/auth/resend-verification" \
 cek "PASANGAN §284: email tak dikenal tercatat 'tak dicoba', bukan hilang" "V == 1" \
   "$([ "$(jejak284 "$E284X")" = "tak_dicoba|email_tak_dikenal" ] && echo 1 || echo 0)"
 
+
+# ── §285 — AKUN YANG SUDAH TERVERIFIKASI: TAK DIKIRIMI, DAN ITU TERBACA ───────
+#
+# Reproduksi PERSIS keadaan yang dilaporkan pemilik repo, dan yang memakan dua
+# hari untuk didiagnosis: akun yang sudah terverifikasi, lalu didaftarkan ulang.
+# Server benar tidak mengirim apa-apa — tapi selama dua hari tak ada satu pun
+# tempat yang mengatakannya, dan layar justru menjanjikan surat yang secara
+# struktural tak akan pernah berangkat.
+#
+# Riwayat percobaan kirim email yang dipasang putaran sebelumnya menjawabnya
+# dalam satu baris, dan seksi ini memakukan baris itu supaya ia tak bisa hilang
+# lagi.
+echo
+echo "§285 akun terverifikasi didaftarkan ulang: tak dikirimi, dan itu TERBACA"
+
+E285="verif285.$(date +%s)@contoh.id"
+reg285() {
+  curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
+    -H "$XFF284" -d "{\"nama\":\"Uji 285\",\"email\":\"$E285\",\"password\":\"Rahasia123!\"}"
+}
+
+R285A=$(reg285)
+KODE285=$(echo "$R285A" | jq -r '.dev_verify_kode // empty')
+cek "premis §285: pendaftaran pertama menerbitkan kode" "V == 1" \
+  "$([ -n "$KODE285" ] && echo 1 || echo 0)"
+
+# Diverifikasi sungguhan lewat rutenya — bukan `UPDATE users` — supaya keadaan
+# yang diukur lahir dari jalan yang sama dengan yang ditempuh orangnya.
+V285=$(curl -s -X POST "$BASE/api/auth/verify-email" -H 'Content-Type: application/json' \
+  -H "$XFF284" -d "{\"email\":\"$E285\",\"kode\":\"$KODE285\"}")
+cek "premis §285: akunnya BENAR-BENAR terverifikasi (dapat sesi)" "V == 1" \
+  "$(echo "$V285" | jq '(.token != null) | if . then 1 else 0 end')"
+
+R285B=$(reg285)
+
+cek "§285 daftar ulang akun terverifikasi TIDAK dikirimi, dan sebabnya tercatat" "V == 1" \
+  "$([ "$(jejak284 "$E285")" = "tak_dicoba|akun_terverifikasi" ] && echo 1 || echo 0)"
+
+# PASANGAN: perbaikan tampilan tidak boleh menggeser kontrak server sedikit pun.
+# Balasan untuk akun terverifikasi harus tetap identik dengan balasan untuk
+# email yang belum pernah ada — kalau tidak, celah enumerasi yang dijaga
+# susah payah terbuka kembali lewat pintu baru.
+E285X="baru285.$(date +%s)@contoh.id"
+R285X=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
+  -H "$XFF284" -d "{\"nama\":\"Uji 285x\",\"email\":\"$E285X\",\"password\":\"Rahasia123!\"}")
+BADAN285B=$(echo "$R285B" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
+BADAN285X=$(echo "$R285X" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
+cek "PASANGAN §285: balasannya identik dengan email yang belum pernah ada" "V == 1" \
+  "$([ "$BADAN285B" = "$BADAN285X" ] && [ -n "$BADAN285B" ] && echo 1 || echo 0)"
+cek "PASANGAN §285: akun terverifikasi tak membocorkan kode, di dev sekalipun" "V == 1" \
+  "$(echo "$R285B" | jq '(.dev_verify_kode == null) | if . then 1 else 0 end')"
+
+# PASANGAN: jalan keluarnya memang ADA dan memang bekerja. `forgot-password`
+# tidak punya syarat `emailVerifiedAt`, jadi akun terverifikasi yang lupa
+# passwordnya tetap bisa dibantu — itu satu-satunya jalur surat yang tersisa
+# untuknya, dan ia harus benar-benar mengirim.
+curl -s -o /dev/null -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' \
+  -H "$XFF284" -d "{\"email\":\"$E285\"}"
+cek "PASANGAN §285: lupa-password untuk akun terverifikasi MEMANG mencoba kirim" "V == 1" \
+  "$(case "$(jejak284 "$E285")" in tak_dicoba\|akun_*|TAK-ADA-BARIS) echo 0;; *) echo 1;; esac)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

@@ -255,7 +255,20 @@ export function SistemPage() {
               ) : e.sebab ? (
                 <span className="text-stone-600">{SEBAB[e.sebab] ?? e.sebab}</span>
               ) : (
-                <span className="text-stone-500">{e.penyedia ?? "—"}</span>
+                /*
+                  Untuk yang TERKIRIM, id pesan penyedianya ikut ditampilkan —
+                  itu satu-satunya cara mencocokkan baris ini dengan catatan
+                  penyedia, tempat nasib sebenarnya surat itu (delivered /
+                  bounced / blocked) tercatat.
+                */
+                <span className="text-stone-500">
+                  {e.penyedia ?? "—"}
+                  {e.pesan_id && (
+                    <span className="ml-1 break-all font-mono text-xs text-stone-400">
+                      {e.pesan_id}
+                    </span>
+                  )}
+                </span>
               ),
           },
         ]}

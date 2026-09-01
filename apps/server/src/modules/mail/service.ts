@@ -107,6 +107,21 @@ async function catatKeadaan(
   }
 }
 
+/**
+ * Alamat yang DITOLAK server SMTP, dari `info.rejected` milik nodemailer.
+ *
+ * Dipisah sebagai fungsi murni supaya aturannya bisa diuji tanpa transport:
+ * yang menentukan benar-salahnya cuma pembacaan dua bentuk (`string` dan
+ * `{address}`) yang boleh datang bercampur — dan justru bentuk seperti itu
+ * yang paling mudah keliru dibaca lalu berakhir sebagai `[object Object]` di
+ * pesan galat yang seharusnya menyebut alamat.
+ */
+export function penerimaDitolak(
+  rejected: ReadonlyArray<string | { address: string }> | undefined | null,
+): string[] {
+  return (rejected ?? []).map((r) => (typeof r === "string" ? r : r.address));
+}
+
 export type PercobaanEmail = typeof emailPercobaan.$inferSelect;
 
 /**
@@ -238,15 +253,34 @@ export async function kirimEmail(pesan: Pesan, konteks: string): Promise<"smtp" 
     });
     throw new Error("Email belum dikonfigurasi (SMTP kosong & tanpa Resend)");
   }
+  /** id pesan dari penyedia — jembatan ke catatan mereka sendiri. */
+  let pesanId: string | null = null;
   try {
     if (penyedia === "smtp") {
-      await buatTransport(row!).sendMail({
+      const info = await buatTransport(row!).sendMail({
         from: fromHeader(row),
         to: pesan.to,
         subject: pesan.subject,
         html: pesan.html,
         text: pesan.text,
       });
+      pesanId = info.messageId ?? null;
+      /*
+       * `sendMail` RESOLVE WALAU PENERIMANYA DITOLAK — dan itu bukan
+       * kejanggalan nodemailer, melainkan bentuk SMTP: satu pesan boleh punya
+       * banyak penerima, sebagian diterima dan sebagian ditolak, dan
+       * transaksinya tetap selesai. Daftar yang ditolak ada di `info.rejected`,
+       * dan sampai hari ini kita tak pernah membacanya.
+       *
+       * Akibatnya persis kelas yang sedang dibayar berulang di berkas ini,
+       * satu lapis lebih dalam: penerima yang DITOLAK tercatat "Terkirim".
+       * "Terkirim" karena itu dulu cuma berarti "panggilannya tak melempar".
+       * Sekarang ia berarti penyedianya menerima alamat itu.
+       */
+      const ditolak = penerimaDitolak(info.rejected);
+      if (ditolak.length > 0) {
+        throw new Error(`SMTP menolak penerima: ${ditolak.join(", ")}`);
+      }
     } else {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -275,6 +309,15 @@ export async function kirimEmail(pesan: Pesan, konteks: string): Promise<"smtp" 
         const detail = await res.text().catch(() => "");
         throw new Error(`Resend gagal (${res.status}): ${detail.slice(0, 200)}`);
       }
+      /*
+       * Balasannya `{ id }`, dan sampai hari ini dibuang. Tanpa id itu, baris
+       * "Terkirim" di panel tak bisa dicocokkan ke pesan mana pun di dashboard
+       * penyedia — padahal di situlah nasib SEBENARNYA sebuah surat tercatat
+       * (delivered / bounced / blocked). Menyimpannya membuat satu baris di
+       * panel bisa ditelusuri sampai ke ujungnya.
+       */
+      const badan = (await res.json().catch(() => null)) as { id?: string } | null;
+      pesanId = badan?.id ?? null;
     }
   } catch (e) {
     const pesanGalat = (e instanceof Error ? e.message : String(e)).slice(0, MAKS_PESAN_GALAT);
@@ -292,7 +335,7 @@ export async function kirimEmail(pesan: Pesan, konteks: string): Promise<"smtp" 
     throw e;
   }
   await catatKeadaan({ suksesPada: new Date(), suksesPenyedia: penyedia }, false);
-  await catatPercobaan({ konteks, tujuan: pesan.to, hasil: "terkirim", penyedia });
+  await catatPercobaan({ konteks, tujuan: pesan.to, hasil: "terkirim", penyedia, pesanId });
   return penyedia;
 }
 

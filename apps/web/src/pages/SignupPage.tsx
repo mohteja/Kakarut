@@ -4,6 +4,7 @@ import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { tulisLokal } from "../lib/simpanan";
+import { AJAKAN_MASUK, PESAN_DAFTAR } from "../lib/pesan-verifikasi";
 
 /**
  * Daftar akun sendiri (self sign-up). TIDAK langsung login: server mengirim
@@ -74,9 +75,14 @@ export function SignupPage() {
 
         {sent ? (
           <div className="space-y-4">
+            {/*
+              Dua kemungkinan disebut BERDAMPINGAN, bukan satu yang diklaim.
+              Lihat `lib/pesan-verifikasi.ts` untuk sebabnya — kalimat lama
+              menjanjikan surat yang untuk akun yang sudah aktif memang tak
+              akan pernah berangkat, dan tak menyebut jalan keluarnya.
+            */}
             <div className="rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
-              📧 Jika <b>{email}</b> valid, kami sudah mengirim <b>kode 6 angka</b> ke email
-              tersebut. Masukkan kodenya untuk mengaktifkan akun (berlaku 60 menit).
+              📧 <b>{email}</b> — {PESAN_DAFTAR}
             </div>
             {devKode && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -90,11 +96,16 @@ export function SignupPage() {
             >
               Masukkan kode verifikasi
             </Link>
+            {/*
+              DISEJAJARKAN dengan tombol kode, tidak lagi abu-abu kecil di
+              bawahnya: untuk akun yang sudah aktif, INILAH satu-satunya jalan
+              yang benar — dan sebelumnya ia yang paling tak terlihat.
+            */}
             <Link
               to="/login"
-              className="block text-center text-sm text-stone-500 hover:text-orange-600 hover:underline"
+              className="block rounded-lg border border-stone-300 px-4 py-2 text-center text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-600"
             >
-              Ke halaman Masuk
+              {AJAKAN_MASUK}
             </Link>
           </div>
         ) : (

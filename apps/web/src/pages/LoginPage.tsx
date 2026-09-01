@@ -4,6 +4,7 @@ import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
+import { PESAN_KIRIM_ULANG } from "../lib/pesan-verifikasi";
 
 export function LoginPage() {
   const { login, masukTamu, kirimUlangVerifikasi } = useAuth();
@@ -129,7 +130,7 @@ export function LoginPage() {
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {verifKirim === "sent" ? (
                 <>
-                  <div>Kode verifikasi baru sudah dikirim (bila email valid). Cek email Anda.</div>
+                  <div>{PESAN_KIRIM_ULANG}</div>
                   {verifDevKode && (
                     <div className="mt-1 font-mono text-base tracking-widest">{verifDevKode}</div>
                   )}
