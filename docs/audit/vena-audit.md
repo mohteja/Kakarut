@@ -50,6 +50,138 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kegagalan kirim email yang tak terdengar di mana pun — server — 2026-09-01 — **LAPORAN BUG NYATA**
+
+- **Bukan dari sapuan.** Pemilik repo melaporkannya di tengah putaran lain:
+  *"user tidak lagi menerima email otp, padahal semalam berhasil 1×"*. Entri
+  ini dicatat apa adanya sebagai vena karena bentuknya persis bentuk yang
+  dicari berkas ini — dan karena gerbang yang seharusnya menangkapnya SUDAH
+  ADA, lalu meloloskannya.
+
+- **Terukur lewat HTTP + Postgres sungguhan**, satu akun baru, penyedia email
+  yang menolak:
+
+  | langkah | jawaban | kenyataan |
+  |---|---|---|
+  | `POST /auth/register` | `200 "…kami telah mengirim KODE verifikasi 6 digit. Cek email Anda"` | surat GAGAL terkirim |
+  | `POST /auth/resend-verification` | `200 {ok:true}` | tak ada kiriman sama sekali (tertahan jeda 2 menit) |
+  | baris `email_verification_tokens` | **2** | sistem yakin kodenya terbit |
+  | baris log yang menyebut sebabnya | **0** | — |
+
+  Nol. Penyedianya menolak dan tak ada satu pun tempat di sistem — respons,
+  log, maupun panel super admin — yang bisa memberi tahu pemiliknya kenapa.
+  Yang bisa dilakukannya cuma menebak, dan itulah yang sedang terjadi saat
+  laporan ini masuk.
+
+- **Populasinya: 5 pemanggil `kirimEmail` di luar rumahnya.** Empat menelan
+  galatnya (`verifikasi email`, `reset password`, `undangan karyawan`,
+  `peringatan cadangan`), satu menampilkannya (`POST /admin/sistem/smtp/test-email`,
+  400 berpesan). Dari keempat penelan itu, **tiga benar-benar bisu** — tanpa
+  log, tanpa penghitung, tanpa apa pun; yang keempat (peringatan cadangan)
+  sudah menulis `console.error` sendiri. **Idiomnya sudah ada di repo ini,
+  cuma tak dipakai di tiga pintu yang paling mahal.**
+
+- **KENAPA GERBANG YANG ADA MELOLOSKANNYA — ini temuan sebenarnya.**
+  `galat-ditelan-beralasan.test.ts` sudah menghitung ketiga situs itu, dan
+  mendaftarkannya: `modules/auth/routes.ts` 2 · `modules/users/routes.ts` 1.
+  Ia lolos karena gerbang itu menuntut **alasan yang tertulis**, dan alasannya
+  memang tertulis rapi:
+
+  > `catch { /* best-effort: jangan gagalkan permintaan bila email error */ }`
+
+  Alasan itu **benar**. Yang tak pernah dipisahkan darinya adalah keputusan
+  KEDUA yang menempel diam-diam: *"…dan karena itu tak usah memberi tahu siapa
+  pun"*. Catatan kejujuran gerbang itu sendiri sudah menuliskan batas ini —
+  *"yang dijaga berkas ini adalah adanya KEPUTUSAN yang tertulis, bukan
+  mutunya"* — dan hari ini batas itu menagih ongkosnya.
+
+  **Aturan barunya, dinamai:** *alasan tertulis ≠ kabar tersampaikan.*
+
+- **Kenapa galatnya TIDAK dipulangkan ke peminta.** Tiga dari lima pintu itu
+  (`/register`, `/resend-verification`, `/forgot-password`) sengaja menjawab
+  byte-per-byte sama untuk email yang terdaftar dan yang tidak; surat hanya
+  dikirim untuk akun yang ADA dan belum terverifikasi, jadi penanda
+  `email_gagal` di badan respons akan menjawab persis pertanyaan yang rute-rute
+  itu susah payah tutup. Arah keluar kabarnya memang harus **ke operator**.
+  Itu keputusan, bukan kelalaian, dan ditulis di kodenya.
+
+- **Tindak**:
+  - satu rumah bersama `kirimEmailDiam(pesan, konteks)` — log ber-konteks +
+    hasil boolean; keempat pintu memakainya, termasuk peringatan cadangan yang
+    dulu punya salinan `try/catch`-nya sendiri;
+  - pencatatan hasil kirim dipasang **di `kirimEmail`**, satu pintu yang
+    dilewati SEMUA pengiriman — bukan di masing-masing pemanggil, supaya
+    pemanggil berikutnya tak bisa lupa;
+  - tabel `email_keadaan` (satu baris): kapan sukses terakhir, kapan & kenapa
+    gagal terakhir, dan **kegagalan beruntun**. Di database, bukan di memori:
+    kegagalan email ditemukan berhari-hari kemudian, oleh orang yang membuka
+    panel karena ada yang mengeluh — dan deploy menghapus ingatan proses;
+  - temuan panel `email_gagal_kirim` (KRITIS) di `periksaSetelan`, **memuat
+    pesan penyedianya apa adanya**. Temuan yang cuma berkata "email gagal"
+    mengembalikan persis tebak-tebakan yang hendak dihapusnya.
+
+- **Ukuran sesudah**, jalur yang sama, penyedia yang sama-sama menolak:
+
+  ```
+  log server   EMAIL GAGAL [verifikasi-email] ke <alamat>: Resend gagal (403): …
+  email_keadaan  gagal_beruntun=1  gagal_penyedia=resend  gagal_pesan="Resend gagal (403): …"
+  panel          KRITIS · email_gagal_kirim · "Pengiriman email GAGAL"
+  ```
+
+  **PASANGAN** (jalur sah tetap bekerja): satu kiriman berhasil lewat SMTP
+  sungguhan ke sink lokal → surat mendarat (`Subject: Kode verifikasi
+  Terakasir`), `gagal_beruntun` **1 → 0**, temuan panel **hilang** (5 → 4
+  temuan). Diukur, bukan diasumsikan.
+
+- **Gerbang baru** `email-gagal-terdengar.test.ts` (14 asersi): registri siapa
+  boleh memanggil `kirimEmail` telanjang **beserta alasannya**, larangan entri
+  kuburan di registri itu, keharusan tiap pemakai `kirimEmailDiam` menyebut
+  konteksnya sebagai literal kebab-case, tiap pintu memakai konteks yang
+  menamai dirinya, dan semantik `temuanEmailGagal` (termasuk: baris warisan
+  berkolom kosong tak boleh jadi `"null"` di layar).
+
+- **Bukti merah, tiga arah**: (1) satu pintu dikembalikan ke `kirimEmail`
+  telanjang → 3 asersi merah; (2) konteks diganti variabel → 2 merah;
+  (3) `temuanEmailGagal` dilumpuhkan → 6 merah. Instrumennya sendiri diuji
+  (Aturan 7): deklarasi fungsinya tak boleh terhitung sebagai panggilan, prosa
+  yang mengutip bentuk terlarang tak boleh menuduh, koma di dalam objek pesan
+  tak boleh memecah argumen.
+
+- **Perbaikan ini nyaris melucuti gerbang LAIN, diam-diam.** Aturan
+  `email-berbatas` di `penjaga-semua-pintu.test.ts` mencari `await kirimEmail(`;
+  begitu empat pintu berpindah ke `kirimEmailDiam`, keempatnya lenyap dari
+  sapuannya sekaligus dan berkas itu tetap **hijau** sambil berhenti menjaga
+  apa pun. Polanya dilebarkan jadi `await kirimEmail(?:Diam)?\(` dan rumah
+  bersamanya didaftarkan beralasan. Kelas yang sama sudah punya namanya di
+  sesi ini: *alat ukur yang menumpang pada bentuk kode lain bisa berubah jadi
+  hiasan tanpa yang memakainya tahu.*
+
+- **Batas yang ditulis jujur**:
+  - ini **bukan antrean kirim ulang**. Surat yang gagal tetap hilang; yang
+    dijamin cuma bahwa kegagalannya **berbunyi**;
+  - `email_keadaan` satu baris untuk seluruh pemasangan — ia tak bisa
+    membedakan "Resend menolak alamat tenant A" dari "SMTP tenant B mati",
+    karena penyedianya memang setelan platform, bukan setelan tenant;
+  - penyebab sebenarnya di produksi pemilik repo **belum terlihat dari sini**
+    dan sengaja tidak ditebak di ledger ini. Yang dikirim putaran ini adalah
+    alat yang membuatnya bisa dibaca dalam sekali lihat — plus jalan keluar
+    yang sudah ada hari ini tanpa deploy: tombol **Kirim Test Email** di panel
+    super admin, yang memang menampilkan galat penyedianya apa adanya.
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` 216 berkas / 2625 uji ·
+  `verify-api.sh` **3362 lolos, 0 gagal** · `audit:invarian` 27/27 ·
+  Playwright 13/13.
+
+  Satu merah palsu terjadi di tengah dan dicatat supaya tak terulang: server
+  lama dari pengukuran (berkunci Resend bogus) masih memegang port 3000, jadi
+  server baru mati saat bind dan **41 asersi `verify-api` merah** karena jalur
+  `dev_verify_kode` memang mustahil hijau di server itu. Bukan kode yang salah,
+  melainkan premis yang tak diperiksa — `ss` tak ada di PATH shell itu,
+  sehingga perintah pembunuh prosesnya **gagal tanpa suara**. Bentuk yang sama
+  dengan vena yang sedang digarap, di alat kerjaku sendiri.
+
+---
+
 ## Gerbang yang tak bisa dijalankan — ponsel — 2026-09-01
 
 - **Yang menghalangi bukan gerbang merah, melainkan IZIN.** Tiga commit
@@ -8676,6 +8808,12 @@ berlaku di situ).
       medannya sama sekali. `riwayat_terpotong` sudah TERDAFTAR beralasan di
       `kunci-belum-dibaca.txt`, jadi utangnya kini berangka dan bernama.
       **Kini bisa digarap** — gerbang ponselnya sudah berjalan
+- [x] ~~**Kegagalan kirim email yang tak terdengar di mana pun**~~ — TEMUAN
+      dari LAPORAN BUG NYATA, lihat entri di atas. 5 pemanggil `kirimEmail`;
+      3 bisu total. Gerbang yang ada (`galat-ditelan-beralasan`) sudah
+      MENDAFTARKAN ketiganya dan meloloskannya — ia menuntut alasan tertulis,
+      dan alasannya memang tertulis. **Alasan tertulis ≠ kabar tersampaikan.**
+      Daftar telanan 22 → 20 entri
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama

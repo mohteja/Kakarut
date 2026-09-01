@@ -394,8 +394,16 @@ const ATURAN: Aturan[] = [
      *
      * `await kirimEmail(`, bukan `kirimEmail(` polos: yang terakhir ikut
      * menuduh DEKLARASI fungsinya sendiri di `mail/service.ts`.
+     *
+     * `(?:Diam)?` DITAMBAHKAN 2026-09-01, dan tanpanya perbaikan hari itu akan
+     * melucuti gerbang ini diam-diam. Empat dari lima pintu pengirim surat
+     * berpindah ke `kirimEmailDiam` (rumah bersama yang MEMBUNYIKAN kegagalan
+     * kirim); dengan pola lama, keempatnya lenyap dari sapuan sekaligus dan
+     * berkas ini tetap HIJAU sambil berhenti menjaga apa pun. Kelas itu punya
+     * namanya sendiri di repo ini: alat ukur yang menumpang pada bentuk kode
+     * lain bisa berubah jadi hiasan tanpa yang memakainya tahu.
      */
-    tulis: /await\s+kirimEmail\(/,
+    tulis: /await\s+kirimEmail(?:Diam)?\(/,
     penjaga: /rateLimit\(|\bbatas[A-Z]\w*/,
     dasar: {
       "lib/backup-peringatan.ts": {
@@ -415,6 +423,17 @@ const ATURAN: Aturan[] = [
           "buta yang ditulis di kepala berkas ini — granularitasnya BADAN, jadi " +
           "penjaga yang sah tapi tinggal di pemanggil terbaca 'tanpa penjaga'. " +
           "Diperiksa dengan tangan, bukan diasumsikan",
+      },
+      "modules/mail/service.ts": {
+        pintu: 1,
+        alasan:
+          "RUMAH BERSAMANYA, bukan pintu. `kirimEmailDiam` tak punya rute, tak " +
+          "punya pemanggil dari luar proses, dan alamat tujuannya datang dari " +
+          "pemanggilnya — jadi tak ada yang bisa membanjiri siapa pun DI SINI. " +
+          "Penjaga laju yang sesungguhnya ada di keempat pemanggilnya, dan " +
+          "keempatnya sudah tertimbang di daftar ini atau berpenjaga sendiri. " +
+          "Memasang ember di sini justru salah tempat: satu ember bersama akan " +
+          "membuat undangan karyawan menghabiskan jatah verifikasi email",
       },
       "modules/admin-system/routes.ts": {
         pintu: 1,
