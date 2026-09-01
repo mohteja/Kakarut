@@ -6164,12 +6164,40 @@ BULAN143=$(TZ=Asia/Jakarta date +%Y-%m)
 # disetujui, jadi kalau tanggalnya bersinggungan, pembuatannya gagal, `.id`
 # jadi kosong, dan DELETE atas id kosong membalas 400 — bukan 403/200 yang
 # diuji. `L143` karena itu ikut bergeser bersama pasangan cutinya.
+#
+# PERBAIKAN KEDUA, 2026-09-01: mitigasi di atas hanya menutup SATU sisi.
+#
+# Ia memindahkan tanggal saat hari ini KEBETULAN tanggal 5/6 — yaitu saat
+# cutinya jatuh di masa LALU dan tertimpa cap absen. Sisi sebaliknya tak
+# tertutup: bila hari ini tanggal 1, tanggal 05/06 ada di MASA DEPAN, dan
+# rekap sengaja berhenti menilai di hari ini ("tanggal yang belum lewat tak
+# pernah dinilai"). Cutinya karena itu tak terhitung sama sekali — `cuti` 0,
+# bukan 2 — dan dua asersi memerah tanpa satu baris kode pun rusak.
+#
+# TERUKUR: seluruh Agustus hijau (seksi ini selalu berjalan pada tanggal ≥ 7),
+# lalu merah pada 2026-09-01 saat gerbang hasil-merge dijalankan. Gerbang yang
+# menuduh karena kalender berpindah mengajari pembacanya mengabaikan gerbang.
+#
+# Aturannya sekarang ditulis sebagai SYARAT, bukan sebagai tanggal ajaib:
+# ketiga tanggal wajib (a) sudah LEWAT, (b) bukan hari ini, (c) berada di SATU
+# bulan yang sama, dan (d) saling eksklusif. Dari tanggal 10 ke atas, bulan
+# berjalan punya cukup ruang; sebelum itu, seluruh blok pindah ke bulan LALU —
+# yang seluruh harinya sudah lewat, jadi syarat (a) dan (b) otomatis benar.
+BULAN_KINI143="$BULAN143"
 HARI143=$(TZ=Asia/Jakarta date +%d)
-if [ "$HARI143" = "05" ] || [ "$HARI143" = "06" ]; then
-  M143="$BULAN143-20"; S143="$BULAN143-21"; L143="$BULAN143-07"
+if [ "$((10#$HARI143))" -ge 10 ]; then
+  M143="$BULAN143-04"; S143="$BULAN143-05"; L143="$BULAN143-07"
 else
+  BULAN143=$(TZ=Asia/Jakarta date -d "$(TZ=Asia/Jakarta date +%Y-%m-01) -1 day" +%Y-%m)
   M143="$BULAN143-05"; S143="$BULAN143-06"; L143="$BULAN143-20"
 fi
+# PREMIS, sebelum satu asersi pun: tanggal cutinya memang sudah lewat. Tanpa
+# ini, "cuti 2 hari" yang merah tak bisa dibedakan antara "rekapnya salah" dan
+# "tanggalnya belum terjadi".
+cek "premis §143: tanggal cuti sudah LEWAT (bukan hari ini, bukan besok)" "V == 1" \
+  "$([ "$S143" \< "$(TZ=Asia/Jakarta date +%Y-%m-%d)" ] && echo 1 || echo 0)"
+cek "premis §143: ketiga tanggalnya di SATU bulan yang sama" "V == 1" \
+  "$([ "${M143%-*}" = "${L143%-*}" ] && [ "${M143%-*}" = "$BULAN143" ] && echo 1 || echo 0)"
 
 cek "guard: tanpa token → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pengajuan")"
@@ -6221,10 +6249,16 @@ cek "rekap: tanggal cuti berstatus 'cuti' + kategori sakit" "V == 1" \
 cek "rekap: tanggal cuti TIDAK dihitung tidak hadir" "V == 1" \
   "$(echo "$RK143" | jq '(.hari) as $h | [.rows[]|select((.hadir + .tidak_hadir + .cuti + .libur) > $h)]|length==0|if . then 1 else 0 end')"
 # Tanggal masa depan tak pernah dinilai — jendela hitung berhenti di hari ini.
+# DUA ASERSI DI BAWAH BICARA SOAL BULAN BERJALAN, bukan bulan cutinya — jadi
+# rekapnya diambil ULANG untuk `BULAN_KINI143`. Memakai `$RK143` di sini akan
+# membuat keduanya HAMPA di hari-hari ketika blok di atas pindah ke bulan lalu:
+# "tak ada tanggal masa depan berstatus alpa" tentu benar pada bulan yang
+# seluruhnya sudah lewat, dan benar tanpa menguji apa pun.
+RK143K=$(api "$OWNER" "GET" "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all")
 cek "rekap: tanggal setelah hari ini berstatus 'kosong'" "V == 1" \
-  "$(echo "$RK143" | jq --arg t "$(TZ=Asia/Jakarta date -d '+3 days' +%Y-%m-%d 2>/dev/null || TZ=Asia/Jakarta date +%Y-%m-%d)" '[.rows[]|.harian[]|select(.tanggal==$t and .status=="alpa")]|length==0|if . then 1 else 0 end')"
+  "$(echo "$RK143K" | jq --arg t "$(TZ=Asia/Jakarta date -d '+3 days' +%Y-%m-%d 2>/dev/null || TZ=Asia/Jakarta date +%Y-%m-%d)" '[.rows[]|.harian[]|select(.tanggal==$t and .status=="alpa")]|length==0|if . then 1 else 0 end')"
 cek "rekap: bulan tak valid → jatuh ke bulan berjalan" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=ngawur" | jq --arg b "$BULAN143" '.bulan==$b|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=ngawur" | jq --arg b "$BULAN_KINI143" '.bulan==$b|if . then 1 else 0 end')"
 
 # Batalkan: pemohon hanya boleh saat masih menunggu; orang lain tak boleh sama sekali.
 P143B=$(api "$REISS105" POST /pengajuan \
@@ -6240,21 +6274,28 @@ cek "pemohon batalkan yg sudah disetujui → 409" "V == 409" \
   "$(status_code "$REISS105" DELETE "/pengajuan/$PID143")"
 # Saringan aktif/arsip: karyawan yang sudah keluar tak boleh mengotori daftar
 # maupun angka "total tidak hadir" — tapi tetap bisa dilihat bila diminta.
+#
+# BULAN BERJALAN, bukan `$BULAN143`, dan itu perbaikan 2026-09-01: "Keluar Uji
+# 143" dibuat DI SINI, jadi keanggotaannya bertanggal hari ini. Saat blok cuti
+# di atas pindah ke bulan lalu (awal bulan), rekap bulan itu menyaringnya
+# keluar DENGAN BENAR — `bergabung <= akhir bulan` — dan tiga asersi di bawah
+# memerah menuduh produk yang justru bekerja. Yang diuji di sini saringan
+# aktif/arsip, bukan tanggal cuti, jadi bulannya memang tak perlu sama.
 api "$OWNER" POST /karyawan \
   "{\"nama\":\"Keluar Uji 143\",\"email\":\"keluar143@basooopa.id\",\"password\":\"Keluar143!\",\"role\":\"admin\"}" > /dev/null
 UIDK143=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="keluar143@basooopa.id")][0].user_id // ""')
 cek "karyawan uji muncul di rekap saat masih aktif" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length==1|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length==1|if . then 1 else 0 end')"
 cek "arsipkan karyawan uji → 200" "V == 200" \
   "$(status_code_body "$OWNER" PATCH "/karyawan/$UIDK143" '{"arsip":true}')"
 
-AKTIF143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=aktif")
-ARSIP143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=arsip")
-SEMUA143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=semua")
+AKTIF143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=aktif")
+ARSIP143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=arsip")
+SEMUA143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=semua")
 cek "status=aktif: yang sudah keluar hilang dari rekap" "V == 0" \
   "$(echo "$AKTIF143" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length')"
 cek "TANPA status= (bawaan) sama dengan status=aktif" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
 cek "status=arsip: yang keluar muncul + membawa arsip_pada" "V == 1" \
   "$(echo "$ARSIP143" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u and .arsip_pada!=null)]|length==1|if . then 1 else 0 end')"
 cek "status=arsip: karyawan aktif TIDAK ikut" "V == 1" \
@@ -6262,7 +6303,7 @@ cek "status=arsip: karyawan aktif TIDAK ikut" "V == 1" \
 cek "status=semua: gabungan keduanya" "V == 1" \
   "$(echo "$SEMUA143" | jq --arg u "$UIDK143" --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(([.rows[]|select(.user_id==$u)]|length)==1) and ((.rows|length) > $n)|if . then 1 else 0 end')"
 cek "status ngawur → jatuh ke bawaan aktif" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=ngasal" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=ngasal" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
 # Bulan SEBELUM ia bergabung: tak punya hari kerja di sana → tak usah muncul.
 cek "bulan lampau: karyawan yang belum bergabung tak muncul" "V == 0" \
   "$(api "$OWNER" GET "/absensi/rekap?bulan=2020-01&branch_id=all&status=semua" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length')"
@@ -10327,8 +10368,39 @@ cek "INTI: cap 02:00 hari-0 → KELUAR, bukan masuk kedua" "V == 1" \
 
 # ── INTI-3: rekap — satu shift = satu baris, dengan jam pulangnya ──────────
 BLN200=$(TZ="$TZ200" date -d "@$((MID200 - 2 * 3600))" +%Y-%m)
+BLN_KINI200=$(TZ="$TZ200" date +%Y-%m)
 REKAP200=$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN200&branch_id=$CB200")
 BARIS200=$(echo "$REKAP200" | jq --arg n "Kasir Malam 200" '[.rows[]|select(.nama==$n)][0]')
+#
+# LINTAS BULAN — dan ini BUKAN pengecualian yang dikarang untuk menghijaukan.
+#
+# Kasir malam di seksi ini sengaja DIBUAT BARU (alasannya dua puluh baris di
+# atas), jadi keanggotaannya bertanggal HARI INI. Sementara skenarionya sengaja
+# dimundurkan supaya kedua capnya sudah lewat — dan pada tanggal 1 sebelum
+# pukul 11 setempat, kemunduran itu MENYEBERANGI pergantian bulan.
+#
+# Rekap lalu bekerja PERSIS seperti yang seharusnya: `bergabung <= akhir bulan`
+# menyaring keluar orang yang baru bergabung bulan ini dari rekap bulan LALU
+# (`absensi/routes.ts` — "Yang baru bergabung SETELAH bulan ini berakhir tak
+# punya hari kerja di sini"). Barisnya tak ada, dan enam asersi di bawah
+# memerah menuduh produk yang justru benar.
+#
+# TERUKUR 2026-09-01 pukul 08:56 WIB, saat gerbang hasil-merge dijalankan:
+# skenarionya mundur ke 30–31 Agustus, karyawannya bergabung 1 September, dan
+# `rekap?bulan=2026-08` memulangkan baris `null`.
+#
+# Maka pada hari-hari itu yang diuji BUKAN NIHIL melainkan aturan penyaringnya
+# sendiri — sebuah asersi yang tetap bisa merah. Sisa seksi ini (semantik cap
+# lintas-hari, yang jadi INTI-nya) berjalan apa adanya setiap hari.
+if [ "$BLN200" != "$BLN_KINI200" ]; then
+  cek "premis §200: penyeberangan bulan hanya di awal bulan (tgl $(TZ="$TZ200" date +%d))" "V == 1" \
+    "$([ "$((10#$(TZ="$TZ200" date +%d)))" -le 2 ] && echo 1 || echo 0)"
+  cek "§200 lintas bulan: rekap $BLN200 memang TIDAK memuat karyawan yang baru bergabung $BLN_KINI200" "V == 1" \
+    "$(echo "$BARIS200" | jq 'if .==null then 1 else 0 end')"
+  cek "§200 lintas bulan: dan di rekap $BLN_KINI200 barisnya ADA (dia memang anggota)" "V == 1" \
+    "$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN_KINI200&branch_id=$CB200" \
+        | jq --arg n "Kasir Malam 200" '[.rows[]|select(.nama==$n)]|length==1|if . then 1 else 0 end')"
+else
 cek "dasar §200: baris kasir malam ada di rekap" "V == 1" \
   "$(echo "$BARIS200" | jq 'if .==null then 0 else 1 end')"
 cek "INTI: hadir = 1 (satu shift, bukan dua hari)" "V == 1" \
@@ -10348,6 +10420,7 @@ cek "jam pulangnya memang cap 02:00 itu" "V == 1" \
 # hadir. Tanpa itu jq galat dan asersinya gagal karena kalender.
 cek "INTI: tanggal berikutnya BUKAN hadir" "V == 1" \
   "$(echo "$BARIS200" | jq --arg d "$HARI200_PULANG" '(([.harian[]|select(.tanggal==$d)][0]) // {}).status!="hadir"|if . then 1 else 0 end')"
+fi
 
 # ── Status hadir: satu sumber untuk layar dan untuk gerbang ────────────────
 cek "GET /absensi/status: sesudah cap pulang, TIDAK hadir lagi" "V == 1" \
@@ -10382,10 +10455,17 @@ cek "INTI: cap pagi 17 jam kemudian tetap MASUK, bukan pulang" "V == 1" \
 # tampil tanpa jam pulang. Perbaikan ini menentukan tipe cap BARU, bukan menulis
 # ulang riwayat — kalau ia sampai memasangkan keduanya, jam kerja kemarin
 # berubah jadi 17 jam tanpa ada yang menyentuh apa pun.
+#
+# Dibaca lewat `GET /absensi?tanggal=`, BUKAN lewat rekap bulanan, dan itu
+# perbaikan 2026-09-01: "Kasir Lupa 200" juga dibuat hari ini, jadi rekap bulan
+# LALU menyaringnya keluar dengan benar saat skenarionya menyeberangi
+# pergantian bulan (lihat catatan panjang di blok rekap di atas). Daftar
+# harian tak punya syarat keanggotaan itu — ia bertanya soal SATU tanggal, dan
+# tanggal itulah yang sedang diuji.
 cek "…dan hari kemarin tetap tanpa jam pulang (riwayat tak ditulis ulang)" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN200&branch_id=$CB200" \
-      | jq --arg n "Kasir Lupa 200" --arg d "$HARI200_MASUK" \
-        '[.rows[]|select(.nama==$n)][0].harian|[.[]|select(.tanggal==$d)][0]|((.status=="hadir") and (.masuk!=null) and (.keluar==null))|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi?branch_id=$CB200&tanggal=$HARI200_MASUK" \
+      | jq --arg n "Kasir Lupa 200" \
+        '[.[]|select(.nama==$n)][0]|((.masuk!=null) and (.keluar==null))|if . then 1 else 0 end')"
 
 # ── Batas: dua cap di HARI yang sama tetap berselang-seling ────────────────
 E200D="siang200.$RANDOM@basooopa.id"
