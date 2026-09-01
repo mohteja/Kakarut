@@ -50,6 +50,75 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## RILIS — dan prosedur hasil-merge yang membayar dirinya sendiri, lagi — 2026-09-01
+
+- **Tayang di `production`**: `b6432f7`, memuat tiga putaran (selisih susulan
+  bisa diputuskan · dua utang balapan terakhir · delapan pemotongan senyap
+  terakhir). **CI run #479 hijau seluruhnya** — `quality`, `verify-api`, dan
+  `deploy` (image GHCR terbangun, redeploy Dokploy terpicu 02:16:31Z).
+
+- **PROSEDURNYA MEMBAYAR DIRINYA SENDIRI, DAN INI KALI KEDUA.** `ci.yml`
+  menuntut seluruh suite dijalankan atas HASIL MERGE sebelum didorong. Hasil
+  merge itu **identik isinya** dengan `claude` (`git diff` kosong), jadi yang
+  merah bukan kegagalan gabungan — melainkan **kalender**. Rilis pagi ini hijau
+  pada 2026-08-31; jalan berikutnya pukul 08:56 WIB tanggal **2026-09-01**, dan
+  **sembilan asersi absensi memerah**. Didorong tanpa langkah itu, CI di
+  `production` yang akan merah dan deploy tertahan.
+
+- **Tiga blok, satu keluarga**: asersi yang benar hanya bila hari ini jatuh di
+  tempat tertentu pada kalender.
+  - **§143 cuti** — tanggal dipatok 05/06. Mitigasi yang sudah ada hanya
+    menutup sisi "hari ini KEBETULAN tanggal 5/6"; sisi sebaliknya terbuka —
+    pada tanggal 1, tanggal 05/06 ada di **masa depan**, dan rekap sengaja
+    berhenti menilai di hari ini. `cuti` 0, bukan 2.
+  - **§200 shift malam** — skenarionya dimundurkan supaya kedua capnya sudah
+    lewat, dan pada tanggal 1 sebelum pukul 11 kemunduran itu **menyeberangi
+    pergantian bulan**. Kasir malamnya dibuat baru, jadi keanggotaannya
+    bertanggal hari ini — dan rekap bulan lalu menyaringnya keluar **dengan
+    benar** (`bergabung <= akhir bulan`). Enam asersi menuduh produk yang
+    justru bekerja.
+  - **§143 saringan aktif/arsip** — karyawan ujinya juga dibuat hari ini, ikut
+    tersaring saat blok cuti pindah ke bulan lalu.
+
+- **Yang diperbaiki BUKAN dilonggarkan.** Aturannya ditulis sebagai SYARAT,
+  bukan tanggal ajaib: ketiga tanggal cuti wajib sudah lewat, bukan hari ini,
+  satu bulan, saling eksklusif — dari tanggal 10 ke atas bulan berjalan,
+  sebelum itu bulan lalu. Dua premis baru memakukannya. Di §200, pada
+  hari-hari penyeberangan yang diuji **bukan nihil** melainkan aturan
+  penyaringnya sendiri: barisnya tak ada di bulan lalu **dan** ada di bulan
+  berjalan. Sisa seksi — semantik cap lintas-hari, INTI-nya — jalan tiap hari.
+
+- **Dua asersi yang MEMANG bicara bulan berjalan** ("tanggal masa depan tak
+  dinilai", "bulan tak valid jatuh ke bulan berjalan") kini mengambil rekapnya
+  sendiri. Memakai rekap bulan lalu membuat keduanya **hampa** — benar tanpa
+  menguji apa pun, dan itu bentuk hijau yang paling mahal.
+
+- **Temuan kedua, dari memeriksa kesiapan rilis**: entri changelog **"Angka
+  BIAYA hanya untuk manajemen"** terdaftar "belum di-merge" padahal **sudah
+  tayang sejak `6ceef83` (2026-08-27)** — dibuktikan dari `production` sendiri
+  (`GET /stok/nilai` ada di sana). Kepala CHANGELOG sudah menuliskan akibatnya
+  lebih dulu: *"mobile akan mengira fitur yang sudah aktif belum bisa
+  dipakai."* Empat hari changelog berkata salah dengan percaya diri.
+  Distempel; paruh "belum di-merge" pada `BELUM_TAYANG` kini kosong, dan
+  **batasnya ditulis**: daftar itu menahan LUPA MENSTEMPEL, bukan STEMPEL YANG
+  TERLAMBAT DICABUT — entri yang sudah terdaftar tak pernah ditanya lagi.
+
+- **Ponsel: BELUM tayang, dan sebabnya izin, bukan gerbang merah.** Fikstur
+  kunci kontrak (`LaporanDurasiPesanan|riwayat_terpotong`) sudah di-commit dan
+  didorong ke cabang `claude` ponsel (`ef04956`). Gerbangnya **tak bisa
+  dijalankan**: Flutter tak terpasang di mesin ini, dan
+  `workflow_dispatch` ditolak **403 "Resource not accessible by integration"**
+  — token aplikasinya tak punya `actions: write` di repo itu. Tiga commit
+  ponsel yang menunggu **belum pernah** dilewati CI (ketiga run CI ponsel yang
+  ada semuanya dari push ke `Production`). Merge tanpa gerbang tidak dilakukan.
+
+- **Gerbang pada hasil merge:** typecheck bersih · `npm test` **2.607** (214
+  berkas) · build web · `verify-api.sh` **3.362 lolos / 0 gagal** (DB segar) ·
+  cakupan rute **274 cocok** · `audit:invarian` **27/27** · Playwright
+  **13/13**. Lalu CI `production` #479 mengulanginya dan hijau.
+
+---
+
 ## Delapan pemotongan senyap terakhir — dan lubang yang perbaikannya akan memperbesar 8× — server + web — 2026-08-31 — `MAKS_UTANG` 8 → 0
 
 - **Vena ini sudah empat putaran berjalan**, dan sisanya tinggal 8 situs
@@ -8415,6 +8484,11 @@ berlaku di situ).
       satu memakai kunci badan, tujuh layar web ikut menampilkannya. Aturan
       mekanis BARU: tiap rute ber-`potongLarik` wajib mengambil `BATAS + 1`
       DAN punya pembaca di layar
+- [ ] **Gerbang ponsel tak bisa dijalankan dari sesi ini** — Flutter tak
+      terpasang, dan `workflow_dispatch` CI ponsel ditolak 403 (token tanpa
+      `actions: write`). Tiga commit di `claude` ponsel karena itu menunggu
+      tanpa pernah dilewati gerbang. Yang membukanya: memberi izin Actions pada
+      aplikasi GitHub-nya, atau menjalankan CI-nya dari tangan
 - [ ] **`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`** — dan baris
       bergeser. Dua entri memerah 2026-08-31 karena vena lain menambah komentar
       di atasnya, tanpa satu pun perilaku berubah. Repo ini sudah memilih kunci
