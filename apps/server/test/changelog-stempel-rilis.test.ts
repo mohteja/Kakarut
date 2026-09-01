@@ -47,9 +47,20 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
-  // masih di cabang `claude`, belum di-merge
-  "## Angka BIAYA hanya untuk manajemen (owner/admin)",
-  "## Delapan daftar yang dipotong kini MENGATAKANNYA",
+  /*
+   * PARUH "belum di-merge" KOSONG sejak 2026-08-31 — dan kosongnya bukan
+   * kerapian. Entri "Angka BIAYA hanya untuk manajemen" tercantum di sini
+   * sebagai belum tayang selama EMPAT HARI padahal ia sudah hidup di
+   * production sejak merge `6ceef83` (2026-08-27); dibuktikan dari production
+   * sendiri, rute `GET /stok/nilai` yang entrinya sebut memang sudah ada di
+   * sana. Kepala CHANGELOG menuliskan akibatnya lebih dulu: "mobile akan
+   * mengira fitur yang sudah aktif belum bisa dipakai."
+   *
+   * Daftar ini menahan LUPA MENSTEMPEL; ia tak menahan STEMPEL YANG TERLAMBAT
+   * DICABUT, sebab entri yang terdaftar di sini tak pernah ditanya lagi.
+   * Batas yang diketahui — dan yang menutupnya kelak harus membandingkan
+   * dengan production, bukan dengan daftar ini.
+   */
   // bukan rilis
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",

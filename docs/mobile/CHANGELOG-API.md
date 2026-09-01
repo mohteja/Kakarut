@@ -37,6 +37,8 @@ tanpa akses repo server.
 badan responsnya tetap larik telanjang (build lama membacanya `as List`), dan
 header lewat begitu saja pada klien yang tak memintanya.
 
+**Sudah di-merge ke production.**
+
 Yang berubah, dan kenapa layar mobile mungkin perlu ikut menampilkannya:
 daftar-daftar ini **selalu** dipotong server, juga sebelum perubahan ini —
 bedanya dulu potongannya **tidak dikatakan**, jadi daftar pendek terlihat
@@ -82,6 +84,15 @@ rentang. Yang pendek hanya `riwayat`.
 🟡 **PERLU DILIHAT** — build lama **tidak pecah**: seluruh parser Dart untuk
 medan ini memakai `as num? ?? 0`, jadi `null` terbaca 0. Tapi layar yang
 menampilkannya akan menulis **"Rp 0"**, dan itu angka yang salah dibaca.
+
+**Sudah di-merge ke production.**
+
+> Stempel ini TERTINGGAL empat hari, dan itu dicatat di sini bukan dihapus
+> diam-diam: entri ini sudah tayang lewat merge `6ceef83` (2026-08-27) tapi
+> tetap terdaftar "belum di-merge" sampai 2026-08-31. Dibuktikan dari
+> `production` sendiri — rute `GET /stok/nilai` yang entri ini sebut memang
+> sudah ada di sana. Kepala berkas ini menuliskan akibatnya lebih dulu:
+> *"mobile akan mengira fitur yang sudah aktif belum bisa dipakai."*
 
 **Medan yang kini bisa `null`:**
 
