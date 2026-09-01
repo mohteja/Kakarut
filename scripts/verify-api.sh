@@ -16278,6 +16278,116 @@ cek "§283 laporan kecil TIDAK berkata terpotong" "V == 1" \
 cek "PASANGAN §283: sampah kecil tetap tanpa header" "V == 1" \
   "$(test -z "$(header_of "x-kakarut-terpotong" -H "Authorization: Bearer $OWNER" "$BASE/api/sampah")" && echo 1 || echo 0)"
 
+
+# ── §284 — MENDAFTAR ULANG EMAIL YANG SUDAH ADA: KODENYA DIKIRIM, ─────────────
+#         DAN RIWAYATNYA MENGATAKAN APA YANG TERJADI
+#
+# Lahir dari laporan bug produksi, bukan dari sapuan. Pemilik repo melaporkan
+# pendaftar berhenti menerima kode OTP; surat UJI ke alamat yang sama SAMPAI,
+# folder spam sudah diperiksa, dan panel tak menampilkan satu temuan pun.
+# Yang tersisa cuma satu kemungkinan: suratnya tak pernah dicoba dikirim.
+#
+# Dan memang begitu — `POST /register` hanya mengirim bila emailnya BELUM ada.
+# Terukur lewat HTTP sebelum diperbaiki: pendaftaran kedua atas alamat yang sama
+# tak menulis satu baris token pun, tak mengirim apa pun, dan meninggalkan NOL
+# jejak, sementara balasannya berkata "kami telah mengirim KODE verifikasi 6
+# digit. Cek email Anda".
+#
+# ALAT UKURNYA: `GET /admin/sistem` → `email_percobaan`. Bukan karena praktis,
+# melainkan karena itulah SATU-SATUNYA permukaan yang bisa membedakan "dikirim"
+# dari "tak pernah dicoba" — dan membedakan keduanya adalah seluruh isi seksi
+# ini. `dev_verify_kode` tak bisa dipakai untuk pendaftaran KEDUA: ia sengaja
+# tak dipulangkan di cabang itu supaya balasannya tetap identik byte-per-byte
+# (dijaga asersi enumerasi di bawah).
+#
+# SELURUHNYA LEWAT HTTP, tanpa satu pun sentuhan ke basis data. Itu bukan
+# kebetulan: §252 di atas menuliskan alasannya — "skrip ini memang tak pernah
+# menyentuh psql, dan justru itu yang membuat premisnya otomatis terbukti".
+# Versi pertama seksi ini memundurkan `created_at` lewat psql untuk melewati
+# penjaga jarak 120 detik; diganti dengan cara yang lebih jujur DAN lebih
+# realistis — MEMBUNUH kodenya dengan lima tebakan salah, persis seperti orang
+# yang salah ketik lima kali lalu mendaftar ulang.
+#
+# ALAMATNYA SENDIRI (`X-Forwarded-For`), dan itu perlu: `batasRegister` 20/IP
+# per JAM, dan kepala berkas ini sudah mencatat bahwa skrip ini berjalan TEPAT
+# DI TEPI kuota itu. Tanpa alamat terpisah, seksi ini memerah karena 429 —
+# kegagalan yang sama sekali bukan tentang kode yang diujinya. Server dev
+# berjalan dengan TRUST_PROXY_HOPS bawaan (1), jadi entri paling kanan itulah
+# yang dibaca `ipKlien`.
+echo
+echo "§284 daftar ulang email yang sudah ada: kodenya DIKIRIM, riwayatnya bicara"
+
+XFF284="X-Forwarded-For: 203.0.113.28"
+E284="ulang284.$(date +%s)@contoh.id"
+
+reg284() {
+  curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
+    -H "$XFF284" -d "{\"nama\":\"Uji 284\",\"email\":\"$E284\",\"password\":\"Rahasia123!\"}"
+}
+# Baris percobaan TERBARU untuk sebuah alamat: "<hasil>|<sebab>"; dan cacahnya.
+jejak284()  { api "$SA" GET /admin/sistem | jq -r --arg e "$1" \
+  '[.email_percobaan[] | select(.tujuan == $e)][0] | if . == null then "TAK-ADA-BARIS" else "\(.hasil)|\(.sebab // "-")" end'; }
+cacah284()  { api "$SA" GET /admin/sistem | jq --arg e "$1" '[.email_percobaan[] | select(.tujuan == $e)] | length'; }
+waktu284()  { api "$SA" GET /admin/sistem | jq -r --arg e "$1" \
+  '[.email_percobaan[] | select(.tujuan == $e)][0].waktu // "-"'; }
+
+R284A=$(reg284)
+cek "premis §284: pendaftaran pertama menerbitkan kode" "V == 1" \
+  "$(echo "$R284A" | jq '(.dev_verify_kode != null) | if . then 1 else 0 end')"
+cek "premis §284: percobaannya TERCATAT di riwayat" "V == 1" \
+  "$([ "$(jejak284 "$E284")" != "TAK-ADA-BARIS" ] && echo 1 || echo 0)"
+
+# Kode dimatikan dengan LIMA tebakan salah (MAKS_PERCOBAAN). Sesudah ini tak ada
+# kode HIDUP, jadi penjaga jarak 120 detik tak lagi ikut bicara — yang diukur
+# betul-betul cabang "email sudah ada".
+for _ in 1 2 3 4 5; do
+  curl -s -o /dev/null -X POST "$BASE/api/auth/verify-email" -H 'Content-Type: application/json' \
+    -H "$XFF284" -d "{\"email\":\"$E284\",\"kode\":\"000000\"}"
+done
+N284A=$(cacah284 "$E284")
+W284A=$(waktu284 "$E284")
+
+R284B=$(reg284)
+N284B=$(cacah284 "$E284")
+W284B=$(waktu284 "$E284")
+
+cek "§284 daftar ulang MENCOBA mengirim lagi (baris percobaan bertambah)" "V == 1" \
+  "$([ "$N284B" -gt "$N284A" ] && echo 1 || echo 0)"
+# Barisnya harus BARU **dan** berupa percobaan. Versi pertama asersi ini hanya
+# memeriksa yang kedua, dan itu membuatnya HIJAU di jalan merahnya sendiri:
+# tanpa perbaikan, baris terbaru milik alamat itu masih baris pendaftaran
+# PERTAMA — yang memang sebuah percobaan. Hijau yang benar tanpa menguji apa
+# pun adalah bentuk hijau yang paling mahal.
+cek "§284 barisnya BARU dan menyebut percobaan, bukan keputusan diam" "V == 1" \
+  "$([ "$W284B" != "$W284A" ] && [ "$W284B" != "-" ] && case "$(jejak284 "$E284")" in \
+      tak_dicoba\|akun_*|tak_dicoba\|jarak_kirim_ulang|TAK-ADA-BARIS) false;; *) true;; esac \
+      && echo 1 || echo 0)"
+
+# ENUMERASI TETAP TERTUTUP — asersi yang MENAHAN pengetatan di atas. Balasan
+# untuk email yang sudah ada harus tetap sama persis dengan balasan untuk email
+# baru; `dev_verify_kode` dibuang lebih dulu karena ia memang hanya ada di dev.
+BADAN284A=$(echo "$R284A" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
+BADAN284B=$(echo "$R284B" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
+cek "PASANGAN §284: balasannya TETAP identik (enumerasi tak dibuka)" "V == 1" \
+  "$([ "$BADAN284A" = "$BADAN284B" ] && [ -n "$BADAN284A" ] && echo 1 || echo 0)"
+cek "PASANGAN §284: daftar ulang tak membocorkan kode, di dev sekalipun" "V == 1" \
+  "$(echo "$R284B" | jq '(.dev_verify_kode == null) | if . then 1 else 0 end')"
+
+# PASANGAN KEDUA: akun yang SUDAH terverifikasi tetap tak dikirimi apa pun —
+# jalannya MASUK, bukan verifikasi ulang — dan keputusan itu ikut tercatat.
+curl -s -o /dev/null -X POST "$BASE/api/auth/resend-verification" \
+  -H 'Content-Type: application/json' -H "$XFF284" -d "{\"email\":\"$OWNER_EMAIL\"}"
+cek "PASANGAN §284: akun terverifikasi tak dikirimi, dan sebabnya TERCATAT" "V == 1" \
+  "$([ "$(jejak284 "$OWNER_EMAIL")" = "tak_dicoba|akun_terverifikasi" ] && echo 1 || echo 0)"
+
+# PASANGAN KETIGA: email tak dikenal tetap dibalas 200 (tak jadi oracle
+# enumerasi), tapi keadaannya kini terlihat oleh operator.
+E284X="tak.dikenal.284.$(date +%s)@contoh.id"
+curl -s -o /dev/null -X POST "$BASE/api/auth/resend-verification" \
+  -H 'Content-Type: application/json' -H "$XFF284" -d "{\"email\":\"$E284X\"}"
+cek "PASANGAN §284: email tak dikenal tercatat 'tak dicoba', bukan hilang" "V == 1" \
+  "$([ "$(jejak284 "$E284X")" = "tak_dicoba|email_tak_dikenal" ] && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

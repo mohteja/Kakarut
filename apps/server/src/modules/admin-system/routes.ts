@@ -4,7 +4,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { periksaCadangan, type BackupRunDto, type BackupStatusDto, type SmtpSettingsDto } from "@kakarut/shared";
+import {
+  periksaCadangan,
+  type BackupRunDto,
+  type BackupStatusDto,
+  type PercobaanEmailDto,
+  type SmtpSettingsDto,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import { backupRuns, smtpSettings, users } from "../../db/schema";
 import { env } from "../../config/env";
@@ -21,8 +27,28 @@ import {
 import { sapuUnggahanYatim } from "../../lib/sapu-unggahan";
 import { keadaanCadangan, peringatanTerakhir } from "../../lib/backup-peringatan";
 import { periksaSetelan } from "../../lib/pemeriksaan-setelan";
-import { getSmtpRow, kirimEmail, penyediaEmail, ujiKoneksiSmtp, type SmtpRow } from "../mail/service";
+import {
+  getSmtpRow,
+  kirimEmail,
+  penyediaEmail,
+  percobaanEmailTerakhir,
+  ujiKoneksiSmtp,
+  type PercobaanEmail,
+  type SmtpRow,
+} from "../mail/service";
 import type { AppEnv } from "../../middleware/auth";
+
+function percobaanDto(row: PercobaanEmail): PercobaanEmailDto {
+  return {
+    waktu: row.waktu.toISOString(),
+    konteks: row.konteks,
+    tujuan: row.tujuan,
+    hasil: row.hasil as PercobaanEmailDto["hasil"],
+    sebab: row.sebab,
+    penyedia: row.penyedia,
+    pesan: row.pesan,
+  };
+}
 
 function backupDto(row: typeof backupRuns.$inferSelect): BackupRunDto {
   return {
@@ -85,6 +111,16 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       // sekali, oleh orang yang sedang menunggu deploy selesai; ini tempat
       // orang benar-benar melihatnya.
       pemeriksaan: await periksaSetelan().catch(() => []),
+      /*
+       * RIWAYAT PERCOBAAN KIRIM EMAIL — menumpang rute ini, bukan rute sendiri,
+       * karena ia dibaca di halaman yang sama dan oleh peran yang sama.
+       *
+       * BUKAN `TemuanSetelanDto`: ini CATATAN, bukan temuan. Baris `tak_dicoba`
+       * yang sah (mis. akun sudah terverifikasi) adalah keadaan normal, dan
+       * mencampurnya ke daftar temuan akan membuat panel memerah setiap hari
+       * sampai orang berhenti membacanya.
+       */
+      email_percobaan: (await percobaanEmailTerakhir().catch(() => [])).map(percobaanDto),
     });
   })
   .post("/migrate", async (c) => {
@@ -294,7 +330,7 @@ export const adminSystemRoutes = new Hono<AppEnv>()
         body.html?.trim() ||
         `<p>Halo! Ini email percobaan dari pengaturan SMTP Terakasir.</p><p>Bila Anda menerima ini, konfigurasi email sudah benar.</p>`;
       try {
-        const provider = await kirimEmail({ to, subject, html });
+        const provider = await kirimEmail({ to, subject, html }, "uji-smtp");
         return c.json({ ok: true, to, provider });
       } catch (e) {
         throw new HTTPException(400, {

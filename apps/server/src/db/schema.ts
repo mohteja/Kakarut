@@ -426,6 +426,64 @@ export const emailKeadaan = pgTable("email_keadaan", {
 });
 
 /**
+ * CATATAN PERCOBAAN KIRIM EMAIL — cincin 200 baris terakhir.
+ *
+ * KENAPA ADA, padahal `email_keadaan` di atas baru saja dipasang. Tabel itu
+ * menjawab "adakah kiriman yang GAGAL?" dan ia menjawabnya dengan benar. Tapi
+ * pada 2026-09-01 pertanyaan yang sebenarnya ternyata bukan itu, dan ia tak
+ * bisa menjawabnya:
+ *
+ *     surat uji ke alamat X          → SAMPAI
+ *     kode OTP ke alamat X yang sama → tak sampai, tak ada di spam
+ *     panel                          → tak ada temuan `email_gagal_kirim`
+ *
+ * Panel yang diam punya DUA tafsir yang berlawanan — "tak ada yang gagal
+ * karena semuanya berhasil" dan "tak ada yang gagal karena tak ada yang pernah
+ * dicoba" — dan tak ada cara membedakannya. Diagnosisnya karena itu memakan
+ * satu putaran penuh, dan berakhir pada dugaan, bukan bacaan.
+ *
+ * Sebabnya struktural: `auth/routes.ts` punya TUJUH cabang yang membalas 200
+ * "kami telah mengirim KODE verifikasi 6 digit. Cek email Anda" TANPA pernah
+ * memanggil pengirimnya. Terukur lewat HTTP: mendaftar ulang email yang sudah
+ * ada tidak menulis satu baris token pun, tidak mengirim apa pun, dan
+ * meninggalkan nol jejak — sementara balasannya identik dengan pendaftaran
+ * yang berhasil.
+ *
+ * Maka yang dicatat di sini bukan cuma yang gagal, melainkan SETIAP PERCOBAAN,
+ * termasuk yang keputusannya "tidak dikirim" BESERTA SEBABNYA. Itu yang
+ * membuat pertanyaan "dikirim atau tidak?" terjawab dalam sekali lihat.
+ *
+ * ALAMAT TUJUAN DISIMPAN UTUH, atas keputusan pemilik repo, dan hanya terbaca
+ * super admin (`GET /admin/sistem`). Tanpa alamatnya, laporan "si A tak
+ * menerima" tak bisa dicocokkan dengan baris mana pun — dan itu persis
+ * pekerjaan yang tabel ini ada untuk melakukannya. Setara dengan log penerima
+ * yang dicatat mail server mana pun.
+ *
+ * CINCIN, bukan arsip: 200 baris terakhir, yang lama dibuang saat menulis.
+ * Diagnosis email selalu tentang beberapa jam terakhir; menyimpan selamanya
+ * cuma menumbuhkan tabel berisi alamat orang tanpa ada yang membacanya.
+ */
+export const emailPercobaan = pgTable(
+  "email_percobaan",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
+    /** nama PINTUNYA: `verifikasi-email`, `reset-password`, … */
+    konteks: text("konteks").notNull(),
+    tujuan: text("tujuan").notNull(),
+    /** `terkirim` | `gagal` | `tak_dicoba` */
+    hasil: text("hasil").notNull(),
+    /** hanya untuk `tak_dicoba` — kenapa keputusannya tidak mengirim */
+    sebab: text("sebab"),
+    /** `smtp` | `resend`; null bila tak sampai memilih penyedia */
+    penyedia: text("penyedia"),
+    /** pesan galat penyedia, dipotong */
+    pesan: text("pesan"),
+  },
+  (t) => [index("email_percobaan_waktu_idx").on(t.waktu)],
+);
+
+/**
  * Token reset password (lupa password): dikirim via email sebagai tautan.
  * Disimpan sebagai HASH (bukan token mentah). Sekali pakai + kedaluwarsa.
  */

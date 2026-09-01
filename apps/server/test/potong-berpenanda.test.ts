@@ -55,6 +55,19 @@ const MAKS_UTANG = 0;
 
 /** kunci: `berkas` → teks argumen `.limit(…)` → alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
+  "modules/mail/service.ts": {
+    BATAS_PERCOBAAN_EMAIL: {
+      kelas: "sah",
+      jumlah: 1,
+      teks:
+        "Potongannya BUKAN klaim kelengkapan, sebab yang di baliknya juga " +
+        "bukan: tabelnya sendiri CINCIN 200 baris — baris ke-201 tak " +
+        "tersembunyi, ia sudah tak ada. Angkanya disebut apa adanya di layar " +
+        "('200 percobaan terakhir'), dan riwayat kirim email selalu tentang " +
+        "beberapa jam terakhir; menyimpan selamanya cuma menumbuhkan tabel " +
+        "berisi alamat orang tanpa ada yang membacanya.",
+    },
+  },
   "modules/admin-error-log/routes.ts": {
     LIMIT_KELOMPOK: {
       kelas: "sah",

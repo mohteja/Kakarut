@@ -1719,6 +1719,26 @@ export interface BackupStatusDto {
  * kemudian. `tindakan` selalu diisi — temuan yang tak menyebutkan apa yang
  * harus dilakukan hanya memindahkan pekerjaan menebak ke pembacanya.
  */
+/**
+ * Satu baris riwayat percobaan kirim email (panel super admin).
+ *
+ * `hasil: "tak_dicoba"` adalah alasan tipe ini ada. Tanpa baris seperti itu,
+ * riwayat yang kosong dari kegagalan punya dua tafsir yang berlawanan —
+ * "semua berhasil" dan "tak ada yang pernah dicoba" — dan itu terbukti memakan
+ * satu putaran diagnosis penuh pada 2026-09-01.
+ */
+export interface PercobaanEmailDto {
+  waktu: string;
+  /** nama pintunya: "verifikasi-email", "reset-password", "uji-smtp", … */
+  konteks: string;
+  tujuan: string;
+  hasil: "terkirim" | "gagal" | "tak_dicoba";
+  /** hanya terisi saat `tak_dicoba` — kenapa keputusannya tidak mengirim */
+  sebab: string | null;
+  penyedia: string | null;
+  pesan: string | null;
+}
+
 export interface TemuanSetelanDto {
   /** pengenal stabil, mis. "superadmin_password_bawaan" */
   kode: string;

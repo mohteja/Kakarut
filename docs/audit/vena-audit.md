@@ -50,6 +50,142 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Surat yang tak pernah DICOBA dikirim — server + web — 2026-09-01 — **LAPORAN BUG NYATA (lanjutan)**
+
+- **Putaran sebelumnya menjawab pertanyaan yang salah, dan itu ketahuan dari
+  laporan berikutnya.** Perbaikan pagi ini membuat KEGAGALAN kirim berbunyi
+  (`kirimEmailDiam`, `email_keadaan`, temuan `email_gagal_kirim`). Ia bekerja.
+  Lalu pemilik repo melapor lagi:
+
+  | pengamatan | artinya |
+  |---|---|
+  | "Kirim Test Email" ke alamat X **sampai** | penyedia, `from`, kotak masuk X sehat |
+  | kode OTP ke X **tak sampai**, **tak ada di spam** | bukan penyaringan, bukan alamat |
+  | build baru **sudah hidup** | instrumennya aktif |
+  | panel **tak menampilkan** `email_gagal_kirim` | **tak ada kiriman yang GAGAL** |
+
+  Yang tersisa hanya satu kemungkinan: **suratnya tak pernah dicoba dikirim.**
+
+- **Panel yang diam punya DUA tafsir yang berlawanan** — "semua berhasil" dan
+  "tak ada yang pernah dicoba" — dan tak ada cara memilih di antaranya. Itulah
+  kebutaan yang membuat diagnosis hari ini makan satu putaran penuh dan
+  berakhir pada dugaan, bukan bacaan. Aturan barunya: **alat yang cuma bisa
+  melaporkan KEGAGALAN tak bisa membedakan "berhasil" dari "tak pernah
+  terjadi".**
+
+- **Populasi terukur: TUJUH pintu** di `auth/routes.ts` yang membalas 200
+  *"kami telah mengirim KODE verifikasi 6 digit. Cek email Anda"* tanpa pernah
+  menyentuh penyedia email, dan **ketujuhnya meninggalkan NOL jejak**:
+  `/register` pada email yang sudah ada · `/register` yang kalah balapan
+  `users_email_unique` · jarak 120 detik di `kirimKodeVerifikasi` · dan empat
+  cabang `/resend-verification` (`!user`, `deletedAt`, `!isActive`,
+  `emailVerifiedAt`). Yang terakhir paling mahal: sekali `emailVerifiedAt`
+  terisi, alamat itu **permanen diam selamanya** — tak ada rute yang
+  mengosongkannya. Sebagai pembanding, `/forgot-password` cuma punya SATU.
+
+- **Terukur lewat HTTP + Postgres sungguhan**, satu alamat, dua pendaftaran
+  berurutan:
+
+  | | daftar #1 (email baru) | daftar #2 (email sama) |
+  |---|---|---|
+  | kode terbit | **203623** | **tak ada** |
+  | baris token di DB | 2 | **tetap 2** |
+  | balasan HTTP | *"…Cek email Anda"* | **identik byte-per-byte** |
+  | jejak yang ditinggalkan | 1 baris log | **NOL** |
+
+- **Tindak, tiga bagian**:
+  1. **Instrumen** — tabel cincin `email_percobaan` (200 baris terakhir):
+     waktu · konteks · tujuan · hasil (`terkirim`/`gagal`/**`tak_dicoba`**) ·
+     sebab · penyedia · pesan. Ditulis dari SATU tempat (`mail/service.ts`),
+     dibaca lewat `GET /admin/sistem`, dirender di panel super admin sebagai
+     **catatan, bukan temuan** — baris "tidak dikirim" yang sah adalah keadaan
+     normal, dan mewarnainya merah akan membuat panel diabaikan. Alamat tujuan
+     disimpan UTUH atas keputusan pemilik repo.
+  2. **Perangkapnya dihapus** — `/register` pada akun yang **aktif dan belum
+     terverifikasi** kini MENGIRIM kodenya. Badan responsnya tak berubah
+     sedikit pun (`dev` sengaja tak diisi di cabang itu), jadi enumerasi tetap
+     tertutup; penjaganya juga tak berubah (`batasRegister` 20/IP/jam + jarak
+     120 detik per akun), dan `/resend-verification` sudah menawarkan kemampuan
+     yang sama persis kepada siapa pun yang tahu alamatnya.
+  3. **Pengerasan** — surat kini punya versi TEKS-POLOS, dan cabang Resend
+     meneruskan `text` (sebelumnya membuangnya diam-diam, jadi setiap surat
+     yang keluar adalah surat HTML-saja). Web `LoginPage` mendapat hitung
+     mundur kirim ulang yang sudah lama dimiliki `VerifikasiEmailPage` —
+     rumahnya kini satu, `lib/jeda-verifikasi.ts`.
+
+- **Ukuran sesudah**, dibaca lewat balasan `GET /admin/sistem` sendiri
+  (Aturan 6, bukan `SELECT`):
+
+  ```
+  reset-password    tak_dicoba  email_tak_dikenal      bukan.siapa.siapa@contoh.id
+  verifikasi-email  tak_dicoba  akun_terverifikasi     terahokiindonesia@gmail.com
+  verifikasi-email  tak_dicoba  email_tak_dikenal      tidak.ada.sama.sekali@contoh.id
+  verifikasi-email  tak_dicoba  penyedia_belum_diatur  jalur1c…@contoh.id   ← daftar #2
+  verifikasi-email  tak_dicoba  penyedia_belum_diatur  jalur1c…@contoh.id   ← daftar #1
+  ```
+
+  Dua baris untuk alamat yang sama membuktikan **kedua pendaftaran mencoba
+  mengirim** — yang kedua itulah perbaikannya.
+
+- **Gerbang baru** `otp-senyap-tercatat.test.ts` (12 asersi): tiap **lengan
+  rantai `if/else` yang salah satu lengannya MENGIRIM** wajib berakhir pada
+  salah satu dari dua hal — mengirim, atau `catatTakDicoba` dengan sebab dari
+  serikat `SebabTakDicoba`; jumlah situsnya dipaku (12); tiap sebab beralasan,
+  dua arah, tanpa entri kuburan; dan ketiga hasil (`terkirim`/`gagal`/
+  `tak_dicoba`) wajib benar-benar ditulis.
+
+- **Detektornya salah sekali, dan salahnya diperbaiki bukan didaftarkan.**
+  Versi pertama menyaring cabang berdasarkan pengenal (`user`, `existing`,
+  `deletedAt`, …) dan langsung menuduh **LIMA** cabang yang sah — penjaga
+  login, penjaga `/verify-email`, penjaga `/reset-password` — yang semuanya tak
+  ada urusannya dengan surat. Penyaringnya diganti ke bentuk yang tepat:
+  **rantai yang salah satu lengannya mengirim**. Tuduhan palsu lebih merusak
+  gerbang daripada diam; ia mengajari orang mendaftarkan pengecualian sampai
+  daftarnya berhenti berarti.
+
+- **Gerbangnya menemukan kosakata mati milikku sendiri**: `email_sudah_terdaftar`
+  masuk ke serikat `SebabTakDicoba` sebelum sempat dipakai — sisa dari asumsi
+  bahwa mendaftar ulang memang tak boleh mengirim. Asumsi itu justru
+  perangkapnya. Dicabut, dan sebabnya ditulis di tempatnya.
+
+- **Bukti merah, empat arah**: satu pintu berhenti mencatat → 2 asersi merah ·
+  `/register` kembali tak mengirim → jumlah situs bergeser, merah ·
+  `hasil: "terkirim"` berhenti ditulis → merah · dan di `verify-api`,
+  perbaikannya dicabut → **§284 merah 2 asersi**.
+
+- **Satu asersi §284 sempat HIJAU di jalan merahnya sendiri** dan itu diperbaiki,
+  bukan dibiarkan: "barisnya menyebut percobaan" tetap benar tanpa perbaikan,
+  sebab baris terbaru masih milik pendaftaran PERTAMA. Kini ia menuntut
+  barisnya **BARU** juga. *Hijau yang benar tanpa menguji apa pun adalah bentuk
+  hijau yang paling mahal.*
+
+- **§284 seluruhnya lewat HTTP, tanpa satu sentuhan pun ke psql** — versi
+  pertamanya memundurkan `created_at` lewat basis data untuk melewati penjaga
+  jarak, dan itu melanggar sifat yang §252 tuliskan sebagai kelebihan skrip itu.
+  Diganti dengan cara yang lebih jujur DAN lebih realistis: **kodenya dibunuh
+  dengan lima tebakan salah**, persis seperti orang yang salah ketik lima kali
+  lalu mendaftar ulang. Kuota `batasRegister` dihindari lewat alamat sendiri
+  (`X-Forwarded-For`), sebab kepala berkas itu sendiri mencatat ia berjalan
+  tepat di tepi 20/IP/jam.
+
+- **Batas yang ditulis jujur**:
+  - pemindai gerbangnya **leksikal**, bukan pengurai TypeScript — ia hanya
+    melihat rantai `if/else` yang salah satu lengannya memanggil pengirim.
+    Keputusan yang disembunyikan di dalam pembantu tak terlihat olehnya; itu
+    sebabnya jumlah situsnya ikut dipaku;
+  - `email_percobaan` **cincin 200 baris** — ia menjawab "beberapa jam
+    terakhir", bukan arsip;
+  - **penyebab pasti di produksi tetap belum dikonfirmasi.** Putaran ini
+    menghapus perangkap yang paling cocok dengan buktinya DAN memasang alat
+    yang membuat jawabannya terbaca dalam sekali lihat bila ternyata bukan itu.
+    Itu dinyatakan apa adanya.
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` **217 berkas / 2641
+  uji** · `verify-api.sh` **3371 lolos, 0 gagal** · `audit:invarian` 27/27 ·
+  Playwright 13/13.
+
+---
+
 ## Kegagalan kirim email yang tak terdengar di mana pun — server — 2026-09-01 — **LAPORAN BUG NYATA**
 
 - **Bukan dari sapuan.** Pemilik repo melaporkannya di tengah putaran lain:
@@ -8838,6 +8974,20 @@ berlaku di situ).
       MENDAFTARKAN ketiganya dan meloloskannya — ia menuntut alasan tertulis,
       dan alasannya memang tertulis. **Alasan tertulis ≠ kabar tersampaikan.**
       Daftar telanan 22 → 20 entri
+- [x] ~~**Surat yang tak pernah DICOBA dikirim**~~ — TEMUAN, lanjutan laporan
+      bug yang sama; lihat entri di atas. 7 pintu membalas "cek email Anda"
+      tanpa menyentuh penyedia, nol jejak. Alat yang cuma bisa melaporkan
+      KEGAGALAN tak bisa membedakan "berhasil" dari "tak pernah terjadi"
+- [ ] **Ponsel masih pada alur TOKEN lama untuk verifikasi email** — layarnya
+      meminta "salin token di tautan, lalu tempel di bawah"
+      (`verifikasi_email_page.dart:134-159`) sementara surat kini dipimpin kode
+      6 angka dan URL mentahnya bahkan tak dicetak sebagai teks di versi HTML.
+      Ditambah: jeda kirim ulang ditulis **30 detik di klien**
+      (`_mulaiCooldown(30)`) sementara server menahan **120**, dan
+      `resendVerification` membuang badan responsnya sehingga
+      `retry_after_detik` tak pernah dibaca — tombolnya tampak siap, ditekan,
+      dan tak ada surat berangkat. Terukur, bernama, dan **tidak** menjelaskan
+      surat yang tak sampai; digarap terpisah atas keputusan pemilik repo
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama
