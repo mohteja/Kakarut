@@ -7,7 +7,7 @@ import { getCadanganStorage } from "../modules/upload/backup-storage";
 // Arah impor SATU ARAH: `backup.ts` tak boleh mengimpor berkas ini. Penjaganya
 // dinyalakan dari `index.ts`, bukan dari dalam penjadwal cadangan.
 import { zonaWaktuCadangan } from "./backup";
-import { kirimEmail, penyediaEmail, getSmtpRow } from "../modules/mail/service";
+import { kirimEmailDiam, penyediaEmail, getSmtpRow } from "../modules/mail/service";
 
 /**
  * PENJAGA CADANGAN — yang MENGABARKAN, bukan yang menampilkan.
@@ -231,14 +231,16 @@ export async function periksaPeringatanCadangan(sekarang = new Date()): Promise<
 
   let terkirim = 0;
   for (const p of penerima) {
-    try {
-      await kirimEmail({ to: p.email, subject: pesan.subject, html: pesan.html, text: pesan.text });
+    // Salinan `try/catch`-nya dulu di sini; sekarang satu rumah bersama
+    // (`kirimEmailDiam`) yang mencatatnya, sehingga peringatan cadangan ikut
+    // menaikkan penghitung kegagalan yang dibaca panel setelan — dulu tidak.
+    if (
+      await kirimEmailDiam(
+        { to: p.email, subject: pesan.subject, html: pesan.html, text: pesan.text },
+        "peringatan-cadangan",
+      )
+    ) {
       terkirim++;
-    } catch (e) {
-      console.error(
-        `PERINGATAN CADANGAN gagal dikirim ke ${p.email}:`,
-        e instanceof Error ? e.message : String(e),
-      );
     }
   }
   if (terkirim === 0) return "gagal-kirim";

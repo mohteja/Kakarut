@@ -15905,16 +15905,52 @@ rm -f /tmp/kk280c-s
 # Sengaja dua penutupan BERSAMAAN, bukan berurutan: yang berurutan tertahan
 # lebih dulu oleh `shiftTerbuka()` dan dibalas 400 "tak ada shift terbuka" —
 # jawaban yang benar, tapi bukan jalur yang sedang dijaga di sini.
+#
+# BALAPANNYA DISTAGING ULANG SAMPAI BENAR-BENAR BERPAPASAN, dan itu bukan
+# kelonggaran — itu justru yang membuat asersi di bawahnya berarti.
+#
+# Versi pertama menembak dua `curl` latar sekali saja lalu langsung menilai
+# kodenya. Di mesin senggang itu memang berlomba: terukur 12 dari 12 putaran
+# menghasilkan `200 409`. Tapi di tengah suite penuh — 3.300+ asersi, server,
+# Postgres, dan Playwright berebut CPU yang sama — penjadwalnya sesekali
+# menjalankan keduanya BERURUTAN. Yang kedua lalu tertahan `shiftTerbuka()`
+# dan dibalas `400 "tak ada shift terbuka"`, persis seperti yang sudah ditulis
+# di komentar atas: jawaban yang BENAR, tapi bukan jalur yang sedang dijaga.
+#
+# Terjadi 2026-09-01, TEPAT DI TENGAH RILIS perbaikan OTP: `200 400`, satu
+# asersi merah, nol perilaku berubah. Gerbang yang memerah karena penjadwal
+# mengajari pembacanya mengabaikan gerbang — kelas yang sama dengan sembilan
+# asersi absensi yang memerah karena kalender berpindah, dan dengan `DIPILAH`
+# yang memerah karena nomor baris bergeser.
+#
+# Maka `400` di sini TIDAK dinilai sebagai pelanggaran melainkan sebagai
+# "balapannya gagal distaging" → ulangi. Dan supaya pengulangan itu tak bisa
+# diam-diam menelan kegagalan yang sesungguhnya, jumlah percobaannya IKUT
+# DINILAI: kalau sesudah $MAKS280D kali balapannya tak pernah terjadi, itu
+# dilaporkan sebagai premis yang gagal, bukan disembunyikan sebagai hijau.
 tutup_aktif280
-api "$REISS105" POST /shift/buka '{"modal_awal":100000}' > /dev/null
 rm -f /tmp/kk280d-*
-for i in 1 2; do
-  ( curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/tutup" \
-      -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
-      -d '{"uang_fisik":100000}' > "/tmp/kk280d-$i" ) &
+MAKS280D=8
+COBA280D=0
+K280D=""
+while [ "$COBA280D" -lt "$MAKS280D" ]; do
+  COBA280D=$((COBA280D+1))
+  tutup_aktif280
+  api "$REISS105" POST /shift/buka '{"modal_awal":100000}' > /dev/null
+  rm -f /tmp/kk280d-1 /tmp/kk280d-2
+  for i in 1 2; do
+    ( curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/shift/tutup" \
+        -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
+        -d '{"uang_fisik":100000}' > "/tmp/kk280d-$i" ) &
+  done
+  wait
+  K280D="$(cat /tmp/kk280d-1 2>/dev/null) $(cat /tmp/kk280d-2 2>/dev/null)"
+  # `if !` bukan gaya: di bawah `set -e`, `grep` yang tak menemukan apa pun
+  # memulangkan 1 dan MEMBUNUH skrip ini di tengah jalan.
+  if ! printf '%s\n' $K280D | grep -q '^400'; then break; fi
 done
-wait
-K280D="$(cat /tmp/kk280d-1 2>/dev/null) $(cat /tmp/kk280d-2 2>/dev/null)"
+cek "premis §280d: balapannya benar-benar terstaging (percobaan: $COBA280D, kode: $K280D)" "V == 0" \
+  "$(printf '%s\n' $K280D | grep -c '^400')"
 cek "PASANGAN §280: tepat SATU penutupan berhasil (kode: $K280D)" "V == 1" \
   "$(printf '%s\n' $K280D | grep -c '^200')"
 cek "PASANGAN §280: yang kalah tetap dibalas 409 (kode: $K280D)" "V == 1" \

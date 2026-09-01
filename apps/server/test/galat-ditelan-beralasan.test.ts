@@ -50,11 +50,37 @@ const PER_BERKAS = new Map<string, number>([
   ["server/lib/error-log.ts", 1],
   ["server/lib/pangkas-token.ts", 1],
   ["server/lib/sapu-unggahan.ts", 2],
-  ["server/modules/auth/routes.ts", 2],
+  /*
+   * `server/modules/auth/routes.ts` (2) dan `server/modules/users/routes.ts` (1)
+   * PERNAH ada di sini, dan hilangnya 2026-09-01 adalah temuan berkas ini
+   * sendiri — dicatat, bukan disembunyikan.
+   *
+   * Ketiganya pintu KIRIM EMAIL: verifikasi pendaftar baru, reset password,
+   * undangan karyawan. Ketiganya lolos gerbang ini bertahun-tahun dengan
+   * alasan yang tertulis rapi ("best-effort: jangan gagalkan permintaan bila
+   * email error") — dan alasan itu memang BENAR. Yang tak pernah dipisahkan
+   * darinya adalah keputusan kedua yang menempel diam-diam: "dan karena itu
+   * tak usah memberi tahu siapa pun".
+   *
+   * Ongkosnya terukur 2026-09-01, saat pendaftar berhenti menerima kode OTP:
+   * `POST /auth/register` menjawab 200 "cek email Anda", dua baris token
+   * tertulis di DB, dan NOL baris di log menyebut kenapa penyedianya menolak.
+   * Pemilik pemasangan tak punya satu pun tempat untuk melihatnya.
+   *
+   * Perbaikannya bukan melempar galatnya ke peminta — jawaban rute-rute itu
+   * sengaja netral supaya tak bisa dipakai menebak email mana yang terdaftar.
+   * Yang dipasang: satu rumah bersama `kirimEmailDiam` (log ber-konteks +
+   * penghitung kegagalan beruntun yang dibaca panel setelan), dijaga
+   * `email-gagal-terdengar.test.ts`.
+   *
+   * Yang diajarkan ke berkas ini: catatan kejujurannya di atas — "yang dijaga
+   * adalah adanya KEPUTUSAN yang tertulis, bukan mutunya" — bukan formalitas.
+   * Alasan tertulis TIDAK sama dengan kabar tersampaikan, dan gerbang ini
+   * memang tak bisa membedakannya.
+   */
   ["server/modules/sync/idempoten.ts", 1],
   ["server/modules/sync/routes.ts", 2],
   ["server/modules/upload/backup-storage.ts", 1],
-  ["server/modules/users/routes.ts", 1],
   ["server/scripts/restore-backup.ts", 1],
   ["server/seed/guest.ts", 1],
   ["web/components/BatasGalat.tsx", 1],

@@ -23,7 +23,7 @@ import {
 import { type AppEnv } from "../../middleware/auth";
 import { emailDariBody, lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { env } from "../../config/env";
-import { kirimEmail } from "../mail/service";
+import { kirimEmailDiam } from "../mail/service";
 import { suratUndangan } from "../mail/surat";
 import { isKodeKaryawanConflict, resolveKodeKaryawan } from "./service";
 
@@ -325,15 +325,28 @@ export const karyawanRoutes = new Hono<AppEnv>()
         .from(companies)
         .where(eq(companies.id, auth.company_id!));
       const url = `${appBaseUrl(c)}/daftar`;
-      await kirimEmail({
-        to: body.email,
-        // `subject` sengaja TIDAK dilolos: ia teks biasa, bukan HTML — dan
-        // transport (nodemailer/Resend) sudah menyandikan headernya.
-        subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Terakasir`,
-        html: suratUndangan(co?.nama ?? "sebuah perusahaan", url),
-      });
-    } catch {
-      /* abaikan kegagalan email */
+      await kirimEmailDiam(
+        {
+          to: body.email,
+          // `subject` sengaja TIDAK dilolos: ia teks biasa, bukan HTML — dan
+          // transport (nodemailer/Resend) sudah menyandikan headernya.
+          subject: `Undangan bergabung ${co?.nama ?? "perusahaan"} di Terakasir`,
+          html: suratUndangan(co?.nama ?? "sebuah perusahaan", url),
+        },
+        "undangan-karyawan",
+      );
+    } catch (e) {
+      /*
+       * Yang masih bisa mendarat di sini BUKAN kegagalan kirim — itu sudah
+       * diurus `kirimEmailDiam`, yang tak melempar. Yang tersisa cuma
+       * kegagalan MENYIAPKAN suratnya (mis. membaca nama perusahaan). Sama
+       * seperti sebelumnya, ia tak boleh menggagalkan undangan yang barisnya
+       * sudah tersimpan; berbeda dari sebelumnya, ia juga tak boleh diam.
+       */
+      console.error(
+        "EMAIL GAGAL [undangan-karyawan] — suratnya tak sempat disusun:",
+        e instanceof Error ? e.message : String(e),
+      );
     }
       return c.json({ id: inv.id, email: body.email, role: body.role }, 201);
     },

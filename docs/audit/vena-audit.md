@@ -50,6 +50,404 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kegagalan kirim email yang tak terdengar di mana pun — server — 2026-09-01 — **LAPORAN BUG NYATA**
+
+- **Bukan dari sapuan.** Pemilik repo melaporkannya di tengah putaran lain:
+  *"user tidak lagi menerima email otp, padahal semalam berhasil 1×"*. Entri
+  ini dicatat apa adanya sebagai vena karena bentuknya persis bentuk yang
+  dicari berkas ini — dan karena gerbang yang seharusnya menangkapnya SUDAH
+  ADA, lalu meloloskannya.
+
+- **Terukur lewat HTTP + Postgres sungguhan**, satu akun baru, penyedia email
+  yang menolak:
+
+  | langkah | jawaban | kenyataan |
+  |---|---|---|
+  | `POST /auth/register` | `200 "…kami telah mengirim KODE verifikasi 6 digit. Cek email Anda"` | surat GAGAL terkirim |
+  | `POST /auth/resend-verification` | `200 {ok:true}` | tak ada kiriman sama sekali (tertahan jeda 2 menit) |
+  | baris `email_verification_tokens` | **2** | sistem yakin kodenya terbit |
+  | baris log yang menyebut sebabnya | **0** | — |
+
+  Nol. Penyedianya menolak dan tak ada satu pun tempat di sistem — respons,
+  log, maupun panel super admin — yang bisa memberi tahu pemiliknya kenapa.
+  Yang bisa dilakukannya cuma menebak, dan itulah yang sedang terjadi saat
+  laporan ini masuk.
+
+- **Populasinya: 5 pemanggil `kirimEmail` di luar rumahnya.** Empat menelan
+  galatnya (`verifikasi email`, `reset password`, `undangan karyawan`,
+  `peringatan cadangan`), satu menampilkannya (`POST /admin/sistem/smtp/test-email`,
+  400 berpesan). Dari keempat penelan itu, **tiga benar-benar bisu** — tanpa
+  log, tanpa penghitung, tanpa apa pun; yang keempat (peringatan cadangan)
+  sudah menulis `console.error` sendiri. **Idiomnya sudah ada di repo ini,
+  cuma tak dipakai di tiga pintu yang paling mahal.**
+
+- **KENAPA GERBANG YANG ADA MELOLOSKANNYA — ini temuan sebenarnya.**
+  `galat-ditelan-beralasan.test.ts` sudah menghitung ketiga situs itu, dan
+  mendaftarkannya: `modules/auth/routes.ts` 2 · `modules/users/routes.ts` 1.
+  Ia lolos karena gerbang itu menuntut **alasan yang tertulis**, dan alasannya
+  memang tertulis rapi:
+
+  > `catch { /* best-effort: jangan gagalkan permintaan bila email error */ }`
+
+  Alasan itu **benar**. Yang tak pernah dipisahkan darinya adalah keputusan
+  KEDUA yang menempel diam-diam: *"…dan karena itu tak usah memberi tahu siapa
+  pun"*. Catatan kejujuran gerbang itu sendiri sudah menuliskan batas ini —
+  *"yang dijaga berkas ini adalah adanya KEPUTUSAN yang tertulis, bukan
+  mutunya"* — dan hari ini batas itu menagih ongkosnya.
+
+  **Aturan barunya, dinamai:** *alasan tertulis ≠ kabar tersampaikan.*
+
+- **Kenapa galatnya TIDAK dipulangkan ke peminta.** Tiga dari lima pintu itu
+  (`/register`, `/resend-verification`, `/forgot-password`) sengaja menjawab
+  byte-per-byte sama untuk email yang terdaftar dan yang tidak; surat hanya
+  dikirim untuk akun yang ADA dan belum terverifikasi, jadi penanda
+  `email_gagal` di badan respons akan menjawab persis pertanyaan yang rute-rute
+  itu susah payah tutup. Arah keluar kabarnya memang harus **ke operator**.
+  Itu keputusan, bukan kelalaian, dan ditulis di kodenya.
+
+- **Tindak**:
+  - satu rumah bersama `kirimEmailDiam(pesan, konteks)` — log ber-konteks +
+    hasil boolean; keempat pintu memakainya, termasuk peringatan cadangan yang
+    dulu punya salinan `try/catch`-nya sendiri;
+  - pencatatan hasil kirim dipasang **di `kirimEmail`**, satu pintu yang
+    dilewati SEMUA pengiriman — bukan di masing-masing pemanggil, supaya
+    pemanggil berikutnya tak bisa lupa;
+  - tabel `email_keadaan` (satu baris): kapan sukses terakhir, kapan & kenapa
+    gagal terakhir, dan **kegagalan beruntun**. Di database, bukan di memori:
+    kegagalan email ditemukan berhari-hari kemudian, oleh orang yang membuka
+    panel karena ada yang mengeluh — dan deploy menghapus ingatan proses;
+  - temuan panel `email_gagal_kirim` (KRITIS) di `periksaSetelan`, **memuat
+    pesan penyedianya apa adanya**. Temuan yang cuma berkata "email gagal"
+    mengembalikan persis tebak-tebakan yang hendak dihapusnya.
+
+- **Ukuran sesudah**, jalur yang sama, penyedia yang sama-sama menolak:
+
+  ```
+  log server   EMAIL GAGAL [verifikasi-email] ke <alamat>: Resend gagal (403): …
+  email_keadaan  gagal_beruntun=1  gagal_penyedia=resend  gagal_pesan="Resend gagal (403): …"
+  panel          KRITIS · email_gagal_kirim · "Pengiriman email GAGAL"
+  ```
+
+  **PASANGAN** (jalur sah tetap bekerja): satu kiriman berhasil lewat SMTP
+  sungguhan ke sink lokal → surat mendarat (`Subject: Kode verifikasi
+  Terakasir`), `gagal_beruntun` **1 → 0**, temuan panel **hilang** (5 → 4
+  temuan). Diukur, bukan diasumsikan.
+
+- **Gerbang baru** `email-gagal-terdengar.test.ts` (14 asersi): registri siapa
+  boleh memanggil `kirimEmail` telanjang **beserta alasannya**, larangan entri
+  kuburan di registri itu, keharusan tiap pemakai `kirimEmailDiam` menyebut
+  konteksnya sebagai literal kebab-case, tiap pintu memakai konteks yang
+  menamai dirinya, dan semantik `temuanEmailGagal` (termasuk: baris warisan
+  berkolom kosong tak boleh jadi `"null"` di layar).
+
+- **Bukti merah, tiga arah**: (1) satu pintu dikembalikan ke `kirimEmail`
+  telanjang → 3 asersi merah; (2) konteks diganti variabel → 2 merah;
+  (3) `temuanEmailGagal` dilumpuhkan → 6 merah. Instrumennya sendiri diuji
+  (Aturan 7): deklarasi fungsinya tak boleh terhitung sebagai panggilan, prosa
+  yang mengutip bentuk terlarang tak boleh menuduh, koma di dalam objek pesan
+  tak boleh memecah argumen.
+
+- **Perbaikan ini nyaris melucuti gerbang LAIN, diam-diam.** Aturan
+  `email-berbatas` di `penjaga-semua-pintu.test.ts` mencari `await kirimEmail(`;
+  begitu empat pintu berpindah ke `kirimEmailDiam`, keempatnya lenyap dari
+  sapuannya sekaligus dan berkas itu tetap **hijau** sambil berhenti menjaga
+  apa pun. Polanya dilebarkan jadi `await kirimEmail(?:Diam)?\(` dan rumah
+  bersamanya didaftarkan beralasan. Kelas yang sama sudah punya namanya di
+  sesi ini: *alat ukur yang menumpang pada bentuk kode lain bisa berubah jadi
+  hiasan tanpa yang memakainya tahu.*
+
+- **Batas yang ditulis jujur**:
+  - ini **bukan antrean kirim ulang**. Surat yang gagal tetap hilang; yang
+    dijamin cuma bahwa kegagalannya **berbunyi**;
+  - `email_keadaan` satu baris untuk seluruh pemasangan — ia tak bisa
+    membedakan "Resend menolak alamat tenant A" dari "SMTP tenant B mati",
+    karena penyedianya memang setelan platform, bukan setelan tenant;
+  - penyebab sebenarnya di produksi pemilik repo **belum terlihat dari sini**
+    dan sengaja tidak ditebak di ledger ini. Yang dikirim putaran ini adalah
+    alat yang membuatnya bisa dibaca dalam sekali lihat — plus jalan keluar
+    yang sudah ada hari ini tanpa deploy: tombol **Kirim Test Email** di panel
+    super admin, yang memang menampilkan galat penyedianya apa adanya.
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` 216 berkas / 2625 uji ·
+  `verify-api.sh` **3362 lolos, 0 gagal** · `audit:invarian` 27/27 ·
+  Playwright 13/13.
+
+  Satu merah palsu terjadi di tengah dan dicatat supaya tak terulang: server
+  lama dari pengukuran (berkunci Resend bogus) masih memegang port 3000, jadi
+  server baru mati saat bind dan **41 asersi `verify-api` merah** karena jalur
+  `dev_verify_kode` memang mustahil hijau di server itu. Bukan kode yang salah,
+  melainkan premis yang tak diperiksa — `ss` tak ada di PATH shell itu,
+  sehingga perintah pembunuh prosesnya **gagal tanpa suara**. Bentuk yang sama
+  dengan vena yang sedang digarap, di alat kerjaku sendiri.
+
+- **DAN MERAH PALSU KEDUA, di gerbang hasil-merge saat rilisnya** — kali ini
+  bukan salah prosedurku melainkan cacat instrumennya, jadi dibayar sebagai
+  perbaikan: `PASANGAN §280: yang kalah tetap dibalas 409` memerah dengan
+  `kode: 200 400`. Blok itu menembak dua `POST /shift/tutup` latar SEKALI lalu
+  langsung menilai; di mesin senggang ia memang berlomba — **terukur 12 dari 12
+  putaran menghasilkan `200 409`** — tapi di tengah suite penuh penjadwalnya
+  sesekali menjalankan keduanya BERURUTAN, dan yang kedua tertahan
+  `shiftTerbuka()` lalu dibalas `400`. Komentar di blok itu sendiri sudah
+  menuliskan bahwa `400` adalah "jawaban yang benar, tapi bukan jalur yang
+  sedang dijaga" — ia cuma tak pernah menindaklanjutinya.
+
+  Perbaikannya: balapannya **distaging ulang sampai benar-benar berpapasan**
+  (maks 8 percobaan), dan jumlah percobaannya IKUT DINILAI sebagai premis —
+  supaya pengulangan itu tak bisa diam-diam menelan kegagalan yang sesungguhnya.
+  Yang membuatnya aman: pengulangan **hanya** dipicu `400`. Diuji atas empat
+  keadaan palsu — `200 409` hijau di percobaan 1 · `200 400` **merah sebagai
+  premis** sesudah 8 percobaan · `200 500` dan `200 200` **merah di percobaan
+  1**, tak pernah diulang. Pelanggaran sungguhan tak bisa diputar sampai hijau.
+
+  Kelasnya sudah bernama di sesi ini: *gerbang yang menuduh karena kalender /
+  baris / penjadwal berpindah mengajari pembacanya mengabaikan gerbang.* Ini
+  kejadian ketiga, dan yang pertama yang penyebabnya bukan kalender atau nomor
+  baris melainkan **CPU yang sibuk**.
+
+---
+
+## Gerbang yang tak bisa dijalankan — ponsel — 2026-09-01
+
+- **Yang menghalangi bukan gerbang merah, melainkan IZIN.** Tiga commit
+  menumpuk di `claude` repo ponsel tanpa pernah sekali pun dilewati gerbang,
+  dan tak ada jalan membukanya dari lingkungan tempat commit-commit itu lahir:
+  - Flutter SDK tak terpasang di sini — `flutter analyze`/`flutter test`
+    mustahil dijalankan lokal;
+  - `workflow_dispatch` dijawab **403 "Resource not accessible by
+    integration"**. Diagnosisnya bisa ditunjuk, bukan ditebak: **push berhasil**
+    (`contents: write` ada) dan **daftar run terbaca** (`actions: read` ada);
+    yang ditolak hanya `dispatches` — jadi yang kurang persis `actions: write`.
+
+- **Yang membukanya bukan menambah izin, melainkan MEMINDAHKAN PEMICUNYA.**
+  Daftar izin sebuah GitHub App ditentukan penerbitnya, bukan pemasangnya —
+  jadi "beri izin Actions" belum tentu ada tombolnya. Pemicu push, sebaliknya,
+  ada di dalam repo itu sendiri: `branches: [Production, claude]`.
+
+- **DAN INI MEMBALIK SEBAGIAN KESEPAKATAN**, jadi ditulis di kepala berkasnya
+  bukan diselundupkan. `Production`-saja bukan kelalaian: `ci.yml` repo web
+  menuliskan sebabnya — *"atas permintaan pemilik repo untuk menekan pemakaian
+  menit Actions"*. Yang berubah bukan pendapat soal biaya, melainkan satu fakta
+  yang **tak berlaku di repo web**: suite web bisa dijalankan lokal, suite
+  ponsel tidak. Diputuskan pemiliknya, dengan biayanya disebut lebih dulu (±3
+  menit Actions per push).
+
+- **`paths-ignore` SENGAJA TIDAK DIPASANG.** Ia akan menghemat menit pada push
+  docs-saja, tapi `on.push` hanya punya SATU blok — saringan itu ikut melewati
+  gerbang pada `Production` juga. Gerbang yang bisa dilewati diam-diam bukan
+  penghematan.
+
+- **PREMIS RUN DIPERIKSA SEBELUM WARNANYA DIPERCAYA**, dan itu bukan
+  kerewelan: "hijau" bisa saja run `Production` lama yang tak menguji apa pun.
+  Terukur pada run **#4**: `event=push` · `head_branch=claude` ·
+  `head_sha=846a44d` — sama persis dengan commit yang barusan didorong. Push
+  yang MENAMBAHKAN pemicunya itulah yang memicunya (GitHub membaca berkas
+  workflow dari commit yang didorong).
+
+- **BATAS YANG DIAKUI:**
+  - Gerbangnya kini berjalan, tapi ia tetap **tak bisa dijalankan dari mesin
+    ini** — yang berubah cuma siapa yang memicunya. Perubahan ponsel apa pun
+    dari sesi seperti ini tetap harus menunggu CI, bukan diukur lokal.
+  - Tak ada gerbang yang menjaga pemicu ini tetap ada. Repo ponsel tak punya
+    uji atas berkas CI-nya sendiri; menghapus `claude` dari daftar cabang akan
+    mengembalikan keadaan lama tanpa satu pun asersi berubah warna.
+  - Ia menggerbangi `claude`, bukan cabang kerja lain. `workflow_dispatch`
+    tetap satu-satunya jalan untuk cabang selain kedua itu — dan jalan itu
+    masih tertutup bagi sesi ini.
+
+- **DAN GERBANGNYA MENGGIGIT PADA JALAN PERTAMANYA.** Run #4 merah: **598
+  lolos, 1 gagal** — dan yang menuduh adalah gerbang kontrak repo ponsel
+  sendiri:
+
+  ```
+  ❌ kunci_kontrak_server_test.dart: kunci kontrak yang tak disentuh wajib tercatat
+     Expected: empty
+       Actual: ['riwayat_terpotong']
+  ```
+
+  **Tuduhannya benar, dan sasarannya aku.** Fikstur kunci kontrak kusegarkan
+  sehari sebelumnya dengan perintah yang dicetak gerbang server — tapi perintah
+  itu hanya **MENYEGARKAN FIKSTUR**; memutuskan nasib kunci barunya adalah
+  langkah KEDUA, dan langkah itu terlewat. Persis bentuk yang uji itu ada untuk
+  mencegah: medan baru lahir di `types.ts` tanpa satu pihak pun wajib
+  memutuskan *"ponsel ikut membaca ini atau tidak"*.
+
+  Tiga commit ponsel menumpuk berminggu-minggu tanpa gerbang; **begitu
+  gerbangnya menyala, ia langsung menemukan sesuatu.** Itu bukan kebetulan —
+  itu ukuran berapa lama sebuah pintu dibiarkan terbuka.
+
+- **Diputuskan, bukan didiamkan**: `riwayat_terpotong` didaftarkan di
+  `kunci-belum-dibaca.txt` dengan **kelompok dan alasannya sendiri**, bukan
+  ditumpangkan ke `rows_terpotong` di atasnya — sebab bedanya penting. Kartu
+  supplier memang tak punya layar di ponsel; laporan Lama Pesanan **punya**
+  (`durasi_detik`, `lewat_target`, `target_detik`, `bertarget` semuanya sudah
+  dibaca `lib/`, dipaku SENTINEL di uji yang sama). Jadi ini bukan fitur yang
+  belum ada, melainkan **satu kalimat yang belum dikatakan**.
+
+- **Hijau, lalu tayang.** Run **#5** (`event=push`, `head_sha=4942376`):
+  `flutter analyze` bersih · `flutter test` **599 lolos**. Merge `claude` →
+  `Production` (`16aa8b4`), pohon hasil merge **identik** dengan yang
+  digerbangi (`git diff` kosong). **Rilis ponsel PERTAMA yang gerbangnya
+  berjalan SEBELUM merge**, bukan sesudah mendarat di `Production`.
+
+- **Berkas:** `kakarut-mobile/.github/workflows/ci.yml` (`846a44d`) ·
+  `test/fikstur/kunci-belum-dibaca.txt` (`4942376`). Repo web **tak disentuh** —
+  `ci.yml`-nya tak pernah menyebut ponsel, jadi tak ada kalimatnya yang jadi
+  salah.
+
+---
+
+## Kunci daftar-beralasan yang bergeser — server (uji) — 2026-09-01 — dibayar KEEMPAT kalinya, lalu DIJAGA
+
+- **Venanya lahir dari rilis kemarin.** Gerbang hasil-merge memerah di tengah
+  rilis, dan salah dua penyebabnya bukan produk melainkan `DIPILAH` di
+  `query-punya-rumah` yang berkunci `berkas:NOMOR BARIS`: vena pemotongan
+  menambah komentar di atas dua situs, entrinya bergeser **26 dan 10 baris**,
+  dan dua asersi memerah tanpa satu pun perilaku berubah. Nomornya kuperbarui
+  dan **kudaftarkan sebagai vena** — ini pembayarannya.
+
+- **POPULASI: 39 daftar adjudikasi tangan** di `apps/server/test`
+  (`DIPILAH_TANGAN`, `TERBUKA_SENGAJA`, `DIKECUALIKAN`, `BELUM_TERBUKTI`, …).
+  Disapu mekanis lewat pohon sintaks, **dua bentuk** — objek harfiah
+  (`Record<string, …>`) dan pasangan larik (`new Map([[k, v]])`) — sebab repo
+  ini memakai keduanya, dan menyapu satu saja akan menyatakan berkas yang
+  justru membusuk tak punya kunci sama sekali. **327 kunci harfiah** terbaca di
+  **34 berkas**.
+
+- **TEMUAN: 1 daftar / 4 entri** berkunci nomor baris — seluruhnya
+  `query-punya-rumah.test.ts`. Plus **1 komentar** di `bentuk-balasan.test.ts`
+  yang *meresepkan* `berkas:baris` untuk daftar yang hari ini masih kosong —
+  undangan bagi entri berikutnya untuk lahir busuk.
+
+- **DAN INI TANDA TANGANNYA, LAGI.** Aturannya sudah ditulis di **empat**
+  berkas, dan sudah dibayar **tiga** kali sebelum hari ini:
+  - `pelaku.test.ts:63` — *"versi pertama memakai nomor baris dan langsung
+    membusuk: menambahkan satu komentar…"*
+  - `util/urutan.ts:126` — *"Putaran 27 membayar pembusukan kunci bernomor
+    baris untuk KEDUA kalinya (satu baris `import` menggeser 1228 jadi 1229 dan
+    dua gerbang memerah)."*
+  - `util/mutasi-web.ts:105` — *"sudah dibayar dua kali… Sekali cukup."*
+  - `util/kolom-numerik.ts:46` — *"Kuncinya bukan nomor baris."*
+
+  Empat berkas menuliskan aturannya. **Nol yang menegakkannya.** Aturannya
+  sudah dipikirkan, ditulis, dikomentari panjang — penjaganya dipasang di
+  beberapa pintu, dan pintu lain ke keadaan yang sama dibiarkan terbuka.
+
+- **PERBAIKAN.** `DIPILAH` dikunci `berkas:NAMA PARAMETER`
+  (`modules/stok/routes.ts:hari`), kunci yang menempel pada HAL yang
+  diadjudikasi: ia berpindah hanya bila parameternya sendiri berganti nama —
+  dan itu memang saat keputusan lama layak ditinjau ulang. Keunikannya
+  **dipaku premis tersendiri**: kunci stabil yang tak unik adalah cacat kedua,
+  satu entri diam-diam memaafkan dua bacaan.
+
+- **GERBANG BARU** `kunci-daftar-tak-bergeser.test.ts` — melarang BENTUK
+  `…​.(ts|tsx|dart|sh|md):<angka>` sebagai kunci daftar, di seluruh
+  `apps/server/test`.
+
+- **DETEKTOR DIBUKTIKAN BISA MENUDUH, dua arah:**
+  - atas **kode sungguhan**, sebelum diperbaiki: ia menuduh tepat **4 situs**,
+    yang persis sama dengan yang membusuk kemarin;
+  - atas **sumber sintetis**: kedua bentuk (objek & Map) tertuduh, dan kunci
+    stabil di sebelahnya TIDAK ikut tertuduh.
+
+- **BUKTI MERAH + PASANGAN — dan pasangannya yang paling menentukan:**
+  1. satu kunci dikembalikan ke nomor baris → gerbang baru merah menyebut
+     berkas, baris, dan kuncinya;
+  2. **satu komentar disisipkan di atas situs `hari`** — penyebab persis yang
+     membusukkannya empat kali. Dengan kunci LAMA: `query-punya-rumah` merah
+     **2 asersi** ("tanpa batas yang terlihat" + "sudah tak ada situsnya").
+     Dengan kunci BARU: **12/12 hijau**. Itu perbedaan yang sedang dibeli.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - Yang disapu **kunci HARFIAH** saja. Kunci yang dirakit saat berjalan
+    (`` `${berkas}:${baris}` ``) tak terlihat — dan bentuk itu ADA di repo ini
+    (`urutan.ts`, `mutasi-web.ts`, `bendera-hapus.ts` sudah memakai medan
+    `kunci` yang stabil justru karena pernah membusuk). Yang menahannya tetap
+    keputusan penulisnya, bukan gerbang ini.
+  - Lingkupnya `apps/server/test`, bukan uji ponsel/web di repo lain.
+  - Ia melarang **bentuk** `…:<angka>`, bukan menjamin kunci penggantinya
+    bagus. Kunci stabil yang tak unik adalah cacat lain, dan tiap daftar wajib
+    memaku keunikannya sendiri — `query-punya-rumah` kini melakukannya.
+
+- **Berkas:** `test/kunci-daftar-tak-bergeser.test.ts` (baru) ·
+  `test/query-punya-rumah.test.ts` (kunci + premis keunikan) ·
+  `test/bentuk-balasan.test.ts` (bentuk kunci diperbaiki sebelum entri
+  pertamanya lahir). **Tak ada kode produk yang disentuh.**
+
+- **Gerbang:** typecheck bersih · `npm test` **2.611** (215 berkas) · build web
+  · `verify-api.sh` **3.362 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` **27/27** · Playwright **13/13**.
+
+---
+
+## RILIS — dan prosedur hasil-merge yang membayar dirinya sendiri, lagi — 2026-09-01
+
+- **Tayang di `production`**: `b6432f7`, memuat tiga putaran (selisih susulan
+  bisa diputuskan · dua utang balapan terakhir · delapan pemotongan senyap
+  terakhir). **CI run #479 hijau seluruhnya** — `quality`, `verify-api`, dan
+  `deploy` (image GHCR terbangun, redeploy Dokploy terpicu 02:16:31Z).
+
+- **PROSEDURNYA MEMBAYAR DIRINYA SENDIRI, DAN INI KALI KEDUA.** `ci.yml`
+  menuntut seluruh suite dijalankan atas HASIL MERGE sebelum didorong. Hasil
+  merge itu **identik isinya** dengan `claude` (`git diff` kosong), jadi yang
+  merah bukan kegagalan gabungan — melainkan **kalender**. Rilis pagi ini hijau
+  pada 2026-08-31; jalan berikutnya pukul 08:56 WIB tanggal **2026-09-01**, dan
+  **sembilan asersi absensi memerah**. Didorong tanpa langkah itu, CI di
+  `production` yang akan merah dan deploy tertahan.
+
+- **Tiga blok, satu keluarga**: asersi yang benar hanya bila hari ini jatuh di
+  tempat tertentu pada kalender.
+  - **§143 cuti** — tanggal dipatok 05/06. Mitigasi yang sudah ada hanya
+    menutup sisi "hari ini KEBETULAN tanggal 5/6"; sisi sebaliknya terbuka —
+    pada tanggal 1, tanggal 05/06 ada di **masa depan**, dan rekap sengaja
+    berhenti menilai di hari ini. `cuti` 0, bukan 2.
+  - **§200 shift malam** — skenarionya dimundurkan supaya kedua capnya sudah
+    lewat, dan pada tanggal 1 sebelum pukul 11 kemunduran itu **menyeberangi
+    pergantian bulan**. Kasir malamnya dibuat baru, jadi keanggotaannya
+    bertanggal hari ini — dan rekap bulan lalu menyaringnya keluar **dengan
+    benar** (`bergabung <= akhir bulan`). Enam asersi menuduh produk yang
+    justru bekerja.
+  - **§143 saringan aktif/arsip** — karyawan ujinya juga dibuat hari ini, ikut
+    tersaring saat blok cuti pindah ke bulan lalu.
+
+- **Yang diperbaiki BUKAN dilonggarkan.** Aturannya ditulis sebagai SYARAT,
+  bukan tanggal ajaib: ketiga tanggal cuti wajib sudah lewat, bukan hari ini,
+  satu bulan, saling eksklusif — dari tanggal 10 ke atas bulan berjalan,
+  sebelum itu bulan lalu. Dua premis baru memakukannya. Di §200, pada
+  hari-hari penyeberangan yang diuji **bukan nihil** melainkan aturan
+  penyaringnya sendiri: barisnya tak ada di bulan lalu **dan** ada di bulan
+  berjalan. Sisa seksi — semantik cap lintas-hari, INTI-nya — jalan tiap hari.
+
+- **Dua asersi yang MEMANG bicara bulan berjalan** ("tanggal masa depan tak
+  dinilai", "bulan tak valid jatuh ke bulan berjalan") kini mengambil rekapnya
+  sendiri. Memakai rekap bulan lalu membuat keduanya **hampa** — benar tanpa
+  menguji apa pun, dan itu bentuk hijau yang paling mahal.
+
+- **Temuan kedua, dari memeriksa kesiapan rilis**: entri changelog **"Angka
+  BIAYA hanya untuk manajemen"** terdaftar "belum di-merge" padahal **sudah
+  tayang sejak `6ceef83` (2026-08-27)** — dibuktikan dari `production` sendiri
+  (`GET /stok/nilai` ada di sana). Kepala CHANGELOG sudah menuliskan akibatnya
+  lebih dulu: *"mobile akan mengira fitur yang sudah aktif belum bisa
+  dipakai."* Empat hari changelog berkata salah dengan percaya diri.
+  Distempel; paruh "belum di-merge" pada `BELUM_TAYANG` kini kosong, dan
+  **batasnya ditulis**: daftar itu menahan LUPA MENSTEMPEL, bukan STEMPEL YANG
+  TERLAMBAT DICABUT — entri yang sudah terdaftar tak pernah ditanya lagi.
+
+- **Ponsel: BELUM tayang, dan sebabnya izin, bukan gerbang merah.** Fikstur
+  kunci kontrak (`LaporanDurasiPesanan|riwayat_terpotong`) sudah di-commit dan
+  didorong ke cabang `claude` ponsel (`ef04956`). Gerbangnya **tak bisa
+  dijalankan**: Flutter tak terpasang di mesin ini, dan
+  `workflow_dispatch` ditolak **403 "Resource not accessible by integration"**
+  — token aplikasinya tak punya `actions: write` di repo itu. Tiga commit
+  ponsel yang menunggu **belum pernah** dilewati CI (ketiga run CI ponsel yang
+  ada semuanya dari push ke `Production`). Merge tanpa gerbang tidak dilakukan.
+
+- **Gerbang pada hasil merge:** typecheck bersih · `npm test` **2.607** (214
+  berkas) · build web · `verify-api.sh` **3.362 lolos / 0 gagal** (DB segar) ·
+  cakupan rute **274 cocok** · `audit:invarian` **27/27** · Playwright
+  **13/13**. Lalu CI `production` #479 mengulanginya dan hijau.
+
+---
+
 ## Delapan pemotongan senyap terakhir — dan lubang yang perbaikannya akan memperbesar 8× — server + web — 2026-08-31 — `MAKS_UTANG` 8 → 0
 
 - **Vena ini sudah empat putaran berjalan**, dan sisanya tinggal 8 situs
@@ -8415,16 +8813,31 @@ berlaku di situ).
       satu memakai kunci badan, tujuh layar web ikut menampilkannya. Aturan
       mekanis BARU: tiap rute ber-`potongLarik` wajib mengambil `BATAS + 1`
       DAN punya pembaca di layar
-- [ ] **`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`** — dan baris
-      bergeser. Dua entri memerah 2026-08-31 karena vena lain menambah komentar
-      di atasnya, tanpa satu pun perilaku berubah. Repo ini sudah memilih kunci
-      BERKAS + JUMLAH di `kueri-terkurung-tenant` justru karena ini; gerbang
-      yang menuduh karena baris berpindah mengajari pembacanya mengabaikan
-      gerbang. Belum diukur berapa gerbang lain yang berkunci baris
+- [x] ~~**Gerbang ponsel tak bisa dijalankan dari sesi ini**~~ — SELESAI, lihat
+      entri di atas. Yang membukanya bukan menambah izin melainkan memindahkan
+      PEMICUNYA: `branches: [Production, claude]`. Push ke cabang kerja kini
+      digerbangi CI, dan premis run-nya (event/branch/sha) diperiksa sebelum
+      warnanya dipercaya
+- [x] ~~**`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`**~~ —
+      SELESAI, lihat entri di atas. 39 daftar adjudikasi disapu (327 kunci
+      harfiah di 34 berkas); **1 daftar / 4 entri** berkunci nomor baris, kini
+      berkunci `berkas:nama-parameter`. Aturannya — sudah ditulis di 4 berkas,
+      dibayar 4 kali, dijaga 0 — akhirnya punya gerbang
 - [ ] **Header `X-Kakarut-Terpotong` belum dirender ponsel** — kini **delapan**
       rute mengirimnya (`/stok/penyesuaian` yang lama + tujuh yang dibayar
-      2026-08-31). `core/api_client.dart` sudah punya pembacanya; layarnya
-      yang belum. Repo ponsel berumah lain
+      2026-08-31), plus medan badan `riwayat_terpotong` pada laporan Lama
+      Pesanan. `core/api_client.dart:97` sudah punya pembacanya dan **tepat
+      SATU** layar memakainya (`sampah_page.dart:81`);
+      `LaporanDurasi.fromJson` (`operasional_models.dart:1305`) belum mengurai
+      medannya sama sekali. `riwayat_terpotong` sudah TERDAFTAR beralasan di
+      `kunci-belum-dibaca.txt`, jadi utangnya kini berangka dan bernama.
+      **Kini bisa digarap** — gerbang ponselnya sudah berjalan
+- [x] ~~**Kegagalan kirim email yang tak terdengar di mana pun**~~ — TEMUAN
+      dari LAPORAN BUG NYATA, lihat entri di atas. 5 pemanggil `kirimEmail`;
+      3 bisu total. Gerbang yang ada (`galat-ditelan-beralasan`) sudah
+      MENDAFTARKAN ketiganya dan meloloskannya — ia menuntut alasan tertulis,
+      dan alasannya memang tertulis. **Alasan tertulis ≠ kabar tersampaikan.**
+      Daftar telanan 22 → 20 entri
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama

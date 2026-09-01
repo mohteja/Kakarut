@@ -375,6 +375,57 @@ export const smtpSettings = pgTable("smtp_settings", {
 });
 
 /**
+ * KEADAAN PENGIRIMAN EMAIL — satu baris (`kunci = 'email'`), ditulis tiap kali
+ * sepucuk surat berhasil ATAU gagal dikirim.
+ *
+ * KENAPA ADA. Tiga pintu di aplikasi ini mengirim surat yang BOLEH gagal tanpa
+ * menggagalkan permintaannya: verifikasi email pendaftar baru, reset password,
+ * dan undangan karyawan. Ketiganya harus begitu — membalas 500 karena SMTP
+ * mati akan menggagalkan pendaftaran yang datanya sudah tersimpan, dan pada
+ * dua pintu pertama membalas apa adanya juga membuka enumerasi akun (jawaban
+ * yang berbeda = cara menebak email mana yang terdaftar).
+ *
+ * Tapi "tak menggagalkan permintaan" pernah berarti "tak meninggalkan jejak
+ * sama sekali", dan itu terukur pada 2026-09-01, lewat HTTP sungguhan, saat
+ * pemilik repo melaporkan pendaftar berhenti menerima kode OTP:
+ *
+ *     POST /auth/register              → 200 "…kami telah mengirim KODE…"
+ *     POST /auth/resend-verification   → 200 {ok:true}
+ *     baris email_verification_tokens  → 2   (sistem yakin kode terbit)
+ *     baris log server soal kegagalan  → 0
+ *
+ * Nol. Penyedia emailnya menolak, dan TAK ADA satu pun tempat di sistem ini —
+ * respons, log, maupun panel — yang bisa memberi tahu siapa pun kenapa. Yang
+ * bisa dilakukan pemiliknya cuma menebak.
+ *
+ * KENAPA DI DATABASE, BUKAN DI MEMORI. Alasannya sama dengan yang ditulis
+ * `peringatan_terkirim` di bawah, ditambah satu: baris log dibaca sekali, oleh
+ * orang yang kebetulan sedang menonton deploy. Kegagalan email justru
+ * ditemukan berhari-hari kemudian, oleh orang yang membuka panel karena ada
+ * yang mengeluh. `pemeriksaan-setelan.ts` sudah menuliskan prinsip itu untuk
+ * temuan lain; baris ini yang membuatnya berlaku juga untuk email.
+ *
+ * YANG TIDAK DIJANJIKAN: ini bukan antrean kirim ulang. Surat yang gagal tetap
+ * hilang — yang dijamin cuma bahwa kegagalannya BERBUNYI.
+ */
+export const emailKeadaan = pgTable("email_keadaan", {
+  /** selalu `'email'` — satu baris untuk seluruh pemasangan. */
+  kunci: text("kunci").primaryKey(),
+  suksesPada: timestamp("sukses_pada", { withTimezone: true }),
+  suksesPenyedia: text("sukses_penyedia"),
+  gagalPada: timestamp("gagal_pada", { withTimezone: true }),
+  gagalPenyedia: text("gagal_penyedia"),
+  /** pesan galat penyedia, dipotong — cukup untuk mendiagnosis, bukan arsip. */
+  gagalPesan: text("gagal_pesan"),
+  /**
+   * Kegagalan BERUNTUN sejak kiriman sukses terakhir. Nol berarti pengiriman
+   * terakhir berhasil; angka yang naik berarti keadaannya SEDANG berlangsung,
+   * bukan satu kegagalan tunggal yang sudah lewat.
+   */
+  gagalBeruntun: integer("gagal_beruntun").notNull().default(0),
+});
+
+/**
  * Token reset password (lupa password): dikirim via email sebagai tautan.
  * Disimpan sebagai HASH (bukan token mentah). Sekali pakai + kedaluwarsa.
  */

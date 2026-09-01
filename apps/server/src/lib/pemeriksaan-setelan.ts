@@ -6,7 +6,7 @@ import { users } from "../db/schema";
 import { env, r2Configured } from "../config/env";
 import { getStorage } from "../modules/upload/storage";
 import { getCadanganStorage } from "../modules/upload/backup-storage";
-import { getSmtpRow, penyediaEmail } from "../modules/mail/service";
+import { getSmtpRow, keadaanEmail, penyediaEmail, type KeadaanEmail } from "../modules/mail/service";
 import { tautanEmailDariHeader } from "./base-url";
 import { pengamatanProxy, type PengamatanProxy } from "./pengamatan-proxy";
 
@@ -72,6 +72,50 @@ export function nilaiProxy(
     };
   }
   return null;
+}
+
+/**
+ * Verdict soal PENGIRIMAN email — dipisah sebagai fungsi murni dengan alasan
+ * yang sama seperti `nilaiProxy`: yang menentukan benar-salahnya adalah aturan
+ * sederhana atas beberapa medan, dan justru aturan sederhana itu yang paling
+ * mudah salah tanpa ketahuan.
+ *
+ * Bedanya dengan `email_mati` (temuan 4): di sana penyedianya memang belum
+ * ada, di sini penyedianya ADA dan menolak. Panel yang cuma punya temuan
+ * pertama akan menampilkan halaman bersih untuk pemasangan yang emailnya sudah
+ * mati berhari-hari — persis keadaan yang terukur 2026-09-01.
+ */
+export function temuanEmailGagal(keadaan: KeadaanEmail | null): TemuanSetelanDto | null {
+  // Nol berarti kiriman TERAKHIR berhasil. Melaporkan kegagalan yang sudah
+  // pulih mengajari pembacanya mengabaikan panel ini.
+  if (!keadaan || keadaan.gagalBeruntun <= 0) return null;
+  const kapan = keadaan.gagalPada ? keadaan.gagalPada.toISOString() : "(waktu tak tercatat)";
+  const lewat = keadaan.gagalPenyedia ?? "penyedia tak tercatat";
+  const galat = keadaan.gagalPesan?.trim() || "(penyedia tak memberi pesan)";
+  /*
+   * Kiriman sukses terakhir IKUT disebut, dan itu bukan hiasan: "sejak kapan"
+   * adalah pertanyaan pertama yang ditanyakan orang yang baru tahu emailnya
+   * mati, dan tanpa angka ini jawabannya cuma tebakan. Kosong pun bercerita —
+   * artinya pemasangan ini BELUM PERNAH berhasil mengirim satu surat pun.
+   */
+  const sukses = keadaan.suksesPada
+    ? `Kiriman sukses terakhir: ${keadaan.suksesPada.toISOString()}.`
+    : "Pemasangan ini BELUM PERNAH berhasil mengirim satu surat pun.";
+  return {
+    kode: "email_gagal_kirim",
+    tingkat: "kritis",
+    judul: "Pengiriman email GAGAL",
+    rincian:
+      `${keadaan.gagalBeruntun} kiriman berturut-turut gagal, terakhir ${kapan} lewat ` +
+      `${lewat}. Galat dari penyedia: "${galat}". ${sukses} Selama ini berlangsung, ` +
+      "kode verifikasi pendaftar baru dan tautan reset password TIDAK sampai — " +
+      "sementara penggunanya tetap menerima jawaban 'cek email Anda', karena " +
+      "jawaban yang berbeda akan membocorkan email mana yang terdaftar.",
+    tindakan:
+      "Baca pesan galat di atas apa adanya — ia datang dari penyedianya, bukan dari aplikasi ini. " +
+      "Lalu uji dengan tombol Kirim Test Email di halaman SMTP; angka di sini kembali nol " +
+      "begitu satu kiriman berhasil.",
+  };
 }
 
 /** Super admin aktif yang passwordnya masih sama dengan `SEED_SUPERADMIN_PASSWORD`. */
@@ -179,6 +223,13 @@ export async function periksaSetelan(): Promise<TemuanSetelanDto[]> {
       tindakan: "Isi pengaturan SMTP di panel super admin, atau set RESEND_API_KEY.",
     });
   }
+
+  /*
+   * 4b. PENYEDIANYA ADA, TAPI MENOLAK. Lihat `temuanEmailGagal` di atas untuk
+   * kenapa ini temuan tersendiri dan bukan pelebaran temuan 4.
+   */
+  const emailGagal = temuanEmailGagal(await keadaanEmail().catch(() => null));
+  if (emailGagal) temuan.push(emailGagal);
 
   /*
    * 5. JWT_SECRET BAWAAN. Di produksi ini melempar saat boot, jadi temuan ini

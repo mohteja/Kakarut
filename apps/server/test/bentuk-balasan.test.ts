@@ -29,7 +29,17 @@ import { situsBalasan, tabelRahasia } from "./util/bentuk-balasan";
  */
 const MAKS_UTANG = 0;
 
-/** `berkas:baris` → alasan, untuk `BARIS_PENUH` yang sengaja dibiarkan. */
+/**
+ * `berkas:nama-fungsi` → alasan, untuk `BARIS_PENUH` yang sengaja dibiarkan.
+ *
+ * KOSONG hari ini, dan bentuk kuncinya sengaja ditulis SEBELUM entri
+ * pertamanya lahir: komentar lama di sini menuliskan `berkas:baris`, dan itu
+ * mengundang entri berikutnya dikunci pada nomor yang bergeser. Repo ini sudah
+ * membayar pembusukan kunci bernomor baris EMPAT kali (`pelaku.test.ts`,
+ * `util/urutan.ts` putaran 27, `util/mutasi-web.ts`, lalu `query-punya-rumah`
+ * di tengah rilis 2026-09-01), dan `kunci-daftar-tak-bergeser.test.ts` kini
+ * menegakkannya secara mekanis.
+ */
 const DIPILAH = new Map<string, string>();
 
 const semua = situsBalasan();

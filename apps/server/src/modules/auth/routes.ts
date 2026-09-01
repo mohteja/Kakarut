@@ -24,7 +24,7 @@ import {
   lewatiRateLimit,
   rateLimit,
 } from "../../middleware/rateLimit";
-import { emailTerkonfigurasi, kirimEmail } from "../mail/service";
+import { emailTerkonfigurasi, kirimEmailDiam } from "../mail/service";
 import { suratReset, suratVerifikasi } from "../mail/surat";
 import { autoTerimaUndanganEmail } from "../onboarding/service";
 import { GUEST } from "../../seed/guest";
@@ -315,15 +315,27 @@ async function kirimKodeVerifikasi(
     return true;
   });
   if (!dikirim) return undefined;
-  try {
-    await kirimEmail({
+  /*
+   * KEGAGALANNYA TAK DIPULANGKAN KE PEMINTA, dan itu keputusan, bukan
+   * kelalaian: rute pemanggilnya (`/register`, `/resend-verification`) sengaja
+   * membalas byte-per-byte sama untuk email yang terdaftar dan yang tidak.
+   * Menambahkan `email_gagal` ke badannya akan membuka kembali enumerasi akun
+   * yang ditutup dengan susah payah — surat hanya dikirim untuk akun yang ADA
+   * dan belum terverifikasi, jadi penandanya menjawab persis pertanyaan yang
+   * tak boleh terjawab.
+   *
+   * Maka satu-satunya jalan keluar kabar ini adalah ke arah OPERATOR, dan
+   * `kirimEmailDiam` yang mengurusnya: log ber-konteks + penghitung kegagalan
+   * beruntun yang dibaca panel setelan.
+   */
+  await kirimEmailDiam(
+    {
       to: email,
       subject: "Kode verifikasi Terakasir",
       html: suratVerifikasi(nama, kode, VERIFIKASI_MENIT, url),
-    });
-  } catch {
-    /* best-effort: jangan gagalkan permintaan bila email error */
-  }
+    },
+    "verifikasi-email",
+  );
   if (!(await emailTerkonfigurasi()) && process.env.NODE_ENV !== "production") {
     return { kode, url };
   }
@@ -446,15 +458,17 @@ export const authRoutes = new Hono<AppEnv>()
           expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 jam
         });
         const url = `${appBaseUrl(c)}/reset-password?token=${raw}`;
-        try {
-          await kirimEmail({
+        // Sama seperti verifikasi: jawabannya wajib netral (lihat catatan di
+        // `kirimKodeVerifikasi`), jadi kabar kegagalannya keluar lewat log +
+        // penghitung, bukan lewat badan respons.
+        await kirimEmailDiam(
+          {
             to: email,
             subject: "Reset password Terakasir",
             html: suratReset(user.nama, url, raw),
-          });
-        } catch {
-          /* best-effort: jangan gagalkan permintaan bila email error */
-        }
+          },
+          "reset-password",
+        );
         if (!(await emailTerkonfigurasi()) && process.env.NODE_ENV !== "production") {
           devUrl = url;
         }
