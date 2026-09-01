@@ -50,6 +50,60 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Gerbang yang tak bisa dijalankan — ponsel — 2026-09-01
+
+- **Yang menghalangi bukan gerbang merah, melainkan IZIN.** Tiga commit
+  menumpuk di `claude` repo ponsel tanpa pernah sekali pun dilewati gerbang,
+  dan tak ada jalan membukanya dari lingkungan tempat commit-commit itu lahir:
+  - Flutter SDK tak terpasang di sini — `flutter analyze`/`flutter test`
+    mustahil dijalankan lokal;
+  - `workflow_dispatch` dijawab **403 "Resource not accessible by
+    integration"**. Diagnosisnya bisa ditunjuk, bukan ditebak: **push berhasil**
+    (`contents: write` ada) dan **daftar run terbaca** (`actions: read` ada);
+    yang ditolak hanya `dispatches` — jadi yang kurang persis `actions: write`.
+
+- **Yang membukanya bukan menambah izin, melainkan MEMINDAHKAN PEMICUNYA.**
+  Daftar izin sebuah GitHub App ditentukan penerbitnya, bukan pemasangnya —
+  jadi "beri izin Actions" belum tentu ada tombolnya. Pemicu push, sebaliknya,
+  ada di dalam repo itu sendiri: `branches: [Production, claude]`.
+
+- **DAN INI MEMBALIK SEBAGIAN KESEPAKATAN**, jadi ditulis di kepala berkasnya
+  bukan diselundupkan. `Production`-saja bukan kelalaian: `ci.yml` repo web
+  menuliskan sebabnya — *"atas permintaan pemilik repo untuk menekan pemakaian
+  menit Actions"*. Yang berubah bukan pendapat soal biaya, melainkan satu fakta
+  yang **tak berlaku di repo web**: suite web bisa dijalankan lokal, suite
+  ponsel tidak. Diputuskan pemiliknya, dengan biayanya disebut lebih dulu (±3
+  menit Actions per push).
+
+- **`paths-ignore` SENGAJA TIDAK DIPASANG.** Ia akan menghemat menit pada push
+  docs-saja, tapi `on.push` hanya punya SATU blok — saringan itu ikut melewati
+  gerbang pada `Production` juga. Gerbang yang bisa dilewati diam-diam bukan
+  penghematan.
+
+- **PREMIS RUN DIPERIKSA SEBELUM WARNANYA DIPERCAYA**, dan itu bukan
+  kerewelan: "hijau" bisa saja run `Production` lama yang tak menguji apa pun.
+  Terukur pada run **#4**: `event=push` · `head_branch=claude` ·
+  `head_sha=846a44d` — sama persis dengan commit yang barusan didorong. Push
+  yang MENAMBAHKAN pemicunya itulah yang memicunya (GitHub membaca berkas
+  workflow dari commit yang didorong).
+
+- **BATAS YANG DIAKUI:**
+  - Gerbangnya kini berjalan, tapi ia tetap **tak bisa dijalankan dari mesin
+    ini** — yang berubah cuma siapa yang memicunya. Perubahan ponsel apa pun
+    dari sesi seperti ini tetap harus menunggu CI, bukan diukur lokal.
+  - Tak ada gerbang yang menjaga pemicu ini tetap ada. Repo ponsel tak punya
+    uji atas berkas CI-nya sendiri; menghapus `claude` dari daftar cabang akan
+    mengembalikan keadaan lama tanpa satu pun asersi berubah warna.
+  - Ia menggerbangi `claude`, bukan cabang kerja lain. `workflow_dispatch`
+    tetap satu-satunya jalan untuk cabang selain kedua itu — dan jalan itu
+    masih tertutup bagi sesi ini.
+
+- **Berkas:** `kakarut-mobile/.github/workflows/ci.yml` (`846a44d`). Repo web
+  **tak disentuh** — `ci.yml`-nya tak pernah menyebut ponsel, jadi tak ada
+  kalimatnya yang jadi salah.
+
+---
+
 ## Kunci daftar-beralasan yang bergeser — server (uji) — 2026-09-01 — dibayar KEEMPAT kalinya, lalu DIJAGA
 
 - **Venanya lahir dari rilis kemarin.** Gerbang hasil-merge memerah di tengah
@@ -8567,11 +8621,11 @@ berlaku di situ).
       satu memakai kunci badan, tujuh layar web ikut menampilkannya. Aturan
       mekanis BARU: tiap rute ber-`potongLarik` wajib mengambil `BATAS + 1`
       DAN punya pembaca di layar
-- [ ] **Gerbang ponsel tak bisa dijalankan dari sesi ini** — Flutter tak
-      terpasang, dan `workflow_dispatch` CI ponsel ditolak 403 (token tanpa
-      `actions: write`). Tiga commit di `claude` ponsel karena itu menunggu
-      tanpa pernah dilewati gerbang. Yang membukanya: memberi izin Actions pada
-      aplikasi GitHub-nya, atau menjalankan CI-nya dari tangan
+- [x] ~~**Gerbang ponsel tak bisa dijalankan dari sesi ini**~~ — SELESAI, lihat
+      entri di atas. Yang membukanya bukan menambah izin melainkan memindahkan
+      PEMICUNYA: `branches: [Production, claude]`. Push ke cabang kerja kini
+      digerbangi CI, dan premis run-nya (event/branch/sha) diperiksa sebelum
+      warnanya dipercaya
 - [x] ~~**`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`**~~ —
       SELESAI, lihat entri di atas. 39 daftar adjudikasi disapu (327 kunci
       harfiah di 34 berkas); **1 daftar / 4 entri** berkunci nomor baris, kini
