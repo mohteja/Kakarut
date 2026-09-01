@@ -35,41 +35,43 @@ const BACAAN_ANGKA = "Number(c.req.query(…))";
 
 /** `berkas:baris` → alasan, untuk bacaan angka yang sengaja dibiarkan. */
 /*
- * KUNCINYA BERKAS + NOMOR BARIS, dan itu KELEMAHAN YANG DIKETAHUI.
+ * KUNCINYA BERKAS + NAMA PARAMETER, bukan berkas + NOMOR BARIS.
  *
- * Repo ini sudah membayar pelajarannya di gerbang lain — `DIPILAH_TANGAN` di
- * `kueri-terkurung-tenant` sengaja berkunci BERKAS + JUMLAH persis karena
- * "gerbang di repo ini sudah sekali patah karena memaku baris yang bergeser
- * gara-gara komentar". Di sini kuncinya masih baris, jadi menambahkan satu
- * komentar di atas situsnya memerahkan gerbang ini tanpa satu pun perilaku
- * berubah. Terjadi lagi 2026-08-31 (kedua entri di bawah bergeser 26 dan 10
- * baris saat vena pemotongan dibayar), dan nomornya diperbarui, bukan
- * gerbangnya dilonggarkan.
+ * Kunci baris di sini membusuk 2026-09-01, di tengah rilis: vena pemotongan
+ * menambah komentar di atas dua situs, entrinya bergeser 26 dan 10 baris, dan
+ * gerbang ini memerah tanpa satu pun perilaku berubah. Itu pembayaran KEEMPAT
+ * atas pelajaran yang sama — `pelaku.test.ts`, `util/urutan.ts` (putaran 27),
+ * dan `util/mutasi-web.ts` sudah menuliskannya, dan `kueri-terkurung-tenant`
+ * sudah memilih BERKAS + JUMLAH justru karena ini.
  *
- * Didaftarkan sebagai vena tersendiri di `docs/audit/vena-audit.md`:
- * kunci baris ini layak diganti kunci yang tak bergeser.
+ * Nama parameternya (`c.req.query("hari")`) menempel pada HAL yang sedang
+ * diadjudikasi: ia berpindah hanya bila parameternya sendiri berganti nama —
+ * dan itu memang saat sebuah keputusan lama layak ditinjau ulang.
+ *
+ * Keunikannya DIPAKU premis di bawah: kunci yang stabil tapi tak unik akan
+ * membuat satu entri diam-diam memaafkan dua situs.
  */
 const DIPILAH = new Map<string, string>([
   [
-    "modules/laporan/routes.ts:562",
+    "modules/laporan/routes.ts:biaya_tetap",
     "Kalkulator BEP: `biaya_tetap` ditolak 400 bila bukan angka atau <= 0, di " +
       "baris berikutnya, dengan pesan yang menyebut namanya. Batas ATAS-nya " +
       "memang tak ada — dan itu tak merusak: hasilnya sekadar angka BEP yang " +
       "besar, bukan kueri yang mahal atau baris yang tertulis.",
   ],
   [
-    "modules/print/kertas.ts:39",
+    "modules/print/kertas.ts:chars_per_line",
     "`chars_per_line` diklem 16..96 di dalam objek yang dipulangkan, bukan di " +
       "pernyataan yang sama — di luar jangkauan pemindai ini, tapi ada dan " +
       "terbaca mata satu layar.",
   ],
   [
-    "modules/print/kertas.ts:40",
+    "modules/print/kertas.ts:feed",
     "`feed` diklem bersama `chars_per_line` di objek yang sama; alasannya sama " +
       "persis dengan tetangganya di atas.",
   ],
   [
-    "modules/stok/routes.ts:275",
+    "modules/stok/routes.ts:hari",
     "`hari` diklem 0..60 di baris BERIKUTNYA (`Math.min(60, Math.max(0, …))`) " +
       "dengan bawaan 7 bila bukan angka — pemindai ini berlingkup satu " +
       "pernyataan, jadi klemnya tak terlihat dari situs bacaannya.",
@@ -141,6 +143,9 @@ function situsAngkaQuery(kode?: Record<string, string>): Situs[] {
 
 const semua = situsAngkaQuery();
 
+/** Kunci adjudikasi: menempel pada parameternya, bukan pada nomor barisnya. */
+const kunciSitus = (x: Situs) => `${x.berkas}:${x.nama}`;
+
 describe("masukan dari query punya rumah, sama seperti masukan dari badan", () => {
   it("PREMIS: populasinya benar-benar tersapu", () => {
     expect(semua.length).toBeGreaterThanOrEqual(4);
@@ -187,10 +192,26 @@ describe("masukan dari query punya rumah, sama seperti masukan dari badan", () =
     }
   });
 
+  /**
+   * PREMIS bagi kunci barunya: `berkas:nama` wajib UNIK di antara situs yang
+   * tak berklem. Kunci stabil yang tak unik adalah cacat kedua — satu entri
+   * akan diam-diam memaafkan DUA bacaan, dan yang kedua tak pernah ditinjau
+   * siapa pun.
+   */
+  it("PREMIS: kunci `berkas:nama` unik di antara situs tak berklem", () => {
+    const k = semua.filter((x) => !x.berklem).map(kunciSitus);
+    const ganda = [...new Set(k.filter((x, i) => k.indexOf(x) !== i))];
+    expect(
+      ganda,
+      "dua bacaan tak berklem berbagi kunci — pakai kunci yang lebih halus:\n" +
+        ganda.join("\n"),
+    ).toEqual([]);
+  });
+
   it("tiap angka dari query dibatasi, atau terdaftar beralasan", () => {
     const liar = semua
       .filter((x) => !x.berklem)
-      .map((x) => `${x.berkas}:${x.baris}`)
+      .map(kunciSitus)
       .filter((k) => !DIPILAH.has(k));
     expect(
       liar,
@@ -204,7 +225,7 @@ describe("masukan dari query punya rumah, sama seperti masukan dari badan", () =
   });
 
   it("anti-kuburan: tiap entri DIPILAH masih punya situsnya, dan beralasan", () => {
-    const nyata = new Set(semua.map((x) => `${x.berkas}:${x.baris}`));
+    const nyata = new Set(semua.map(kunciSitus));
     const basi = [...DIPILAH.keys()].filter((k) => !nyata.has(k));
     expect(basi, `sudah tak ada situsnya — hapus:\n${basi.join("\n")}`).toEqual([]);
     for (const [k, alasan] of DIPILAH) {

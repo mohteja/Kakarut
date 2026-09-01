@@ -50,6 +50,89 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kunci daftar-beralasan yang bergeser — server (uji) — 2026-09-01 — dibayar KEEMPAT kalinya, lalu DIJAGA
+
+- **Venanya lahir dari rilis kemarin.** Gerbang hasil-merge memerah di tengah
+  rilis, dan salah dua penyebabnya bukan produk melainkan `DIPILAH` di
+  `query-punya-rumah` yang berkunci `berkas:NOMOR BARIS`: vena pemotongan
+  menambah komentar di atas dua situs, entrinya bergeser **26 dan 10 baris**,
+  dan dua asersi memerah tanpa satu pun perilaku berubah. Nomornya kuperbarui
+  dan **kudaftarkan sebagai vena** — ini pembayarannya.
+
+- **POPULASI: 39 daftar adjudikasi tangan** di `apps/server/test`
+  (`DIPILAH_TANGAN`, `TERBUKA_SENGAJA`, `DIKECUALIKAN`, `BELUM_TERBUKTI`, …).
+  Disapu mekanis lewat pohon sintaks, **dua bentuk** — objek harfiah
+  (`Record<string, …>`) dan pasangan larik (`new Map([[k, v]])`) — sebab repo
+  ini memakai keduanya, dan menyapu satu saja akan menyatakan berkas yang
+  justru membusuk tak punya kunci sama sekali. **327 kunci harfiah** terbaca di
+  **34 berkas**.
+
+- **TEMUAN: 1 daftar / 4 entri** berkunci nomor baris — seluruhnya
+  `query-punya-rumah.test.ts`. Plus **1 komentar** di `bentuk-balasan.test.ts`
+  yang *meresepkan* `berkas:baris` untuk daftar yang hari ini masih kosong —
+  undangan bagi entri berikutnya untuk lahir busuk.
+
+- **DAN INI TANDA TANGANNYA, LAGI.** Aturannya sudah ditulis di **empat**
+  berkas, dan sudah dibayar **tiga** kali sebelum hari ini:
+  - `pelaku.test.ts:63` — *"versi pertama memakai nomor baris dan langsung
+    membusuk: menambahkan satu komentar…"*
+  - `util/urutan.ts:126` — *"Putaran 27 membayar pembusukan kunci bernomor
+    baris untuk KEDUA kalinya (satu baris `import` menggeser 1228 jadi 1229 dan
+    dua gerbang memerah)."*
+  - `util/mutasi-web.ts:105` — *"sudah dibayar dua kali… Sekali cukup."*
+  - `util/kolom-numerik.ts:46` — *"Kuncinya bukan nomor baris."*
+
+  Empat berkas menuliskan aturannya. **Nol yang menegakkannya.** Aturannya
+  sudah dipikirkan, ditulis, dikomentari panjang — penjaganya dipasang di
+  beberapa pintu, dan pintu lain ke keadaan yang sama dibiarkan terbuka.
+
+- **PERBAIKAN.** `DIPILAH` dikunci `berkas:NAMA PARAMETER`
+  (`modules/stok/routes.ts:hari`), kunci yang menempel pada HAL yang
+  diadjudikasi: ia berpindah hanya bila parameternya sendiri berganti nama —
+  dan itu memang saat keputusan lama layak ditinjau ulang. Keunikannya
+  **dipaku premis tersendiri**: kunci stabil yang tak unik adalah cacat kedua,
+  satu entri diam-diam memaafkan dua bacaan.
+
+- **GERBANG BARU** `kunci-daftar-tak-bergeser.test.ts` — melarang BENTUK
+  `…​.(ts|tsx|dart|sh|md):<angka>` sebagai kunci daftar, di seluruh
+  `apps/server/test`.
+
+- **DETEKTOR DIBUKTIKAN BISA MENUDUH, dua arah:**
+  - atas **kode sungguhan**, sebelum diperbaiki: ia menuduh tepat **4 situs**,
+    yang persis sama dengan yang membusuk kemarin;
+  - atas **sumber sintetis**: kedua bentuk (objek & Map) tertuduh, dan kunci
+    stabil di sebelahnya TIDAK ikut tertuduh.
+
+- **BUKTI MERAH + PASANGAN — dan pasangannya yang paling menentukan:**
+  1. satu kunci dikembalikan ke nomor baris → gerbang baru merah menyebut
+     berkas, baris, dan kuncinya;
+  2. **satu komentar disisipkan di atas situs `hari`** — penyebab persis yang
+     membusukkannya empat kali. Dengan kunci LAMA: `query-punya-rumah` merah
+     **2 asersi** ("tanpa batas yang terlihat" + "sudah tak ada situsnya").
+     Dengan kunci BARU: **12/12 hijau**. Itu perbedaan yang sedang dibeli.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - Yang disapu **kunci HARFIAH** saja. Kunci yang dirakit saat berjalan
+    (`` `${berkas}:${baris}` ``) tak terlihat — dan bentuk itu ADA di repo ini
+    (`urutan.ts`, `mutasi-web.ts`, `bendera-hapus.ts` sudah memakai medan
+    `kunci` yang stabil justru karena pernah membusuk). Yang menahannya tetap
+    keputusan penulisnya, bukan gerbang ini.
+  - Lingkupnya `apps/server/test`, bukan uji ponsel/web di repo lain.
+  - Ia melarang **bentuk** `…:<angka>`, bukan menjamin kunci penggantinya
+    bagus. Kunci stabil yang tak unik adalah cacat lain, dan tiap daftar wajib
+    memaku keunikannya sendiri — `query-punya-rumah` kini melakukannya.
+
+- **Berkas:** `test/kunci-daftar-tak-bergeser.test.ts` (baru) ·
+  `test/query-punya-rumah.test.ts` (kunci + premis keunikan) ·
+  `test/bentuk-balasan.test.ts` (bentuk kunci diperbaiki sebelum entri
+  pertamanya lahir). **Tak ada kode produk yang disentuh.**
+
+- **Gerbang:** typecheck bersih · `npm test` **2.611** (215 berkas) · build web
+  · `verify-api.sh` **3.362 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` **27/27** · Playwright **13/13**.
+
+---
+
 ## RILIS — dan prosedur hasil-merge yang membayar dirinya sendiri, lagi — 2026-09-01
 
 - **Tayang di `production`**: `b6432f7`, memuat tiga putaran (selisih susulan
@@ -8489,12 +8572,11 @@ berlaku di situ).
       `actions: write`). Tiga commit di `claude` ponsel karena itu menunggu
       tanpa pernah dilewati gerbang. Yang membukanya: memberi izin Actions pada
       aplikasi GitHub-nya, atau menjalankan CI-nya dari tangan
-- [ ] **`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`** — dan baris
-      bergeser. Dua entri memerah 2026-08-31 karena vena lain menambah komentar
-      di atasnya, tanpa satu pun perilaku berubah. Repo ini sudah memilih kunci
-      BERKAS + JUMLAH di `kueri-terkurung-tenant` justru karena ini; gerbang
-      yang menuduh karena baris berpindah mengajari pembacanya mengabaikan
-      gerbang. Belum diukur berapa gerbang lain yang berkunci baris
+- [x] ~~**`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`**~~ —
+      SELESAI, lihat entri di atas. 39 daftar adjudikasi disapu (327 kunci
+      harfiah di 34 berkas); **1 daftar / 4 entri** berkunci nomor baris, kini
+      berkunci `berkas:nama-parameter`. Aturannya — sudah ditulis di 4 berkas,
+      dibayar 4 kali, dijaga 0 — akhirnya punya gerbang
 - [ ] **Header `X-Kakarut-Terpotong` belum dirender ponsel** — kini **delapan**
       rute mengirimnya (`/stok/penyesuaian` yang lama + tujuh yang dibayar
       2026-08-31). `core/api_client.dart` sudah punya pembacanya; layarnya
