@@ -98,9 +98,45 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
     tetap satu-satunya jalan untuk cabang selain kedua itu — dan jalan itu
     masih tertutup bagi sesi ini.
 
-- **Berkas:** `kakarut-mobile/.github/workflows/ci.yml` (`846a44d`). Repo web
-  **tak disentuh** — `ci.yml`-nya tak pernah menyebut ponsel, jadi tak ada
-  kalimatnya yang jadi salah.
+- **DAN GERBANGNYA MENGGIGIT PADA JALAN PERTAMANYA.** Run #4 merah: **598
+  lolos, 1 gagal** — dan yang menuduh adalah gerbang kontrak repo ponsel
+  sendiri:
+
+  ```
+  ❌ kunci_kontrak_server_test.dart: kunci kontrak yang tak disentuh wajib tercatat
+     Expected: empty
+       Actual: ['riwayat_terpotong']
+  ```
+
+  **Tuduhannya benar, dan sasarannya aku.** Fikstur kunci kontrak kusegarkan
+  sehari sebelumnya dengan perintah yang dicetak gerbang server — tapi perintah
+  itu hanya **MENYEGARKAN FIKSTUR**; memutuskan nasib kunci barunya adalah
+  langkah KEDUA, dan langkah itu terlewat. Persis bentuk yang uji itu ada untuk
+  mencegah: medan baru lahir di `types.ts` tanpa satu pihak pun wajib
+  memutuskan *"ponsel ikut membaca ini atau tidak"*.
+
+  Tiga commit ponsel menumpuk berminggu-minggu tanpa gerbang; **begitu
+  gerbangnya menyala, ia langsung menemukan sesuatu.** Itu bukan kebetulan —
+  itu ukuran berapa lama sebuah pintu dibiarkan terbuka.
+
+- **Diputuskan, bukan didiamkan**: `riwayat_terpotong` didaftarkan di
+  `kunci-belum-dibaca.txt` dengan **kelompok dan alasannya sendiri**, bukan
+  ditumpangkan ke `rows_terpotong` di atasnya — sebab bedanya penting. Kartu
+  supplier memang tak punya layar di ponsel; laporan Lama Pesanan **punya**
+  (`durasi_detik`, `lewat_target`, `target_detik`, `bertarget` semuanya sudah
+  dibaca `lib/`, dipaku SENTINEL di uji yang sama). Jadi ini bukan fitur yang
+  belum ada, melainkan **satu kalimat yang belum dikatakan**.
+
+- **Hijau, lalu tayang.** Run **#5** (`event=push`, `head_sha=4942376`):
+  `flutter analyze` bersih · `flutter test` **599 lolos**. Merge `claude` →
+  `Production` (`16aa8b4`), pohon hasil merge **identik** dengan yang
+  digerbangi (`git diff` kosong). **Rilis ponsel PERTAMA yang gerbangnya
+  berjalan SEBELUM merge**, bukan sesudah mendarat di `Production`.
+
+- **Berkas:** `kakarut-mobile/.github/workflows/ci.yml` (`846a44d`) ·
+  `test/fikstur/kunci-belum-dibaca.txt` (`4942376`). Repo web **tak disentuh** —
+  `ci.yml`-nya tak pernah menyebut ponsel, jadi tak ada kalimatnya yang jadi
+  salah.
 
 ---
 
@@ -8633,8 +8669,13 @@ berlaku di situ).
       dibayar 4 kali, dijaga 0 — akhirnya punya gerbang
 - [ ] **Header `X-Kakarut-Terpotong` belum dirender ponsel** — kini **delapan**
       rute mengirimnya (`/stok/penyesuaian` yang lama + tujuh yang dibayar
-      2026-08-31). `core/api_client.dart` sudah punya pembacanya; layarnya
-      yang belum. Repo ponsel berumah lain
+      2026-08-31), plus medan badan `riwayat_terpotong` pada laporan Lama
+      Pesanan. `core/api_client.dart:97` sudah punya pembacanya dan **tepat
+      SATU** layar memakainya (`sampah_page.dart:81`);
+      `LaporanDurasi.fromJson` (`operasional_models.dart:1305`) belum mengurai
+      medannya sama sekali. `riwayat_terpotong` sudah TERDAFTAR beralasan di
+      `kunci-belum-dibaca.txt`, jadi utangnya kini berangka dan bernama.
+      **Kini bisa digarap** — gerbang ponselnya sudah berjalan
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama
