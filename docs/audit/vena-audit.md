@@ -180,6 +180,30 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   sehingga perintah pembunuh prosesnya **gagal tanpa suara**. Bentuk yang sama
   dengan vena yang sedang digarap, di alat kerjaku sendiri.
 
+- **DAN MERAH PALSU KEDUA, di gerbang hasil-merge saat rilisnya** — kali ini
+  bukan salah prosedurku melainkan cacat instrumennya, jadi dibayar sebagai
+  perbaikan: `PASANGAN §280: yang kalah tetap dibalas 409` memerah dengan
+  `kode: 200 400`. Blok itu menembak dua `POST /shift/tutup` latar SEKALI lalu
+  langsung menilai; di mesin senggang ia memang berlomba — **terukur 12 dari 12
+  putaran menghasilkan `200 409`** — tapi di tengah suite penuh penjadwalnya
+  sesekali menjalankan keduanya BERURUTAN, dan yang kedua tertahan
+  `shiftTerbuka()` lalu dibalas `400`. Komentar di blok itu sendiri sudah
+  menuliskan bahwa `400` adalah "jawaban yang benar, tapi bukan jalur yang
+  sedang dijaga" — ia cuma tak pernah menindaklanjutinya.
+
+  Perbaikannya: balapannya **distaging ulang sampai benar-benar berpapasan**
+  (maks 8 percobaan), dan jumlah percobaannya IKUT DINILAI sebagai premis —
+  supaya pengulangan itu tak bisa diam-diam menelan kegagalan yang sesungguhnya.
+  Yang membuatnya aman: pengulangan **hanya** dipicu `400`. Diuji atas empat
+  keadaan palsu — `200 409` hijau di percobaan 1 · `200 400` **merah sebagai
+  premis** sesudah 8 percobaan · `200 500` dan `200 200` **merah di percobaan
+  1**, tak pernah diulang. Pelanggaran sungguhan tak bisa diputar sampai hijau.
+
+  Kelasnya sudah bernama di sesi ini: *gerbang yang menuduh karena kalender /
+  baris / penjadwal berpindah mengajari pembacanya mengabaikan gerbang.* Ini
+  kejadian ketiga, dan yang pertama yang penyebabnya bukan kalender atau nomor
+  baris melainkan **CPU yang sibuk**.
+
 ---
 
 ## Gerbang yang tak bisa dijalankan — ponsel — 2026-09-01
