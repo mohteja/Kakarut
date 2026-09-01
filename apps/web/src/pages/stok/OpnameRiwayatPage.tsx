@@ -12,7 +12,7 @@ import type {
 import { ErrorText, Spinner, SpinnerAtauGalat } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
-import { api } from "../../lib/api";
+import { api, bacaTerpotong } from "../../lib/api";
 import { formatAngka, formatWaktu } from "../../lib/format";
 
 type JenisOpname = "bahan" | "perlengkapan";
@@ -485,16 +485,36 @@ export function OpnameRiwayatPage() {
   const [detail, setDetail] = useState<string | null>(null);
   const [detailPerl, setDetailPerl] = useState<string | null>(null);
 
+  /*
+   * KEDUA riwayat dipotong server (200 sesi bahan, 100 sesi perlengkapan), dan
+   * halaman ini justru yang dipakai menelusuri opname LAMA. Daftar yang habis
+   * di layar tanpa penanda terbaca sebagai "tak ada opname sebelum ini" —
+   * kesimpulan yang salah pada halaman yang ada untuk membuktikan sebaliknya.
+   */
+  const [terpotong, setTerpotong] = useState<number | null>(null);
+  const [terpotongPerl, setTerpotongPerl] = useState<number | null>(null);
   const { data: sesi, isLoading, error: sesiGagal } = useQuery({
     queryKey: ["opname-riwayat", branchQuery],
-    queryFn: () => api<OpnameSesiRow[]>(`/stok/opname/riwayat${branchQuery}`),
+    queryFn: () =>
+      api<OpnameSesiRow[]>(`/stok/opname/riwayat${branchQuery}`, {
+        bacaHeader: bacaTerpotong(setTerpotong),
+      }),
     enabled: tab === "bahan",
   });
   const { data: sesiPerl, isLoading: loadingPerl, error: sesiPerlGagal } = useQuery({
     queryKey: ["perlengkapan-opname", branchQuery],
-    queryFn: () => api<OpnamePerlengkapanSesiRow[]>(`/perlengkapan/opname/riwayat${branchQuery}`),
+    queryFn: () =>
+      api<OpnamePerlengkapanSesiRow[]>(`/perlengkapan/opname/riwayat${branchQuery}`, {
+        bacaHeader: bacaTerpotong(setTerpotongPerl),
+      }),
     enabled: tab === "perlengkapan",
   });
+  const spanduk = (n: number, apa: string) => (
+    <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+      Menampilkan <b>{n} {apa} terakhir</b>. Yang <b>lebih lama</b> tidak ikut ditampilkan di
+      sini.
+    </div>
+  );
 
   const gantiTab = (t: JenisOpname) => {
     setDetail(null);
@@ -542,7 +562,9 @@ export function OpnameRiwayatPage() {
               Belum ada riwayat opname bahan baku.
             </div>
           ) : (
-            (sesi ?? []).map((s) => (
+            <>
+            {terpotong !== null && spanduk(terpotong, "sesi opname bahan")}
+            {(sesi ?? []).map((s) => (
               <button
                 key={s.session_id}
                 onClick={() => setDetail(s.session_id)}
@@ -564,7 +586,8 @@ export function OpnameRiwayatPage() {
                 </div>
                 <StatusBadge status={s.status} jumlahSelisih={s.jumlah_selisih} />
               </button>
-            ))
+            ))}
+            </>
           )
         ) : sesiPerlGagal ? (
           <SpinnerAtauGalat error={sesiPerlGagal} apa="Riwayat opname perlengkapan" />
@@ -575,7 +598,9 @@ export function OpnameRiwayatPage() {
             Belum ada riwayat opname perlengkapan.
           </div>
         ) : (
-          (sesiPerl ?? []).map((s) => (
+          <>
+          {terpotongPerl !== null && spanduk(terpotongPerl, "sesi opname perlengkapan")}
+          {(sesiPerl ?? []).map((s) => (
             <button
               key={s.session_id}
               onClick={() => setDetailPerl(s.session_id)}
@@ -596,7 +621,8 @@ export function OpnameRiwayatPage() {
               </div>
               <StatusBadgePerl status={s.status} jumlah={s.jumlah_item} />
             </button>
-          ))
+          ))}
+          </>
         )}
       </main>
 

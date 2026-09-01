@@ -226,8 +226,24 @@ export function LaporanDurasiPesananPage() {
           <Card className="p-0">
             <div className="border-b border-stone-200 px-4 py-3">
               <h2 className="font-semibold text-stone-800">Riwayat penyelesaian</h2>
+              {/*
+                ANGKA YANG MENDAMAIKAN, bukan sekadar spanduk. Kartu di atas
+                menampilkan `lap.jumlah` — hitungan SEBENARNYA dari agregat
+                yang tak dibatasi — sementara tabel ini berisi paling banyak
+                200 baris. Dua angka berselisih yang berdiri di satu layar
+                menyembuhkan dirinya hanya kalau ditautkan.
+              */}
               <p className="mt-0.5 text-xs text-stone-500">
-                Terbaru lebih dulu, dibatasi 200 baris terakhir.
+                Terbaru lebih dulu
+                {lap.riwayat_terpotong ? (
+                  <>
+                    , menampilkan <b>{lap.riwayat.length}</b> dari{" "}
+                    <b>{lap.jumlah}</b> sajian yang terhitung. Statistik per menu di atas tetap
+                    dihitung dari <b>seluruhnya</b>.
+                  </>
+                ) : (
+                  <> — seluruh {lap.riwayat.length} sajian yang terhitung ada di sini.</>
+                )}
               </p>
             </div>
             <div className="overflow-x-auto">

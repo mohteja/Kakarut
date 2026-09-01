@@ -30,8 +30,19 @@ interface Alasan {
   teks: string;
 }
 
-/** Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar. */
-const MAKS_UTANG = 2;
+/**
+ * Utang yang diakui, dalam SITUS. Wajib TURUN begitu terbayar.
+ *
+ * NOL sejak 2026-08-31, dan nol di sini berarti sesuatu yang bisa diperiksa:
+ * tiap situs periksa-dulu-baru-tulis di `src` entah memegang penahan yang
+ * TERBACA MESIN, entah terdaftar `sah` beserta alasan kenapa
+ * penulis-terakhir-menang memang arti yang benar di situ. Tak ada lagi baris
+ * yang berbunyi "tahu ini salah, belum sempat".
+ *
+ * Asersi `MAKS_UTANG - utang.length <= 1` di bawah menjaga angka ini tetap
+ * ketat: menaikkannya kembali menuntut alasan yang ditulis, bukan diam.
+ */
+const MAKS_UTANG = 0;
 
 /** kunci: `berkas` -> nama fungsi -> alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
@@ -101,28 +112,30 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "padanya.",
     },
   },
-  "modules/admin-tenants/routes.ts": {
-    // Kunci daftar berubah `transaction` → `jalankan` begitu callback transaksi
-    // berhenti dinilai sebagai situs tersendiri: yang tertuduh kini fungsi
-    // yang MENULISKAN transaksinya, dan itu memang nama yang benar untuknya.
-    jalankan: {
-      kelas: "utang",
-      teks:
-        "UTANG. Pembuatan penyewa (companies + users) oleh super admin. " +
-        "Peluangnya kecil — satu orang, satu formulir — tapi kecil bukan " +
-        "ditahan, dan itu justru pembedaan yang vena ini ada untuk menjaga.",
-    },
-  },
-  "modules/auth/superadmin.ts": {
-    pastikanSuperAdmin: {
-      kelas: "utang",
-      teks:
-        "UTANG, dan tetangganya sudah menunjukkan jawabannya: " +
-        "`backfillEmployeeCode` di berkas sebelah memegang advisory lock " +
-        "supaya dua instance yang boot bersamaan tak menulis ganda. Fungsi " +
-        "ini berjalan di boot yang sama dan tidak.",
-    },
-  },
+  /*
+   * DUA ENTRI DIHAPUS 2026-08-31, dan keduanya dengan sebab yang BERBEDA —
+   * pembedaan yang layak ditinggalkan buat penerusnya.
+   *
+   *   `modules/admin-tenants/routes.ts` -> `jalankan` — TUDUHAN DICABUT.
+   *   Balapannya sudah ditahan `companies_slug_unique` + `users_email_unique`
+   *   sejak lama, diterjemahkan PER INDEKS jadi 409, dan §213 verify-api sudah
+   *   mengukurnya lewat HTTP (3 pembuatan tenant kembar → tak ada 5xx, tepat
+   *   satu lahir). Yang tak terbaca penjaganya: `.catch(bentrokUnikPada …)`
+   *   menempel di situs PANGGIL, satu lingkup di luar fungsi yang tertuduh.
+   *   `.catch`-nya dipindahkan ke dalam badan `jalankan` — perilaku identik,
+   *   bukti jadi terbaca mesin, kelasnya `BENTROK`. Alasan tulisan tangannya
+   *   ("kecil bukan ditahan") ternyata SALAH sejak ditulis, dan itu dicatat
+   *   apa adanya di ledger, bukan dihapus diam-diam.
+   *
+   *   `modules/auth/superadmin.ts` -> `pastikanSuperAdmin` — UTANG DIBAYAR,
+   *   bukan dicabut. Ia memang tak punya penahan; kini memegang
+   *   `kunciAntrean(tx, "super-admin")`, kunci yang sama jenisnya dengan yang
+   *   sudah dipegang tetangganya `backfillEmployeeCode` di boot yang sama.
+   *   Terukur 8 ronde: 3/8 bersih → 8/8.
+   *
+   * Keduanya dipaku di bawah ("provisi super admin memegang kuncinya",
+   * "pembuatan penyewa terbaca BENTROK"), jadi ia tak bisa kembali diam-diam.
+   */
 };
 
 const semua = situsLomba();
@@ -142,6 +155,41 @@ describe("periksa-dulu-baru-tulis wajib punya penahan", () => {
     for (const k of ["KUNCI", "BENTROK", "KLAIM"] as const) {
       expect(semua.filter((x) => x.kelas === k).length, `kelas ${k}`).toBeGreaterThanOrEqual(10);
     }
+  });
+
+  /**
+   * DUA SITUS YANG DULU `utang`, DIPAKU PADA KELASNYA — bukan sekadar dihapus
+   * dari daftar.
+   *
+   * Menghapus entri dari `daftar` saja tak menahan apa pun: begitu penahannya
+   * dicabut lagi, situsnya kembali tertuduh dan yang merah cuma uji "sudah
+   * diadjudikasi" — pesan yang menyuruh MENDAFTARKANNYA, bukan mengembalikan
+   * penjaganya. Dua asersi di bawah menyebut kelas yang dituntut, jadi
+   * pencabutan mana pun memerah dengan kalimat yang menunjuk sebabnya.
+   */
+  it("provisi super admin memegang kuncinya", () => {
+    const s = semua.find(
+      (x) => x.berkas === "modules/auth/superadmin.ts" && x.nama === "pastikanSuperAdmin",
+    );
+    expect(s, "situs pastikanSuperAdmin hilang dari sapuan").toBeDefined();
+    expect(
+      s!.kelas,
+      "dua boot yang bertindih: 3/8 bersih tanpa kunci — sisanya galat 23505 " +
+        "atau kalimat 'email sudah dipakai akun lain' yang keliru",
+    ).toBe("KUNCI");
+  });
+
+  it("pembuatan penyewa terbaca BENTROK, bukan telanjang", () => {
+    const s = semua.find(
+      (x) => x.berkas === "modules/admin-tenants/routes.ts" && x.nama === "jalankan",
+    );
+    expect(s, "situs jalankan hilang dari sapuan").toBeDefined();
+    expect(
+      s!.kelas,
+      "terjemahan `bentrokUnikPada` harus hidup DI DALAM `jalankan` — di situs " +
+        "panggilnya ia benar tapi tak terbaca, dan situsnya kembali menuntut " +
+        "adjudikasi tangan",
+    ).toBe("BENTROK");
   });
 
   it("PREMIS: pengisi kode massal memegang kuncinya", () => {

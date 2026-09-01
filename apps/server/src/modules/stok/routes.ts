@@ -44,6 +44,16 @@ import { fifoBahan, hitungSaldoCabang, kartuStok, qtyDiJalan } from "./service";
  */
 const BATAS_PENYESUAIAN = 300;
 
+/**
+ * Tiga daftar lain di berkas ini yang dulu dipotong TANPA berkata apa-apa.
+ * Angkanya tak berubah; yang berubah, ketiganya kini mengaku lewat header
+ * `X-Kakarut-Terpotong` (lihat `lib/potong.ts` — bentuk larik telanjangnya
+ * tak boleh berubah jadi objek).
+ */
+const BATAS_EXP = 300;
+const BATAS_OPNAME_SESI = 200;
+const BATAS_OPNAME_BARIS = 200;
+
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
   catatan: z.string().nullish(),
@@ -306,7 +316,9 @@ export const stokRoutes = new Hono<AppEnv>()
         AND pr.exp_date <= ${today}::date + ${hari}::int
         AND (b.created_at IS NULL OR pr.waktu > b.created_at)
       ORDER BY pr.exp_date ASC, i.nama ASC
-      LIMIT 300
+      -- SATU BARIS LEBIH dari batasnya: itulah cara membedakan "pas 300" dari
+      -- "300 dari sekian". potongLarik di bawah membuangnya lagi.
+      LIMIT ${BATAS_EXP + 1}
     `);
 
     // saldo live per bahan (semua lot) — konteks menilai sisa
@@ -330,7 +342,14 @@ export const stokRoutes = new Hono<AppEnv>()
         sisa_hari: Number(row.sisa_hari),
       };
     });
-    return c.json(items);
+    /*
+     * Layar ini dipakai memutuskan apa yang harus dijual duluan. Daftar yang
+     * dipotong diam-diam di sini berarti lot yang paling dekat kedaluwarsa
+     * memang tampil (urutannya menaik), tapi pemakainya tak pernah tahu masih
+     * ada ekor yang tak terkirim — dan yang menyaring di browser tak akan
+     * pernah menemukan baris ke-301.
+     */
+    return c.json(potongLarik(c, items, BATAS_EXP));
   })
   /**
    * CATAT WASTE (mis. bahan kedaluwarsa): memotong stok lewat mekanisme
@@ -1022,10 +1041,12 @@ export const stokRoutes = new Hono<AppEnv>()
       )
       .groupBy(stockOpnames.sessionId)
       .orderBy(desc(sql`max(${stockOpnames.createdAt})`), stockOpnames.sessionId)
-      .limit(200);
+      // SATU baris lebih dari batasnya — lihat `potongLarik` di bawah.
+      .limit(BATAS_OPNAME_SESI + 1);
+    const dipakai = potongLarik(c, rows, BATAS_OPNAME_SESI);
 
     // resolusi nama user (opsional)
-    const userIds = [...new Set(rows.map((r) => r.user_id).filter(Boolean))] as string[];
+    const userIds = [...new Set(dipakai.map((r) => r.user_id).filter(Boolean))] as string[];
     const namaById = new Map<string, string>();
     if (userIds.length > 0) {
       const us = await db
@@ -1038,11 +1059,11 @@ export const stokRoutes = new Hono<AppEnv>()
     const nomorBySesi = await nomorUntukRefs(
       db,
       auth.company_id!,
-      rows.map((r) => r.session_id!).filter(Boolean),
+      dipakai.map((r) => r.session_id!).filter(Boolean),
     );
 
     return c.json(
-      rows.map((r) => ({
+      dipakai.map((r) => ({
         session_id: r.session_id,
         nomor: r.session_id ? (nomorBySesi.get(r.session_id) ?? null) : null,
         waktu: r.waktu,
@@ -1280,6 +1301,14 @@ export const stokRoutes = new Hono<AppEnv>()
         and(eq(stockOpnames.companyId, auth.company_id!), eq(stockOpnames.branchId, branchId)),
       )
       .orderBy(desc(stockOpnames.createdAt), desc(stockOpnames.id))
-      .limit(200);
-    return c.json(rows);
+      .limit(BATAS_OPNAME_BARIS + 1);
+    /*
+     * BATAS YANG DIAKUI, ditulis di sini supaya tak terbaca lebih baik dari
+     * kenyataannya: rute ini TAK DIBACA klien mana pun hari ini — tak ada
+     * layar web yang memanggilnya, dan `docs/API-CONTRACT.md` pun tak
+     * menyebutnya (ia hanya diketuk verify-api). Headernya tetap dipasang
+     * karena murah dan benar, tapi jangan salah baca ini sebagai "sudah
+     * sampai ke mata orang". Terdaftar beralasan di `pemotongan-terungkap`.
+     */
+    return c.json(potongLarik(c, rows, BATAS_OPNAME_BARIS));
   });

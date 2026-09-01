@@ -97,6 +97,26 @@ Handler global (`app.onError`):
 Setiap respons API membawa **`X-Kakarut-Build: <buildId>`** (sinyal versi
 frontend). Aman diabaikan oleh klien mobile.
 
+**`X-Kakarut-Terpotong: <batas>` — daftar yang DIPOTONG mengatakannya.**
+Sejumlah rute membatasi panjang daftarnya supaya satu layar tak menarik ribuan
+baris. Bila pemotongan itu benar-benar terjadi, responsnya membawa header ini
+berisi **jumlah baris yang dikirim**; bila daftarnya memang lebih pendek dari
+batasnya, headernya **tidak ada sama sekali** (bukan `0`). Klien yang membacanya
+bisa berkata "menampilkan N terbaru, masih ada yang lebih lama"; klien yang
+tidak, tak berubah sama sekali — **bentuk badan responsnya tetap larik
+telanjang**, dan itu disengaja supaya build lama yang membacanya `as List` tak
+rusak.
+
+Rute yang memakai header ini: `GET /api/shift`, `/api/shift/selisih`,
+`/api/stok/exp`, `/api/stok/opname`, `/api/stok/opname/riwayat`,
+`/api/stok/penyesuaian`, `/api/perlengkapan/opname/riwayat`,
+`/api/perlengkapan/beli`, `/api/perlengkapan/kiriman`, `/api/sampah`,
+`/api/menu/:id/riwayat-harga`.
+
+Balasan berbentuk **objek** memakai kunci badan, bukan header — mis.
+`transaksi_terpotong` (detail shift), `lots_terpotong` (riwayat harga lot),
+`rows_terpotong` (kartu supplier), `riwayat_terpotong` (laporan lama pesanan).
+
 ### Pembatasan laju (rate limiting) — **429**
 Endpoint sensitif dibatasi per (IP + email/identitas) untuk mencegah brute-force /
 abuse: **login, register, forgot/reset password, verifikasi email, kirim-ulang
@@ -1176,7 +1196,7 @@ lahir sebagai pekerjaan baru yang belum tersentuh.
 
 - `GET /api/shift/aktif` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift | null` (shift terbuka + rekap live). **HITUNG BUTA:** untuk peran terkunci cabang (kasir/tim) selagi shift masih TERBUKA **dan hitungan belum dikunci**, `hitung_buta: true` dan angka tunai disembunyikan — `kas_sistem`, `penjualan_tunai`, dan `selisih` semuanya `null` (**bukan 0** — nol adalah angka yang sah). `jumlah_transaksi`, non-tunai, dan `modal_awal` tetap tampil. Owner/admin tak pernah dibutakan.
 - `GET /api/shift/pantau` — **[owner/admin]** — res: `ShiftPantauRow[]` — pantau operasional SEMUA cabang store: status kasir + rekap **hari ini** (zona waktu perusahaan) + jam operasional + tanda telat buka/lupa tutup. **DUA JENDELA, jangan dicampur:** `penjualan_tunai`/`penjualan_nontunai`/`jumlah_transaksi` berjendela **hari ini** (boleh memuat beberapa shift), sedangkan `penjualan_tunai_shift` & `kas_sistem` hanya milik **shift yang sedang terbuka** — `kas_sistem = modal_awal + penjualan_tunai_shift`, angka yang sama dengan `/shift/aktif` dan dengan yang dibandingkan `POST /shift/tutup`. Pada cabang bershift dua, uang shift yang sudah ditutup sudah dihitung dan diangkat dari laci, jadi ia TIDAK boleh ikut di `kas_sistem`.
-- `GET /api/shift` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50)
+- `GET /api/shift` — [owner/admin/cashier] — query: `branch_id?` — res: `Shift[]` (shift tertutup, maks 50; **`X-Kakarut-Terpotong: 50`** bila ada yang lebih lama)
 - `GET /api/shift/:id` — [owner/admin/cashier; cashier terkunci cabangnya] — res: `ShiftDetail` (= `Shift` + `transaksi: ShiftTransaksiRow[]`, maks 300, urut waktu desc, + `transaksi_terpotong: boolean` — true bila masih ada transaksi lain di luar 300 itu; `jumlah_transaksi` tetap hitungan SEBENARNYA dari agregat tanpa batas, jadi rekap kas tak terpengaruh pemotongan) — error: **403** shift bukan cabang kasir, **404**
 - `POST /api/shift/buka` — **[cashier]** — req: `{ modal_awal: number(≥0)=0 }` — res: **201** `Shift` — error: **400** shift sudah terbuka **atau kasir belum absen masuk hari ini** (pesan: "Absen masuk dulu sebelum buka kasir"), **403** luar cabang
 - `POST /api/shift/kunci-hitungan` — **[cashier]** — query: `branch_id?` — req: `{ uang_fisik: number(≥0) }` — res: `{ uang_fisik, kas_sistem, selisih }` — error: **400** tak ada shift terbuka, **409** hitungan sudah dikunci dengan nominal LAIN. **Ini "reveal"-nya**: `kas_sistem` & `selisih` dibuka di sini, setelah nominal fisik terkunci. Nominal yang **sama** dikirim ulang tetap **200** (retry jaringan bukan kecurangan). Respons 409 tetap membawa `uang_fisik`/`kas_sistem`/`selisih` milik penguncian pertama, di samping `error`.
@@ -1349,7 +1369,7 @@ Laporan:
 - `GET /api/stok` — [any] — query: `branch_id?` — res: array saldo stok (saldo per ingredient)
 - `GET /api/stok/kartu/:ingredientId` — [any] — query: `branch_id?`, `dari?`, `sampai?` — res: kartu ledger stok (`KartuStokDto`; mutasi kini juga memuat jenis `kirim` = kiriman keluar/transfer stok ke cabang lain yang sudah diterima) — error: **400** stok tak dilacak, **404**
 - `GET /api/stok/fifo/:ingredientId` — [any] — query: `branch_id?` — **KARTU FIFO** satu bahan pada satu cabang: seluruh riwayat masuk/keluar di-walk kronologis, keluar mengonsumsi lot **paling awal masuk** (First-In First-Out). Res: `BahanFifoDto` = lot masuk (qty/harga/terpakai/sisa/exp) + `pemakaian` (terbaru dulu, maks 300; tiap baris membawa `rincian` diambil dari lot mana + `hpp` biaya FIFO) + `saldo` (== saldo ledger) + `defisit` (stok minus tak tertutup lot). Opname disetujui = reset: selisih turun dikonsumsi FIFO, selisih naik jadi lot penyesuaian berharga acuan. — error: **400** stok tak dilacak, **404**
-- `GET /api/stok/exp` — [any] — query: `branch_id?`, `hari?=7` (clamp 0..60) — res: `ExpLotRow[]` (lot masuk stok ber-`exp_date` ≤ hari ini + `hari`, urut exp ASC, maks 300; lot sebelum baseline opname terakhir bahan itu dikecualikan). **APROKSIMASI**: ledger stok agregat tanpa FIFO — `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` live bahan disandingkan agar pemakai menilai sendiri. `sisa_hari` = exp − hari ini (negatif = lewat)
+- `GET /api/stok/exp` — [any] — query: `branch_id?`, `hari?=7` (clamp 0..60) — res: `ExpLotRow[]` (lot masuk stok ber-`exp_date` ≤ hari ini + `hari`, urut exp ASC, maks 300 + **`X-Kakarut-Terpotong`**; lot sebelum baseline opname terakhir bahan itu dikecualikan). **APROKSIMASI**: ledger stok agregat tanpa FIFO — `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` live bahan disandingkan agar pemakai menilai sendiri. `sisa_hari` = exp − hari ini (negatif = lewat)
 - `POST /api/stok/waste` — [owner/admin/cashier/tim/kitchen/bar] (peran terikat cabang hanya cabangnya) — req: `{ branch_id?: uuid, ingredient_id: uuid, qty: number(>0), foto_url: string (min 1, **bukti foto wajib**), catatan?|null (max300) }` — mencatat WASTE (mis. bahan kedaluwarsa) lewat mekanisme penyesuaian yang ada: menulis SATU sesi `stock_opnames` (fisik = saldo − qty, `penyesuaian_kategori:"waste_bahan"`, status `menunggu`) → tampil di Riwayat SO dan **baru memotong stok setelah di-ACC** owner/admin — res: **201** `{ ok, session_id, nomor }` (SO-xxxx) — error: **400** (bahan invalid/tak dilacak, qty > saldo), **403** luar cabang
 - `POST /api/stok/opname` — [owner/admin/cashier/tim/kitchen/bar] (inline) — req `OpnameBody`: `{ branch_id?: uuid, catatan?|null, client_ref?: uuid, device_id?|null, items: [{ingredient_id:uuid, qty:number(≥0), foto_url?|null, alasan?|null}] (min 1) }` — res: **201** `{ ok, jumlah, session_id, nomor, ringkasan }` — error: **400** bahan invalid/tak dilacak, **403** (luar cabang / bukan petugas opname rak itu — hanya petugas ANGGOTA AKTIF yang dihitung; penugasan basi diabaikan)
 
@@ -1378,7 +1398,7 @@ Laporan:
 - `POST /api/stok/penyesuaian/:id/setujui` — [owner/admin] — res: `{ ok: true }` — error: **400**, **404**
 - `POST /api/stok/penyesuaian/:id/tolak` — [owner/admin] — req: `{ alasan: string (min 1) }` — res: `{ ok: true }` — error: **404**
 - `POST /api/stok/penyesuaian/setujui-massal` — [owner/admin] — query: `branch_id?` — res: `{ ok, jumlah }`
-- `GET /api/stok/opname/riwayat` — [any] — query: `branch_id?` — res: row ringkasan sesi (per session_id)
+- `GET /api/stok/opname/riwayat` — [any] — query: `branch_id?` — res: row ringkasan sesi (per session_id; maks 200 + **`X-Kakarut-Terpotong`**)
 - `GET /api/stok/opname/sesi/:sessionId` — [any] — res: detail sesi (fisik vs sistem per bahan) — error: **404**
 - `POST /api/stok/opname/sesi/:sessionId/acc` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/stok/opname/sesi/:sessionId/tolak` — [owner/admin] — req: `{ alasan?|null }` — res: `{ ok, jumlah }` — error: **404**
@@ -1395,15 +1415,15 @@ Laporan:
 - `GET /api/perlengkapan/master` — [owner/admin] — res: distribusi perlengkapan seluruh perusahaan
 - `POST /api/perlengkapan/stok-awal` — [owner/admin] — query: `branch_id?` — req: `{ items: [{supply_id:uuid, qty:number(≥0)}] (min1) }` — res: `{ ok, jumlah, diubah }` — error: **404**
 - `POST /api/perlengkapan/opname` — [any] — query: `branch_id?` — req: `{ items: [{supply_id:uuid, qty_fisik:number(≥0)}] (min1), catatan?|null (max300) }` — res: **201** `{session_id,nomor,...}` atau `{ session_id: null, ... }` bila tak ada selisih
-- `GET /api/perlengkapan/opname/riwayat` — [any] — query: `branch_id?` — res: daftar sesi
+- `GET /api/perlengkapan/opname/riwayat` — [any] — query: `branch_id?` — res: daftar sesi (maks 100 + **`X-Kakarut-Terpotong`**)
 - `GET /api/perlengkapan/opname/sesi/:sessionId` — [any] — res: detail sesi — error: **404**
 - `POST /api/perlengkapan/opname/sesi/:sessionId/acc` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/opname/sesi/:sessionId/tolak` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `DELETE /api/perlengkapan/opname/sesi/:sessionId` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/permintaan-otomatis` — [owner/admin] — query: `branch_id?`, `rencana_id?` (tautkan faktur BP ke permintaan Tambah Stok dari Menu → tampil di `PermintaanStokRow.beli_perlengkapan`) — res: `PermintaanPerlengkapanOtomatisHasil` (seluruh item kurang jadi **SATU faktur BP multi-item** — lihat `beli_faktur`) — error: **400/404**
-- `GET /api/perlengkapan/kiriman` — [any] — query: `branch_id?` — res: daftar kiriman
+- `GET /api/perlengkapan/kiriman` — [any] — query: `branch_id?` — res: daftar kiriman (maks 50 + **`X-Kakarut-Terpotong`**)
 - `POST /api/perlengkapan/kiriman/:id/terima` — [any] — query: `branch_id?` — res: hasil — error: **400/404**
-- `GET /api/perlengkapan/beli` — [any] — query: `branch_id?` (owner/admin; cashier/tim terkunci CK-nya) — res: `BeliPerlengkapanRow[]` (baris; kelompokkan per `faktur_id` — baris warisan `faktur_id=null` = faktur satu-item; `nomor` BP- per FAKTUR; kini juga memuat `diproses_oleh` (pemroses), `supplier_utama` (tempat beli — supplier langganan item), dan `harga_beli` master utk estimasi RAB). **Status pipeline paritas beli bahan baku**: `menunggu` (RAB) → `diproses` (sedang dibelanjakan) → `tiba` / `batal`. **Faktur yang PERMINTAANNYA SUDAH DIHAPUS TIDAK ditampilkan** (baris non-`tiba` yang `rencana_id`-nya hanya punya produksi ter-soft-delete) — konsisten dgn productions yang lenyap; status `batal` hanya tampil bila permintaannya masih ada (pembatalan sah). Baris `tiba` (stok nyata) selalu tampil.
+- `GET /api/perlengkapan/beli` — [any] — query: `branch_id?` (owner/admin; cashier/tim terkunci CK-nya) — res: `BeliPerlengkapanRow[]` (maks 200 + **`X-Kakarut-Terpotong`**; baris; kelompokkan per `faktur_id` — baris warisan `faktur_id=null` = faktur satu-item; `nomor` BP- per FAKTUR; kini juga memuat `diproses_oleh` (pemroses), `supplier_utama` (tempat beli — supplier langganan item), dan `harga_beli` master utk estimasi RAB). **Status pipeline paritas beli bahan baku**: `menunggu` (RAB) → `diproses` (sedang dibelanjakan) → `tiba` / `batal`. **Faktur yang PERMINTAANNYA SUDAH DIHAPUS TIDAK ditampilkan** (baris non-`tiba` yang `rencana_id`-nya hanya punya produksi ter-soft-delete) — konsisten dgn productions yang lenyap; status `batal` hanya tampil bila permintaannya masih ada (pembatalan sah). Baris `tiba` (stok nyata) selalu tampil.
 - `POST /api/perlengkapan/beli` — [owner/admin] — req **multi-item**: `{ items: [{supply_id:uuid, qty:number(>0), total_harga?:number(≥0)|null}] (1..100), ck_branch_id?:uuid|null, tujuan_branch_id?:uuid|null, catatan?|null }` (bentuk lama satu-item `{supply_id, qty, …}` tetap diterima) — res: **201** `{ faktur_id, nomor, ids[] }` — error: **400/404**
 - `POST /api/perlengkapan/beli/faktur/:fakturId/proses` — [owner/admin] — tandai faktur **diproses** (sedang dibelanjakan; pemroses tercatat) — hanya dari 'menunggu' — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/beli/faktur/:fakturId/tiba` — [owner/admin] — req: `{ items?: [{id:uuid, qty?:number(>0), total_harga?:number(≥0)|null}] }` — proses SEMUA baris 'menunggu'/'diproses' faktur (masuk stok CK PL- per baris + auto-kirim KP- per baris) — res: `{ faktur_id, jumlah_tiba, kiriman[] }` — error: **400/404**
@@ -1454,7 +1474,7 @@ Laporan:
 
 ## `/api/sampah` — Tempat sampah / record soft-deleted (`modules/sampah/routes.ts`) — group guard **[owner/admin]**
 
-- `GET /api/sampah` — res: `SampahRow[]` (penjualan + pembelian + produksi yang di-soft-delete)
+- `GET /api/sampah` — res: `SampahRow[]` (penjualan + pembelian + produksi yang di-soft-delete; berlangit-langit + **`X-Kakarut-Terpotong`**)
 - `POST /api/sampah/pulihkan` — req: `{ jenis: "penjualan"|"pembelian"|"produksi", key: string(uuid) }` — res: `{ ok, jumlah_baris }` — error: **404**
 - `POST /api/sampah/kosongkan` — hapus permanen semua sampah — res: `{ ok, penjualan, faktur }`
 
@@ -3381,6 +3401,16 @@ export interface LaporanDurasiPesanan {
   per_menu: DurasiMenuRow[];
   /** penyelesaian terbaru lebih dulu — dibatasi agar layar tak kebanjiran */
   riwayat: DurasiRiwayatRow[];
+  /**
+   * `riwayat` DIPOTONG — dan `jumlah` di atas TIDAK.
+   *
+   * Kedua angka itu berdiri di layar yang sama, jadi tanpa penanda ini
+   * "1.284 sajian terhitung" tampil tepat di atas daftar berisi 200 tanpa
+   * satu kata pun menjelaskan selisihnya. `per_menu` dan `jumlah` lahir dari
+   * agregat `GROUP BY` yang tak dibatasi, jadi statistiknya tetap atas
+   * SELURUH rentang; yang pendek cuma daftar riwayatnya.
+   */
+  riwayat_terpotong: boolean;
 }
 
 /** Satu baris ranking menu terlaris. */

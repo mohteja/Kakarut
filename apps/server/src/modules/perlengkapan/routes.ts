@@ -39,6 +39,7 @@ import {
   cabangDariQuery,
 } from "../../middleware/auth";
 import { kunciAntrean } from "../../lib/kunci";
+import { potongLarik } from "../../lib/potong";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import { clientRefField, denganKlaimIdempoten, deviceIdField } from "../sync/idempoten";
 import { terbitkanNomor } from "../dokumen/nomor";
@@ -53,6 +54,9 @@ import {
   buatBeliPerlengkapanManual,
   buatKirimanPerlengkapan,
   buatOpnamePerlengkapan,
+  BATAS_BELI_PERLENGKAPAN,
+  BATAS_KIRIMAN_PERLENGKAPAN,
+  BATAS_OPNAME_PERLENGKAPAN,
   daftarBeliPerlengkapan,
   daftarKirimanPerlengkapan,
   detailOpnamePerlengkapan,
@@ -394,7 +398,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .get("/opname/riwayat", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    return c.json(await riwayatOpnamePerlengkapan(auth.company_id!, branchId));
+    const rows = await riwayatOpnamePerlengkapan(auth.company_id!, branchId);
+    return c.json(potongLarik(c, rows, BATAS_OPNAME_PERLENGKAPAN));
   })
   .get("/opname/sesi/:sessionId", async (c) => {
     const auth = c.get("auth");
@@ -487,7 +492,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
   .get("/kiriman", async (c) => {
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
-    return c.json(await daftarKirimanPerlengkapan(auth.company_id!, branchId));
+    const rows = await daftarKirimanPerlengkapan(auth.company_id!, branchId);
+    return c.json(potongLarik(c, rows, BATAS_KIRIMAN_PERLENGKAPAN));
   })
   .post("/kiriman/:id/terima", async (c) => {
     const auth = c.get("auth");
@@ -524,7 +530,8 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     let ckFilter: string | undefined;
     if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
     else ckFilter = (await cabangDariQuery(c)) ?? undefined;
-    return c.json(await daftarBeliPerlengkapan(auth.company_id!, ckFilter));
+    const rows = await daftarBeliPerlengkapan(auth.company_id!, ckFilter);
+    return c.json(potongLarik(c, rows, BATAS_BELI_PERLENGKAPAN));
   })
   /**
    * Buat FAKTUR beli perlengkapan MANUAL ke CK (multi-item — seperti faktur

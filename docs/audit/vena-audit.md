@@ -50,6 +50,404 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Delapan pemotongan senyap terakhir — dan lubang yang perbaikannya akan memperbesar 8× — server + web — 2026-08-31 — `MAKS_UTANG` 8 → 0
+
+- **Vena ini sudah empat putaran berjalan**, dan sisanya tinggal 8 situs
+  `utang` di 4 berkas. Aturannya sudah ditulis panjang di
+  `modules/customer/routes.ts:50`, rumahnya sudah ada (`src/lib/potong.ts`),
+  idiomnya sudah dipakai belasan kali. Yang tersisa: memakainya di pintu yang
+  belum. Tanda tangan yang sama lagi.
+
+- **TERUKUR lewat HTTP, satu pintu utuh** — `GET /shift`, riwayat UANG, yang
+  paling tajam dari kedelapannya. 51 shift tertutup disuntik ke satu cabang,
+  dan **premisnya dibuktikan dari balasan rutenya sendiri** (0 → 50 baris),
+  bukan dari `SELECT count(*)`:
+
+  ```
+  sebelum : 50 baris · tanpa header · tanpa medan
+  sesudah : 50 baris · X-Kakarut-Terpotong: 50
+  ```
+
+  Lima puluh baris tanpa satu pun tanda tak bisa dibedakan dari "cabang ini
+  memang belum pernah menutup shift sebelum itu". Owner yang menggulir sampai
+  bawah membaca daftar yang habis sebagai riwayat yang habis.
+
+- **Kedelapan pintu, satu idiom** — tujuh berbalasan larik telanjang memakai
+  `potongLarik` + header (bentuk larik SENGAJA tak berubah jadi objek: build
+  ponsel lama membacanya `as List`); satu berbalasan objek memakai kunci badan:
+
+  | pintu | batas | cara |
+  |---|---|---|
+  | `GET /shift` | 50 | header |
+  | `GET /stok/exp` | 300 | header (`LIMIT` di templat `sql`) |
+  | `GET /stok/opname/riwayat` | 200 | header |
+  | `GET /stok/opname` | 200 | header |
+  | `GET /perlengkapan/opname/riwayat` | 100 | header |
+  | `GET /perlengkapan/beli` | 200 | header |
+  | `GET /perlengkapan/kiriman` | 50 | header |
+  | `GET /laporan/durasi-pesanan` | 200 | `riwayat_terpotong` |
+
+  Tujuh layar web ikut menampilkannya, dengan kalimat yang berbeda per layar —
+  spanduk yang berbunyi sama di tujuh tempat adalah spanduk yang orang berhenti
+  membaca.
+
+### Lubang yang putaran ini akan memperbesar 8×, ditutup lebih dulu
+
+- Sudah ada aturan mekanis untuk medan DTO (*"tiap penanda `terpotong` wajib
+  dibaca web"*). **Tak ada padanannya untuk header** — dan justru bentuk
+  header-lah yang bertambah tujuh di sini. Gerbang baru: tiap rute yang
+  memanggil `potongLarik` wajib (a) mengambil `BATAS + 1`, dan (b) punya
+  pembaca di layar.
+
+- **Gerbang itu langsung menemukan dua pintu LAMA yang tak berpembaca**, dan
+  keduanya dicatat apa adanya, bukan dibereskan diam-diam:
+  - `GET /stok/opname` — **tak ada klien sama sekali**: tak satu layar web
+    memanggilnya, dan `docs/API-CONTRACT.md` pun tak menyebutnya. Ia hanya
+    diketuk verify-api. Headernya tetap dipasang; entrinya menyebut faktanya.
+  - `GET /stok/penyesuaian` — **hanya-ponsel**: ada di kontrak, tak ada di web.
+    Headernya dikirim sejak lama dan sisi ponselnya belum merendernya — utang
+    yang memang sudah terdaftar di berkas ini.
+
+- **Gerbangnya salah tiga kali sebelum satu tuduhan pun sah**, dan tiap
+  kekeliruan mengajarinya satu bentuk:
+  1. jalur dicocokkan utuh → `AnalisisHargaPage` yang SUDAH membaca headernya
+     tertuduh, sebab web menulis `/menu/${row.id}/riwayat-harga` bukan
+     `/menu/:id/…`. Diperbaiki: dicocokkan per potongan literal;
+  2. tanpa batas segmen, `/stok/opname` cocok dengan `/stok/opname/riwayat`
+     yang memang sudah dibaca — rute yang benar-benar tak berpembaca
+     dinyatakan "sudah dibaca" oleh tetangganya sendiri;
+  3. syarat se-BERKAS → `StokPage.tsx` menyebut `/stok/opname` sebagai tautan
+     navigasi DAN memakai `bacaHeader` untuk `/stok/exp`. Diperbaiki:
+     `bacaHeader` dicari di PANGGILAN yang sama, jendelanya dipotong sampai
+     `api(` berikutnya — bukan sekian ratus aksara, sebab batas yang bergeser
+     saat kodenya tumbuh adalah cara gerbang berhenti berlaku tanpa ada yang
+     memutuskan begitu.
+
+- **`BATAS + 1` dipaku terpisah**, dan itu bukan kelebihan: `potongLarik`
+  memasang headernya hanya bila `rows.length > batas`, jadi kueri yang
+  mengambil TEPAT `batas` membuat penandanya tak pernah menyala sementara
+  gerbang "sudah pakai potongLarik" tetap hijau. **Satu karakter cukup untuk
+  mengembalikan seluruh cacat yang putaran ini bayar.**
+
+### Dua koreksi atas catatan lama, ditulis bukan diwarisi
+
+- **Alasan utang `laporan` SALAH.** Ia berbunyi *"statistik lama-pengerjaan per
+  menu dihitung dari 200 baris sajian terakhir"*. Tidak: `per_menu`, `jumlah`,
+  dan `rata_detik` lahir dari agregat `GROUP BY` yang **tak dibatasi**. Yang
+  dipotong hanya `riwayat` — dan itu tetap salah selama ia diam, sebab
+  `jumlah` tampil tepat di atasnya. Layarnya kini menautkan keduanya
+  ("menampilkan 200 dari 1.284"), pola yang sama dengan `ShiftDetailModal`.
+
+- **`Number()` mentah di layar**, dan gerbang `angka-input` yang benar. Pola
+  `bacaHeader` yang kusalin ke enam layar memuat `Number(h.get(...))`, dan
+  aturan rumah melarang `Number()` mentah di `.tsx` — aturan yang benar, sebab
+  `Number()` di layar hampir selalu berarti isian pengguna sedang diurai tanpa
+  penjaga. Jawabannya bukan mengecualikan, melainkan **satu rumah**:
+  `bacaTerpotong` di `lib/api.ts`, dan **kedelapan** salinan (termasuk empat
+  yang sudah ada sebelum putaran ini) dipindah ke sana.
+
+- **Gerbang `query-punya-rumah` memerah karena baris bergeser** — entrinya
+  berkunci `berkas:baris`, dan dua entri bergeser 26 dan 10 baris. Nomornya
+  diperbarui, gerbangnya tidak dilonggarkan; kelemahan kuncinya ditulis di
+  berkasnya dan **didaftarkan sebagai vena tersendiri** di bawah. Repo ini
+  sudah memilih kunci BERKAS + JUMLAH di gerbang lain justru karena ini.
+
+- **BUKTI MERAH — tiga, satu per gerbang baru:**
+  1. `+ 1` dicabut dari `GET /shift` → *"mengambil SATU BARIS LEBIH"* merah;
+  2. `potongLarik` diganti `rows.slice` di `GET /perlengkapan/kiriman` →
+     *"DIPAKU: tujuh pintu…"* merah menyebut rutenya;
+  3. `bacaHeader` dicabut dari layar `/stok/exp` → *"potongannya sampai ke
+     layar"* merah.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - **Yang diukur lewat HTTP satu pintu, bukan delapan.** Ketujuh lainnya
+    memakai pembantu yang sama persis dan dipaku uji statis. Menyuntik 300
+    baris di sembilan pintu akan memperlambat gerbang demi satu bit.
+  - §283 menjaga sisi **penandanya jujur** (diam saat daftarnya memang
+    pendek) — sisi terpotongnya milik uji statis. Peringatan yang menyala
+    tanpa sebab adalah peringatan yang orang belajar abaikan, dan gerbang
+    statis tak bisa melihat bentuk kegagalan itu.
+  - "Dibaca layar" berarti ADA berkas web yang menyebut jalurnya dan memakai
+    `bacaHeader` di panggilan yang sama. Ia **tidak** membuktikan spanduknya
+    benar-benar dirender.
+  - `MAKS_UTANG` 0 tak berarti tak ada pemotongan lain — `slice`/`take` murni
+    di JS tetap di luar populasi yang disapu `util/potong.ts`.
+  - **Fikstur kunci kontrak di repo ponsel** (`../kakarut-mobile/test/fikstur/
+    kunci-kontrak-server.txt`) ikut disegarkan supaya gerbangnya hijau di
+    mesin yang punya kedua repo. Perubahan itu **belum di-commit di repo
+    ponsel** — ia butuh PR-nya sendiri di sana.
+
+- **Berkas:** `modules/shift/routes.ts` · `stok/routes.ts` ·
+  `perlengkapan/{service,routes}.ts` · `laporan/routes.ts` ·
+  `packages/shared/src/types.ts` · `lib/api.ts` (+`bacaTerpotong`) · tujuh
+  layar web · `test/{potong-berpenanda,pemotongan-terungkap,query-punya-rumah,
+  changelog-stempel-rilis}.test.ts` · `scripts/verify-api.sh` (§283, 20 asersi)
+  · `docs/API-CONTRACT.md` (header didokumentasikan — ia tak pernah ada di
+  kontrak, juga untuk `/sampah` yang memakainya sejak lama) ·
+  `docs/mobile/CHANGELOG-API.md` (🟡).
+
+- **Gerbang:** typecheck bersih · `npm test` **2.607** (214 berkas) · build web
+  · `verify-api.sh` **3.363 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` **27/27** · Playwright **13/13**.
+
+---
+
+## Dua utang balapan terakhir — satu DIBAYAR, satu DICABUT — server — 2026-08-31 — `MAKS_UTANG` 2 → 0
+
+- **Entri venanya sendiri yang menagih peninjauan**, dan alasannya tertulis:
+  keduanya didaftarkan **sebelum `lomba.ts` bisa menembus `db.transaction`**,
+  jadi kelasnya dinilai dengan mata yang lebih buruk daripada yang sekarang.
+  Repo ini sudah sekali membayar harga karena tidak meninjau ulang
+  (`tibaBeliPerlengkapan`: `utang` dengan alasan *"hasilnya tak pernah
+  dilihat"*, padahal penjaganya sudah ada lima minggu sebelumnya).
+
+- **Keduanya ternyata bukan hal yang sama, dan itu inti putaran ini:**
+
+  | situs | yang sebenarnya menahan | putusan |
+  |---|---|---|
+  | `admin-tenants` `jalankan` | `companies_slug_unique` + `users_email_unique`, diterjemahkan **per indeks** jadi 409 | **tuduhan DICABUT** |
+  | `pastikanSuperAdmin` | `users_email_unique` — **secara kebetulan** | **utang DIBAYAR** |
+
+---
+
+### 1. `pastikanSuperAdmin` — utang yang memang utang
+
+- **Indeksnya menjaga aturan yang SALAH.** `users_email_unique` menjaga "satu
+  user per email"; aturan di sini "paling banyak satu super admin aktif".
+  Keduanya berimpit **hanya** selama seluruh instance membaca
+  `SEED_SUPERADMIN_EMAIL` yang sama.
+
+- **TERUKUR atas Postgres sungguhan** — 8 ronde, tiap ronde dua panggilan
+  serentak dari keadaan nol super admin, dan premisnya dibuktikan tiap ronde
+  (jumlah baris dibaca ulang, bukan diasumsikan):
+
+  ```
+  3/8  bersih
+  4/8  yang kalah ditolak 23505 users_email_unique → index.ts mencetak
+       "Gagal memastikan super admin: Failed query: insert into users …"
+  1/8  yang kalah membaca emailDipakai SESUDAH yang menang commit lalu
+       mencetak kalimat yang KELIRU: "email … sudah dipakai akun lain —
+       lewati pembuatan otomatis"
+  0/8  jumlah barisnya salah
+  ```
+
+  **Lima dari delapan boot menutup dengan galat atau dengan kalimat yang
+  salah** — di satu-satunya tempat pemilik sistem bisa membacanya. Datanya
+  tak pernah rusak; yang rusak apa yang DIKATAKAN log boot. Yang 1/8 itu
+  bentuk terburuknya: bukan diam, melainkan **percaya diri dan salah**.
+
+- **Sesudah `kunciAntrean(tx, "super-admin")`: 8/8 bersih**, nol galat, nol
+  kalimat menyesatkan, jumlah baris tetap 1. Kunci yang sama jenisnya dengan
+  yang sudah dipegang tetangganya `backfillEmployeeCode` **di boot yang sama** —
+  persis jawaban yang entri utangnya sendiri tunjuk.
+
+### 2. `admin-tenants` `jalankan` — tuduhan DICABUT, dan alasan lamanya salah
+
+- Balapannya **sudah** ditahan sejak lama, dan **sudah** diukur lewat HTTP:
+  §213 verify-api menembak tiga pembuatan tenant kembar → *"TAK ADA 5xx"*,
+  *"tepat SATU tenant lahir"*. Yang kalah menerima **409 per indeks** ("slug
+  sudah dipakai" vs "email sudah terdaftar"), bukan 500.
+
+- Yang tak terbaca **penjaganya**, bukan penjagaan: `.catch(bentrokUnikPada …)`
+  menempel di situs **panggil**, satu lingkup di luar fungsi yang tertuduh, dan
+  `lomba.ts` berlingkup satu fungsi. `.catch`-nya dipindahkan ke dalam badan
+  `jalankan` — **perilaku identik**, kelasnya jadi `BENTROK`, entri tangannya
+  lenyap. Sama bentuknya dengan dua situs `F` yang keluar dari `DIPILAH_TANGAN`
+  putaran lalu: yang berubah siapa yang bisa membaca buktinya.
+
+- **Alasan lamanya dicatat sebagai SALAH, bukan dihapus diam-diam**: *"kecil
+  bukan ditahan"* — ia ditahan, dan sudah diukur, sejak sebelum kalimat itu
+  ditulis.
+
+### 3. Aturannya ditulis di DATA — `audit:invarian` 26 → **27**
+
+`paling banyak SATU super admin aktif`
+(`GREATEST(count(*)-1, 0) FROM users WHERE is_super_admin AND deleted_at IS NULL`).
+Uji statis bisa menagih kuncinya TERTULIS; hanya baris ini yang menjawab
+**berapa akun yang benar-benar lahir**, dan CI menjalankannya SESUDAH
+verify-api di atas basis data yang sudah dilewati 3.344 asersi. Nol super admin
+sengaja **bukan** pelanggaran (basis data yang belum di-boot pun sah); yang
+dilarang akun kedua.
+
+---
+
+- **BUKTI MERAH — tiga, satu per gerbang:**
+  1. `kunciAntrean` dicabut → *"provisi super admin memegang kuncinya"* **dan**
+     *"tiap periksa-lalu-tulis tanpa penahan sudah diadjudikasi"* merah;
+  2. `.catch` dikembalikan ke situs panggil → *"pembuatan penyewa terbaca
+     BENTROK"* + uji adjudikasi merah;
+  3. satu baris super admin kedua disisipkan ke DB → `audit:invarian`
+     **26 sehat, 1 dilanggar**; dihapus lagi → 27/27.
+
+  Dua asersi struktural itu ADA justru karena menghapus entri dari `daftar`
+  saja tak menahan apa pun: tanpa keduanya, pencabutan penjaga hanya
+  memerahkan uji "sudah diadjudikasi" — pesan yang menyuruh MENDAFTARKANNYA
+  kembali, bukan mengembalikan penjaganya.
+
+- **Gerbang kedua yang menagihku, dan ia benar**: `penjaga-semua-pintu`
+  memerah dengan *"`dasar` tak menyimpan entri yang sudah tak berlaku"* —
+  entri `superadmin.ts` di daftar «bentrok-unik» jadi basi begitu pintunya
+  tertutup. Alasan lamanya pantas dibaca penerusnya sebab ia BENAR pada bagian
+  yang diukurnya dan MELESET pada yang tidak: *"satu di antaranya mencatat
+  galat lalu lanjut — akunnya tetap tepat satu."* Jumlah akunnya memang selalu
+  satu; "mencatat galat lalu lanjut" bukan satu-satunya cara gagal.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - **Tak ada seksi verify-api baru, dan tak bisa ada**: `pastikanSuperAdmin`
+    berjalan di BOOT — tak ada pintu HTTP yang mencapainya. Gerbangnya
+    STRUKTURAL (kelas `KUNCI` dipaku) + **DATA** (invarian ke-27). Sisi HTTP
+    pembuatan penyewa dijaga §213, yang dijalankan ulang sebagai pasangan dan
+    tak bergeser satu jawaban pun.
+  - Pengukuran 8 ronde hidup di scratchpad, bukan di `scripts/` — ia
+    MENGHAPUS baris `users`, dan skrip perusak yang bisa salah sasaran tak
+    pantas tinggal di repo. Prosedurnya: kosongkan super admin → dua
+    `pastikanSuperAdmin(db)` serentak → baca ulang jumlah barisnya.
+  - `MAKS_UTANG` kini **0**, dan nol itu berarti: tiap situs
+    periksa-dulu-baru-tulis di `src` entah memegang penahan yang terbaca
+    mesin, entah terdaftar `sah` beserta alasannya. Ia TIDAK berarti tak ada
+    balapan tersisa di luar populasi yang disapu `lomba.ts` — lingkupnya tetap
+    satu fungsi, dan nama tabel tetap dibandingkan sebagai teks argumen.
+
+- **Berkas:** `modules/auth/superadmin.ts` (kunci antrean + transaksi) ·
+  `modules/admin-tenants/routes.ts` (`.catch` pindah ke dalam `jalankan`) ·
+  `scripts/audit-invarian.ts` (invarian ke-27) · `test/lomba-tulis.test.ts`
+  (dua entri dihapus, `MAKS_UTANG` 2 → 0, +2 premis struktural) ·
+  `test/penjaga-semua-pintu.test.ts` (entri basi dihapus).
+
+- **Gerbang:** typecheck bersih · `npm test` **2.582** (214 berkas) · build web ·
+  `verify-api.sh` **3.344 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` **27/27** · Playwright **13/13**.
+
+- **Utang balapan tersisa: 0.**
+
+---
+
+## Utang DIBAYAR: selisih yang muncul SESUDAH shift ditutup — dan alat ukur §280 yang ikut mati karenanya — server — 2026-08-31
+
+- **Utang ini kudaftarkan sendiri putaran lalu**, di bagian "BATAS YANG
+  DIAKUI" entri `execPenjualan`, dengan kalimat yang sudah menyebut angkanya:
+  *"menolak 400 … Terukur 20 dari 20."* Kewajiban pertama karena itu bukan
+  membaca kode melainkan **mengukur ulang lewat HTTP**, di basis data segar
+  yang baru di-seed.
+
+- **Tanda tangannya, lagi, dan persis kata per kata seperti yang ditulis di
+  kepala berkas ini**: aturannya sudah dipikirkan, ditulis, dan dikomentari
+  panjang — `statusSelisih` punya 24 baris komentar yang menjelaskan kenapa
+  status harus diturunkan dari angka HIDUP dan bukan dari kolom beku. Penjaga
+  itu dipasang di **dua** pintu (DTO shift dan antrean `GET /shift/selisih`);
+  pintu **ketiga** ke keadaan yang sama — `POST /:id/selisih/putuskan` —
+  dibiarkan membaca kolom bekunya.
+
+- **TERUKUR lewat HTTP sebelum apa pun disentuh** (satu shift, satu penjualan
+  11.000):
+
+  ```
+  tutup PAS       {"status_selisih":"pas","selisih":0,"kas_sistem":100000}
+  sinkron susulan {"kode":201,"susulan":true}
+  layar sesudah   {"status_selisih":"menunggu","selisih":-11000,"kas_sistem":111000}
+  antrean owner   GET /shift/selisih?status=menunggu → baris ini ADA (1)
+  owner menekan   400 {"error":"Shift ini tak punya selisih kas yang perlu diputuskan"}
+  ```
+
+  Owner melihat baris yang menuntut keputusannya, menekannya, dan **ditolak
+  rutenya sendiri**. Kekurangan 11.000 itu tak bisa ditutup siapa pun — bukan
+  ditunda, melainkan tak punya jalan sama sekali.
+
+- **SESUDAH perbaikan, skenario yang sama:**
+
+  ```
+  owner menekan   200 → status_selisih "disetujui"
+  layar akhir     selisih_disetujui_oleh "Owner Basooopa", selisih_diputus_pada terisi
+  menekan lagi    409
+  ```
+
+- **Perbaikannya menurunkan kelayakan dari aturan yang hidup**, bukan menambah
+  cabang khusus: rutenya memanggil `rekapWindow` lalu `statusSelisih` — dua
+  fungsi yang SAMA dengan yang dipakai layar dan antrean — sehingga ketiga
+  pintu tak bisa lagi berselisih tanpa ketiganya ikut berubah. Dua efek ikutan
+  yang disebut apa adanya:
+  - shift yang **belum ditutup** kini dijawab "Shift ini belum ditutup", bukan
+    "tak punya selisih kas" — dua sebab berbeda dulu jatuh ke satu pesan yang
+    salah untuk salah satunya;
+  - guard balapan keputusan-ganda dilonggarkan jadi
+    `selisih_status IS NULL OR = 'menunggu'`. Tanpa itu jalan buntunya cuma
+    **pindah** dari penjaga di atas ke `WHERE` — dan bukti merah di bawah
+    menunjukkan bentuk kegagalannya persis: 409, bukan 400.
+
+- **YANG PALING MAHAL DARI PUTARAN INI BUKAN CACATNYA, MELAINKAN APA YANG
+  DIRUSAK PERBAIKANNYA.** §280b — gerbang balapan yang kupasang putaran lalu —
+  membaca kolom beku `selisih_status` **lewat rute ini**: 400 = NULL, 200 =
+  "menunggu". Sesudah perbaikan, rute itu menjawab **200 di kedua keadaan**,
+  jadi syarat `PUT=400` di dalam `LANGGAR280` menjadi **mustahil** dan
+  gerbangnya berubah jadi hiasan — hijau selamanya, tanpa satu asersi pun
+  berubah warna dan tanpa satu baris pun di §280 disentuh. Diukur, bukan
+  disimpulkan: shift yang rekap penutupannya melewatkan penjualannya dijawab
+  **200**.
+
+  > Alat ukur yang menumpang pada perilaku rute lain bisa berubah jadi hiasan
+  > tanpa satu baris pun di seksi yang memakainya disentuh.
+
+  Alat ukurnya diganti dengan yang membaca boolean itu **langsung**:
+  `selisih_alasan`, ditulis penutupan persis dari `perluAcc`
+  (`perluAcc ? (selisih_alasan || catatan) : null`), jadi shiftnya ditutup
+  dengan `catatan`. Terukur di kedua sisi, satu penjualan 11.000:
+  `rekap menghitung → selisih_alasan "probe280"` · `penjualan susulan →
+  selisih_alasan NULL` — sementara `status_selisih` berbunyi "menunggu" di
+  **keduanya**, dan itulah sebabnya medan DTO itu tak bisa dipakai.
+
+- **BUKTI MERAH — tiga, dan yang ketiga menjaga alat ukurnya sendiri**
+  (tiap kali: kode dicabut → DB segar → verify-api penuh):
+  1. penurunan `statusSelisih` diganti `row.selisihStatus ?? "pas"` (perilaku
+     lama) → **5 asersi §282 merah**, seluruh premisnya tetap hijau;
+  2. pelonggaran guard balapan dicabut → **4 asersi §282 merah**, dan
+     kegagalannya berbunyi **409** — jalan buntunya memang pindah ke `WHERE`,
+     persis seperti yang ditulis komentarnya;
+  3. kunci baris shift di `POST /shift/tutup` dicabut → **§280b merah dengan 3
+     pelanggaran** memakai alat ukur BARU. Tanpa langkah ketiga ini, "§280b
+     tetap hijau" hanya berarti alat ukurnya diganti, bukan bahwa ia masih
+     bisa menuduh.
+
+- **PASANGAN — pengetatan/pelonggaran tak boleh menutup atau melubangi jalan
+  yang sah:** shift yang benar-benar "pas" tetap **400** · shift yang belum
+  ditutup tetap **400**, dengan alasan yang menyebut sebab sebenarnya ·
+  memutuskan **dua kali** tetap **409** · §152 (alur selisih kas yang sudah
+  ada) tetap hijau seluruhnya.
+
+- **Efek samping yang menguntungkan, dan diperiksa bukan diterima**: dua situs
+  kelas `F` di `modules/shift/routes.ts` KELUAR dari `DIPILAH_TANGAN` di
+  `kueri-terkurung-tenant.test.ts` — panggilan `rekapWindow(db, row.companyId,
+  …)` membuat pengurungan tenant-nya terbaca MESIN sebagai kelas C. Alasan
+  tulisan tangannya tidak berubah isinya; yang berubah cuma siapa yang bisa
+  membacanya. **`F` 50 → 48.** Yang menagihnya bukan aku melainkan uji
+  "daftar pilahannya masih ADA — bukan kuburan berkas basi", yang memerah
+  karena berkasnya berhenti punya situs F.
+
+- **BATAS YANG DIAKUI, ditulis jujur:**
+  - §282 mengukur **satu** shift per keadaan, bukan tangga; ia menjaga
+    kesepakatan antar pintu, bukan balapan. Balapannya milik §280.
+  - Alat ukur `selisih_alasan` membaca `perluAcc` **hanya bila shiftnya
+    ditutup dengan `catatan`** — dan kedua seksi yang memakainya memang
+    menutup begitu. Ditutup tanpa `catatan`, medannya NULL di kedua keadaan
+    dan alat ukurnya buta. Ini tertulis di kepala §280 supaya penulis
+    berikutnya tak menghapus `catatan`-nya sebagai "kerapian".
+  - Pintu keempat ke keadaan yang sama belum disapu mekanis: tak ada gerbang
+    yang menagih "setiap pembaca `selisih_status` memakai `statusSelisih`".
+    Yang ada baru §282, yang menjaga kesepakatan antara antrean dan rute
+    keputusan — dua pintu, bukan seluruh populasi.
+
+- **Berkas:** `modules/shift/routes.ts` (kelayakan diturunkan dari
+  `rekapWindow` + `statusSelisih`; 400 "belum ditutup" dipisahkan; guard
+  balapan menerima `IS NULL`) · `scripts/verify-api.sh` (§282 baru — 15
+  asersi; §280b/c alat ukurnya diganti + kepala seksinya menuliskan sebabnya)
+  · `test/kueri-terkurung-tenant.test.ts` (`shift/routes.ts` keluar dari
+  daftar tangan, `F` 50 → 48).
+
+- **Gerbang:** typecheck bersih · `npm test` **2.580** (214 berkas) · build web
+  · `verify-api.sh` **3.344 lolos / 0 gagal** (DB segar) · cakupan rute **274
+  cocok** · `audit:invarian` 26/26 · Playwright **13/13**.
+
+---
+
 ## Utang DIBAYAR: balapan `execPenjualan` — penjaganya ada, dipasang di pintu yang tak melewatinya — server — 2026-08-31
 
 - **Entrinya sendiri menyebut batasnya**: *"Jalur ini memang sudah dijaga
@@ -8003,24 +8401,30 @@ berlaku di situ).
       atas. 40 situs tulis; 4 tuduhan dicabut berturut-turut (tiap pencabutan
       mengajari pemindainya satu bentuk penjagaan), 1 perbaikan, 1 terdaftar
       beralasan. Terukur lewat HTTP: tombol dapur pada penjualan terbuang → 404
-- [ ] **Periksa-dulu-baru-tulis tanpa penahan** — 8 situs tersisa (4 `sah`,
-      **2 `utang` yang jumlahnya dipaku**: pembuatan penyewa dan
-      `pastikanSuperAdmin`). Keduanya ditulis SEBELUM `lomba.ts` bisa menembus
-      transaksi, jadi kelasnya dinilai dengan mata yang lebih buruk dari yang
-      sekarang — layak ditinjau ulang, bukan dipercaya
-- [ ] **Selisih kas yang MUNCUL sesudah shift ditutup tak bisa diputuskan
-      siapa pun** — TERUKUR 20 dari 20 selama vena `execPenjualan`:
-      `POST /shift/:id/selisih/putuskan` menolak **400** ("tak punya selisih
-      yang perlu diputuskan") bila kolom beku `selisih_status` NULL, padahal
-      layar shift DAN antrean `GET /shift/selisih?status=menunggu`
-      menampilkannya sebagai "menunggu" — keduanya memakai `statusSelisih` yang
-      dihitung dari angka HIDUP. Owner melihat baris yang perlu diputuskan,
-      menekannya, dan ditolak rutenya. Sisa dari putaran `statusSelisih`, yang
-      memperbaiki tampilan dan antreannya tetapi **tidak rute keputusannya** —
-      bentuk yang sama persis dengan yang berkas ini ada untuk mencari
-- [ ] **Pemotongan daftar yang tak dikatakan** — 23 situs tersisa (14 `sah`,
-      **9 `utang` yang jumlahnya dipaku**), plus sisi ponsel `GET
-      /stok/penyesuaian` yang headernya dikirim tapi belum dirender
+- [x] ~~**Periksa-dulu-baru-tulis tanpa penahan**~~ — SELESAI, lihat entri di
+      atas. Peninjauan ulangnya terbayar dua arah: `pastikanSuperAdmin` memang
+      utang (3/8 boot bersih → 8/8), sedangkan tuduhan atas pembuatan penyewa
+      DICABUT — ia sudah ditahan indeks unik dan diukur §213 sejak sebelum
+      alasan utangnya ditulis. **`MAKS_UTANG` 2 → 0**, `audit:invarian` 26 → 27
+- [x] ~~**Selisih kas yang MUNCUL sesudah shift ditutup tak bisa diputuskan
+      siapa pun**~~ — UTANG DIBAYAR, lihat entri di atas. 400 → 200, dan alat
+      ukur §280 yang ikut mati karena perbaikan ini diganti + dibuktikan masih
+      bisa menuduh (3 pelanggaran). `F` 50 → 48
+- [x] ~~**Pemotongan daftar yang tak dikatakan**~~ — SELESAI di sisi server,
+      lihat entri di atas. **`MAKS_UTANG` 8 → 0**; tujuh pintu memakai header,
+      satu memakai kunci badan, tujuh layar web ikut menampilkannya. Aturan
+      mekanis BARU: tiap rute ber-`potongLarik` wajib mengambil `BATAS + 1`
+      DAN punya pembaca di layar
+- [ ] **`DIPILAH` di `query-punya-rumah` berkunci `berkas:baris`** — dan baris
+      bergeser. Dua entri memerah 2026-08-31 karena vena lain menambah komentar
+      di atasnya, tanpa satu pun perilaku berubah. Repo ini sudah memilih kunci
+      BERKAS + JUMLAH di `kueri-terkurung-tenant` justru karena ini; gerbang
+      yang menuduh karena baris berpindah mengajari pembacanya mengabaikan
+      gerbang. Belum diukur berapa gerbang lain yang berkunci baris
+- [ ] **Header `X-Kakarut-Terpotong` belum dirender ponsel** — kini **delapan**
+      rute mengirimnya (`/stok/penyesuaian` yang lama + tujuh yang dibayar
+      2026-08-31). `core/api_client.dart` sudah punya pembacanya; layarnya
+      yang belum. Repo ponsel berumah lain
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama

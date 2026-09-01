@@ -6164,12 +6164,40 @@ BULAN143=$(TZ=Asia/Jakarta date +%Y-%m)
 # disetujui, jadi kalau tanggalnya bersinggungan, pembuatannya gagal, `.id`
 # jadi kosong, dan DELETE atas id kosong membalas 400 — bukan 403/200 yang
 # diuji. `L143` karena itu ikut bergeser bersama pasangan cutinya.
+#
+# PERBAIKAN KEDUA, 2026-09-01: mitigasi di atas hanya menutup SATU sisi.
+#
+# Ia memindahkan tanggal saat hari ini KEBETULAN tanggal 5/6 — yaitu saat
+# cutinya jatuh di masa LALU dan tertimpa cap absen. Sisi sebaliknya tak
+# tertutup: bila hari ini tanggal 1, tanggal 05/06 ada di MASA DEPAN, dan
+# rekap sengaja berhenti menilai di hari ini ("tanggal yang belum lewat tak
+# pernah dinilai"). Cutinya karena itu tak terhitung sama sekali — `cuti` 0,
+# bukan 2 — dan dua asersi memerah tanpa satu baris kode pun rusak.
+#
+# TERUKUR: seluruh Agustus hijau (seksi ini selalu berjalan pada tanggal ≥ 7),
+# lalu merah pada 2026-09-01 saat gerbang hasil-merge dijalankan. Gerbang yang
+# menuduh karena kalender berpindah mengajari pembacanya mengabaikan gerbang.
+#
+# Aturannya sekarang ditulis sebagai SYARAT, bukan sebagai tanggal ajaib:
+# ketiga tanggal wajib (a) sudah LEWAT, (b) bukan hari ini, (c) berada di SATU
+# bulan yang sama, dan (d) saling eksklusif. Dari tanggal 10 ke atas, bulan
+# berjalan punya cukup ruang; sebelum itu, seluruh blok pindah ke bulan LALU —
+# yang seluruh harinya sudah lewat, jadi syarat (a) dan (b) otomatis benar.
+BULAN_KINI143="$BULAN143"
 HARI143=$(TZ=Asia/Jakarta date +%d)
-if [ "$HARI143" = "05" ] || [ "$HARI143" = "06" ]; then
-  M143="$BULAN143-20"; S143="$BULAN143-21"; L143="$BULAN143-07"
+if [ "$((10#$HARI143))" -ge 10 ]; then
+  M143="$BULAN143-04"; S143="$BULAN143-05"; L143="$BULAN143-07"
 else
+  BULAN143=$(TZ=Asia/Jakarta date -d "$(TZ=Asia/Jakarta date +%Y-%m-01) -1 day" +%Y-%m)
   M143="$BULAN143-05"; S143="$BULAN143-06"; L143="$BULAN143-20"
 fi
+# PREMIS, sebelum satu asersi pun: tanggal cutinya memang sudah lewat. Tanpa
+# ini, "cuti 2 hari" yang merah tak bisa dibedakan antara "rekapnya salah" dan
+# "tanggalnya belum terjadi".
+cek "premis §143: tanggal cuti sudah LEWAT (bukan hari ini, bukan besok)" "V == 1" \
+  "$([ "$S143" \< "$(TZ=Asia/Jakarta date +%Y-%m-%d)" ] && echo 1 || echo 0)"
+cek "premis §143: ketiga tanggalnya di SATU bulan yang sama" "V == 1" \
+  "$([ "${M143%-*}" = "${L143%-*}" ] && [ "${M143%-*}" = "$BULAN143" ] && echo 1 || echo 0)"
 
 cek "guard: tanpa token → 401" "V == 401" \
   "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pengajuan")"
@@ -6221,10 +6249,16 @@ cek "rekap: tanggal cuti berstatus 'cuti' + kategori sakit" "V == 1" \
 cek "rekap: tanggal cuti TIDAK dihitung tidak hadir" "V == 1" \
   "$(echo "$RK143" | jq '(.hari) as $h | [.rows[]|select((.hadir + .tidak_hadir + .cuti + .libur) > $h)]|length==0|if . then 1 else 0 end')"
 # Tanggal masa depan tak pernah dinilai — jendela hitung berhenti di hari ini.
+# DUA ASERSI DI BAWAH BICARA SOAL BULAN BERJALAN, bukan bulan cutinya — jadi
+# rekapnya diambil ULANG untuk `BULAN_KINI143`. Memakai `$RK143` di sini akan
+# membuat keduanya HAMPA di hari-hari ketika blok di atas pindah ke bulan lalu:
+# "tak ada tanggal masa depan berstatus alpa" tentu benar pada bulan yang
+# seluruhnya sudah lewat, dan benar tanpa menguji apa pun.
+RK143K=$(api "$OWNER" "GET" "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all")
 cek "rekap: tanggal setelah hari ini berstatus 'kosong'" "V == 1" \
-  "$(echo "$RK143" | jq --arg t "$(TZ=Asia/Jakarta date -d '+3 days' +%Y-%m-%d 2>/dev/null || TZ=Asia/Jakarta date +%Y-%m-%d)" '[.rows[]|.harian[]|select(.tanggal==$t and .status=="alpa")]|length==0|if . then 1 else 0 end')"
+  "$(echo "$RK143K" | jq --arg t "$(TZ=Asia/Jakarta date -d '+3 days' +%Y-%m-%d 2>/dev/null || TZ=Asia/Jakarta date +%Y-%m-%d)" '[.rows[]|.harian[]|select(.tanggal==$t and .status=="alpa")]|length==0|if . then 1 else 0 end')"
 cek "rekap: bulan tak valid → jatuh ke bulan berjalan" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=ngawur" | jq --arg b "$BULAN143" '.bulan==$b|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=ngawur" | jq --arg b "$BULAN_KINI143" '.bulan==$b|if . then 1 else 0 end')"
 
 # Batalkan: pemohon hanya boleh saat masih menunggu; orang lain tak boleh sama sekali.
 P143B=$(api "$REISS105" POST /pengajuan \
@@ -6240,21 +6274,28 @@ cek "pemohon batalkan yg sudah disetujui → 409" "V == 409" \
   "$(status_code "$REISS105" DELETE "/pengajuan/$PID143")"
 # Saringan aktif/arsip: karyawan yang sudah keluar tak boleh mengotori daftar
 # maupun angka "total tidak hadir" — tapi tetap bisa dilihat bila diminta.
+#
+# BULAN BERJALAN, bukan `$BULAN143`, dan itu perbaikan 2026-09-01: "Keluar Uji
+# 143" dibuat DI SINI, jadi keanggotaannya bertanggal hari ini. Saat blok cuti
+# di atas pindah ke bulan lalu (awal bulan), rekap bulan itu menyaringnya
+# keluar DENGAN BENAR — `bergabung <= akhir bulan` — dan tiga asersi di bawah
+# memerah menuduh produk yang justru bekerja. Yang diuji di sini saringan
+# aktif/arsip, bukan tanggal cuti, jadi bulannya memang tak perlu sama.
 api "$OWNER" POST /karyawan \
   "{\"nama\":\"Keluar Uji 143\",\"email\":\"keluar143@basooopa.id\",\"password\":\"Keluar143!\",\"role\":\"admin\"}" > /dev/null
 UIDK143=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="keluar143@basooopa.id")][0].user_id // ""')
 cek "karyawan uji muncul di rekap saat masih aktif" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length==1|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length==1|if . then 1 else 0 end')"
 cek "arsipkan karyawan uji → 200" "V == 200" \
   "$(status_code_body "$OWNER" PATCH "/karyawan/$UIDK143" '{"arsip":true}')"
 
-AKTIF143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=aktif")
-ARSIP143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=arsip")
-SEMUA143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=semua")
+AKTIF143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=aktif")
+ARSIP143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=arsip")
+SEMUA143=$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=semua")
 cek "status=aktif: yang sudah keluar hilang dari rekap" "V == 0" \
   "$(echo "$AKTIF143" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length')"
 cek "TANPA status= (bawaan) sama dengan status=aktif" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
 cek "status=arsip: yang keluar muncul + membawa arsip_pada" "V == 1" \
   "$(echo "$ARSIP143" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u and .arsip_pada!=null)]|length==1|if . then 1 else 0 end')"
 cek "status=arsip: karyawan aktif TIDAK ikut" "V == 1" \
@@ -6262,7 +6303,7 @@ cek "status=arsip: karyawan aktif TIDAK ikut" "V == 1" \
 cek "status=semua: gabungan keduanya" "V == 1" \
   "$(echo "$SEMUA143" | jq --arg u "$UIDK143" --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(([.rows[]|select(.user_id==$u)]|length)==1) and ((.rows|length) > $n)|if . then 1 else 0 end')"
 cek "status ngawur → jatuh ke bawaan aktif" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN143&branch_id=all&status=ngasal" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BULAN_KINI143&branch_id=all&status=ngasal" | jq --argjson n "$(echo "$AKTIF143" | jq '.rows|length')" '(.rows|length)==$n|if . then 1 else 0 end')"
 # Bulan SEBELUM ia bergabung: tak punya hari kerja di sana → tak usah muncul.
 cek "bulan lampau: karyawan yang belum bergabung tak muncul" "V == 0" \
   "$(api "$OWNER" GET "/absensi/rekap?bulan=2020-01&branch_id=all&status=semua" | jq --arg u "$UIDK143" '[.rows[]|select(.user_id==$u)]|length')"
@@ -10327,8 +10368,39 @@ cek "INTI: cap 02:00 hari-0 → KELUAR, bukan masuk kedua" "V == 1" \
 
 # ── INTI-3: rekap — satu shift = satu baris, dengan jam pulangnya ──────────
 BLN200=$(TZ="$TZ200" date -d "@$((MID200 - 2 * 3600))" +%Y-%m)
+BLN_KINI200=$(TZ="$TZ200" date +%Y-%m)
 REKAP200=$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN200&branch_id=$CB200")
 BARIS200=$(echo "$REKAP200" | jq --arg n "Kasir Malam 200" '[.rows[]|select(.nama==$n)][0]')
+#
+# LINTAS BULAN — dan ini BUKAN pengecualian yang dikarang untuk menghijaukan.
+#
+# Kasir malam di seksi ini sengaja DIBUAT BARU (alasannya dua puluh baris di
+# atas), jadi keanggotaannya bertanggal HARI INI. Sementara skenarionya sengaja
+# dimundurkan supaya kedua capnya sudah lewat — dan pada tanggal 1 sebelum
+# pukul 11 setempat, kemunduran itu MENYEBERANGI pergantian bulan.
+#
+# Rekap lalu bekerja PERSIS seperti yang seharusnya: `bergabung <= akhir bulan`
+# menyaring keluar orang yang baru bergabung bulan ini dari rekap bulan LALU
+# (`absensi/routes.ts` — "Yang baru bergabung SETELAH bulan ini berakhir tak
+# punya hari kerja di sini"). Barisnya tak ada, dan enam asersi di bawah
+# memerah menuduh produk yang justru benar.
+#
+# TERUKUR 2026-09-01 pukul 08:56 WIB, saat gerbang hasil-merge dijalankan:
+# skenarionya mundur ke 30–31 Agustus, karyawannya bergabung 1 September, dan
+# `rekap?bulan=2026-08` memulangkan baris `null`.
+#
+# Maka pada hari-hari itu yang diuji BUKAN NIHIL melainkan aturan penyaringnya
+# sendiri — sebuah asersi yang tetap bisa merah. Sisa seksi ini (semantik cap
+# lintas-hari, yang jadi INTI-nya) berjalan apa adanya setiap hari.
+if [ "$BLN200" != "$BLN_KINI200" ]; then
+  cek "premis §200: penyeberangan bulan hanya di awal bulan (tgl $(TZ="$TZ200" date +%d))" "V == 1" \
+    "$([ "$((10#$(TZ="$TZ200" date +%d)))" -le 2 ] && echo 1 || echo 0)"
+  cek "§200 lintas bulan: rekap $BLN200 memang TIDAK memuat karyawan yang baru bergabung $BLN_KINI200" "V == 1" \
+    "$(echo "$BARIS200" | jq 'if .==null then 1 else 0 end')"
+  cek "§200 lintas bulan: dan di rekap $BLN_KINI200 barisnya ADA (dia memang anggota)" "V == 1" \
+    "$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN_KINI200&branch_id=$CB200" \
+        | jq --arg n "Kasir Malam 200" '[.rows[]|select(.nama==$n)]|length==1|if . then 1 else 0 end')"
+else
 cek "dasar §200: baris kasir malam ada di rekap" "V == 1" \
   "$(echo "$BARIS200" | jq 'if .==null then 0 else 1 end')"
 cek "INTI: hadir = 1 (satu shift, bukan dua hari)" "V == 1" \
@@ -10348,6 +10420,7 @@ cek "jam pulangnya memang cap 02:00 itu" "V == 1" \
 # hadir. Tanpa itu jq galat dan asersinya gagal karena kalender.
 cek "INTI: tanggal berikutnya BUKAN hadir" "V == 1" \
   "$(echo "$BARIS200" | jq --arg d "$HARI200_PULANG" '(([.harian[]|select(.tanggal==$d)][0]) // {}).status!="hadir"|if . then 1 else 0 end')"
+fi
 
 # ── Status hadir: satu sumber untuk layar dan untuk gerbang ────────────────
 cek "GET /absensi/status: sesudah cap pulang, TIDAK hadir lagi" "V == 1" \
@@ -10382,10 +10455,17 @@ cek "INTI: cap pagi 17 jam kemudian tetap MASUK, bukan pulang" "V == 1" \
 # tampil tanpa jam pulang. Perbaikan ini menentukan tipe cap BARU, bukan menulis
 # ulang riwayat — kalau ia sampai memasangkan keduanya, jam kerja kemarin
 # berubah jadi 17 jam tanpa ada yang menyentuh apa pun.
+#
+# Dibaca lewat `GET /absensi?tanggal=`, BUKAN lewat rekap bulanan, dan itu
+# perbaikan 2026-09-01: "Kasir Lupa 200" juga dibuat hari ini, jadi rekap bulan
+# LALU menyaringnya keluar dengan benar saat skenarionya menyeberangi
+# pergantian bulan (lihat catatan panjang di blok rekap di atas). Daftar
+# harian tak punya syarat keanggotaan itu — ia bertanya soal SATU tanggal, dan
+# tanggal itulah yang sedang diuji.
 cek "…dan hari kemarin tetap tanpa jam pulang (riwayat tak ditulis ulang)" "V == 1" \
-  "$(api "$OWNER" GET "/absensi/rekap?bulan=$BLN200&branch_id=$CB200" \
-      | jq --arg n "Kasir Lupa 200" --arg d "$HARI200_MASUK" \
-        '[.rows[]|select(.nama==$n)][0].harian|[.[]|select(.tanggal==$d)][0]|((.status=="hadir") and (.masuk!=null) and (.keluar==null))|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/absensi?branch_id=$CB200&tanggal=$HARI200_MASUK" \
+      | jq --arg n "Kasir Lupa 200" \
+        '[.[]|select(.nama==$n)][0]|((.masuk!=null) and (.keluar==null))|if . then 1 else 0 end')"
 
 # ── Batas: dua cap di HARI yang sama tetap berselang-seling ────────────────
 E200D="siang200.$RANDOM@basooopa.id"
@@ -15661,11 +15741,28 @@ rm -f /tmp/kk279-*
 #       penutupan tak menghitung penjualannya (0 dari 20 sempat menghitung),
 #       penjualannya tetap masuk shift, dan penandanya tetap false.
 #
-# KOLOM BEKU `selisih_status` DIBACA LEWAT `POST /:id/selisih/putuskan`, dan
-# itu satu-satunya cara melihatnya dari HTTP: rute itu 400 bila kolomnya NULL
-# (= rekap penutupan TIDAK menghitung penjualannya) dan 200 bila "menunggu"
-# (= rekap penutupan MENGHITUNGNYA). `status_selisih` di DTO tak bisa dipakai —
-# ia diturunkan dari angka HIDUP, jadi kedua keadaan itu terbaca sama.
+# ALAT UKURNYA: `selisih_alasan`, dan shiftnya ditutup DENGAN `catatan`.
+#
+# Yang perlu dibaca seksi ini adalah `perluAcc` di detik penutupan — "apakah
+# rekap penutupan menghitung penjualannya?". `status_selisih` di DTO tak bisa
+# dipakai: ia diturunkan dari angka HIDUP, jadi kedua keadaan terbaca sama
+# ("menunggu"). Tapi `selisih_alasan` ditulis penutupannya PERSIS dari boolean
+# itu — `perluAcc ? (selisih_alasan || catatan) : null` — jadi menutup dengan
+# `catatan` membuat medannya berbunyi bila rekapnya menghitung, dan NULL bila
+# tidak. TERUKUR, satu penjualan 11.000 di kedua sisi:
+#
+#   rekap menghitung : selisih −11.000 · selisih_alasan "probe280"
+#   penjualan susulan: selisih −11.000 · selisih_alasan NULL
+#   (status_selisih "menunggu" di KEDUANYA — itu sebabnya ia tak dipakai)
+#
+# VERSI PERTAMA MEMAKAI `POST /:id/selisih/putuskan` sebagai alat ukur — 400
+# bila kolomnya NULL, 200 bila "menunggu" — dan itu berhenti benar begitu rute
+# tersebut diperbaiki (§282): ia kini menurunkan kelayakannya dari aturan
+# hidup, jadi ia menjawab 200 di KEDUA keadaan. Terukur sesudah perbaikan itu:
+# shift yang rekapnya melewatkan penjualannya dijawab 200, bukan 400 — dan
+# `LANGGAR280` jadi mustahil naik. Gerbang yang tak pernah bisa merah adalah
+# hiasan; alat ukur yang menumpang pada perilaku rute lain bisa berubah jadi
+# hiasan tanpa satu baris pun di seksi ini disentuh.
 #
 # Gerbang statis hanya melihat kuncinya TERTULIS; yang di sini melihat ia
 # MENAHAN — dan melihat pula bahwa penandanya tak berbalik jadi cerewet.
@@ -15758,20 +15855,20 @@ for D280 in 0.004 0.007 0.012 0.020 0.033 0.055 0.090 0.150; do
   W=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
   rm -f /tmp/kk280-s
   ( api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W")" > /tmp/kk280-s ) &
-  ( sleep "$D280"; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null ) &
+  ( sleep "$D280"; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000,"catatan":"probe280"}' > /dev/null ) &
   wait
   KODE=$(jq -r '.hasil[0].kode // 0' /tmp/kk280-s 2>/dev/null || echo 0)
   [ "$KODE" = "201" ] && MASUK280=$((MASUK280+1))
-  # Kolom BEKU `selisih_status` cuma bisa dibaca lewat sini: 400 = NULL (rekap
-  # penutupan TIDAK menghitung penjualannya) · 200 = "menunggu" (ia MENGHITUNG).
-  # `status_selisih` di DTO tak bisa dipakai — ia diturunkan dari angka HIDUP.
-  PUT=$(status_code_body "$OWNER" POST "/shift/$S/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"probe 280"}')
-  [ "$PUT" = "200" ] && TERHITUNG280=$((TERHITUNG280+1))
   D280H=$(api "$REISS105" GET "/shift/$S")
+  # `perluAcc` di detik penutupan, dibaca dari medan yang ditulis boolean itu
+  # sendiri: berbunyi bila rekap penutupan MENGHITUNG penjualannya, NULL bila
+  # tidak. Lihat "ALAT UKURNYA" di kepala seksi ini.
+  ALASAN=$(echo "$D280H" | jq -r '.selisih_alasan // "null"')
+  [ "$ALASAN" != "null" ] && TERHITUNG280=$((TERHITUNG280+1))
   FLAG=$(echo "$D280H" | jq -r '.ada_transaksi_susulan')
   NTX=$(echo "$D280H" | jq -r '.transaksi|length')
   [ "$FLAG" = "true" ] && TUTUPMENANG280=$((TUTUPMENANG280+1))
-  if [ "$KODE" = "201" ] && [ "$NTX" = "1" ] && [ "$PUT" = "400" ] && [ "$FLAG" = "false" ]; then
+  if [ "$KODE" = "201" ] && [ "$NTX" = "1" ] && [ "$ALASAN" = "null" ] && [ "$FLAG" = "false" ]; then
     LANGGAR280=$((LANGGAR280+1))
   fi
 done
@@ -15792,12 +15889,13 @@ S280C=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id //
 W280C=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 rm -f /tmp/kk280c-s
 ( api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W280C")" > /tmp/kk280c-s ) &
-( sleep 0.4; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null ) &
+( sleep 0.4; api "$REISS105" POST /shift/tutup '{"uang_fisik":100000,"catatan":"probe280c"}' > /dev/null ) &
 wait
-PUT280C=$(status_code_body "$OWNER" POST "/shift/$S280C/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"probe §280c"}')
-cek "premis §280c: rekap penutupan MEMANG menghitung penjualannya" "V == 200" "$PUT280C"
+D280C=$(api "$REISS105" GET "/shift/$S280C")
+cek "premis §280c: rekap penutupan MEMANG menghitung penjualannya" "V == 1" \
+  "$(echo "$D280C" | jq '(.selisih_alasan != null)|if . then 1 else 0 end')"
 cek "PASANGAN §280: yang sudah terhitung TIDAK ditandai susulan" "V == 0" \
-  "$(api "$REISS105" GET "/shift/$S280C" | jq '(.ada_transaksi_susulan)|if . then 1 else 0 end')"
+  "$(echo "$D280C" | jq '(.ada_transaksi_susulan)|if . then 1 else 0 end')"
 rm -f /tmp/kk280c-s
 
 # PASANGAN: penjaga penutupan-ganda yang SUDAH ADA harus selamat dari
@@ -15965,6 +16063,184 @@ cek "PASANGAN §281: akunnya kini bisa masuk" "V == 1" \
 # bukan tebakan, dan memotong jatah karenanya akan membuat salah ketik biasa
 # menghabiskan kesempatan orang.
 cek "PASANGAN §281: kode berbentuk salah ditolak 400" "V == 400" "$(verif281 "$EM281" "123")"
+
+# §282 — SELISIH YANG MUNCUL SESUDAH PENUTUPAN TETAP BISA DIPUTUSKAN
+#
+# Tanda tangan yang sama lagi: aturannya sudah dipikirkan, ditulis, dan
+# dikomentari panjang; penjaganya dipasang di SATU pintu, dan pintu lain ke
+# keadaan yang sama dibiarkan terbuka.
+#
+# `statusSelisih` — aturan yang dipakai layar shift DAN antrean
+# `GET /shift/selisih` — menurunkan statusnya dari selisih HARI INI, sebab
+# angka shift tidak berhenti bergerak saat ditutup: penjualan sinkron
+# bertanggal mundur bisa mendarat di jendela shift yang sudah lama tertutup.
+# `POST /:id/selisih/putuskan` tak ikut berubah; ia tetap membaca KOLOM BEKU
+# `selisih_status`, yang NULL selama belum ada yang memutuskan.
+#
+# TERUKUR lewat HTTP sebelum diperbaiki, dan angkanya bukan kasus pinggir —
+# 20 dari 20 percobaan:
+#
+#   tutup PAS        {"status_selisih":"pas","selisih":0,"kas_sistem":100000}
+#   sinkron susulan  {"kode":201,"susulan":true}
+#   layar sesudah    {"status_selisih":"menunggu","selisih":-11000}
+#   antrean owner    GET /shift/selisih?status=menunggu → baris ini ADA
+#   owner menekan    400 "tak punya selisih kas yang perlu diputuskan"
+#
+# Owner melihat baris yang menuntut keputusannya, menekannya, dan ditolak
+# rutenya sendiri — dan kekurangan 11.000 itu tak pernah bisa ditutup siapa pun.
+#
+# Yang dijaga di sini adalah KESEPAKATAN ANTAR PINTU: apa pun yang muncul di
+# antrean `?status=menunggu` harus bisa diputuskan. Karena itu antreannya
+# dibaca lebih dulu dan hasilnya dijadikan PREMIS, bukan diasumsikan — bila
+# suatu hari antreannya berhenti memuat baris ini, seksi ini harus memerah
+# sebagai "premis", bukan diam-diam berhenti menguji apa pun.
+echo
+echo "── §282 selisih yang muncul sesudah penutupan tetap bisa diputuskan ──"
+
+pastikanHadir "$REISS105" "§282"
+tutup_aktif280
+
+S282=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+cek "premis §282: shift uji terbuka" "V == 1" \
+  "$([ -n "$S282" ] && [ "$S282" != "null" ] && echo 1 || echo 0)"
+
+# Ditutup PAS — dan itu PREMISnya, bukan latar: seluruh temuan ini bergantung
+# pada kolom bekunya NULL. Ditutup TANPA `catatan`, supaya `selisih_alasan`
+# ikut NULL dan tak ada jalan lain yang diam-diam mengisi kolom itu.
+T282=$(api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}')
+cek "premis §282: penutupannya PAS (kolom beku selisih_status NULL)" "V == 1" \
+  "$(echo "$T282" | jq '(.status_selisih=="pas" and .selisih==0 and .selisih_alasan==null)|if . then 1 else 0 end')"
+
+# Penjualan tunai SUSULAN mendarat di jendela shift yang sudah tertutup.
+W282=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+R282=$(api "$REISS105" POST /sync "$(sync280 "$PBA_ID" "$W282")")
+cek "premis §282: penjualan susulannya memang mendarat (201 + bertanda)" "V == 1" \
+  "$(echo "$R282" | jq '(.hasil[0].kode==201 and .hasil[0].data.ada_transaksi_susulan==true)|if . then 1 else 0 end')"
+
+D282=$(api "$REISS105" GET "/shift/$S282")
+cek "premis §282: layar shift kini berkata 'menunggu' dengan selisih != 0" "V == 1" \
+  "$(echo "$D282" | jq '(.status_selisih=="menunggu" and .selisih!=0)|if . then 1 else 0 end')"
+# Kolom bekunya TETAP NULL — dibaca dari medan yang ditulis boolean `perluAcc`
+# penutupan (lihat "ALAT UKURNYA" di §280). Tanpa premis ini, "200" di bawah
+# bisa saja datang dari kolom beku yang kebetulan sudah terisi.
+cek "premis §282: kolom bekunya TETAP NULL (bukan ikut berubah sendiri)" "V == 1" \
+  "$(echo "$D282" | jq '(.selisih_alasan == null)|if . then 1 else 0 end')"
+cek "premis §282: antrean owner MEMANG memuat baris ini" "V == 1" \
+  "$(api "$OWNER" GET '/shift/selisih?status=menunggu' \
+     | jq --arg s "$S282" '[.[]|select(.id==$s)]|length')"
+
+# INTINYA: yang muncul di antrean itu bisa diputuskan.
+#
+# Kode DAN badan ditangkap dari SATU panggilan — memanggilnya dua kali (sekali
+# untuk kodenya, sekali untuk badannya) membuat panggilan kedua dijawab 409
+# oleh penjaga keputusan-ganda, dan asersinya lalu menguji hal lain.
+R282P=$(curl -s -w '\n%{http_code}' -X POST "$BASE/api/shift/$S282/selisih/putuskan" \
+  -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+  -d '{"status":"disetujui"}')
+P282=${R282P%$'\n'*}
+cek "§282 selisih susulan BISA diputuskan owner (bukan 400)" "V == 200" "${R282P##*$'\n'}"
+cek "§282 keputusannya BENAR-BENAR tersimpan (siapa + kapan + status)" "V == 1" \
+  "$(api "$REISS105" GET "/shift/$S282" \
+     | jq '(.status_selisih=="disetujui" and .selisih_disetujui_oleh!=null and .selisih_diputus_pada!=null)|if . then 1 else 0 end')"
+cek "§282 balasannya sendiri sudah berkata disetujui" "V == 1" \
+  "$(echo "$P282" | jq '(.status_selisih=="disetujui")|if . then 1 else 0 end')"
+cek "§282 sesudah diputus ia HILANG dari antrean menunggu" "V == 0" \
+  "$(api "$OWNER" GET '/shift/selisih?status=menunggu' \
+     | jq --arg s "$S282" '[.[]|select(.id==$s)]|length')"
+
+# PASANGAN 1: pelonggaran ini tak boleh melubangi penjaga keputusan-ganda.
+# Kolom bekunya kini "disetujui", dan `IS NULL` di WHERE guard balapan tak
+# boleh membuat keputusan kedua menimpa yang pertama.
+cek "PASANGAN §282: memutuskan DUA KALI tetap 409" "V == 409" \
+  "$(status_code_body "$OWNER" POST "/shift/$S282/selisih/putuskan" '{"status":"ditolak","alasan_tolak":"berubah pikiran"}')"
+
+# PASANGAN 2: shift yang selisihnya SUNGGUH pas tetap ditolak 400 — pelonggaran
+# ini menurunkan kelayakannya dari aturan hidup, bukan menghapus kelayakannya.
+tutup_aktif280
+S282B=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+api "$REISS105" POST /shift/tutup '{"uang_fisik":100000}' > /dev/null
+cek "premis §282: shift pasangan memang berstatus 'pas'" "V == 1" \
+  "$(api "$REISS105" GET "/shift/$S282B" | jq '(.status_selisih=="pas")|if . then 1 else 0 end')"
+cek "PASANGAN §282: shift yang benar-benar PAS tetap ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/shift/$S282B/selisih/putuskan" '{"status":"disetujui"}')"
+
+# PASANGAN 3: shift yang BELUM ditutup ditolak juga — dan dengan alasan yang
+# menyebut sebab sebenarnya, bukan "tak punya selisih". Dulu keduanya jatuh ke
+# satu pesan yang salah untuk salah satunya.
+tutup_aktif280
+S282C=$(api "$REISS105" POST /shift/buka '{"modal_awal":100000}' | jq -r '.id // empty')
+cek "PASANGAN §282: shift yang BELUM ditutup ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST "/shift/$S282C/selisih/putuskan" '{"status":"disetujui"}')"
+cek "PASANGAN §282: alasannya menyebut 'belum ditutup', bukan 'tak punya selisih'" "V == 1" \
+  "$(api "$OWNER" POST "/shift/$S282C/selisih/putuskan" '{"status":"disetujui"}' \
+     | jq '(.error|test("belum ditutup"))|if . then 1 else 0 end')"
+tutup_aktif280
+
+# §283 — PENANDA PEMOTONGAN YANG JUJUR: DIAM SAAT DAFTARNYA MEMANG PENDEK
+#
+# Delapan pemotongan senyap terakhir dibayar putaran ini. Yang dijaga DI SINI
+# bukan sisi terpotongnya — data seed terlalu kecil untuk itu, dan menyuntik
+# 300 baris lewat HTTP di sembilan pintu akan memperlambat gerbang ini demi
+# satu bit informasi. Sisi terpotongnya dipaku uji statis
+# (`pemotongan-terungkap.test.ts`: tiap rute ber-`potongLarik` wajib mengambil
+# `BATAS + 1`, wajib punya pembaca di layar) dan DIUKUR sekali lewat HTTP:
+#
+#   51 shift tertutup di satu cabang → GET /shift memulangkan 50 baris
+#   sebelum : tanpa header, tanpa medan — tak beda dari "memang cuma 50"
+#   sesudah : X-Kakarut-Terpotong: 50
+#
+# Yang dijaga di sini sisi SEBALIKNYA, dan justru itu yang paling mudah salah:
+# penanda yang SELALU menyala. Kueri yang lupa `+ 1` membuat daftar berjumlah
+# tepat `BATAS` dituduh terpotong; peringatan yang menyala tanpa sebab adalah
+# peringatan yang orang belajar abaikan, dan gerbang statis di atas tak bisa
+# melihatnya sebab bentuk kodenya benar.
+#
+# Sekaligus PREMIS bagi dirinya sendiri: tiap asersi "tak ada header" hanya
+# berarti bila daftarnya memang lebih pendek dari batasnya — jadi panjangnya
+# ikut diperiksa, bukan diandaikan.
+echo
+echo "── §283 penanda pemotongan jujur: diam saat daftarnya memang pendek ──"
+
+# tanpaPotong <keterangan> <batas> <path…>
+tanpaPotong283() {
+  local ket="$1" batas="$2" path="$3" hdr n
+  # `header_of`, bukan `grep` sendiri: di bawah `set -e`, `grep` yang TIDAK
+  # menemukan apa-apa memulangkan 1 dan mematikan skrip ini — dan "tak ada
+  # header" justru keadaan yang sedang diuji seksi ini.
+  n=$(api "$OWNER" GET "$path" | jq 'length')
+  hdr=$(header_of "x-kakarut-terpotong" -H "Authorization: Bearer $OWNER" "$BASE/api$path")
+  cek "premis §283 $ket: daftarnya lebih pendek dari batas ($n < $batas)" "V == 1" \
+    "$([ "$n" -lt "$batas" ] && echo 1 || echo 0)"
+  cek "§283 $ket TIDAK berkata terpotong" "V == 1" \
+    "$([ -z "$hdr" ] && echo 1 || echo 0)"
+}
+
+tanpaPotong283 "riwayat shift"            50  "/shift?branch_id=$CB213"
+tanpaPotong283 "stok mendekati exp"      300  "/stok/exp?hari=7"
+tanpaPotong283 "riwayat sesi opname"     200  "/stok/opname/riwayat"
+tanpaPotong283 "baris opname"            200  "/stok/opname"
+tanpaPotong283 "opname perlengkapan"     100  "/perlengkapan/opname/riwayat"
+tanpaPotong283 "pembelian perlengkapan"  200  "/perlengkapan/beli"
+tanpaPotong283 "kiriman perlengkapan"     50  "/perlengkapan/kiriman"
+
+# Laporan durasi memulangkan OBJEK, jadi penandanya kunci badan — dan medannya
+# WAJIB ADA walau bernilai false: klien tak bisa membedakan "tidak terpotong"
+# dari "server versi lama" bila kuncinya kadang hilang.
+HARI283=$(date -u +%Y-%m-%d)
+LAP283=$(api "$OWNER" GET "/laporan/durasi-pesanan?dari=$HARI283&sampai=$HARI283")
+cek "§283 laporan durasi MEMBAWA medan riwayat_terpotong" "V == 1" \
+  "$(echo "$LAP283" | jq 'has("riwayat_terpotong") | if . then 1 else 0 end')"
+cek "§283 medannya boolean, bukan null" "V == 1" \
+  "$(echo "$LAP283" | jq '((.riwayat_terpotong|type) == "boolean") | if . then 1 else 0 end')"
+cek "premis §283: riwayatnya memang lebih pendek dari batas 200" "V == 1" \
+  "$(echo "$LAP283" | jq '((.riwayat|length) < 200) | if . then 1 else 0 end')"
+cek "§283 laporan kecil TIDAK berkata terpotong" "V == 1" \
+  "$(echo "$LAP283" | jq '(.riwayat_terpotong == false) | if . then 1 else 0 end')"
+
+# PASANGAN: pintu yang SUDAH memakai idiom ini sejak lama tak boleh bergeser
+# perilakunya gara-gara pembantunya dipakai tujuh pintu baru.
+cek "PASANGAN §283: sampah kecil tetap tanpa header" "V == 1" \
+  "$(test -z "$(header_of "x-kakarut-terpotong" -H "Authorization: Bearer $OWNER" "$BASE/api/sampah")" && echo 1 || echo 0)"
 
 if [ "$FAIL" -gt 0 ]; then
   echo

@@ -12,7 +12,7 @@ import {
   inputClass,
 } from "../../components/ui";
 import { ShiftDetailModal } from "../../components/ShiftDetailModal";
-import { api } from "../../lib/api";
+import { api, bacaTerpotong } from "../../lib/api";
 import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 /** Label + warna selisih kas (fisik − seharusnya). */
@@ -37,10 +37,7 @@ function PerluAccPanel({ onDetail }: { onDetail: (id: string) => void }) {
     queryKey: ["shift-selisih", "menunggu"],
     queryFn: () =>
       api<SelisihKasRow[]>("/shift/selisih?status=menunggu", {
-        bacaHeader: (h) => {
-          const n = Number(h.get("X-Kakarut-Terpotong"));
-          setTerpotong(Number.isFinite(n) && n > 0 ? n : null);
-        },
+        bacaHeader: bacaTerpotong(setTerpotong),
       }),
     refetchInterval: 60_000,
   });
@@ -361,9 +358,22 @@ function RiwayatCabangModal({
   onClose: () => void;
   onDetail: (id: string) => void;
 }) {
+  /*
+   * PENANDA PEMOTONGAN, dan di modal inilah ia paling berarti: ini riwayat
+   * UANG. Server memotong di 50 shift terakhir; tanpa penanda, owner yang
+   * menggulir sampai bawah membaca daftar yang habis sebagai "cabang ini
+   * memang belum pernah menutup shift sebelum itu".
+   *
+   * Terukur lewat rutenya sendiri sebelum diperbaiki: 51 shift tertutup di
+   * satu cabang → balasannya 50 baris, tanpa header, tanpa medan.
+   */
+  const [terpotong, setTerpotong] = useState<number | null>(null);
   const { data, error: gagal } = useQuery({
     queryKey: ["shift-riwayat", branch?.id],
-    queryFn: () => api<Shift[]>(`/shift?branch_id=${branch!.id}`),
+    queryFn: () =>
+      api<Shift[]>(`/shift?branch_id=${branch!.id}`, {
+        bacaHeader: bacaTerpotong(setTerpotong),
+      }),
     enabled: !!branch,
   });
   return (
@@ -378,6 +388,12 @@ function RiwayatCabangModal({
         <div className="p-4 text-center text-sm text-stone-400">Belum ada shift ditutup di cabang ini.</div>
       ) : (
         <div className="space-y-2">
+          {terpotong !== null && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+              Menampilkan <b>{terpotong} shift terakhir</b>. Cabang ini punya shift yang{" "}
+              <b>lebih lama</b> dan tidak ikut ditampilkan di sini.
+            </div>
+          )}
           {data.map((s) => {
             const info = selisihInfo(s.selisih);
             return (

@@ -83,6 +83,19 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
     const slug =
       body.slug ?? body.nama.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
+    /*
+     * TERJEMAHAN BENTROK UNIK HIDUP DI DALAM `jalankan`, bukan di situs
+     * panggilnya — dan itu satu-satunya perbedaan dari versi sebelumnya.
+     *
+     * Perilakunya identik: `.catch` yang sama, pesan yang sama, kode yang sama.
+     * Yang berubah siapa yang bisa MEMBACANYA. Pemindai balapan
+     * (`test/util/lomba.ts`) berlingkup satu fungsi, jadi selama penjaganya
+     * menempel di luar `jalankan`, situs ini terbaca "periksa-dulu-baru-tulis
+     * tanpa penahan" dan harus dititipkan ke daftar adjudikasi tangan —
+     * bertahun-tahun sebagai `utang`, padahal indeks uniknya sudah menahannya
+     * sejak awal dan §213 sudah mengukurnya lewat HTTP (3 pembuatan tenant
+     * kembar → tak ada 5xx, tepat satu lahir).
+     */
     const jalankan = () =>
       db.transaction(async (tx) => {
       const [existingCompany] = await tx
@@ -132,26 +145,28 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
         .values({ userId: owner.id, companyId: company.id, role: "owner", employeeCode });
 
       return { company, branch, owner: { id: owner.id, email: owner.email } };
-    });
-    /*
-     * Dua pra-cek di dalam transaksi itu (slug & email) sama-sama punya jeda
-     * sebelum tulisannya; yang benar-benar menjaga keduanya adalah
-     * `companies_slug_unique` dan `users_email_unique`. Yang KALAH balapan dulu
-     * menerima 23505 mentah alias 500.
-     *
-     * Diterjemahkan PER INDEKS, bukan lewat satu pesan seragam: "slug sudah
-     * dipakai" dan "email sudah terdaftar" menuntun ke perbaikan yang berbeda,
-     * dan super admin yang membuat tenant baru tak punya cara lain menebaknya.
-     */
-    const result = await jalankan().catch((e: unknown) => {
-      if (bentrokUnikPada(e, "companies_slug_unique")) {
-        throw new HTTPException(409, { message: `Slug "${slug}" sudah dipakai` });
-      }
-      if (bentrokUnikPada(e, "users_email_unique")) {
-        throw new HTTPException(409, { message: `Email ${body.owner_email} sudah terdaftar` });
-      }
-      throw e;
-    });
+    })
+        /*
+         * Dua pra-cek di dalam transaksi itu (slug & email) sama-sama punya
+         * jeda sebelum tulisannya; yang benar-benar menjaga keduanya adalah
+         * `companies_slug_unique` dan `users_email_unique`. Yang KALAH balapan
+         * dulu menerima 23505 mentah alias 500.
+         *
+         * Diterjemahkan PER INDEKS, bukan lewat satu pesan seragam: "slug
+         * sudah dipakai" dan "email sudah terdaftar" menuntun ke perbaikan
+         * yang berbeda, dan super admin yang membuat tenant baru tak punya
+         * cara lain menebaknya.
+         */
+        .catch((e: unknown) => {
+          if (bentrokUnikPada(e, "companies_slug_unique")) {
+            throw new HTTPException(409, { message: `Slug "${slug}" sudah dipakai` });
+          }
+          if (bentrokUnikPada(e, "users_email_unique")) {
+            throw new HTTPException(409, { message: `Email ${body.owner_email} sudah terdaftar` });
+          }
+          throw e;
+        });
+    const result = await jalankan();
     return c.json(result, 201);
   })
   .get("/:id", async (c) => {

@@ -34,9 +34,24 @@ import { berkasKode, SRV } from "./util/rute";
 const BACAAN_ANGKA = "Number(c.req.query(…))";
 
 /** `berkas:baris` → alasan, untuk bacaan angka yang sengaja dibiarkan. */
+/*
+ * KUNCINYA BERKAS + NOMOR BARIS, dan itu KELEMAHAN YANG DIKETAHUI.
+ *
+ * Repo ini sudah membayar pelajarannya di gerbang lain — `DIPILAH_TANGAN` di
+ * `kueri-terkurung-tenant` sengaja berkunci BERKAS + JUMLAH persis karena
+ * "gerbang di repo ini sudah sekali patah karena memaku baris yang bergeser
+ * gara-gara komentar". Di sini kuncinya masih baris, jadi menambahkan satu
+ * komentar di atas situsnya memerahkan gerbang ini tanpa satu pun perilaku
+ * berubah. Terjadi lagi 2026-08-31 (kedua entri di bawah bergeser 26 dan 10
+ * baris saat vena pemotongan dibayar), dan nomornya diperbarui, bukan
+ * gerbangnya dilonggarkan.
+ *
+ * Didaftarkan sebagai vena tersendiri di `docs/audit/vena-audit.md`:
+ * kunci baris ini layak diganti kunci yang tak bergeser.
+ */
 const DIPILAH = new Map<string, string>([
   [
-    "modules/laporan/routes.ts:536",
+    "modules/laporan/routes.ts:562",
     "Kalkulator BEP: `biaya_tetap` ditolak 400 bila bukan angka atau <= 0, di " +
       "baris berikutnya, dengan pesan yang menyebut namanya. Batas ATAS-nya " +
       "memang tak ada — dan itu tak merusak: hasilnya sekadar angka BEP yang " +
@@ -54,7 +69,7 @@ const DIPILAH = new Map<string, string>([
       "persis dengan tetangganya di atas.",
   ],
   [
-    "modules/stok/routes.ts:265",
+    "modules/stok/routes.ts:275",
     "`hari` diklem 0..60 di baris BERIKUTNYA (`Math.min(60, Math.max(0, …))`) " +
       "dengan bawaan 7 bila bukan angka — pemindai ini berlingkup satu " +
       "pernyataan, jadi klemnya tak terlihat dari situs bacaannya.",

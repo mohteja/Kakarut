@@ -36,7 +36,7 @@ import { CatatWasteModal } from "./CatatWasteModal";
 import { StokPerlengkapanTab } from "./StokPerlengkapanTab";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
-import { api } from "../../lib/api";
+import { api, bacaTerpotong } from "../../lib/api";
 import {
   formatAngka,
   formatRupiah,
@@ -86,10 +86,16 @@ export function StokPage() {
     queryFn: () => api<PenyimpananDto[]>(`/penyimpanan${branchQuery}`),
   });
   // PERINGATAN EXP: lot hampir/lewat tanggal kedaluwarsa (7 hari ke depan)
+  // Server memotong daftar ini di 300 lot. Layar ini dipakai memutuskan APA
+  // YANG HARUS DIJUAL DULUAN, jadi ekor yang tak terkirim bukan sekadar
+  // kerapian: angka di judul panel adalah panjang daftar, bukan jumlah lot.
+  const [expTerpotong, setExpTerpotong] = useState<number | null>(null);
   const { data: expLots = [], error: expGagal } = useQuery({
     queryKey: ["stok-exp", branchQuery],
     queryFn: () =>
-      api<ExpLotRow[]>(`/stok/exp${branchQuery ? `${branchQuery}&hari=7` : "?hari=7"}`),
+      api<ExpLotRow[]>(`/stok/exp${branchQuery ? `${branchQuery}&hari=7` : "?hari=7"}`, {
+        bacaHeader: bacaTerpotong(setExpTerpotong),
+      }),
     enabled: !isKantorData,
   });
   const [bukaExp, setBukaExp] = useState(false);
@@ -479,13 +485,20 @@ export function StokPage() {
             }`}
           >
             <span>
-              ⏳ {expLots.length} lot bahan {adaLewat ? "lewat/hampir" : "hampir"} kedaluwarsa
-              (≤ 7 hari)
+              ⏳ {expLots.length}
+              {expTerpotong !== null ? "+" : ""} lot bahan{" "}
+              {adaLewat ? "lewat/hampir" : "hampir"} kedaluwarsa (≤ 7 hari)
             </span>
             <span>{bukaExp ? "▴" : "▾"}</span>
           </button>
           {bukaExp && (
             <div className="mt-2 space-y-1.5">
+              {expTerpotong !== null && (
+                <div className="rounded-lg border border-amber-300 bg-white/80 px-2.5 py-1.5 text-[11px] text-amber-900">
+                  Menampilkan <b>{expTerpotong} lot terdekat kedaluwarsa</b>. Masih ada lot lain
+                  yang tidak ikut ditampilkan.
+                </div>
+              )}
               {expLots.map((l) => (
                 <div
                   key={l.production_id}

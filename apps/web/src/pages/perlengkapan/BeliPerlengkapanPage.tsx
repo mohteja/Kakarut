@@ -14,7 +14,7 @@ import {
 } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
-import { api } from "../../lib/api";
+import { api, bacaTerpotong } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
 import { AreaCetak } from "../../components/AreaCetak";
 
@@ -108,9 +108,18 @@ export function BeliPerlengkapanPage() {
   const [detail, setDetail] = useState<FakturBeli | null>(null);
   const [buatOpen, setBuatOpen] = useState(false);
 
+  /*
+   * Server memotong daftar ini di 200 baris — dan urutannya menaruh yang
+   * BUTUH AKSI di atas, jadi yang dipotong justru EKOR RIWAYATNYA. Tanpa
+   * penanda, faktur lama terbaca sebagai "tak pernah ada".
+   */
+  const [terpotong, setTerpotong] = useState<number | null>(null);
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["perlengkapan-beli"],
-    queryFn: () => api<BeliPerlengkapanRow[]>("/perlengkapan/beli"),
+    queryFn: () =>
+      api<BeliPerlengkapanRow[]>("/perlengkapan/beli", {
+        bacaHeader: bacaTerpotong(setTerpotong),
+      }),
   });
   const grup = useMemo(() => kelompokkanFaktur(rows), [rows]);
   const batal = useMutation({
@@ -196,6 +205,12 @@ export function BeliPerlengkapanPage() {
                   🧹 Batalkan semua
                 </button>
               )}
+            </div>
+          )}
+          {terpotong !== null && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              Menampilkan <b>{terpotong} baris pembelian terakhir</b>, dengan yang butuh aksi di
+              atas. Riwayat yang <b>lebih lama</b> tidak ikut ditampilkan di sini.
             </div>
           )}
           {grup.map((g) => {

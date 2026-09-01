@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { and, eq, isNull } from "drizzle-orm";
 import { env } from "../../config/env";
 import type { Db, Tx } from "../../db/client";
+import { kunciAntrean } from "../../lib/kunci";
 import { users } from "../../db/schema";
 
 /**
@@ -12,36 +13,69 @@ import { users } from "../../db/schema";
  * dibuat otomatis dari SEED_SUPERADMIN_EMAIL/PASSWORD.
  *
  * Mengembalikan true bila membuat akun baru, false bila sudah ada (no-op).
+ *
+ * DUA BOOT YANG BERTINDIH ADALAH KEADAAN NORMAL DI SINI, bukan kecelakaan —
+ * `lib/kunci.ts` sudah menuliskannya: penyebaran repo ini "memutar instance
+ * baru sebelum yang lama berhenti". Maka periksa-lalu-tulis di bawah dipegang
+ * satu kunci antrean, dan alasannya bukan kerapian.
+ *
+ * Yang menahannya SELAMA INI cuma `users_email_unique`, dan itu indeks atas
+ * aturan yang SALAH: ia menjaga "satu user per email", sedangkan aturan di
+ * sini "paling banyak satu super admin aktif". Keduanya berimpit hanya selama
+ * seluruh instance membaca `SEED_SUPERADMIN_EMAIL` yang sama.
+ *
+ * Akibatnya tidak merusak data — jumlah barisnya memang tetap satu — melainkan
+ * merusak apa yang DIKATAKAN log boot. TERUKUR atas Postgres sungguhan, 8
+ * ronde dua panggilan serentak dari keadaan nol super admin:
+ *
+ *   3/8  bersih
+ *   4/8  yang kalah ditolak `23505 users_email_unique`, dan `index.ts`
+ *        mencetaknya sebagai "Gagal memastikan super admin: Failed query:
+ *        insert into users …" — pembacanya tak bisa tahu akunnya ada atau tidak
+ *   1/8  yang kalah membaca `emailDipakai` SESUDAH yang menang commit, lalu
+ *        mencetak kalimat yang KELIRU: "email … sudah dipakai akun lain —
+ *        lewati pembuatan otomatis". Email itu dipakai super admin yang baru
+ *        saja lahir; tak ada akun lain
+ *   0/8  jumlah barisnya salah
+ *
+ * Lima dari delapan boot karena itu menutup dengan galat atau dengan kalimat
+ * yang salah, di satu-satunya tempat pemilik sistem bisa membacanya.
+ *
+ * Tetangganya `backfillEmployeeCode` sudah memegang kunci sejenis sejak awal,
+ * dan berjalan di boot yang SAMA.
  */
 export async function pastikanSuperAdmin(dbx: Db | Tx): Promise<boolean> {
-  const [ada] = await dbx
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.isSuperAdmin, true), isNull(users.deletedAt)))
-    .limit(1);
-  if (ada) {
-    await peringatkanEnvMenyimpang(dbx);
-    return false;
-  }
+  return dbx.transaction(async (tx) => {
+    await kunciAntrean(tx, "super-admin");
+    const [ada] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.isSuperAdmin, true), isNull(users.deletedAt)))
+      .limit(1);
+    if (ada) {
+      await peringatkanEnvMenyimpang(tx);
+      return false;
+    }
 
-  const email = env.SEED_SUPERADMIN_EMAIL.trim().toLowerCase();
-  // Jangan menimpa akun lain yang kebetulan memakai email itu.
-  const [emailDipakai] = await dbx.select({ id: users.id }).from(users).where(eq(users.email, email));
-  if (emailDipakai) {
-    console.warn(
-      `Super admin belum ada, tapi email ${email} sudah dipakai akun lain — lewati pembuatan otomatis.`,
-    );
-    return false;
-  }
+    const email = env.SEED_SUPERADMIN_EMAIL.trim().toLowerCase();
+    // Jangan menimpa akun lain yang kebetulan memakai email itu.
+    const [emailDipakai] = await tx.select({ id: users.id }).from(users).where(eq(users.email, email));
+    if (emailDipakai) {
+      console.warn(
+        `Super admin belum ada, tapi email ${email} sudah dipakai akun lain — lewati pembuatan otomatis.`,
+      );
+      return false;
+    }
 
-  await dbx.insert(users).values({
-    email,
-    passwordHash: bcrypt.hashSync(env.SEED_SUPERADMIN_PASSWORD, 10),
-    nama: "Super Admin",
-    isSuperAdmin: true,
-    emailVerifiedAt: new Date(),
+    await tx.insert(users).values({
+      email,
+      passwordHash: bcrypt.hashSync(env.SEED_SUPERADMIN_PASSWORD, 10),
+      nama: "Super Admin",
+      isSuperAdmin: true,
+      emailVerifiedAt: new Date(),
+    });
+    return true;
   });
-  return true;
 }
 
 /**

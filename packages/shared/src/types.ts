@@ -1808,6 +1808,16 @@ export interface LaporanDurasiPesanan {
   per_menu: DurasiMenuRow[];
   /** penyelesaian terbaru lebih dulu — dibatasi agar layar tak kebanjiran */
   riwayat: DurasiRiwayatRow[];
+  /**
+   * `riwayat` DIPOTONG — dan `jumlah` di atas TIDAK.
+   *
+   * Kedua angka itu berdiri di layar yang sama, jadi tanpa penanda ini
+   * "1.284 sajian terhitung" tampil tepat di atas daftar berisi 200 tanpa
+   * satu kata pun menjelaskan selisihnya. `per_menu` dan `jumlah` lahir dari
+   * agregat `GROUP BY` yang tak dibatasi, jadi statistiknya tetap atas
+   * SELURUH rentang; yang pendek cuma daftar riwayatnya.
+   */
+  riwayat_terpotong: boolean;
 }
 
 /** Satu baris ranking menu terlaris. */
