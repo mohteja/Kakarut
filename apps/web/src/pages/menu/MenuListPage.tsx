@@ -202,14 +202,21 @@ export function MenuListPage() {
       {[...grup.entries()].map(([kategori, list]) => (
         <div key={kategori} className="mb-6">
           <h2 className="mb-2 text-lg font-semibold text-stone-700">{kategori}</h2>
+          {/* SATU tabel per kategori, ditumpuk — jadi lebar kolomnya harus
+              TETAP dan sama di semua tabel (`tetap` + `kelasJudul` w-*), atau
+              kepala "HPP" tiap kategori berdiri di x yang berbeda. Kolom
+              "Menu" tanpa lebar: ia yang menampung sisanya. */}
           <TabelResponsif
             data={list}
             kunci={(m) => m.id}
             kosong="Belum ada menu di kategori ini."
+            tetap
+            minLebar="min-w-[76rem]"
             kolom={[
               {
                 judul: "Kode",
                 hp: "sub",
+                kelasJudul: "w-20",
                 sel: (m) =>
                   m.kode ? (
                     <span className="inline-block rounded bg-stone-100 px-2 py-0.5 font-mono text-xs font-semibold text-stone-600">
@@ -242,12 +249,13 @@ export function MenuListPage() {
                   </>
                 ),
               },
-              { judul: "HPP", kanan: true, sel: (m) => formatRupiah(m.hpp) },
+              { judul: "HPP", kanan: true, kelasJudul: "w-28", sel: (m) => formatRupiah(m.hpp) },
               {
                 judul: "HPP Dine-in",
                 kanan: true,
                 // turunan HPP: hanya berguna berdampingan dengan kolom lain
                 hp: "lewat",
+                kelasJudul: "w-32",
                 kelasSel: "text-stone-400",
                 sel: (m) => formatRupiah(m.hpp_dine_in),
               },
@@ -255,33 +263,39 @@ export function MenuListPage() {
                 judul: "Markup",
                 kanan: true,
                 hp: "lewat",
+                kelasJudul: "w-20",
                 sel: (m) => (m.tipe === "paket" ? `dasar ×${m.base_mult}` : `×${m.mult}`),
               },
               {
                 judul: "Harga Saran",
                 kanan: true,
                 hp: "lewat",
+                kelasJudul: "w-32",
                 sel: (m) => formatRupiah(m.harga_saran),
               },
               {
                 judul: "Saran Bulat",
                 kanan: true,
                 hp: "lewat",
+                kelasJudul: "w-32",
                 sel: (m) => formatRupiah(m.harga_jual_bulat),
               },
               {
                 judul: "Harga Jual",
                 kanan: true,
+                kelasJudul: "w-32",
                 kelasSel: "font-bold",
                 sel: (m) => formatRupiah(m.harga_jual),
               },
               {
                 judul: "Food Cost",
                 kanan: true,
+                kelasJudul: "w-28",
                 sel: (m) => <FoodCost persen={m.food_cost_persen} maks={foodCostMaks} />,
               },
               {
                 hp: "aksi",
+                kelasJudul: "w-28",
                 kelasSel: "whitespace-nowrap text-right",
                 sel: (m) => (
                   <>

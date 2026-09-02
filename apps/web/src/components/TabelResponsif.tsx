@@ -79,6 +79,7 @@ export function TabelResponsif<T>({
   minLebar,
   judulKartu,
   onKlikBaris,
+  tetap = false,
 }: {
   kolom: KolomTabel<T>[];
   data: T[];
@@ -110,6 +111,18 @@ export function TabelResponsif<T>({
    * baris; Enter/Spasi pada baris yang fokus membukanya juga.
    */
   onKlikBaris?: (baris: T, indeks: number) => void;
+  /**
+   * Tata letak tabel TETAP (`table-layout: fixed`): lebar kolom diambil dari
+   * `kelasJudul` (mis. `w-28`) pada baris kepala, bukan dari isi sel.
+   *
+   * Dipakai saat SATU definisi kolom dirender sebagai BEBERAPA tabel yang
+   * ditumpuk (Menu & HPP: satu tabel per kategori). Dengan tata letak otomatis
+   * tiap tabel mengukur kolomnya dari isinya sendiri, jadi "HPP" di kategori
+   * pertama berdiri di x yang lain dari "HPP" di kategori kedua — kepala yang
+   * sama tak lagi sejajar. Kolom tanpa lebar (biasanya nama) menerima sisa
+   * lebarnya.
+   */
+  tetap?: boolean;
 }) {
   const propsKlik = (baris: T, i: number) =>
     onKlikBaris
@@ -231,7 +244,7 @@ export function TabelResponsif<T>({
 
       {/* Desktop: tabel seperti semula */}
       <div className="hidden overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-sm sm:block">
-        <table className={`w-full ${minLebar ?? ""}`}>
+        <table className={`w-full ${tetap ? "table-fixed" : ""} ${minLebar ?? ""}`}>
           <thead className="border-b border-stone-200 bg-stone-50">
             <tr>
               {kolom.map((k, j) => (
