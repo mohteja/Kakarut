@@ -1737,6 +1737,13 @@ export interface LaporanHarian {
   total_refund: number;
   /** banyaknya kejadian refund yang menyusutkan rentang ini */
   jumlah_refund: number;
+  /**
+   * Σ subtotal seperti SEBELUM refund mana pun (jangkar `subtotal_asal`).
+   * Dihitung server sejak 2026-09-02: `omzet + total_refund` di layar salah,
+   * sebab `total_refund` nominal bersih (diskon dipotong, PB1 ditambah)
+   * sedangkan `omzet` kotor.
+   */
+  omzet_sebelum_refund: number;
   pb1_terkumpul: number;
   total_hpp: number;
   estimasi_profit: number;

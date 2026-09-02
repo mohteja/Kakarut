@@ -191,7 +191,7 @@ export function LaporanPage() {
               <b>Refund</b> {formatRupiah(lap.total_refund)} dari {lap.jumlah_refund} kejadian
               adalah uang yang dikembalikan atas transaksi <b>periode ini</b>, kapan pun
               pengembaliannya dilakukan. <b>Omzet</b> di atas sudah bersih darinya — sebelum
-              refund, omzetnya {formatRupiah(lap.omzet + lap.total_refund)}.
+              refund, omzetnya {formatRupiah(lap.omzet_sebelum_refund)}.
             </p>
           )}
 
