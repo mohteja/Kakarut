@@ -46,9 +46,14 @@ const EnvSchema = z.object({
 
   /**
    * Base URL publik aplikasi — dipakai membangun tautan email (verifikasi,
-   * reset password, undangan). OPSIONAL: bila kosong, base URL diturunkan dari
+   * reset password, undangan) DAN sebagai asal KANONIK: permintaan dokumen
+   * yang datang lewat alias (`www.` ↔ tanpa `www.`, `http` → `https`, atau
+   * host lain di `APP_HOST_DIPERCAYA`) dialihkan 301 ke sini, supaya sesi
+   * yang tersimpan di peramban (per asal) tak terbelah dua — lihat
+   * `lib/host-kanonik.ts`. OPSIONAL: bila kosong, base URL diturunkan dari
    * header permintaan (proto + host) sehingga tautan mengikuti domain yang
-   * dipakai pengguna. Set eksplisit hanya bila perlu domain kustom tetap.
+   * dipakai pengguna, dan TAK ADA pengalihan. Set eksplisit bila perlu domain
+   * kustom tetap.
    */
   APP_BASE_URL: z
     .string()
