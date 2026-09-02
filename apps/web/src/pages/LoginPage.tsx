@@ -1,14 +1,18 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
 import { PESAN_KIRIM_ULANG } from "../lib/pesan-verifikasi";
+import { NILAI_SESI_BERAKHIR, PARAM_SESI, PESAN_SESI_BERAKHIR } from "../lib/pesan-sesi";
 
 export function LoginPage() {
   const { login, masukTamu, kirimUlangVerifikasi } = useAuth();
   const navigate = useNavigate();
+  // Dilempar ke sini oleh `api()` karena 401? Katakan sebabnya (lib/pesan-sesi.ts).
+  const [params] = useSearchParams();
+  const sesiBerakhir = params.get(PARAM_SESI) === NILAI_SESI_BERAKHIR;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +101,11 @@ export function LoginPage() {
           <h1 className="mt-3 text-2xl font-bold text-stone-800">Terakasir</h1>
           <p className="text-sm text-stone-500">Sistem kasir &amp; HPP untuk bisnis F&amp;B</p>
         </div>
+        {sesiBerakhir && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            ⏰ {PESAN_SESI_BERAKHIR}
+          </div>
+        )}
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <label htmlFor="email" className="mb-1 block text-sm font-medium text-stone-700">

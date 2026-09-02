@@ -1,4 +1,5 @@
 import { bacaLokal, hapusLokal, tulisLokal } from "./simpanan";
+import { NILAI_SESI_BERAKHIR, PARAM_SESI } from "./pesan-sesi";
 
 export interface AuthState {
   token: string;
@@ -145,7 +146,10 @@ export async function api<T = unknown>(
   // Login yang gagal harus tetap menampilkan pesan asli dari server.
   if (res.status === 401 && !path.startsWith("/auth/login")) {
     saveAuth(null);
-    window.location.href = "/login";
+    // SEBABNYA IKUT: `throw` di bawah tak pernah dibaca siapa pun (dokumennya
+    // sudah dibuang oleh perpindahan), jadi kalimatnya diucapkan halaman
+    // login lewat query — lihat `lib/pesan-sesi.ts`.
+    window.location.href = `/login?${PARAM_SESI}=${NILAI_SESI_BERAKHIR}`;
     throw new ApiError(401, "Sesi berakhir, silakan login ulang");
   }
   if (!res.ok) {

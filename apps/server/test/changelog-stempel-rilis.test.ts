@@ -47,9 +47,6 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
-  // Ditulis 2026-09-02 bersama kodenya; stempelnya dipasang begitu merge ke
-  // production mendarat — bukan sebelumnya.
-  "## `GET /laporan` membawa `omzet_sebelum_refund`",
   /*
    * PARUH "belum di-merge" KOSONG sejak 2026-08-31 — dan kosongnya bukan
    * kerapian. Entri "Angka BIAYA hanya untuk manajemen" tercantum di sini

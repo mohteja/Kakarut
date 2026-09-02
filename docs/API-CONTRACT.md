@@ -44,6 +44,16 @@ set base URL ke `https://<host-produksi>` lalu tambahkan path (mis.
   berlaku" → hapus token tersimpan → arahkan ke login. Endpoint yang mengganti
   password sendiri **menerbitkan token baru** di responsnya — simpan token baru
   itu menggantikan yang lama agar sesi tetap hidup tanpa login ulang.
+- **Umur & pencabutan sesi (diukur §287 `verify-api.sh`, 2026-09-02):** token
+  berumur `JWT_EXPIRES_IN` (bawaan **12 jam**, tanpa refresh token); yang
+  kedaluwarsa dijawab **401** `"Token tidak valid atau kedaluwarsa"`. Karyawan
+  yang **dinonaktifkan/diarsipkan** admin kehilangan sesinya **seketika** pada
+  permintaan berikutnya (401 `"Sesi tidak berlaku lagi — silakan masuk kembali"`
+  atau `"Akses ke perusahaan ini sudah tidak berlaku"`), tanpa menunggu token
+  kedaluwarsa; diaktifkan kembali → token yang sama **hidup lagi** tanpa login
+  ulang. Klien: perlakukan SEMUA 401 di luar `/auth/login` sama — hapus sesi,
+  ke layar login, dan **katakan sebabnya** kepada pengguna (web memakai
+  `/login?sesi=berakhir`); jangan diam-diam.
 - **Tidak ada cookie / CSRF** — auth murni via Bearer token. Simpan token di
   secure storage aplikasi.
 

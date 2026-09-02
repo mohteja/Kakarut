@@ -16720,6 +16720,65 @@ cek "PASANGAN §286: …juga dengan branch_id=all → 403" "V == 403" \
   "$(status_code "$K286" GET "/laporan?dari=$TODAY&sampai=$TODAY&branch_id=all")"
 api "$K286" POST /shift/tutup '{"uang_fisik":27720}' > /dev/null
 
+
+# §287 — DAUR HIDUP SESI: yang KEDALUWARSA ditolak, yang DICABUT mati seketika
+#
+# Pemetaan cakupan 2026-09-02: `JWT_EXPIRES_IN` (12 jam) ada, tapi tak satu
+# uji pun pernah menembak token yang benar-benar kedaluwarsa — lengan
+# `TokenExpiredError` di `requireAuth` belum pernah dijalankan gerbang. Sesi
+# yang dicabut lewat ganti/reset password (§?, 4292/4306) dan keanggotaan
+# diarsip (§141) sudah dijaga; NONAKTIF hanya diuji pada pintu login ("akun
+# nonaktif tidak bisa login"), bukan pada sesi yang SUDAH ADA.
+#
+# Token kedaluwarsa dibuat dengan menandatangani ulang PAYLOAD token owner
+# (sub, tv, dst — bukan diketik) memakai JWT_SECRET yang sama, exp 60 detik
+# yang lalu. PASANGAN-nya: payload yang persis sama dengan exp di depan → 200,
+# jadi yang ditolak memang `exp`, bukan cara penandatanganannya.
+echo "── §287 daur hidup sesi: token kedaluwarsa ditolak, sesi yang dicabut mati seketika ──"
+cek "premis §287: JWT_SECRET tersedia untuk menandatangani token uji" "V == 1" \
+  "$([ -n "${JWT_SECRET:-}" ] && echo 1 || echo 0)"
+tanda287() { # tanda287 <expiresIn> [rahasia] → token berpayload OWNER
+  node -e '
+    const jwt = require(process.cwd() + "/node_modules/jsonwebtoken");
+    const [tok, exp, rahasia] = process.argv.slice(1);
+    const p = jwt.decode(tok); delete p.iat; delete p.exp;
+    process.stdout.write(jwt.sign(p, rahasia || process.env.JWT_SECRET, { expiresIn: exp }));
+  ' "$OWNER" "$1" "${2:-}"
+}
+T287_MATI=$(tanda287 -60s)
+T287_HIDUP=$(tanda287 1h)
+T287_ASING=$(tanda287 1h rahasia-lain-yang-bukan-milik-server)
+cek "§287 token KEDALUWARSA → 401" "V == 401" "$(status_code "$T287_MATI" GET /auth/me)"
+cek "§287 …dan pesannya menyebut kedaluwarsa" "V == 1" \
+  "$(api "$T287_MATI" GET /auth/me | jq '((.error // "")|test("kedaluwarsa"))|if . then 1 else 0 end')"
+cek "PASANGAN §287: payload yang SAMA dengan exp di depan → 200 (yang ditolak memang exp)" "V == 200" \
+  "$(status_code "$T287_HIDUP" GET /auth/me)"
+cek "PASANGAN §287: tanda tangan asing → 401" "V == 401" "$(status_code "$T287_ASING" GET /auth/me)"
+
+# SESI YANG SUDAH ADA dicabut oleh NONAKTIF — dan pencabutannya bisa dibalik
+# tanpa masuk ulang (tokennya sendiri masih sah; yang diperiksa tiap
+# permintaan adalah barisnya).
+SUF287=$(date +%s)
+CB287=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe!="central_kitchen" and .is_active)][0].id // ""')
+# `user_id`, bukan `id`: jalan pertama seksi ini membaca `.id`, PATCH-nya
+# menembak `/karyawan/` kosong (404 "Tidak ditemukan"), dan tiga asersi memerah
+# menuduh server tak mencabut sesi — padahal yang salah kuncinya.
+U287=$(api "$OWNER" POST /karyawan "{\"nama\":\"Kasir 287\",\"email\":\"kasir287-$SUF287@basooopa.id\",\"password\":\"Kasir287Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB287\"}" | jq -r '.user_id // ""')
+K287=$(login "kasir287-$SUF287@basooopa.id" "Kasir287Pass!")
+cek "premis §287: karyawan baru tercipta (user_id) dan punya sesi yang hidup (200)" "V == 1" \
+  "$([ ${#U287} -eq 36 ] && [ "$(status_code "$K287" GET /auth/me)" = 200 ] && echo 1 || echo 0)"
+api "$OWNER" PATCH "/karyawan/$U287" '{"is_active":false}' > /dev/null
+cek "§287 dinonaktifkan → sesi yang SUDAH ADA mati seketika (401)" "V == 401" "$(status_code "$K287" GET /auth/me)"
+cek "§287 …dan pesannya menyebut sesi tidak berlaku lagi" "V == 1" \
+  "$(api "$K287" GET /auth/me | jq '((.error // "")|test("tidak berlaku"))|if . then 1 else 0 end')"
+api "$OWNER" PATCH "/karyawan/$U287" '{"is_active":true}' > /dev/null
+cek "PASANGAN §287: diaktifkan lagi → token yang sama hidup lagi (200), tanpa masuk ulang" "V == 200" \
+  "$(status_code "$K287" GET /auth/me)"
+# DIARSIPKAN: pencabutan yang lebih tegas — dan §141 sudah menjaga jalur
+# keanggotaannya; di sini dipaku bahwa sesi yang sedang hidup ikut mati.
+api "$OWNER" PATCH "/karyawan/$U287" '{"arsip":true}' > /dev/null
+cek "§287 diarsipkan → sesi yang sudah ada mati (401)" "V == 401" "$(status_code "$K287" GET /auth/me)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

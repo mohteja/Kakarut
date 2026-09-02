@@ -36,6 +36,8 @@ omzetnya {omzet + total_refund}", padahal `omzet` KOTOR (Σ subtotal) dan
 untuk omzet sebelum refund 92.000. Kalau ponsel ingin menampilkan angka itu,
 baca medan ini; jangan merakitnya dari `omzet + total_refund`.
 
+**Sudah di-merge ke production.**
+
 ## `POST /auth/reset-password` sekaligus MENANDAI EMAIL TERVERIFIKASI
 
 ⚪️ **INFO** — tak ada bentuk balasan yang berubah (`{ ok: true }` tetap).
