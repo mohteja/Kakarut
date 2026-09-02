@@ -11,7 +11,12 @@ import {
 import { api, AUTH_STORAGE_KEY, loadAuth, saveAuth, type AuthState } from "../lib/api";
 import { hapusLokal } from "../lib/simpanan";
 
-/** Hasil daftar / kirim-ulang verifikasi (netral, tanpa sesi). */
+/**
+ * Hasil daftar / kirim-ulang verifikasi (netral, tanpa sesi) — KECUALI satu
+ * keadaan: `/register` untuk akun yang sudah terverifikasi dengan password
+ * yang cocok memulangkan SESI (bentuk `AuthState`) plus `sudah_aktif: true`.
+ * Pemanggil memeriksa `"token" in hasil`.
+ */
 export interface DaftarResult {
   ok: boolean;
   message?: string;
@@ -33,7 +38,11 @@ interface AuthContextValue {
   /** Masuk sebagai tamu (guest mode) — akun bersama tanpa password. */
   masukTamu: (peran: "owner" | "kasir") => Promise<AuthState>;
   /** Daftar akun. TIDAK auto-login: kirim tautan verifikasi ke email. */
-  register: (nama: string, email: string, password: string) => Promise<DaftarResult>;
+  register: (
+    nama: string,
+    email: string,
+    password: string,
+  ) => Promise<DaftarResult | (AuthState & { sudah_aktif: true })>;
   /** Verifikasi email dengan KODE 6 digit → langsung dapat sesi (auto-login). */
   verifikasiEmail: (email: string, kode: string) => Promise<AuthState>;
   /**
@@ -185,12 +194,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const register = useCallback(
-    async (nama: string, email: string, password: string) =>
-      api<DaftarResult>("/auth/register", {
+    async (nama: string, email: string, password: string) => {
+      const res = await api<DaftarResult | (AuthState & { sudah_aktif: true })>("/auth/register", {
         method: "POST",
         body: { nama, email, password },
-      }),
-    [],
+      });
+      // Akun sudah aktif + password cocok → server memulangkan sesi. Disimpan
+      // di sini, lewat jalur yang sama dengan login, supaya tak ada dua cara
+      // menyimpan sesi yang pelan-pelan menyimpang.
+      if ("token" in res) setSession(res);
+      return res;
+    },
+    [setSession],
   );
 
   const verifikasiEmail = useCallback(

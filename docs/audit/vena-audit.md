@@ -50,6 +50,122 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Akun yang sudah aktif LANGSUNG DIMASUKKAN dari `/register` — dan layar daftar kembali SATU jalan — web + server — 2026-09-02
+
+- **Babak keempat dari satu laporan, dan yang pertama lahir dari PENOLAKAN
+  pemilik repo atas perbaikanku sendiri.** Babak 3 memperbaiki layar dengan
+  kalimat DUA cabang (*"jika alamat ini baru … jika akunnya sudah aktif,
+  langsung Masuk"*) plus tombol *"Akun sudah aktif?"*. Pemilik repo menolaknya:
+  *"kalo sudah aktif langsung login biar tidak membingungkan user apalagi ini
+  halaman awal user untuk coba aplikasi ini."* Alasannya benar, dan dicatat di
+  sini sebagai **keputusan desain yang dicabut** — bukan tuduhan, tapi kelasnya
+  sama: sesuatu yang kutulis dengan yakin, dibuktikan salah, dan dibalik
+  terang-terangan. Aturan gerbang babak 3 ("tiap kalimat menyebut KEDUA
+  kemungkinan") ikut DIBALIK, bukan dilonggarkan diam-diam.
+
+- **Yang benar: keadaan "sudah aktif" ditangani SEBELUM layar tunggu.**
+  `POST /auth/register` untuk akun terverifikasi dengan password yang COCOK
+  kini memulangkan **sesi** (bentuk sama dengan `/login`) + `sudah_aktif:
+  true`. Web menyimpannya lewat `setSession` yang sama dengan login — bukan
+  cara kedua yang pelan-pelan menyimpang — dan `SignupPage` menampilkan
+  *"Akun ini sudah aktif — Anda langsung dimasukkan"* 1,2 detik lalu
+  mengarahkan ke tujuan yang sama dengan halaman Masuk. Kalimat tunggu kode
+  kembali satu arah; tombol jalan kedua dan `AJAKAN_MASUK` dicabut.
+
+- **Bukan kebocoran baru, dan syaratnya ditulis di kodenya supaya tak
+  melonggar**: yang dibocorkan `/register` kini **TEPAT SAMA** dengan yang
+  dibocorkan `/login` — keberadaan akun hanya terungkap kepada pemegang
+  password yang benar. Password salah tetap dijawab netral, identik
+  byte-per-byte dengan email baru. Ember `batasRegister` (20/IP/jam) bahkan
+  lebih ketat daripada ember login untuk menebak password lewat pintu ini.
+  Akun BELUM terverifikasi tak pernah diberi sesi dari sini walau passwordnya
+  cocok — kodenya dikirim, verifikasi tetap wajib, persis `/login` yang
+  menolaknya 403.
+
+- **Terukur lewat HTTP sungguhan (§285, ditulis ulang jadi dua paruh)**:
+  daftar → verifikasi lewat rutenya → daftar ULANG. (a) password sama →
+  `token` ada, `sudah_aktif == true`, baris riwayat tetap `tak_dicoba /
+  akun_terverifikasi` (keputusan "tak dikirimi" tetap tercatat walau orangnya
+  dimasukkan). (b) `PasswordSalah999!` → badan identik dengan email yang belum
+  pernah ada, tanpa token, tanpa kode. **§284 +1**: akun belum terverifikasi +
+  password cocok → `token == null`.
+
+- **Riwayat kirim email pindah rumah**: dari halaman Sistem & Migrasi (harus
+  digulir lewat 100+ migrasi; pemilik repo mencarinya di Log Galat) ke
+  **sub-item sidebar pertama** di bawah Pengaturan Email
+  (`/superadmin/email/riwayat`, `RiwayatEmailPage.tsx`). Datanya tetap dari
+  `GET /admin/sistem` — tak ada kontrak yang berubah. Induknya diberi `end`
+  supaya keduanya tak menyala bersamaan.
+
+- **Temuan saat memindahkannya, kelas "penjaga memeriksa salinannya
+  sendiri"**: peta label `SEBAB` disalin utuh ke halaman baru — lengkap dengan
+  `email_sudah_terdaftar`, sebab yang sudah DICABUT di server sehari
+  sebelumnya — dan tak ada yang menuduh. Gerbang `otp-senyap-tercatat` memang
+  memeriksa peta, tapi peta di berkas ujinya sendiri, bukan peta yang dilihat
+  orang. Kini dijaga dua arah terhadap `RiwayatEmailPage.tsx` (tiap sebab
+  berlabel, tak ada label kuburan), pembacanya diuji dengan sumber palsu
+  (Aturan 7), dan bukti merahnya: satu kuburan + satu sebab tanpa label → merah.
+
+- **Klaim "ada bug akun tiba-tiba terverifikasi" DIJAWAB, dan bukan bug.**
+  Pemilik repo mendaftar sendiri SEBELUM 31 Agustus dan tak pernah menerima
+  surat, tapi akunnya terverifikasi. Sebabnya bisa ditunjuk barisnya: migrasi
+  `0065_stormy_zarda.sql` (tayang 2026-07-22) dengan sengaja — dan berkomentar
+  — menandai SEMUA akun yang sudah ada sebagai terverifikasi, supaya pemasangan
+  verifikasi email tak mengunci akun lama. Akun itu ikut tersapu. Enam penulis
+  `emailVerifiedAt` disapu (`users/routes.ts:209` owner membuat karyawan,
+  `admin-tenants/routes.ts:138`, `auth/superadmin.ts:75`, seed/tamu,
+  `verify-email`, backfill 0065): semuanya sengaja, tak satu pun jalur yang
+  menandai akun tanpa keputusan. Dicatat supaya pembaca berikutnya tak membuka
+  ulang pertanyaan yang sama.
+
+- **Gerbang `janji-surat-tak-berlebih` ditulis ulang ke aturan satu jalan (14
+  asersi)**: kalimat tunggu kode dilarang memuat `Jika` / `sudah aktif` /
+  `Masuk` (batas kata — *"Masukkan kodenya"* bukan cabang, dan itu diuji);
+  `PESAN_SUDAH_AKTIF` wajib ada; `SignupPage` wajib membaca `"token" in` dan
+  memakainya; `AuthContext` wajib menyimpan sesi lewat `setSession`; tak satu
+  layar pun boleh memuat *"Akun sudah aktif?"* atau `AJAKAN_MASUK`. **Bukti
+  merah LIMA arah**, tiap-tiapnya dipulihkan byte-per-byte dari salinan:
+  kalimat bercabang dipasang lagi → merah · tombol jalan kedua kembali → merah ·
+  `SignupPage` berhenti membaca `"token" in` → merah · `AuthContext` berhenti
+  menyimpan sesi → merah · peta label web membawa kuburan → merah.
+
+- **Gerbang penuh pertama MERAH 1 — dan bukan oleh putaran ini.** §279 (dua
+  kirim berpapasan) membaca kode `400 200`: kedua permintaan berjalan
+  BERURUTAN, yang kedua ditolak saringan `siap`, bukan lengan 409 yang
+  diuji. Kelas yang sama persis dengan §280d yang sudah distaging ulang
+  2026-09-01. Diperlakukan sama: loop sampai 8 percobaan, berhenti begitu tak
+  ada 400; tiap percobaan butuh faktur kiriman BARU, dan porsinya dihitung dari
+  saldo cabang yang terbaca supaya kekurangannya ≤ 5 butir — staging ulang tak
+  menghabiskan stok CK. **Harness lima kasus** membuktikan loopnya tak bisa
+  menghijaukan penjaga yang rusak: berpapasan langsung → 1 percobaan · dua
+  kali meleset → 3 percobaan, porsi naik · `200 200` (penjaga rusak) → TIDAK
+  diulang dan asersinya merah · delapan kali meleset → premis terstaging
+  merah · faktur kiriman tak lahir → berhenti, premis terbit merah. Dijalankan
+  ulang dari seed segar: **3384 lolos, 0 gagal** — §279 berpapasan di
+  percobaan pertama (kode `200 409`), jadi loopnya belum pernah dibutuhkan di
+  jalan hijau; yang dibuktikan harness adalah perilakunya saat dibutuhkan.
+
+- **Ponsel tak diubah putaran ini, dan alasannya diukur**: bentuk sesi bukan
+  DTO di `types.ts`, jadi fikstur kunci ponsel tak bergeser;
+  `register_page.dart` hanya membaca `dev_verify_url`, jadi balasan sesi cuma
+  membawanya ke layar kode lama — perangkap ponsel TETAP ADA dan sudah antre
+  sebagai putaran terpisah; antreannya kini menyebut `token` di balasan
+  `/register` juga. Entri CHANGELOG-API 🟡 ditulis, distempel begitu tayang.
+
+- **Batas yang ditulis jujur**: pemindai gerbangnya leksikal — ia menjaga
+  bentuk (kata yang dilarang, pengenal yang wajib ada), bukan apakah
+  pengalihannya benar-benar terjadi di browser; jalur HTTP-nya dijaga
+  §284/§285, jalur browsernya belum punya uji e2e. Satu-satunya keadaan yang
+  masih tak terwakili layar — akun aktif + password SALAH — memang tak boleh
+  dibedakan dari email baru, dan pemegangnya cuma punya tautan kecil "Sudah
+  punya akun? Masuk".
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` **218 berkas / 2659
+  uji** · `verify-api.sh` **3384 lolos, 0 gagal** · `audit:invarian` 27/27 ·
+  Playwright **13/13**.
+
+---
+
 ## TERJAWAB: bug OTP bukan bug email — layar yang menjanjikan surat yang tak akan datang — web + server — 2026-09-01
 
 - **Babak ketiga dari satu laporan, dan yang terakhir.** Instrumen babak kedua
@@ -9070,6 +9186,13 @@ berlaku di situ).
       atas. Bukan bug email: akunnya sudah terverifikasi. Yang salah layar
       yang menjanjikan surat yang tak akan datang, plus "Terkirim" yang belum
       tentu terkirim (`info.rejected` dibuang). Keduanya dibayar dan dijaga
+- [x] ~~**Layar daftar dua jalan + riwayat email di halaman Sistem**~~ —
+      DIBALIK atas keputusan pemilik repo, lihat entri di atas. `/register`
+      memasukkan akun aktif yang passwordnya cocok (bocorannya TEPAT SAMA
+      dengan `/login`); layar tunggu kembali satu jalan; riwayat jadi sub-item
+      Pengaturan Email. Klaim "akun tiba-tiba terverifikasi" dijawab dari
+      backfill 0065 — bukan bug. Sambil lalu: peta label web membawa sebab
+      kuburan, dan §279 distaging ulang seperti §280d
 - [ ] **Ponsel masih pada alur TOKEN lama untuk verifikasi email** — layarnya
       meminta "salin token di tautan, lalu tempel di bawah"
       (`verifikasi_email_page.dart:134-159`) sementara surat kini dipimpin kode
@@ -9078,8 +9201,12 @@ berlaku di situ).
       (`_mulaiCooldown(30)`) sementara server menahan **120**, dan
       `resendVerification` membuang badan responsnya sehingga
       `retry_after_detik` tak pernah dibaca — tombolnya tampak siap, ditekan,
-      dan tak ada surat berangkat. Terukur, bernama, dan **tidak** menjelaskan
-      surat yang tak sampai; digarap terpisah atas keputusan pemilik repo
+      dan tak ada surat berangkat. **Sejak 2026-09-02 ditambah satu lagi**:
+      `/register` bisa memulangkan SESI (akun aktif + password cocok), dan
+      `register_page.dart` hanya membaca `dev_verify_url` — balasan sesi
+      membawanya ke layar kode yang tak akan pernah menerima kode. Terukur,
+      bernama, dan **tidak** menjelaskan surat yang tak sampai; digarap
+      terpisah atas keputusan pemilik repo
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama

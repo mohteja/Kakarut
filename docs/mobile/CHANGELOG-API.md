@@ -25,6 +25,30 @@ tanpa akses repo server.
 
 ---
 
+## `POST /auth/register` bisa MEMULANGKAN SESI: akun terverifikasi + password cocok
+
+🟡 **PERLU DICEK** — layar daftar ponsel.
+
+Sebelumnya `/register` **selalu** `{ ok, message, retry_after_detik }` tanpa
+sesi. Sekarang, bila email itu milik akun yang **sudah terverifikasi** dan
+`password` yang diketik **cocok**, balasannya adalah **sesi login** (bentuk sama
+persis dengan `POST /auth/login`) ditambah `sudah_aktif: true`.
+
+Sebabnya nyata: pengguna yang mendaftar ulang dengan email+password yang sama
+dulu dijawab "cek email Anda" untuk akun yang sudah aktif, lalu menunggu surat
+yang memang tak akan pernah dikirim — tanpa satu pun layar menyebut jalan
+keluarnya.
+
+**Yang harus dilakukan ponsel:** sesudah `register`, periksa `token` di
+balasan. Ada → simpan sesi dan masuk (tampilkan "akun sudah aktif"); tidak ada →
+alur lama (layar kode). Tanpa perubahan ini ponsel tetap aman — ia cuma
+mengabaikan sesinya dan menyuruh menunggu kode yang tak datang, persis
+perangkap yang baru dihapus di web.
+
+**Yang TIDAK berubah:** password salah → balasan netral yang identik dengan
+email baru (anti-enumerasi tetap utuh; yang dibocorkan sama persis dengan
+`/login`). Akun belum terverifikasi + password cocok → tetap tanpa sesi, kodenya
+dikirim, verifikasi wajib.
 
 ## Delapan daftar yang dipotong kini MENGATAKANNYA
 

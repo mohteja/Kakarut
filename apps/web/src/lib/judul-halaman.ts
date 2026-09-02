@@ -116,6 +116,7 @@ export const JUDUL_RUTE: Record<string, string> = {
   "/superadmin/backup": "Cadangan",
   "/superadmin/error-log": "Log Galat",
   "/superadmin/email": "Pengaturan Email",
+  "/superadmin/email/riwayat": "Riwayat Kirim Email",
 };
 
 /** Pola ber-parameter, dicoba HANYA setelah pencocokan persis gagal. */

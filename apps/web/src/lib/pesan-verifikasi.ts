@@ -5,45 +5,40 @@
  *
  * Ketiga layar yang meminta kode verifikasi dulu menuliskan kalimatnya
  * sendiri-sendiri, dan ketiganya MENGKLAIM satu hal yang tak selalu benar:
+ * "kami sudah mengirim kode". Untuk akun yang SUDAH terverifikasi server tidak
+ * mengirim apa-apa — yang dibutuhkan orangnya cuma MASUK — dan tak satu layar
+ * pun menyebutnya. Pemilik repo ini sendiri terjebak di situ dua hari.
  *
- *     "Jika X valid, kami sudah mengirim kode 6 angka ke email tersebut."
- *     "Kode baru sudah dikirim (bila email valid). Cek email Anda."
+ * Versi pertama perbaikannya menaruh DUA kemungkinan di kalimat yang sama
+ * ("jika baru, kodenya dikirim; jika sudah aktif, langsung Masuk") plus tombol
+ * "Akun sudah aktif?". Pemilik repo menolaknya, dan alasannya benar: ini layar
+ * PERTAMA orang mencoba aplikasi ini, dan layar yang menawarkan dua jalan
+ * membingungkan. Yang benar: satu jalan, dan keadaan "sudah aktif" ditangani
+ * SEBELUM layar ini — `/register` dengan password yang cocok kini memulangkan
+ * sesi, dan orangnya langsung dimasukkan.
  *
- * Server sengaja membalas IDENTIK untuk email yang terdaftar dan yang tidak —
- * itu yang menutup celah enumerasi akun, dan itu benar. Tapi ada keadaan
- * ketiga yang tak terwakili kalimat mana pun: **akun yang SUDAH terverifikasi**.
- * Untuk akun seperti itu server tidak mengirim apa-apa, dan memang tak perlu —
- * yang dibutuhkan orangnya cuma MASUK.
- *
- * Akibatnya lingkaran tanpa ujung, dan ia menimpa pemilik repo ini sendiri
- * selama dua hari: daftar ulang → "kami sudah mengirim kode" → layar tunggu →
- * "Kirim ulang" → "Kode baru sudah dikirim" → menunggu surat yang secara
- * struktural tak akan pernah berangkat. Tak satu pun layar menyebut jalan
- * keluarnya. Yang akhirnya menjawabnya bukan layar mana pun melainkan riwayat
- * kirim email di panel super admin: `Tidak dikirim — akun sudah terverifikasi`.
- *
- * PERBAIKANNYA BUKAN MEMBERI TAHU YANG MANA. Mengatakan "akun ini sudah
- * terverifikasi" akan membuka kembali persis celah yang ditutup respons netral
- * itu. Yang diperbaiki: kalimat yang MENGASUMSIKAN satu kemungkinan diganti
- * kalimat yang MENYEBUT keduanya, dan jalan keluar kedua dibuat terlihat.
- * Netral, dan tak lagi menyesatkan.
+ * Maka kalimat di sini kembali satu arah. Satu-satunya keadaan yang masih tak
+ * terwakili — akun aktif + password SALAH — memang tak boleh dibedakan dari
+ * email baru (anti-enumerasi), dan pemegangnya punya jalan yang selalu ada di
+ * bawah layar: "Sudah punya akun? Masuk".
  *
  * Ditaruh di satu berkas karena bentuk "tiga salinan yang pelan-pelan
  * menyimpang" sudah menggigit di jalur yang sama: `VerifikasiEmailPage`
- * mendapat hitung mundur kirim ulang dari server, sementara tombol kembar di
- * `LoginPage` berjalan tanpa jeda sama sekali selama berbulan-bulan.
+ * mendapat hitung mundur dari server sementara tombol kembar di `LoginPage`
+ * berjalan tanpa jeda berbulan-bulan.
  */
 
-/** Sesudah pendaftaran: kodenya MUNGKIN sedang dikirim, mungkin juga tidak. */
+/** Sesudah pendaftaran email baru (atau akun lama yang belum diverifikasi). */
 export const PESAN_DAFTAR =
-  "Jika alamat ini baru, kode 6 angka sedang dikirim ke sana (berlaku 60 menit). " +
-  "Jika Anda sudah pernah mendaftar dan akunnya sudah aktif, tidak ada kode yang " +
-  "dikirim — langsung Masuk saja.";
+  "Kode 6 angka sedang dikirim ke alamat ini (berlaku 60 menit). Masukkan " +
+  "kodenya untuk mengaktifkan akun.";
 
 /** Sesudah menekan "Kirim ulang kode", di layar mana pun. */
-export const PESAN_KIRIM_ULANG =
-  "Jika akun ini memang menunggu verifikasi, kode barunya sedang dikirim. " +
-  "Jika akunnya sudah aktif, tidak ada kode yang dikirim — langsung Masuk saja.";
+export const PESAN_KIRIM_ULANG = "Kode baru sedang dikirim (berlaku 60 menit). Cek email Anda.";
 
-/** Ajakan yang menyertai keduanya; dipakai sebagai teks tautan ke /login. */
-export const AJAKAN_MASUK = "Akun sudah aktif? Masuk di sini →";
+/**
+ * Saat `/register` memulangkan SESI: akun sudah aktif dan passwordnya cocok.
+ * Ditampilkan sesaat sebelum diarahkan masuk, supaya orangnya tahu kenapa ia
+ * tak diminta kode.
+ */
+export const PESAN_SUDAH_AKTIF = "Akun ini sudah aktif — Anda langsung dimasukkan.";

@@ -15681,26 +15681,65 @@ echo
 echo "── §279 dua kirim yang berpapasan: satu berangkat, satu jejak ──"
 
 # Faktur kiriman BARU (stok CK sudah cukup dari §82) — satu submit, satu faktur.
-K279=$(api "$OWNER" POST /rekomendasi/menu/faktur \
-  "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":20}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
-F279=$(echo "$K279" | jq -r '.kirim.faktur_id // empty')
+#
+# DISTAGING ULANG, seperti §280d. Dua `curl` yang dilepas dari dua subshell
+# tidak dijamin berpapasan: bila penjadwal menjalankan yang pertama sampai
+# selesai sebelum yang kedua sempat bergerak, yang kedua ditolak 400 oleh
+# saringan `siap` ("sudah dikirim") — dan itu BUKAN yang diuji seksi ini. Yang
+# diuji adalah lengan 409 milik `dikirim_at IS NULL` untuk dua yang benar-benar
+# berpapasan. Kode "400 200" pernah membuat gerbang ini merah tanpa satu baris
+# kode pun yang berubah (2026-09-02); gerbang yang menuduh karena penjadwal
+# berpindah mengajari pembacanya mengabaikan gerbang.
+#
+# Tiap percobaan butuh faktur kiriman BARU, dan faktur kiriman hanya lahir bila
+# cabang tujuan KEKURANGAN (`kebutuhan > saldo`) dan CK punya sisa. Kiriman yang
+# berhasil menambah saldo cabang, jadi porsi percobaan berikutnya dihitung dari
+# saldo cabang yang TERBACA — cukup untuk kekurangan ≤ 5 butir (resep MENU66:
+# 5 butir/porsi) — supaya staging ulang tak menghabiskan stok CK.
+rm -f /tmp/kk279-*
+MAKS279=8
+COBA279=0
+PORSI279=20
+K279KODE=""
+F279=""
+BARIS279=0
+while [ "$COBA279" -lt "$MAKS279" ]; do
+  COBA279=$((COBA279+1))
+  K279=$(api "$OWNER" POST /rekomendasi/menu/faktur \
+    "{\"items\":[{\"menu_id\":\"$MENU66\",\"porsi\":$PORSI279}],\"tujuan_branch_id\":\"$CB46_ID\",\"ck_branch_id\":\"$CK52_UTAMA\"}")
+  F279=$(echo "$K279" | jq -r '.kirim.faktur_id // empty')
+  BARIS279=$(echo "$K279" | jq -r '.kirim.jumlah_baris // 0')
+  # Tanpa faktur kiriman tak ada yang bisa dibalapkan — berhenti; premis di
+  # bawah yang menuduh, lengkap dengan nomor percobaannya.
+  [ -n "$F279" ] || break
+  rm -f /tmp/kk279-1 /tmp/kk279-2
+  for i in 1 2; do
+    ( curl -s -o "/tmp/kk279-b$i" -w "%{http_code}" -X POST "$BASE/api/produksi/kirim/$F279" \
+        -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{}' \
+        > "/tmp/kk279-$i" ) &
+  done
+  wait
+  K279KODE="$(cat /tmp/kk279-1 2>/dev/null) $(cat /tmp/kk279-2 2>/dev/null)"
+  # `if !` bukan gaya: di bawah `set -e`, `grep` yang tak menemukan apa pun
+  # memulangkan 1 dan MEMBUNUH skrip ini di tengah jalan.
+  if ! printf '%s\n' $K279KODE | grep -q '^400'; then break; fi
+  # Belum berpapasan. Saldo cabang sesudah kiriman tadi paling banyak
+  # `saldo + kirim_ck` menurut preview, atau apa yang dilaporkan /stok —
+  # diambil yang terbesar supaya kebutuhan berikutnya PASTI melebihi saldo.
+  SALDO279=$(echo "$K279" | jq -r '(([.preview.bahan[]|select(.pengadaan=="produksi")][0]) // {}) | ((.saldo // 0) + (.kirim_ck // 0)) | floor')
+  STOK279=$(api "$OWNER" GET "/stok?branch_id=$CB46_ID" | jq -r --arg i "$BASO66" '([.[]|select(.ingredient_id==$i)][0].saldo // 0) | floor')
+  [ "$STOK279" -gt "$SALDO279" ] && SALDO279="$STOK279"
+  PORSI279=$(( SALDO279 / 5 + 1 ))
+done
 
 # PREMIS: fakturnya ada DAN punya baris siap kirim. Tanpa ini "satu 200 satu
 # 409" bisa benar karena dua-duanya gagal karena sebab lain.
-cek "premis: faktur kiriman baru terbit" "V == 1" \
+cek "premis: faktur kiriman baru terbit (percobaan: $COBA279, porsi: $PORSI279)" "V == 1" \
   "$([ -n "$F279" ] && [ "$F279" != "null" ] && echo 1 || echo 0)"
-BARIS279=$(echo "$K279" | jq -r '.kirim.jumlah_baris // 0')
 cek "premis: fakturnya punya baris siap kirim" "V >= 1" "$BARIS279"
+cek "premis §279: balapannya benar-benar terstaging (percobaan: $COBA279, kode: $K279KODE)" "V == 0" \
+  "$(printf '%s\n' $K279KODE | grep -c '^400')"
 
-rm -f /tmp/kk279-*
-for i in 1 2; do
-  ( curl -s -o "/tmp/kk279-b$i" -w "%{http_code}" -X POST "$BASE/api/produksi/kirim/$F279" \
-      -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{}' \
-      > "/tmp/kk279-$i" ) &
-done
-wait
-
-K279KODE="$(cat /tmp/kk279-1 2>/dev/null) $(cat /tmp/kk279-2 2>/dev/null)"
 cek "tepat SATU yang memberangkatkan (kode: $K279KODE)" "V == 1" \
   "$(printf '%s\n' $K279KODE | grep -c '^2')"
 cek "yang KALAH ditolak 409, bukan dibalas sukses (kode: $K279KODE)" "V == 1" \
@@ -16353,6 +16392,11 @@ W284B=$(waktu284 "$E284")
 
 cek "§284 daftar ulang MENCOBA mengirim lagi (baris percobaan bertambah)" "V == 1" \
   "$([ "$N284B" -gt "$N284A" ] && echo 1 || echo 0)"
+# Akun BELUM terverifikasi + password cocok → tetap TIDAK dimasukkan. Auto-masuk
+# di /register (lihat §285) hanya untuk akun yang sudah terverifikasi; verifikasi
+# tetap wajib, persis seperti /login yang menolaknya dengan 403.
+cek "§284 akun belum terverifikasi TIDAK dimasukkan walau password cocok" "V == 1" \
+  "$(echo "$R284B" | jq '(.token == null) | if . then 1 else 0 end')"
 # Barisnya harus BARU **dan** berupa percobaan. Versi pertama asersi ini hanya
 # memeriksa yang kedua, dan itu membuatnya HIJAU di jalan merahnya sendiri:
 # tanpa perbaikan, baris terbaru milik alamat itu masih baris pendaftaran
@@ -16421,24 +16465,32 @@ V285=$(curl -s -X POST "$BASE/api/auth/verify-email" -H 'Content-Type: applicati
 cek "premis §285: akunnya BENAR-BENAR terverifikasi (dapat sesi)" "V == 1" \
   "$(echo "$V285" | jq '(.token != null) | if . then 1 else 0 end')"
 
+# (a) PASSWORD COCOK → LANGSUNG DIMASUKKAN, dengan keterangan akun sudah aktif.
+# Inilah keadaan pemilik repo: mendaftar ulang dengan email+password yang sama.
 R285B=$(reg285)
-
-cek "§285 daftar ulang akun terverifikasi TIDAK dikirimi, dan sebabnya tercatat" "V == 1" \
+cek "§285 daftar ulang dgn password COCOK → dapat sesi (token)" "V == 1" \
+  "$(echo "$R285B" | jq '(.token != null) | if . then 1 else 0 end')"
+cek "§285 …dan balasannya berkata akun sudah aktif" "V == 1" \
+  "$(echo "$R285B" | jq '(.sudah_aktif == true) | if . then 1 else 0 end')"
+cek "§285 …dan keputusan 'tak dikirimi' tetap tercatat" "V == 1" \
   "$([ "$(jejak284 "$E285")" = "tak_dicoba|akun_terverifikasi" ] && echo 1 || echo 0)"
 
-# PASANGAN: perbaikan tampilan tidak boleh menggeser kontrak server sedikit pun.
-# Balasan untuk akun terverifikasi harus tetap identik dengan balasan untuk
-# email yang belum pernah ada — kalau tidak, celah enumerasi yang dijaga
-# susah payah terbuka kembali lewat pintu baru.
+# (b) PASSWORD SALAH → NETRAL, identik dengan email yang belum pernah ada.
+# Inilah yang menahan pengetatan di atas: yang dibocorkan /register harus TEPAT
+# SAMA dengan yang dibocorkan /login — keberadaan akun hanya terungkap kepada
+# pemegang password yang benar. Kalau balasan ini berbeda dari email baru,
+# celah enumerasi yang dijaga susah payah terbuka kembali lewat pintu baru.
+R285S=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
+  -H "$XFF284" -d "{\"nama\":\"Uji 285\",\"email\":\"$E285\",\"password\":\"PasswordSalah999!\"}")
 E285X="baru285.$(date +%s)@contoh.id"
 R285X=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
   -H "$XFF284" -d "{\"nama\":\"Uji 285x\",\"email\":\"$E285X\",\"password\":\"Rahasia123!\"}")
-BADAN285B=$(echo "$R285B" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
+BADAN285S=$(echo "$R285S" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
 BADAN285X=$(echo "$R285X" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
-cek "PASANGAN §285: balasannya identik dengan email yang belum pernah ada" "V == 1" \
-  "$([ "$BADAN285B" = "$BADAN285X" ] && [ -n "$BADAN285B" ] && echo 1 || echo 0)"
-cek "PASANGAN §285: akun terverifikasi tak membocorkan kode, di dev sekalipun" "V == 1" \
-  "$(echo "$R285B" | jq '(.dev_verify_kode == null) | if . then 1 else 0 end')"
+cek "PASANGAN §285: password SALAH → balasan identik dengan email yang belum pernah ada" "V == 1" \
+  "$([ "$BADAN285S" = "$BADAN285X" ] && [ -n "$BADAN285S" ] && echo 1 || echo 0)"
+cek "PASANGAN §285: password salah tak dapat sesi maupun kode" "V == 1" \
+  "$(echo "$R285S" | jq '((.token == null) and (.dev_verify_kode == null)) | if . then 1 else 0 end')"
 
 # PASANGAN: jalan keluarnya memang ADA dan memang bekerja. `forgot-password`
 # tidak punya syarat `emailVerifiedAt`, jadi akun terverifikasi yang lupa

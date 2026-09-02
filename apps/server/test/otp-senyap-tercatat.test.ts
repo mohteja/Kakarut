@@ -42,6 +42,8 @@ import { SRC } from "./util/sql-mentah";
 
 const AUTH = join(SRC, "modules/auth/routes.ts");
 const SERVICE = join(SRC, "modules/mail/service.ts");
+/** Layar yang menerjemahkan tiap sebab ke kalimat — peta yang DILIHAT orang. */
+const RIWAYAT_WEB = join(SRC, "../../web/src/pages/superadmin/RiwayatEmailPage.tsx");
 
 /** Yang dianggap "berakhir benar": mengirim, atau mencatat kenapa tidak. */
 const AKHIR_SAH = ["kirimKodeVerifikasi", "kirimEmailDiam", "catatTakDicoba"];
@@ -142,6 +144,15 @@ export function sebabDariSumber(isi: string): string[] {
   return [...s.slice(i, akhir).matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
 }
 
+/** Kunci peta label `SEBAB` di layar riwayat web, seperti tertulis di sumbernya. */
+export function sebabLabelWeb(isi: string): string[] {
+  const s = butaKomentar(isi);
+  const i = s.indexOf("const SEBAB: Record<string, string> = {");
+  if (i < 0) return [];
+  const akhir = s.indexOf("};", i);
+  return [...s.slice(i, akhir).matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1]);
+}
+
 /** Sebab yang benar-benar dipakai di sebuah berkas. */
 export function sebabDipakai(isi: string): string[] {
   const s = butaKomentar(isi);
@@ -232,6 +243,26 @@ describe("cabang yang memutuskan TIDAK mengirim wajib mencatatnya", () => {
     );
   });
 
+  it("layar riwayat web memberi label untuk TIAP sebab — dan tak menyimpan label kuburan", () => {
+    /*
+     * Asersi di atas memeriksa peta di BERKAS INI, bukan peta yang dilihat
+     * orang. Saat riwayat dipindah dari halaman Sistem ke `RiwayatEmailPage`,
+     * petanya disalin utuh — lengkap dengan `email_sudah_terdaftar`, sebab
+     * yang sudah dicabut di server sehari sebelumnya — dan tak ada yang
+     * menuduh. Penjaga yang memeriksa salinannya sendiri hijau selamanya;
+     * yang harus dijaga adalah peta yang benar-benar dibaca pengguna.
+     */
+    const serikat = sebabDariSumber(isiService);
+    const label = sebabLabelWeb(readFileSync(RIWAYAT_WEB, "utf8"));
+    expect(label.length, "peta label terbaca dari layarnya").toBeGreaterThanOrEqual(7);
+
+    const tanpaLabel = serikat.filter((s) => !label.includes(s));
+    expect(tanpaLabel, `sebab tanpa label di layar: ${tanpaLabel.join(", ")}`).toEqual([]);
+
+    const kuburan = label.filter((s) => !serikat.includes(s));
+    expect(kuburan, `label untuk sebab yang sudah tak ada: ${kuburan.join(", ")}`).toEqual([]);
+  });
+
   it("SETIAP hasil kirim tercatat — sukses, gagal, dan tanpa-penyedia", () => {
     // Tabelnya tak berguna bila hanya kegagalan yang masuk: "tak ada baris"
     // akan kembali punya dua tafsir yang berlawanan, yaitu persis kebutaan
@@ -294,5 +325,12 @@ describe("instrumennya bisa menuduh", () => {
     const palsu = `export type SebabTakDicoba =\n  | "satu"\n  | "dua";\n`;
     expect(sebabDariSumber(palsu)).toEqual(["satu", "dua"]);
     expect(sebabDariSumber("tak ada apa-apa di sini")).toEqual([]);
+  });
+
+  it("peta label web terbaca dari layarnya, bukan diketik ulang", () => {
+    const palsu =
+      'const SEBAB: Record<string, string> = {\n  satu: "Satu",\n  // dua: "dikomentari",\n  dua_tiga: "Dua tiga",\n};\n';
+    expect(sebabLabelWeb(palsu)).toEqual(["satu", "dua_tiga"]);
+    expect(sebabLabelWeb("tak ada peta di sini")).toEqual([]);
   });
 });

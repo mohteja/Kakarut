@@ -85,6 +85,9 @@ describe("zona waktu: server & web tak boleh berselisih diam-diam", () => {
       "pages/stok/KartuStokPage.tsx",
       "pages/superadmin/BackupPage.tsx",
       "pages/superadmin/ErrorLogPage.tsx",
+      // Riwayat kirim email dipindah dari SistemPage ke halamannya sendiri
+      // (2026-09-02); rumusan zonanya ikut pindah, jadi berkasnya bertambah.
+      "pages/superadmin/RiwayatEmailPage.tsx",
       "pages/superadmin/SistemPage.tsx",
     ]);
   });
