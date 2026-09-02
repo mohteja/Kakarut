@@ -31,6 +31,7 @@ import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, waktuKertasWIB } from "../../lib/format";
 import { uuidV4 } from "../../lib/idempoten";
 import { bacaLokal, tulisLokal } from "../../lib/simpanan";
+import { petunjukMember } from "../../lib/member-wa";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
 import {
   KosongkanMejaModal,
@@ -374,6 +375,9 @@ export function KasirPage() {
    * ditutup sampai mejanya dipilih — sama seperti aplikasi mobile.
    */
   const perluPilihMeja = !mejaId;
+  // Nama saja tak pernah jadi member (identitasnya WA — `lib/member-wa.ts`).
+  // Dihitung dari keadaan yang SAMA dengan yang nanti dikirim ke server.
+  const petunjukKonsumen = petunjukMember(konsumenNama, konsumenWa);
   const mejaAktif = useMemo(() => mejaList.filter((m) => m.is_active), [mejaList]);
   const mejaTerpilih = mejaAktif.find((m) => m.id === mejaId) ?? null;
   /**
@@ -1261,6 +1265,14 @@ export function KasirPage() {
               className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
             />
           </div>
+          {/* Dikatakan SAMBIL mengetik, bukan seminggu kemudian saat tamunya
+              dicari di Member dan tak ada. `role=status`: dibacakan pelan oleh
+              pembaca layar tanpa merebut fokus dari medan yang sedang diisi. */}
+          {petunjukKonsumen && (
+            <p role="status" className="mt-1 text-[11px] leading-snug text-amber-700">
+              {petunjukKonsumen}
+            </p>
+          )}
           {memberOpen && memberSaran.length > 0 && (
             <ul className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
               {memberSaran.map((m) => (
