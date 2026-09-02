@@ -9,6 +9,7 @@ import { env } from "./config/env";
 import { db } from "./db/client";
 import { sekaliSaja } from "./lib/boot-flags";
 import { computeBuildId, setBuildId } from "./lib/build";
+import { redirectKanonik } from "./lib/host-kanonik";
 import { bersihkanRateLimitKedaluwarsa } from "./middleware/rateLimit";
 import { jadwalkanBackupOtomatis } from "./lib/backup";
 import { jadwalkanPeringatanCadangan } from "./lib/backup-peringatan";
@@ -196,6 +197,14 @@ if (existsSync(webDist)) {
     c.header("Cache-Control", "no-cache");
     return c.html(indexHtml);
   };
+  // ASAL KANONIK. Sesi web hidup di localStorage, dan localStorage itu PER
+  // ASAL: `www.terakasir.com` dan `terakasir.com` adalah dua peramban yang
+  // berbeda bagi sesi — orang yang login di satu tab mendarat di halaman
+  // depan pada tab lain (2026-09-02, dilaporkan pemilik; Chrome menyembunyikan
+  // `www.` di bilah alamat, jadi keduanya TAMPAK sama). Alias yang dikenal
+  // dialihkan 301 ke asal dari `APP_BASE_URL` sebelum shell dilayani; tanpa
+  // konfigurasi itu tak ada yang dialihkan (lihat `lib/host-kanonik.ts`).
+  app.use("*", redirectKanonik());
   // Root & index.html HARUS memakai HTML ber-<meta build> (bukan file mentah
   // dari serveStatic) supaya tab yang dibuka via "/" ikut punya build id.
   app.get("/", kirimShell);

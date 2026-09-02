@@ -7,7 +7,7 @@ function nilaiPertama(v: string | undefined): string {
 }
 
 /** Host yang dinyatakan permintaan — proxy dulu, lalu `Host`. */
-function hostDariPermintaan(c: Context): { proto: string; host: string } {
+export function hostDariPermintaan(c: Context): { proto: string; host: string } {
   const proto = nilaiPertama(c.req.header("x-forwarded-proto")) || "http";
   const host = nilaiPertama(c.req.header("x-forwarded-host")) || nilaiPertama(c.req.header("host"));
   return { proto, host };
