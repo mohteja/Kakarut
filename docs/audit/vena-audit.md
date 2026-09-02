@@ -50,6 +50,85 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Daur hidup SESI — yang kedaluwarsa ditolak, yang dicabut mati seketika, dan layar login yang akhirnya MENGATAKANNYA — server + web — 2026-09-02
+
+- **Kenapa vena ini ada**: pemetaan cakupan 2026-09-02 — `JWT_EXPIRES_IN`
+  (12 jam) ada, tapi tak satu uji pun pernah menembak token yang
+  benar-benar kedaluwarsa (lengan `TokenExpiredError` di `requireAuth` belum
+  pernah dijalankan gerbang); nonaktif hanya diuji di pintu LOGIN, bukan pada
+  sesi yang sudah ada; dan apa yang dilihat orang saat sesinya mati belum
+  pernah diukur di browser. Yang sudah dijaga sebelumnya: ganti/reset password
+  mencabut token lama (4292, 4306), keanggotaan diarsip → 401 (§141),
+  ganti peran TIDAK mencabut sesi (6076).
+
+- **Populasi**: `auth/session.ts` (tanda tangan, klaim `tv`),
+  `middleware/auth.ts:29-68,96-114` (empat pintu 401: token tak ada/tak sah/
+  kedaluwarsa, baris user dihapus/nonaktif, `tv` bergeser, keanggotaan
+  diarsip/perusahaan nonaktif), tiga penulis `tokenVersion` (profil,
+  admin reset, reset-password), `web/lib/api.ts:146` (cabang 401),
+  `LoginPage.tsx`, ponsel `api_client.dart:539` + `auth_controller.dart:41`.
+
+- **Metode (Aturan 6), §287 — 13 asersi**: token kedaluwarsa dibuat dengan
+  MENANDATANGANI ULANG payload token owner (sub, tv — bukan diketik) memakai
+  `JWT_SECRET` yang sama, `exp` 60 detik yang lalu. PASANGAN: payload persis
+  sama dengan exp di depan → 200 (yang ditolak memang `exp`), tanda tangan
+  asing → 401. Karyawan baru → sesi hidup → dinonaktifkan → diaktifkan lagi →
+  diarsipkan. `JWT_SECRET` ada di env job CI dan di prosedur gerbang lokal;
+  premisnya dipaku.
+
+- **Hasil server: BENAR di semua lengan.** Kedaluwarsa → 401 "…kedaluwarsa";
+  nonaktif → sesi yang SUDAH ADA mati seketika (401 "tidak berlaku lagi");
+  diaktifkan lagi → token yang SAMA hidup lagi tanpa login ulang (pencabutan
+  nonaktif bisa dibalik — dicatat, bukan dituduh); diarsipkan → 401.
+
+- **Alat ukurku salah dua kali, keduanya dicatat**: (1) jalan pertama §287
+  memerah tiga asersi menuduh server tak mencabut sesi — `POST /karyawan`
+  memulangkan `user_id`, bukan `id`; PATCH-nya menembak `/karyawan/` kosong
+  (404 "Tidak ditemukan"). Premis "karyawan tercipta" kini memaku panjang
+  id-nya. (2) e2e-nya menanam token sampah lewat `addInitScript` — yang
+  berjalan pada TIAP muat dokumen — jadi sesudah dilempar ke /login ia
+  menanam ulang, aplikasi berputar /login → /dashboard → /login. Ditanam
+  sekali lewat `evaluate`.
+
+- **TEMUAN, di WEB — 401 yang bisu**: `api.ts` menghapus sesi lalu
+  `window.location.href = "/login"` dan `throw new ApiError("Sesi
+  berakhir…")` — lemparan yang tak pernah dibaca siapa pun, sebab dokumennya
+  sudah dibuang. Token kedaluwarsa (12 jam), password diganti di perangkat
+  lain, akun dinonaktifkan: semuanya berakhir di layar login tanpa satu
+  kalimat, terbaca sebagai "aplikasinya mengeluarkan saya tanpa sebab".
+  Terukur: token sampah → /login, `getByText(/Sesi Anda berakhir/)` →
+  *element(s) not found*. Dibayar: pemindahan membawa `?sesi=berakhir`
+  (satu-satunya yang selamat dari perpindahan dokumen penuh), halaman login
+  membacanya dan mengucapkan kalimat dari rumah `lib/pesan-sesi.ts`; nama
+  query & nilainya konstanta bersama di kedua sisi.
+
+- **Bukti merah yang mengajari**: pemeriksaan `!u.isActive` dicabut dari
+  `requireAuth` → §287 **TIDAK merah** — dan itu benar: nonaktif = arsip
+  (satu status, `users/routes.ts:608`), jadi pintu KEDUA (`memberships.
+  archived_at`, `auth.ts:114`) tetap menutupnya. Asersinya menjaga
+  KEADAAN, bukan satu baris kode; bukti merahnya dituntut mencabut KEDUA
+  pintu → merah (dicatat di bawah). Kedaluwarsa diabaikan
+  (`ignoreExpiration`) → §287 merah · sebab dibuang dari pemindahan →
+  penjaga statis DAN e2e merah · kotak di halaman login dicabut → statis
+  merah. Semua dipulihkan byte-per-byte.
+
+- **Penjaga**: §287 (13) · e2e `sesi-berakhir.spec.ts` (Playwright 19 → 20)
+  · `sesi-berakhir-beralasan.test.ts` (4: rumah kalimat ada, pemindahan
+  membawa sebab dari konstanta, halaman login membacanya, tak ada string
+  lepas). Kontrak: bagian Autentikasi menuliskan umur & pencabutan sesi.
+
+- **Batas yang ditulis jujur**: 401 dari penyegaran latar (`segarkanSesi`)
+  masih melempar orangnya di tengah mengetik — kini dengan sebab, tanpa
+  menyimpan isi formulir dan tanpa kembali ke halaman semula; ponsel
+  (`onUnauthorized → logout`) juga bisu — antre di putaran ponsel; umur 12
+  jam tanpa refresh token adalah keputusan, bukan temuan.
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` **220 berkas / 2671 uji** ·
+  `verify-api.sh` **3445 lolos, 0 gagal** · `audit:invarian` 27/27 · Playwright
+  **20/20**.
+
+---
+
 ## Kebenaran ANGKA LAPORAN — lima rute dibandingkan hitungan tangan, empat halaman dibandingkan servernya — server + web — 2026-09-02
 
 - **Kenapa vena ini ada**: pemetaan cakupan 2026-09-02 — kelima rute
@@ -9383,6 +9462,10 @@ berlaku di situ).
       Pengaturan Email. Klaim "akun tiba-tiba terverifikasi" dijawab dari
       backfill 0065 — bukan bug. Sambil lalu: peta label web membawa sebab
       kuburan, dan §279 distaging ulang seperti §280d
+- [x] ~~**Daur hidup sesi**~~ — SELESAI, lihat entri di atas. Server benar di
+      semua lengan (§287, 13 asersi: kedaluwarsa, tanda tangan asing,
+      nonaktif/aktif lagi/arsip pada sesi yang hidup). Temuan di WEB: 401
+      yang bisu — layar login kini mengatakan sebabnya
 - [x] ~~**Kebenaran angka laporan**~~ — SELESAI, lihat entri di atas. Lima
       rute dibandingkan hitungan tangan (§286, 43 asersi): server cocok
       semua. Temuan di KLIEN: "omzet sebelum refund" dirakit dari satuan yang
