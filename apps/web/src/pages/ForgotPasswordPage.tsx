@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { btnPrimary, inputClass } from "../components/ui";
 import { api } from "../lib/api";
+import { PESAN_LUPA } from "../lib/pesan-verifikasi";
 
 /**
  * Lupa password: minta email → server kirim tautan reset (bila terdaftar).
@@ -51,8 +52,7 @@ export function ForgotPasswordPage() {
         {sent ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
-              Jika <b>{email}</b> terdaftar, tautan atur ulang password sudah dikirim. Cek email
-              Anda (berlaku 1 jam).
+              📧 <b>{email}</b> — {PESAN_LUPA}
             </div>
             {devUrl && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

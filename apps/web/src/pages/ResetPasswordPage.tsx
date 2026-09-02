@@ -12,6 +12,15 @@ export function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * Tautan yang MATI (sudah terpakai / kedaluwarsa) diperlakukan seperti
+   * tautan yang tak ada: formulirnya diganti jalan keluar. Sebelumnya galat
+   * servernya tampil merah DI ATAS formulir yang tetap hidup, dan tombol
+   * "Minta tautan baru" hanya ada untuk `?token=` yang kosong — orang dengan
+   * tautan bekas menekan Simpan berulang tanpa satu petunjuk pun. Diukur di
+   * browser (e2e `lupa-password.spec.ts`, 2026-09-02).
+   */
+  const [tautanMati, setTautanMati] = useState(false);
 
   const terlaluPendek = password.length > 0 && password.length < 8;
   const tidakCocok = konfirmasi.length > 0 && password !== konfirmasi;
@@ -25,7 +34,11 @@ export function ResetPasswordPage() {
       await api("/auth/reset-password", { method: "POST", body: { token, password } });
       setDone(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal atur ulang password");
+      const pesan = err instanceof Error ? err.message : "Gagal atur ulang password";
+      setError(pesan);
+      // Kalimat ini milik server (`/reset-password` 400) — satu-satunya tanda
+      // yang membedakan "tautannya mati" dari galat lain (jaringan, 500).
+      if (/tidak valid|kedaluwarsa/i.test(pesan)) setTautanMati(true);
     } finally {
       setLoading(false);
     }
@@ -45,10 +58,10 @@ export function ResetPasswordPage() {
           <h1 className="mt-2 text-2xl font-bold text-stone-800">Atur Ulang Password</h1>
         </div>
 
-        {!token ? (
+        {!token || tautanMati ? (
           <div className="space-y-4 text-center">
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-              Tautan tidak valid — token tidak ada.
+              {tautanMati ? error : "Tautan tidak valid — token tidak ada."}
             </div>
             <Link to="/lupa-password" className={`${btnPrimary} block w-full text-center`}>
               Minta tautan baru

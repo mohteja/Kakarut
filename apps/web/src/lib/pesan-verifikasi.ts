@@ -42,3 +42,16 @@ export const PESAN_KIRIM_ULANG = "Kode baru sedang dikirim (berlaku 60 menit). C
  * tak diminta kode.
  */
 export const PESAN_SUDAH_AKTIF = "Akun ini sudah aktif — Anda langsung dimasukkan.";
+
+/**
+ * Sesudah "Kirim tautan reset" di halaman Lupa Password. "Jika" di sini SAH,
+ * dan bukan cabang kedua seperti yang dicabut di atas: balasan `/forgot-password`
+ * memang netral untuk email terdaftar maupun tidak (anti-enumerasi), jadi
+ * layarnya tak boleh tahu — dan tak boleh berkata "sudah dikirim" untuk surat
+ * yang, bila alamatnya tak dikenal atau penyedianya menolak, tak pernah
+ * berangkat. Kelas yang sama dengan tiga layar di atas; ditemukan saat
+ * cakupan disapu 2026-09-02 (halaman ini tak pernah disentuh uji mana pun).
+ */
+export const PESAN_LUPA =
+  "Jika alamat ini terdaftar, tautan atur ulang password sedang dikirim ke sana " +
+  "(berlaku 1 jam). Cek email Anda.";

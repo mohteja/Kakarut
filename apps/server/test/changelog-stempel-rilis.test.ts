@@ -49,7 +49,7 @@ const MD = readFileSync(
 const BELUM_TAYANG = new Set([
   // Ditulis 2026-09-02 bersama kodenya; stempelnya dipasang begitu merge ke
   // production mendarat — bukan sebelumnya.
-  "## `POST /auth/register` bisa MEMULANGKAN SESI: akun terverifikasi + password cocok",
+  "## `POST /auth/reset-password` sekaligus MENANDAI EMAIL TERVERIFIKASI",
   /*
    * PARUH "belum di-merge" KOSONG sejak 2026-08-31 — dan kosongnya bukan
    * kerapian. Entri "Angka BIAYA hanya untuk manajemen" tercantum di sini
