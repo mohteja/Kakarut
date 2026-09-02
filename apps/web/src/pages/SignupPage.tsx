@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { tulisLokal } from "../lib/simpanan";
-import { AJAKAN_MASUK, PESAN_DAFTAR } from "../lib/pesan-verifikasi";
+import { PESAN_DAFTAR, PESAN_SUDAH_AKTIF } from "../lib/pesan-verifikasi";
 
 /**
  * Daftar akun sendiri (self sign-up). TIDAK langsung login: server mengirim
@@ -28,6 +28,8 @@ export function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [devKode, setDevKode] = useState<string | null>(null);
+  const [sudahAktif, setSudahAktif] = useState(false);
+  const navigate = useNavigate();
 
   const terlaluPendek = password.length > 0 && password.length < 8;
   const tidakCocok = konfirmasi.length > 0 && password !== konfirmasi;
@@ -39,6 +41,20 @@ export function SignupPage() {
     setLoading(true);
     try {
       const res = await register(nama, email, password);
+      if ("token" in res) {
+        /*
+         * Akun sudah aktif dan passwordnya cocok: sesinya sudah disimpan oleh
+         * `register()`. Diberi tahu sesaat, lalu masuk — bukan diarahkan ke
+         * layar kode untuk akun yang tak butuh kode. Tujuannya sama persis
+         * dengan halaman Masuk supaya tak ada dua aturan pengarahan.
+         */
+        setSudahAktif(true);
+        window.setTimeout(
+          () => navigate(res.user.is_super_admin ? "/superadmin" : "/kasir", { replace: true }),
+          1200,
+        );
+        return;
+      }
       setSent(true);
       setDevKode(res.dev_verify_kode ?? null);
       // Pendaftaran BARU SAJA mengirim kode, jadi jaraknya sudah berjalan.
@@ -73,13 +89,16 @@ export function SignupPage() {
           <p className="text-sm text-stone-500">Buat akun untuk mulai memakai Terakasir</p>
         </div>
 
-        {sent ? (
+        {sudahAktif ? (
+          <div className="rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
+            ✅ {PESAN_SUDAH_AKTIF}
+          </div>
+        ) : sent ? (
           <div className="space-y-4">
             {/*
-              Dua kemungkinan disebut BERDAMPINGAN, bukan satu yang diklaim.
-              Lihat `lib/pesan-verifikasi.ts` untuk sebabnya — kalimat lama
-              menjanjikan surat yang untuk akun yang sudah aktif memang tak
-              akan pernah berangkat, dan tak menyebut jalan keluarnya.
+              SATU jalan. Keadaan "akun sudah aktif" ditangani sebelum layar ini
+              (lihat `lib/pesan-verifikasi.ts`), jadi yang sampai ke sini memang
+              sedang menunggu kode.
             */}
             <div className="rounded-lg bg-green-50 px-3 py-3 text-sm text-green-700">
               📧 <b>{email}</b> — {PESAN_DAFTAR}
@@ -97,16 +116,11 @@ export function SignupPage() {
               Masukkan kode verifikasi
             </Link>
             {/*
-              DISEJAJARKAN dengan tombol kode, tidak lagi abu-abu kecil di
-              bawahnya: untuk akun yang sudah aktif, INILAH satu-satunya jalan
-              yang benar — dan sebelumnya ia yang paling tak terlihat.
+              Tombol "Akun sudah aktif?" sengaja TIDAK ada di sini: akun aktif
+              sudah dimasukkan sebelum layar ini tampil. Tautan kecil "Sudah
+              punya akun? Masuk" di bawah tetap ada untuk pemegang password
+              yang salah — satu-satunya keadaan yang memang tak bisa dibedakan.
             */}
-            <Link
-              to="/login"
-              className="block rounded-lg border border-stone-300 px-4 py-2 text-center text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-600"
-            >
-              {AJAKAN_MASUK}
-            </Link>
           </div>
         ) : (
           <form onSubmit={onSubmit} className="space-y-4">

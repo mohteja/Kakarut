@@ -42,6 +42,9 @@ const LaporanDurasiPesananPage = lazy(() => import("./pages/laporan/LaporanDuras
 const LaporanPembelianPage = lazy(() => import("./pages/laporan/LaporanPembelianPage").then((m) => ({ default: m.LaporanPembelianPage })));
 const DashboardPage = lazy(() => import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const SmtpPage = lazy(() => import("./pages/superadmin/SmtpPage").then((m) => ({ default: m.SmtpPage })));
+const RiwayatEmailPage = lazy(() =>
+  import("./pages/superadmin/RiwayatEmailPage").then((m) => ({ default: m.RiwayatEmailPage })),
+);
 const OperasionalPage = lazy(() => import("./pages/operasional/OperasionalPage").then((m) => ({ default: m.OperasionalPage })));
 const TimBerandaPage = lazy(() => import("./pages/TimBerandaPage").then((m) => ({ default: m.TimBerandaPage })));
 const MemberPage = lazy(() => import("./pages/member/MemberPage").then((m) => ({ default: m.MemberPage })));
@@ -178,6 +181,7 @@ export default function App() {
               <Route path="/superadmin/backup" element={<BackupPage />} />
               <Route path="/superadmin/error-log" element={<ErrorLogPage />} />
               <Route path="/superadmin/email" element={<SmtpPage />} />
+              <Route path="/superadmin/email/riwayat" element={<RiwayatEmailPage />} />
             </>
           )}
           {!isSuperAdmin && (

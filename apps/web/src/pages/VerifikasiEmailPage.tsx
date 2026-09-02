@@ -5,7 +5,7 @@ import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { bacaLokal } from "../lib/simpanan";
 import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
-import { AJAKAN_MASUK, PESAN_KIRIM_ULANG } from "../lib/pesan-verifikasi";
+import { PESAN_KIRIM_ULANG } from "../lib/pesan-verifikasi";
 
 /**
  * Verifikasi email dengan KODE 6 DIGIT yang diketik di layar ini.
@@ -168,10 +168,7 @@ export function VerifikasiEmailPage() {
             )}
             {kirimUlang === "terkirim" && !error && (
               <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-                {PESAN_KIRIM_ULANG}{" "}
-                <Link to="/login" className="font-semibold underline">
-                  {AJAKAN_MASUK}
-                </Link>
+                {PESAN_KIRIM_ULANG}
               </div>
             )}
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { PercobaanEmailDto, TemuanSetelanDto } from "@kakarut/shared";
+import type { TemuanSetelanDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, SpinnerAtauGalat, btnPrimary } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
@@ -22,26 +22,10 @@ interface SistemStatus {
     daftar: MigrationEntry[];
   };
   pemeriksaan: TemuanSetelanDto[];
-  email_percobaan: PercobaanEmailDto[];
+  // `email_percobaan` ikut datang di balasan yang sama, tapi dibaca di
+  // `RiwayatEmailPage` — halaman ini tak lagi menampilkannya.
 }
 
-/**
- * Sebab "tidak dikirim", diterjemahkan ke kalimat yang bisa dibaca orang.
- *
- * Kode mentahnya (`akun_terverifikasi`, `jarak_kirim_ulang`, …) memang bentuk
- * yang benar untuk disimpan, tapi ia menyuruh pembacanya menebak. Padahal
- * tabel ini ada justru untuk menghentikan tebakan.
- */
-const SEBAB: Record<string, string> = {
-  email_sudah_terdaftar: "Email sudah terdaftar",
-  balapan_pendaftaran: "Kalah balapan pendaftaran (permintaan kembar)",
-  jarak_kirim_ulang: "Ditahan jarak 2 menit antar kirim ulang",
-  email_tak_dikenal: "Email tidak terdaftar",
-  akun_terhapus: "Akun sudah dihapus",
-  akun_nonaktif: "Akun dinonaktifkan",
-  akun_terverifikasi: "Akun sudah terverifikasi — tak perlu kode lagi",
-  penyedia_belum_diatur: "Belum ada penyedia email (SMTP kosong & tanpa Resend)",
-};
 
 function InfoCard({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
   return (
@@ -191,85 +175,6 @@ export function SistemPage() {
                 {e.status === "terpasang" ? "Terpasang" : "Menunggu"}
               </span>
             ),
-          },
-        ]}
-      />
-
-      {/*
-        RIWAYAT PERCOBAAN KIRIM EMAIL.
-        Bukan daftar temuan, dan sengaja tidak diberi warna merah: baris
-        "tidak dikirim" yang sah (akun sudah terverifikasi, email tak
-        terdaftar) adalah keadaan NORMAL. Yang dijawab tabel ini cuma satu
-        pertanyaan, dan itu pertanyaan yang dulu tak bisa dijawab dari mana
-        pun: "surat itu benar-benar dikirim atau tidak?"
-      */}
-      <h2 className="mt-8 mb-2 text-lg font-bold text-stone-800">✉ Riwayat kirim email</h2>
-      <p className="mb-3 text-sm text-stone-600">
-        200 percobaan terakhir. <b>Tidak dikirim</b> bukan berarti error — sebagian memang
-        keputusan yang benar; sebabnya disebut di kolom terakhir.
-      </p>
-      <TabelResponsif
-        data={sistem.email_percobaan ?? []}
-        kunci={(e) => `${e.waktu}|${e.tujuan}|${e.konteks}`}
-        kosong="Belum ada percobaan kirim email yang tercatat."
-        kolom={[
-          {
-            judul: "Waktu",
-            sel: (e) => (
-              <span className="whitespace-nowrap">
-                {new Intl.DateTimeFormat("id-ID", {
-                  dateStyle: "short",
-                  timeStyle: "medium",
-                  timeZone: "Asia/Jakarta",
-                }).format(new Date(e.waktu))}
-              </span>
-            ),
-          },
-          { judul: "Jenis", sel: (e) => <span className="font-mono text-xs">{e.konteks}</span> },
-          { judul: "Tujuan", sel: (e) => <span className="break-all">{e.tujuan}</span> },
-          {
-            judul: "Hasil",
-            sel: (e) => (
-              <span
-                className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${
-                  e.hasil === "terkirim"
-                    ? "bg-green-100 text-green-800"
-                    : e.hasil === "gagal"
-                      ? "bg-red-100 text-red-800"
-                      : "bg-stone-200 text-stone-700"
-                }`}
-              >
-                {e.hasil === "terkirim"
-                  ? "Terkirim"
-                  : e.hasil === "gagal"
-                    ? "Gagal"
-                    : "Tidak dikirim"}
-              </span>
-            ),
-          },
-          {
-            judul: "Keterangan",
-            sel: (e) =>
-              e.hasil === "gagal" ? (
-                <span className="break-all text-red-700">{e.pesan ?? "—"}</span>
-              ) : e.sebab ? (
-                <span className="text-stone-600">{SEBAB[e.sebab] ?? e.sebab}</span>
-              ) : (
-                /*
-                  Untuk yang TERKIRIM, id pesan penyedianya ikut ditampilkan —
-                  itu satu-satunya cara mencocokkan baris ini dengan catatan
-                  penyedia, tempat nasib sebenarnya surat itu (delivered /
-                  bounced / blocked) tercatat.
-                */
-                <span className="text-stone-500">
-                  {e.penyedia ?? "—"}
-                  {e.pesan_id && (
-                    <span className="ml-1 break-all font-mono text-xs text-stone-400">
-                      {e.pesan_id}
-                    </span>
-                  )}
-                </span>
-              ),
           },
         ]}
       />

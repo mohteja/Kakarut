@@ -405,6 +405,7 @@ export const authRoutes = new Hono<AppEnv>()
         deletedAt: users.deletedAt,
         isActive: users.isActive,
         emailVerifiedAt: users.emailVerifiedAt,
+        passwordHash: users.passwordHash,
       })
       .from(users)
       .where(eq(users.email, email));
@@ -450,6 +451,31 @@ export const authRoutes = new Hono<AppEnv>()
       // surat yang berguna untuk dikirim — tapi keputusannya dicatat, sebab
       // dari luar ia tampak persis seperti pendaftaran yang berhasil.
       await catatTakDicoba("verifikasi-email", email, "akun_terverifikasi");
+      /*
+       * DAN BILA PASSWORDNYA COCOK, LANGSUNG DIMASUKKAN.
+       *
+       * Ini keadaan pemilik repo sendiri selama dua hari: mendaftar ulang
+       * dengan email+password yang sama, dijawab "cek email Anda" untuk akun
+       * yang sudah aktif, lalu menunggu surat yang memang tak akan datang.
+       * Layar tak boleh menyuruh menunggu kode untuk akun yang tak butuh kode.
+       *
+       * INI BUKAN KEBOCORAN BARU, dan syaratnya ditulis di sini supaya tak
+       * pelan-pelan melonggar: yang dibocorkan `/register` HARUS TEPAT SAMA
+       * dengan yang dibocorkan `/login` — keberadaan akun hanya terungkap
+       * kepada pemegang password yang benar. Pemegang password yang salah
+       * tetap menerima balasan netral yang identik dengan email baru, jadi
+       * penebak email tak mendapat apa pun yang belum bisa ia dapat di
+       * `/login`. Ember `batasRegister` (20/IP/jam) bahkan lebih ketat
+       * daripada ember login untuk menebak password lewat pintu ini.
+       *
+       * Akun yang BELUM terverifikasi TIDAK dimasukkan walau passwordnya
+       * cocok — cabang di bawah mengirim kodenya; verifikasi tetap wajib,
+       * persis seperti `/login` yang menolaknya dengan 403.
+       */
+      if (bcrypt.compareSync(password, existing.passwordHash)) {
+        const [user] = await db.select().from(users).where(eq(users.id, existing.id));
+        return c.json({ ...(await buatSesi(user)), sudah_aktif: true });
+      }
     } else {
       /*
        * AKUN SUDAH ADA, AKTIF, TAPI BELUM TERVERIFIKASI → KODENYA DIKIRIM.

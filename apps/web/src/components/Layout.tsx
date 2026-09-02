@@ -394,8 +394,21 @@ export function Layout() {
               <NavLink to="/superadmin/error-log" className={linkClass}>
                 🚨 Log Galat
               </NavLink>
-              <NavLink to="/superadmin/email" className={linkClass}>
+              <NavLink to="/superadmin/email" end className={linkClass}>
                 ✉️ Pengaturan Email
+              </NavLink>
+              {/*
+                SUB-ITEM pertama di sidebar ini. Riwayat kirim email dulu ada
+                di halaman Sistem & Migrasi dan pemilik repo mencarinya di Log
+                Galat — ia berurusan dengan email, jadi rumahnya di bawah
+                Pengaturan Email. `end` di induknya supaya keduanya tak
+                menyala bersamaan.
+              */}
+              <NavLink
+                to="/superadmin/email/riwayat"
+                className={({ isActive }) => `${linkClass({ isActive })} ml-4 text-sm`}
+              >
+                ↳ Riwayat kirim email
               </NavLink>
             </>
           ) : (
