@@ -162,7 +162,13 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 - **Gerbang penuh HIJAU**: typecheck bersih · `npm test` **218 berkas / 2659
   uji** · `verify-api.sh` **3384 lolos, 0 gagal** · `audit:invarian` 27/27 ·
-  Playwright **13/13**.
+  Playwright **13/13**. Dijalankan DUA kali dari seed segar: pada cabang kerja
+  (`480e983`) dan pada hasil merge (`10b0882`, §279 berpapasan di percobaan
+  pertama dua-duanya).
+
+- **Tayang**: merge `10b0882` → `production`, CI #483 hijau (PR #215). Entri
+  CHANGELOG-API distempel sesudahnya. Ponsel: `Production` sudah memuat
+  `1e4365c` (ahead 0) — tak ada rilis ponsel yang menyertai.
 
 ---
 

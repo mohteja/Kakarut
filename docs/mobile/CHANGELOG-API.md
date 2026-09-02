@@ -50,6 +50,8 @@ email baru (anti-enumerasi tetap utuh; yang dibocorkan sama persis dengan
 `/login`). Akun belum terverifikasi + password cocok → tetap tanpa sesi, kodenya
 dikirim, verifikasi wajib.
 
+**Sudah di-merge ke production.**
+
 ## Delapan daftar yang dipotong kini MENGATAKANNYA
 
 > Tidak ada migrasi, dan **tidak ada bentuk balasan yang berubah**. Tujuh rute
