@@ -1,4 +1,4 @@
-import { isValidElement, type ReactNode } from "react";
+import { isValidElement, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { thClass, tdClass } from "./ui";
 
 /**
@@ -78,6 +78,7 @@ export function TabelResponsif<T>({
   kelasBaris,
   minLebar,
   judulKartu,
+  onKlikBaris,
 }: {
   kolom: KolomTabel<T>[];
   data: T[];
@@ -100,7 +101,36 @@ export function TabelResponsif<T>({
   minLebar?: string;
   /** Header di atas daftar kartu HP (mis. kendali "pilih semua"). */
   judulKartu?: ReactNode;
+  /**
+   * Klik satu baris (tabel desktop) / kartu (HP) — mis. membuka detail.
+   *
+   * Dipasang di KEDUA tampilan lewat `propsKlik`: daftar yang bisa dibuka di
+   * laptop tak boleh jadi daftar yang cuma bisa dipandang di HP. Klik yang
+   * berasal dari kendali di dalam sel (tombol/tautan/input) tidak ikut membuka
+   * baris; Enter/Spasi pada baris yang fokus membukanya juga.
+   */
+  onKlikBaris?: (baris: T, indeks: number) => void;
 }) {
+  const propsKlik = (baris: T, i: number) =>
+    onKlikBaris
+      ? {
+          tabIndex: 0,
+          onClick: (e: MouseEvent<HTMLElement>) => {
+            if ((e.target as HTMLElement).closest("a,button,input,select,textarea,label")) return;
+            onKlikBaris(baris, i);
+          },
+          onKeyDown: (e: KeyboardEvent<HTMLElement>) => {
+            if (e.target !== e.currentTarget) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onKlikBaris(baris, i);
+            }
+          },
+        }
+      : {};
+  const kelasKlik = onKlikBaris
+    ? "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+    : "";
   const kPilih = kolom.filter((k) => k.hp === "pilih");
   const kJudul = kolom.filter((k) => k.hp === "judul");
   const kSub = kolom.filter((k) => k.hp === "sub");
@@ -146,7 +176,8 @@ export function TabelResponsif<T>({
                 key={kunci(baris, i)}
                 className={`rounded-xl border border-stone-200 bg-white p-3 shadow-sm ${
                   kelasBaris?.(baris) ?? ""
-                }`}
+                } ${kelasKlik}`}
+                {...propsKlik(baris, i)}
               >
                 {(kPilih.length > 0 || kJudul.length > 0 || kSub.length > 0) && (
                   <div className="flex items-start gap-2">
@@ -222,7 +253,11 @@ export function TabelResponsif<T>({
               </tr>
             ) : (
               data.map((baris, i) => (
-                <tr key={kunci(baris, i)} className={kelasBaris?.(baris) ?? "hover:bg-stone-50"}>
+                <tr
+                  key={kunci(baris, i)}
+                  className={`${kelasBaris?.(baris) ?? "hover:bg-stone-50"} ${kelasKlik}`}
+                  {...propsKlik(baris, i)}
+                >
                   {kolom.map((k, j) => (
                     <td
                       key={j}

@@ -24,6 +24,7 @@ import {
 import { BahanPicker } from "../../components/BahanPicker";
 import { ImageUpload } from "../../components/ImageUpload";
 import { SatuanSelect } from "../../components/SatuanSelect";
+import { TabelResponsif, type KolomTabel } from "../../components/TabelResponsif";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -141,6 +142,93 @@ function BadgeDivisi({ b }: { b: BahanDto }) {
 }
 
 /**
+ * Kolom bentuk DAFTAR resep (tabel berkepala). Urutannya diminta pemilik repo:
+ * No · Kode · Nama produk · Harga / produksi · Hasil · Satuan hasil ·
+ * Harga / satuan · Bahan baku · Lokasi produksi.
+ *
+ * Uang hanya owner/admin: kolomnya TIDAK DIBANGUN sama sekali untuk peran lain
+ * — sejalan dengan server yang sudah mengirim null (`saringBahan`).
+ * `harga_per_unit` dibaca apa adanya dari DTO (dihitung server lewat
+ * `hargaPerUnit`), tidak dibagi ulang di sini.
+ *
+ * Di luar komponen supaya bebas hook dan bisa diiris uji statis
+ * (`resep-daftar-tabel.test.ts`).
+ */
+function kolomDaftarResep(opsi: {
+  bolehUbah: boolean;
+  ringkas: Record<string, number> | undefined;
+}): KolomTabel<BahanDto>[] {
+  const { bolehUbah, ringkas } = opsi;
+  const angka = "whitespace-nowrap tabular-nums";
+  return [
+    {
+      judul: "No",
+      kanan: true,
+      hp: "lewat",
+      kelasJudul: "w-10",
+      kelasSel: "text-stone-400 tabular-nums",
+      sel: (_, i) => i + 1,
+    },
+    {
+      judul: "Kode",
+      hp: "sub",
+      kelasSel: "whitespace-nowrap font-mono text-xs text-stone-500",
+      sel: (b) => b.kode ?? "—",
+    },
+    {
+      judul: "Nama produk",
+      hp: "judul",
+      kelasSel: "font-medium text-stone-800",
+      sel: (b) => b.nama,
+    },
+    ...(bolehUbah
+      ? [
+          {
+            judul: "Harga / produksi",
+            kanan: true,
+            kelasSel: `${angka} font-semibold text-stone-700`,
+            sel: (b: BahanDto) => formatRupiah(b.harga_beli),
+          },
+        ]
+      : []),
+    {
+      judul: "Hasil",
+      kanan: true,
+      kelasSel: angka,
+      // di kartu HP kolom Satuan dilewati, jadi satuannya menempel di sini
+      sel: (b) => (
+        <>
+          {formatAngka(b.isi)} <span className="text-stone-400 sm:hidden">{b.satuan}</span>
+        </>
+      ),
+    },
+    { judul: "Satuan hasil", hp: "lewat", kelasSel: "text-stone-600", sel: (b) => b.satuan },
+    ...(bolehUbah
+      ? [
+          {
+            judul: "Harga / satuan",
+            kanan: true,
+            kelasSel: angka,
+            sel: (b: BahanDto) => formatRupiah(b.harga_per_unit),
+          },
+        ]
+      : []),
+    {
+      judul: "Bahan baku",
+      kanan: true,
+      kelasSel: angka,
+      sel: (b) => {
+        // peta hanya berisi bahan yang PUNYA komponen — absen berarti 0 (belum
+        // ada resep); null hanya selagi peta belum termuat.
+        const n = ringkas ? (ringkas[b.id] ?? 0) : null;
+        return <span>{n == null ? "—" : n > 0 ? formatAngka(n) : "belum ada resep"}</span>;
+      },
+    },
+    { judul: "Lokasi produksi", hp: "sub", sel: (b) => <BadgeDivisi b={b} /> },
+  ];
+}
+
+/**
  * Halaman Resep Produksi: GRID KARTU (thumbnail foto bahan jadi + badge
  * lokasi/divisi + filter chips) → klik kartu membuka DETAIL (?bahan=<id>):
  * editor resep (BOM), CARA MASAK berlangkah + foto proses, foto bahan jadi &
@@ -165,7 +253,7 @@ export function ResepPage() {
     tulisLokal(KUNCI_TAMPILAN, tampilan);
   }, [tampilan]);
 
-  const { data: bahan, isLoading } = useQuery({
+  const { data: bahan, isLoading, error: bahanGagal } = useQuery({
     queryKey: ["bahan", "ringkas"],
     queryFn: () => api<BahanDto[]>("/bahan?ringkas=1"),
   });
@@ -739,57 +827,17 @@ export function ResepPage() {
               </div>
             </div>
           ) : tampilan === "daftar" ? (
-            /* ---- BENTUK DAFTAR: satu baris per resep ---- */
-            <div className="space-y-2">
-              {daftar.map((b) => {
-                const n = ringkas ? (ringkas[b.id] ?? 0) : null;
-                return (
-                  <Card
-                    key={b.id}
-                    onClick={() => bukaDetail(b.id)}
-                    className="flex cursor-pointer items-center gap-3 p-2.5 text-left transition hover:border-orange-300 hover:shadow-sm"
-                  >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
-                      {b.foto_hasil_url ? (
-                        <img
-                          src={b.foto_hasil_url}
-                          alt={b.nama}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-lg" aria-hidden>
-                          🍲
-                        </span>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="min-w-0 truncate text-sm font-semibold text-stone-800">
-                          {b.nama}
-                        </span>
-                        <BadgeDivisi b={b} />
-                      </div>
-                      <div className="truncate text-xs text-stone-500">
-                        batch {formatAngka(b.isi)} {b.satuan} ·{" "}
-                        {n == null ? "—" : n > 0 ? `${n} bahan baku` : "belum ada resep"}
-                      </div>
-                    </div>
-                    {/* harga hanya owner/admin — sama seperti kartu ikon, staf
-                        produksi tetap melihat resepnya tanpa harga */}
-                    {bolehUbah && (
-                      <span className="shrink-0 text-sm font-semibold text-stone-700 tabular-nums">
-                        {formatRupiah(b.harga_beli)}
-                      </span>
-                    )}
-                  </Card>
-                );
-              })}
-              {daftar.length === 0 && (
-                <div className="py-8 text-center text-sm text-stone-400">
-                  {produksi.length === 0 ? "Belum ada resep aktif." : "Tidak ada yang cocok."}
-                </div>
-              )}
-            </div>
+            /* ---- BENTUK DAFTAR: tabel berkepala, satu baris per resep ---- */
+            <TabelResponsif
+              data={daftar}
+              kunci={(b) => b.id}
+              kolom={kolomDaftarResep({ bolehUbah, ringkas })}
+              onKlikBaris={(b) => bukaDetail(b.id)}
+              kelasBaris={() => "hover:bg-orange-50"}
+              minLebar="min-w-[52rem]"
+              galat={bahanGagal}
+              kosong={produksi.length === 0 ? "Belum ada resep aktif." : "Tidak ada yang cocok."}
+            />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {daftar.map((b) => {

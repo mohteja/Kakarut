@@ -61,10 +61,27 @@ test("resep: bentuk daftar bertahan sesudah muat ulang, dan barisnya membuka res
   await expect(tombolDaftar).toHaveAttribute("aria-pressed", "true");
 
   // Nama resep diambil dari layar ITU SENDIRI — bukan ditebak dari seed.
-  const barisPertama = page.locator("div.cursor-pointer").first();
+  // Bentuk daftar adalah TABEL berkepala: namanya dibaca dari sel di bawah
+  // kepala "Nama produk", bukan baris pertama `innerText` — sel pertama kini
+  // nomor urut, dan versi lama sebenarnya membaca "🍲" (placeholder foto; seed
+  // tak punya foto): premis yang lolos hampa. Teks kepala di-uppercase CSS,
+  // jadi dicocokkan tanpa peduli huruf.
+  const kepala = page.getByRole("columnheader");
+  await expect(
+    kepala.filter({ hasText: /nama produk/i }),
+    "premis: kepala tabel memuat kolom Nama produk",
+  ).toHaveCount(1);
+  const idxNama = (await kepala.allInnerTexts()).findIndex((t) => /nama produk/i.test(t));
+  const barisPertama = page.locator("tbody tr").first();
   await expect(barisPertama, "premis: bentuk daftar merender barisnya").toBeVisible();
-  const namaResep = (await barisPertama.innerText()).split("\n")[0]!.trim();
+  const namaResep = (await barisPertama.getByRole("cell").nth(idxNama).innerText()).trim();
   expect(namaResep.length, "premis: baris pertama punya nama").toBeGreaterThan(0);
+  // PASANGAN peran: owner melihat kolom uang — server menyaring biaya untuk
+  // peran lain, layar memagari kolomnya; yang dipaku di sini sisi yang tampil.
+  await expect(
+    kepala.filter({ hasText: /harga \/ satuan/i }),
+    "owner tidak melihat kolom Harga / satuan",
+  ).toHaveCount(1);
 
   // 1) Pilihannya bertahan melewati muat ulang.
   await page.reload();
@@ -74,7 +91,7 @@ test("resep: bentuk daftar bertahan sesudah muat ulang, dan barisnya membuka res
   ).toHaveAttribute("aria-pressed", "true");
 
   // 2) Barisnya benar-benar membuka resepnya (detail = ?bahan=<id>).
-  await page.locator("div.cursor-pointer").first().click();
+  await page.getByRole("row").filter({ hasText: namaResep }).first().click();
   await expect(page, "baris daftar tidak membuka detail resep").toHaveURL(/[?&]bahan=/);
   await expect(page.getByText(namaResep, { exact: false }).first()).toBeVisible();
 
