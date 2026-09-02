@@ -610,6 +610,19 @@ export const authRoutes = new Hono<AppEnv>()
             // Naikkan versi token → SEMUA sesi lama (mis. token dicuri) langsung
             // batal begitu pemilik akun mereset password lewat email.
             tokenVersion: sql`${users.tokenVersion} + 1`,
+            /*
+             * SEKALIAN TERVERIFIKASI — penulis ke-7 `emailVerifiedAt`, disengaja.
+             *
+             * Tautan reset hanya pernah dikirim ke alamat yang tercatat di baris
+             * ini, jadi orang yang memegangnya sudah membuktikan kepemilikan
+             * inbox itu — standar bukti yang PERSIS SAMA dengan kode/tautan
+             * verifikasi. Sebelum ini, akun yang belum terverifikasi bisa
+             * mereset passwordnya lewat inbox-nya, diberi tahu "silakan masuk",
+             * lalu ditolak `/login` 403 "Email belum diverifikasi" — diukur di
+             * browser (e2e `lupa-password.spec.ts`, 2026-09-02). `coalesce`
+             * supaya akun yang sudah terverifikasi TAK bergeser stempelnya.
+             */
+            emailVerifiedAt: sql`coalesce(${users.emailVerifiedAt}, now())`,
           })
           .where(eq(users.id, user.id));
         /*

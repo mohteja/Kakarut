@@ -25,6 +25,21 @@ tanpa akses repo server.
 
 ---
 
+## `POST /auth/reset-password` sekaligus MENANDAI EMAIL TERVERIFIKASI
+
+⚪️ **INFO** — tak ada bentuk balasan yang berubah (`{ ok: true }` tetap).
+
+Sebelumnya reset password lewat tautan email TIDAK menyentuh status verifikasi:
+akun yang belum terverifikasi bisa mengganti passwordnya lewat inbox-nya, diberi
+tahu "silakan masuk", lalu ditolak `/login` 403 "Email belum diverifikasi".
+Padahal tautan reset hanya pernah dikirim ke alamat yang tercatat — memegangnya
+adalah bukti kepemilikan inbox, standar yang sama dengan kode verifikasi.
+
+Sekarang `reset-password` yang sukses juga mengisi `email_verified_at` bila
+masih kosong (akun yang sudah terverifikasi tak berubah). **Untuk ponsel:**
+sesudah reset sukses (dari tautan web), login langsung bisa; tak perlu lagi
+mengarahkan ke layar verifikasi.
+
 ## `POST /auth/register` bisa MEMULANGKAN SESI: akun terverifikasi + password cocok
 
 🟡 **PERLU DICEK** — layar daftar ponsel.

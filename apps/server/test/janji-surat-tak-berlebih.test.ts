@@ -53,8 +53,18 @@ const RUMAH = join(WEB, "lib/pesan-verifikasi.ts");
 const SIGNUP = join(WEB, "pages/SignupPage.tsx");
 const AUTH_CTX = join(WEB, "context/AuthContext.tsx");
 
-/** Pintu klien yang meminta kode verifikasi ke server. */
-const PEMANGGIL = ["register(", "kirimUlangVerifikasi("];
+/**
+ * Pintu klien yang meminta SURAT ke server: kode verifikasi (dua pertama) dan
+ * tautan reset password. Yang ketiga ditambahkan 2026-09-02 — halaman Lupa
+ * Password menulis klaim "sudah dikirim" inline, kelas yang persis sama
+ * dengan tiga layar di bawah, dan luput hanya karena populasinya tak
+ * memuatnya. Pemetaan cakupan yang menemukannya: halaman itu tak pernah
+ * disentuh satu uji pun.
+ */
+const PEMANGGIL = ["register(", "kirimUlangVerifikasi(", '"/auth/forgot-password"'];
+
+/** Kalimat TUNGGU KODE — yang dijaga aturan satu jalan. */
+const TUNGGU_KODE = ["PESAN_DAFTAR", "PESAN_KIRIM_ULANG"];
 
 /**
  * Bentuk yang DILARANG ditulis inline di layar: klaim bahwa suratnya sudah
@@ -115,6 +125,7 @@ describe("layar tunggu kode: satu rumah, satu jalan", () => {
   it("premis: sapuannya menemukan layar-layar pemintanya", () => {
     // Terukur 3 saat gerbang ini ditulis: Signup, VerifikasiEmail, Login.
     expect(layar.map((f) => f.nama).sort()).toEqual([
+      "pages/ForgotPasswordPage.tsx",
       "pages/LoginPage.tsx",
       "pages/SignupPage.tsx",
       "pages/VerifikasiEmailPage.tsx",
@@ -122,6 +133,7 @@ describe("layar tunggu kode: satu rumah, satu jalan", () => {
     expect(pesan.map((p) => p.nama).sort()).toEqual([
       "PESAN_DAFTAR",
       "PESAN_KIRIM_ULANG",
+      "PESAN_LUPA",
       "PESAN_SUDAH_AKTIF",
     ]);
   });
@@ -153,8 +165,11 @@ describe("layar tunggu kode: satu rumah, satu jalan", () => {
      * kejujuran kalimat untuk keadaan yang tak bisa dibedakan; keadaan itu
      * kini ditangani servernya sebelum layar ini tampil.
      */
-    const tunggu = pesan.filter((p) => p.nama !== "PESAN_SUDAH_AKTIF");
-    expect(tunggu.length, "ada kalimat tunggu yang bisa dinilai").toBeGreaterThanOrEqual(2);
+    // Disebut NAMANYA, bukan "semua kecuali satu": `PESAN_LUPA` memang
+    // bercabang ("jika terdaftar…") dan itu sah — balasan lupa password netral
+    // anti-enumerasi, bukan layar tunggu kode. Aturannya di uji sendiri.
+    const tunggu = pesan.filter((p) => TUNGGU_KODE.includes(p.nama));
+    expect(tunggu.length, "ada kalimat tunggu yang bisa dinilai").toBe(TUNGGU_KODE.length);
     for (const p of tunggu) {
       for (const re of CABANG) {
         expect(p.isi, `${p.nama} bercabang lagi (${re.source})`).not.toMatch(re);
@@ -176,6 +191,21 @@ describe("layar tunggu kode: satu rumah, satu jalan", () => {
     const signup = butaKomentar(readFileSync(SIGNUP, "utf8"));
     expect(signup).toContain('"token" in');
     expect(signup).toContain("PESAN_SUDAH_AKTIF");
+  });
+
+  it("kalimat lupa password: netral, dan tak mengklaim surat yang belum tentu berangkat", () => {
+    /*
+     * `/forgot-password` sengaja membalas identik untuk email terdaftar dan
+     * tidak — jadi kalimatnya WAJIB bersyarat ("jika terdaftar"), dan untuk
+     * surat yang mungkin tak pernah berangkat (alamat tak dikenal, penyedia
+     * menolak) ia tak boleh berkata "sudah dikirim". Kelas yang sama dengan
+     * tiga layar kode, satu lapis di sebelahnya.
+     */
+    const lupa = pesan.find((p) => p.nama === "PESAN_LUPA");
+    expect(lupa?.isi, "kalimat lupa password ada di rumahnya").toBeTruthy();
+    expect(lupa!.isi).toMatch(/[Jj]ika/);
+    expect(lupa!.isi).toMatch(/berlaku/);
+    for (const re of KLAIM) expect(lupa!.isi, `PESAN_LUPA mengklaim (${re.source})`).not.toMatch(re);
   });
 
   it("tak ada layar yang menawarkan jalan kedua 'Akun sudah aktif?'", () => {

@@ -50,6 +50,99 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Lupa/reset password dilihat dari BROWSER — dua layar yang tak pernah disentuh uji apa pun — web + server — 2026-09-02
+
+- **Kenapa vena ini ada**: pemetaan cakupan 2026-09-02 (modul × rute × uji ×
+  ledger) menemukan `ForgotPasswordPage` dan `ResetPasswordPage` tak pernah
+  disentuh e2e, tak pernah disebut pemindai, tak pernah disebut ledger — dan
+  itu jalur MASUK: orang yang terkunci dari akunnya. Sisi servernya sudah
+  diketuk §97 (token bekas 400, token ngawur 400, tautan mengikuti host).
+  Yang belum pernah diukur: apa yang dilihat orang **sesudah** 400 itu.
+
+- **Populasi**: 2 halaman web, 2 pintu server, 1 jalur akibat (403 di
+  `LoginPage`). Ponsel punya `lupa_password_page.dart` dengan klaim yang sama;
+  reset-nya memang lewat tautan web — dicatat, tidak digarap di sini.
+
+- **Metode (Aturan 6)**: spec Playwright ditulis DULU dan dijalankan terhadap
+  kode yang belum diubah — 4 kasus, tiap kasus akun segar lewat API
+  (`register` + `verify-email` dengan `dev_verify_kode`; email unik per jalan
+  supaya ember `batasLupa` 6/15 menit dan ember login, keduanya berkunci
+  email, tak pernah tersentuh). **Sebelum perbaikan: 2 merah dari 4.**
+
+- **Temuan 1 — reset berhasil, lalu tak bisa masuk.** Akun yang belum
+  terverifikasi → lupa password → tautan di inbox-nya → password diganti →
+  layar berkata *"Silakan masuk"* → `/login` menjawab **"Email belum
+  diverifikasi. Cek email Anda atau minta kode verifikasi baru."** (tangkapan
+  Playwright). Orang itu BARU SAJA membuktikan kepemilikan inbox-nya lewat
+  tautan yang hanya pernah dikirim ke alamat yang tercatat — standar bukti
+  yang persis sama dengan kode verifikasi. Komentar §97 lama bahkan menuliskan
+  cacatnya sebagai prasyarat uji: *"daftar + verifikasi email dulu (login
+  setelah reset butuh email terverifikasi)"*. Dibayar: `/reset-password`
+  mengisi `emailVerifiedAt` lewat `coalesce(…, now())` di transaksi yang sama
+  — penulis ke-7 `emailVerifiedAt`, disengaja dan berkomentar; akun yang sudah
+  terverifikasi tak bergeser stempelnya. Balasan tetap `{ ok: true }`.
+
+- **Temuan 2 — tautan mati tanpa jalan keluar.** Token bekas/kedaluwarsa →
+  server 400 → halaman menampilkan galat merah **dan formulirnya tetap
+  hidup**; tombol "Minta tautan baru" hanya ada bila `?token=` kosong sama
+  sekali. Terukur: `getByRole("link", { name: "Minta tautan baru" })` →
+  *element(s) not found*. Dibayar: galat yang memuat "tidak valid /
+  kedaluwarsa" (kalimat milik server) mengganti formulir dengan jalan keluar
+  yang sama seperti keadaan tanpa token.
+
+- **Temuan 3 — klaim surat inline, kelas babak 3 yang luput dari
+  populasinya.** *"tautan atur ulang password sudah dikirim"* ditulis di
+  `ForgotPasswordPage` sendiri; gerbang `janji-surat-tak-berlebih` tak
+  melihatnya karena populasinya hanya layar yang memanggil
+  `register(`/`kirimUlangVerifikasi(`. Dibayar: `PESAN_LUPA` di rumah bersama
+  (*"Jika alamat ini terdaftar, tautan … sedang dikirim … (berlaku 1 jam)"*),
+  populasi gerbang diperluas ke `"/auth/forgot-password"` (3 → 4 layar), dan
+  aturan satu-jalan disebut NAMANYA (`PESAN_DAFTAR`, `PESAN_KIRIM_ULANG`) —
+  sebab `PESAN_LUPA` memang bercabang, dan itu sah: balasan netral
+  anti-enumerasi, bukan layar tunggu kode. Ia dapat aturannya sendiri: wajib
+  bersyarat, wajib menyebut masa berlaku, dilarang "sudah dikirim".
+
+- **Penjaga**: e2e `lupa-password.spec.ts` (4 kasus, 13 → 17 Playwright);
+  §97b di `verify-api.sh` (+6 asersi: premis belum terverifikasi 403, tautan
+  tetap dikirim, reset ok, login sesudahnya **200**, PASANGAN password lama
+  401 dan token bekas 400); `janji-surat` 14 → 15 asersi.
+
+- **Bukti merah, semuanya dipulihkan dari salinan**: `coalesce` dicabut +
+  server dinyalakan ulang → langkah §97b menjawab **403** dan e2e kasus 2
+  merah · klaim "sudah dikirim" ditulis inline lagi → `janji-surat` merah ·
+  `PESAN_LUPA` diubah jadi "sudah dikirim" → merah. Temuan 2 punya buktinya
+  dari pengukuran sebelum perbaikan (kode asli = perbaikan dicabut).
+
+- **Alat ukurnya sendiri salah sekali, dan itu dicatat**: asersi
+  `toHaveCount(0)` untuk teks "belum diverifikasi" puas SEKETIKA pada layar
+  yang belum sempat menjawab — hijau tanpa menguji apa pun, tepat di jalan
+  pertama. Urutannya dibalik: URL dulu (yang menunggu), baru teksnya. Dan
+  kasus 1 versi pertama membuka tautan bekas SESUDAH masuk — rute publik
+  hanya hidup tanpa sesi, jadi ia dialihkan ke onboarding dan spec-nya
+  menuduh hal yang salah; langkahnya dipindah ke sebelum masuk.
+
+- **Gerbang penuh pertama MERAH 5 — di §281, seksi yang tak kusentuh, dan
+  bukan bug.** Pendaftaran §97b adalah yang ke-21 pada ember `batasRegister`
+  (20/IP/jam) yang dibagi SELURUH skrip; §281 menerima **429** (satu-satunya
+  di log server) dan lima asersinya memerah — "tak memulangkan kode 6 angka",
+  "kirim ulang tak memberi kode baru", "akunnya kini tak bisa masuk" — tanpa
+  satu pun menyebut kuota. Dua hal dibayar: §97b memakai ember sendiri
+  (`X-Forwarded-For: 203.0.113.97`, seperti §284/§285), dan premis §281 kini
+  menyebut STATUS pendaftarannya (`V == 200`, dengan keterangan bahwa 429
+  berarti ember bersama habis). Batas yang tersisa dan diketahui: tiap seksi
+  baru yang mendaftar tanpa ember sendiri masih bisa menghabiskan jatah seksi
+  di belakangnya — kini setidaknya tuduhannya menyebut sebab yang benar.
+
+- **Batas yang ditulis jujur**: kedaluwarsa 1 jam tak bisa ditunggu e2e —
+  dijaga §97 lewat token BEKAS saja (lengan `expiresAt` belum pernah diukur);
+  pemindai kalimatnya leksikal; ponsel belum disentuh.
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` **218 berkas / 2660 uji** ·
+  `verify-api.sh` **3395 lolos, 0 gagal** · `audit:invarian` 27/27 · Playwright
+  **17/17**.
+
+---
+
 ## Akun yang sudah aktif LANGSUNG DIMASUKKAN dari `/register` — dan layar daftar kembali SATU jalan — web + server — 2026-09-02
 
 - **Babak keempat dari satu laporan, dan yang pertama lahir dari PENOLAKAN
@@ -9199,6 +9292,11 @@ berlaku di situ).
       Pengaturan Email. Klaim "akun tiba-tiba terverifikasi" dijawab dari
       backfill 0065 — bukan bug. Sambil lalu: peta label web membawa sebab
       kuburan, dan §279 distaging ulang seperti §280d
+- [x] ~~**Alur lupa/reset password di web: nol uji browser**~~ — SELESAI, lihat
+      entri di atas. 2 merah dari 4 kasus pada jalan pertama: akun belum
+      terverifikasi ditolak masuk SESUDAH mereset lewat inbox-nya, dan tautan
+      bekas tak punya jalan keluar. Klaim surat inline ketiga dibayar ke rumah
+      bersama; populasi gerbangnya 3 → 4 layar
 - [ ] **Ponsel masih pada alur TOKEN lama untuk verifikasi email** — layarnya
       meminta "salin token di tautan, lalu tempel di bawah"
       (`verifikasi_email_page.dart:134-159`) sementara surat kini dipimpin kode

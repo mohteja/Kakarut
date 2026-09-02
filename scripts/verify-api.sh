@@ -3936,7 +3936,7 @@ cek "hapus akun owner terakhir → 400" "V == 400" \
 echo "== 97. Lupa/reset password + pengaturan SMTP =="
 # Reset password diuji SAAT email belum dikonfigurasi → forgot mengembalikan
 # tautan reset langsung (dev), jadi tokennya bisa dipakai.
-# daftar + verifikasi email dulu (login setelah reset butuh email terverifikasi)
+# (a) akun yang SUDAH terverifikasi — jalur biasa.
 daftar_verif "reset97@example.com" "Lama12345" "Reset Uji 97" > /dev/null
 FP=$(api "" POST /auth/forgot-password '{"email":"reset97@example.com"}')
 cek "forgot: ok true" "V == 1" "$(echo "$FP" | jq '(.ok==true)|if . then 1 else 0 end')"
@@ -3963,6 +3963,46 @@ cek "reset token ngawur → 400" "V == 400" \
 FU=$(api "" POST /auth/forgot-password '{"email":"tidakada97@example.com"}')
 cek "forgot email tak dikenal → ok tanpa url" "V == 1" \
   "$(echo "$FU" | jq '((.ok==true) and (.dev_reset_url == null))|if . then 1 else 0 end')"
+
+# (b) AKUN YANG BELUM TERVERIFIKASI — tautan reset di inbox-nya adalah bukti.
+#
+# Komentar lama paruh (a) berbunyi "daftar + verifikasi email dulu (login
+# setelah reset butuh email terverifikasi)": itu bukan prasyarat uji, itu
+# CACATNYA. Orang yang belum sempat memasukkan kode lalu lupa password bisa
+# mengganti passwordnya lewat inbox yang sama, diberi tahu "silakan masuk",
+# lalu ditolak 403 "Email belum diverifikasi" — diukur di browser (e2e
+# `lupa-password.spec.ts`, 2026-09-02). Tautan reset hanya pernah dikirim ke
+# alamat yang tercatat, jadi memegangnya = bukti kepemilikan inbox, standar
+# yang sama persis dengan kode verifikasi. Kini reset yang sukses SEKALIGUS
+# menandai emailnya terverifikasi.
+#
+# EMBER SENDIRI. `batasRegister` 20/IP/jam dibagi SELURUH skrip ini, dan paruh
+# ini adalah pendaftaran ke-21 sebelum §281 — pada jalan pertamanya §281
+# menerima 429 dan memerah LIMA asersi tanpa satu pun menyebut kuota. Seperti
+# §284/§285: skrip ini berjalan di tepi (TRUST_PROXY_HOPS=1), jadi satu
+# X-Forwarded-For = satu ember, dan pendaftaran di sini tak memakan jatah
+# seksi lain.
+XFF97B="X-Forwarded-For: 203.0.113.97"
+R97B=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -H "$XFF97B" \
+  -d '{"nama":"Reset 97b","email":"reset97b@example.com","password":"Lama12345"}')
+cek "premis §97b: pendaftaran diterima (bukan 429 kuota bersama)" "V == 1" \
+  "$(echo "$R97B" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "premis §97b: akunnya BELUM terverifikasi (login → 403)" "V == 403" \
+  "$(status_code_body "" POST /auth/login '{"email":"reset97b@example.com","password":"Lama12345"}')"
+FP97B=$(api "" POST /auth/forgot-password '{"email":"reset97b@example.com"}')
+RTOK97B=$(echo "$FP97B" | jq -r '.dev_reset_url // ""' | sed 's/.*token=//')
+cek "premis §97b: akun belum terverifikasi TETAP dikirimi tautan reset" "V == 1" \
+  "$([ -n "$RTOK97B" ] && echo 1 || echo 0)"
+cek "§97b reset dgn token → ok" "V == 1" \
+  "$(api "" POST /auth/reset-password "{\"token\":\"$RTOK97B\",\"password\":\"Baru12345\"}" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "§97b sesudah reset, login LANGSUNG BISA → 200 (bukan 403 belum diverifikasi)" "V == 200" \
+  "$(status_code_body "" POST /auth/login '{"email":"reset97b@example.com","password":"Baru12345"}')"
+# PASANGAN: yang dibuktikan tautan itu hanya kepemilikan inbox — password
+# lama tetap mati, dan tautan bekasnya tetap tak bisa dipakai lagi.
+cek "PASANGAN §97b: password lama → 401" "V == 401" \
+  "$(status_code_body "" POST /auth/login '{"email":"reset97b@example.com","password":"Lama12345"}')"
+cek "PASANGAN §97b: token bekas → 400" "V == 400" \
+  "$(status_code_body "" POST /auth/reset-password "{\"token\":\"$RTOK97B\",\"password\":\"Baru12345\"}")"
 # Pengaturan SMTP (super admin)
 cek "SMTP awal: belum dikonfigurasi" "V == 1" \
   "$(api "$SA" GET /admin/sistem/smtp | jq '(.configured==false)|if . then 1 else 0 end')"
@@ -16020,12 +16060,22 @@ echo
 echo "── §281 verifikasi email: kode 6 angka, dan jatah tebakannya ──"
 
 EM281="otp$(date +%s)@uji.local"
-REG281=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
+REG281_STATUS=$(curl -s -o /tmp/kk281-reg -w '%{http_code}' -X POST "$BASE/api/auth/register" \
+  -H 'Content-Type: application/json' \
   -d "{\"nama\":\"Uji OTP\",\"email\":\"$EM281\",\"password\":\"Rahasia123!\"}")
+REG281=$(cat /tmp/kk281-reg 2>/dev/null); rm -f /tmp/kk281-reg
 K281=$(echo "$REG281" | jq -r '.dev_verify_kode // ""')
 
 # PREMIS lebih dulu: tanpa kode, seluruh asersi di bawah benar secara hampa —
 # "ditolak 400" akan lolos justru karena tak ada yang pernah dikirim.
+#
+# Dan STATUSNYA disebut, bukan cuma kodenya: seksi ini pernah memerah lima
+# asersi sekaligus (2026-09-02) karena pendaftarannya adalah yang ke-21 pada
+# ember `batasRegister` 20/IP/jam yang dibagi seluruh skrip — 429, dan tak
+# satu pun asersi menyebutnya. Tuduhan "tak memulangkan kode" untuk kuota yang
+# habis mengajari pembacanya mencari bug di tempat yang salah.
+cek "premis §281: pendaftaran DITERIMA (bukan 429 — ember batasRegister dibagi seluruh skrip)" "V == 200" \
+  "$REG281_STATUS"
 cek "premis §281: pendaftaran memulangkan kode 6 angka" "V == 1" \
   "$(printf '%s' "$K281" | grep -Eq '^[0-9]{6}$' && echo 1 || echo 0)"
 
