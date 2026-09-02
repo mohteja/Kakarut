@@ -182,6 +182,20 @@ export function OpnamePage() {
   // menulis penyesuaian stok sungguhan — lebih baik ditahan di sini, dengan
   // nama bahannya disebut.
   const salahKetik = diisi.filter((s) => Number.isNaN(angkaDari(fisik[s.ingredient_id])));
+  /**
+   * Hitungan fisik yang MINUS. Terjadi di lapangan (2026-09-02, 54 kali dalam
+   * 29 menit dari dua akun): saldo sistem beberapa bahan sudah minus (mis.
+   * nata de coco −100), tombol "= sistem" menyalin angka itu apa adanya, dan
+   * server — yang benar — menolak `qty: minimal 0` sambil menyebut
+   * `items[26]`, indeks yang tak bisa dicocokkan siapa pun dengan bahan. Rak
+   * tak pernah berisi −100; hitungan fisik paling sedikit 0, dan selisih dari
+   * buku yang minus memang selisih yang menunggu ACC. Ditahan di sini dengan
+   * NAMA bahannya, sebelum satu byte pun dikirim.
+   */
+  const negatif = diisi.filter((s) => {
+    const n = angkaDari(fisik[s.ingredient_id]);
+    return !Number.isNaN(n) && n < 0;
+  });
 
   /**
    * Kunci idempotensi SATU SESI penghitungan, bertahan melintasi percobaan
@@ -463,6 +477,12 @@ export function OpnamePage() {
                         <div className="text-sm text-stone-500">
                           Sistem: <b className="text-stone-700">{formatAngka(s.saldo)} {s.satuan}</b>
                         </div>
+                        {s.saldo < 0 && (
+                          <div className="mt-0.5 text-xs text-amber-700">
+                            Saldo sistem minus — isi hitungan fisik yang sebenarnya (paling sedikit
+                            0); selisihnya akan menunggu ACC.
+                          </div>
+                        )}
                       </div>
                       {selisih !== null &&
                         (Math.abs(selisih) < 1e-9 ? (
@@ -491,7 +511,11 @@ export function OpnamePage() {
                         className="h-12 flex-1 rounded-lg border border-stone-300 px-3 text-lg font-semibold focus:border-orange-500 focus:outline-none"
                       />
                       <button
-                        onClick={() => setFisik({ ...fisik, [s.ingredient_id]: teksAngka(s.saldo) })}
+                        // Saldo sistem yang MINUS tak pernah ada di rak: "sama dengan
+                        // sistem" untuk buku −100 adalah 0, bukan −100 yang pasti ditolak.
+                        onClick={() =>
+                          setFisik({ ...fisik, [s.ingredient_id]: teksAngka(Math.max(0, s.saldo)) })
+                        }
                         className="h-12 shrink-0 rounded-lg border border-stone-300 px-3 text-sm font-medium text-stone-600"
                         title="Isi sama dengan sistem"
                       >
@@ -546,6 +570,14 @@ export function OpnamePage() {
                 <b>470</b> atau <b>1,5</b>.
               </div>
             )}
+            {negatif.length > 0 && (
+              <div className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-center text-xs font-medium text-red-800">
+                Stok fisik tidak boleh minus pada{" "}
+                <b>{negatif.map((s) => s.nama).join(", ")}</b> — isi hitungan yang sebenarnya
+                (paling sedikit <b>0</b>). Saldo sistem yang minus adalah selisih yang menunggu
+                ACC, bukan angka rak.
+              </div>
+            )}
             {selisihTanpaFoto.length > 0 && (
               <div className="mb-2 rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-800">
                 Lampirkan bukti foto untuk {selisihTanpaFoto.length} selisih sebelum menyimpan.
@@ -557,7 +589,12 @@ export function OpnamePage() {
               </button>
               <button
                 onClick={() => setKonfirmasi(true)}
-                disabled={terisi === 0 || salahKetik.length > 0 || selisihTanpaFoto.length > 0}
+                disabled={
+                  terisi === 0 ||
+                  salahKetik.length > 0 ||
+                  negatif.length > 0 ||
+                  selisihTanpaFoto.length > 0
+                }
                 className={`${btnPrimary} flex-1 py-3 text-base`}
               >
                 Simpan Opname ({terisi} dihitung)
