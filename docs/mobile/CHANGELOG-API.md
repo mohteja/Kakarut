@@ -25,6 +25,17 @@ tanpa akses repo server.
 
 ---
 
+## `GET /laporan` membawa `omzet_sebelum_refund`
+
+🟢 **BARU** — satu medan tambahan pada `LaporanHarian`; tak ada yang berubah bentuknya.
+
+`omzet_sebelum_refund` = Σ subtotal seperti SEBELUM refund mana pun (jangkar
+`subtotal_asal`). Lahir dari temuan di web: layar menulis "sebelum refund,
+omzetnya {omzet + total_refund}", padahal `omzet` KOTOR (Σ subtotal) dan
+`total_refund` nominal BERSIH (diskon dipotong, PB1 ditambah) — terukur 94.200
+untuk omzet sebelum refund 92.000. Kalau ponsel ingin menampilkan angka itu,
+baca medan ini; jangan merakitnya dari `omzet + total_refund`.
+
 ## `POST /auth/reset-password` sekaligus MENANDAI EMAIL TERVERIFIKASI
 
 ⚪️ **INFO** — tak ada bentuk balasan yang berubah (`{ ok: true }` tetap).
@@ -39,6 +50,8 @@ Sekarang `reset-password` yang sukses juga mengisi `email_verified_at` bila
 masih kosong (akun yang sudah terverifikasi tak berubah). **Untuk ponsel:**
 sesudah reset sukses (dari tautan web), login langsung bisa; tak perlu lagi
 mengarahkan ke layar verifikasi.
+
+**Sudah di-merge ke production.**
 
 ## `POST /auth/register` bisa MEMULANGKAN SESI: akun terverifikasi + password cocok
 

@@ -33,6 +33,9 @@ export function GrafikTransaksiPerJam({ data }: { data: LaporanHarian["per_jam"]
   const skala = puncak > 0 ? puncak : 1;
   const iPuncak = data.findIndex((d) => d.jumlah === puncak);
   const totalTransaksi = data.reduce((a, d) => a + d.jumlah, 0);
+  // Keduanya ANGKA YANG MENDAMAIKAN: dicetak di kaki tabel supaya Σ batang
+  // bisa dicocokkan dengan kartu di atasnya (server menjamin sama — §224/§286).
+  const omzetGrafik = data.reduce((a, d) => a + d.omzet, 0);
   const jamTeks = (j: number) => `${String(j).padStart(2, "0")}.00`;
 
   const d = aktif != null ? data[aktif] : null;
@@ -182,7 +185,7 @@ export function GrafikTransaksiPerJam({ data }: { data: LaporanHarian["per_jam"]
               <td className="px-3 py-1.5">Total</td>
               <td className="px-3 py-1.5 text-right">{totalTransaksi}</td>
               <td className="px-3 py-1.5 text-right">
-                {formatRupiah(data.reduce((a, r) => a + r.omzet, 0))}
+                {formatRupiah(omzetGrafik)}
               </td>
             </tr>
           </tfoot>

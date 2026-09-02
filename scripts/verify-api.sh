@@ -16551,6 +16551,175 @@ curl -s -o /dev/null -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: 
 cek "PASANGAN §285: lupa-password untuk akun terverifikasi MEMANG mencoba kirim" "V == 1" \
   "$(case "$(jejak284 "$E285")" in tak_dicoba\|akun_*|TAK-ADA-BARIS) echo 0;; *) echo 1;; esac)"
 
+
+# §286 — ANGKA LAPORAN DIBANDINGKAN DENGAN YANG DIHITUNG TANGAN
+#
+# Pemetaan cakupan 2026-09-02: kelima rute /laporan/* sudah diketuk (56
+# asersi), tapi hanya BEP (§171) yang angkanya dibandingkan terhadap nilai
+# yang dihitung tangan dari data yang dibuat skrip. Laporan harian, menu laris,
+# lama pesanan, dan pembelian hanya dicek bentuknya atau sifat parsialnya.
+# Angka laporan adalah yang dibaca pemilik warung untuk memutuskan; salah di
+# sini tak pernah "terlihat salah" — cuma berbeda dari yang diingat orang.
+#
+# Datanya di CABANG BARU dengan KASIR BARU supaya tak satu pun nota seksi lain
+# ikut terhitung. Satu bahan Rp5.000/pcs (isi 1) → HPP menu A = 5.000/porsi
+# (stok awal memakai harga acuan bahan); menu B tanpa komponen → HPP 0.
+# PB1 10% (disetel §159, ditegaskan lagi di sini).
+#
+# Yang dihitung tangan (rumus `penjualan/service.ts:589-621`, refund
+# proporsional `refund.ts`, porsi ditagih `lib/porsi-ditagih.ts`):
+#
+#   S1 tunai  A×2 + B×1, diskon 10%  : subtotal 48.000 diskon 4.800 pb1 4.320 total 47.520 hpp 10.000
+#   S2 qris   A×1,        diskon 5.000: subtotal 20.000 diskon 5.000 pb1 1.500 total 16.500 hpp  5.000
+#   S3 tunai  B×3                     : subtotal 24.000 diskon     0 pb1 2.400 total 26.400 hpp      0
+#   refund S1 A×1 → subtotal 28.000 diskon 2.800 pb1 2.520 total 27.720 hpp 5.000, nominal 19.800
+#   refund S3 B×3 → semuanya 0, nominal 26.400
+#
+#   /laporan   : omzet 48.000 · diskon 7.800 · pb1 4.020 · hpp 10.000 · laba 30.200
+#                transaksi 3 · refund 46.200 (2) · tunai 2/27.720 · qris 1/16.500
+#                Σ per_metode 44.220 = omzet − diskon + pb1 · A qty 2/40.000 · B qty 1/8.000
+#                Σ per_jam.jumlah 3 · Σ per_jam.omzet 48.000 · konsumsi bahan 2 pcs
+#   /menu-laris: A 2/40.000 lalu B 1/8.000; total_qty 3; total_omzet 48.000
+#   /durasi    : 3 baris selesai (S1: A,B; S2: A) — rata/median/tercepat/terlama
+#                dicocokkan ±1 dtk dengan riwayatnya sendiri
+#   /pembelian : faktur 10 pcs @1.000 diterima 7 → 7.000, 1 faktur, 1 item, qty 7
+echo "── §286 angka laporan dibandingkan dengan yang dihitung tangan ──"
+# Nama-nama diberi akhiran waktu supaya seksi ini bisa dijalankan ulang di DB
+# yang sama saat dikembangkan; di gerbang (seed segar) ia berjalan sekali.
+SUF286=$(date +%s)
+NA286="Laporan A 286-$SUF286"; NB286="Laporan B 286-$SUF286"; NBH286="bahan uji286-$SUF286"
+api "$OWNER" PATCH /company '{"pb1_enabled":true,"pb1_rate":10}' > /dev/null
+# Perusahaan uji punya beberapa CK pada titik ini, jadi pemasoknya wajib disebut.
+CKP286=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="central_kitchen")][0].id // ""')
+CB286=$(api "$OWNER" POST /cabang "{\"nama\":\"Cabang Laporan 286-$SUF286\",\"central_kitchen_id\":\"$CKP286\"}" | jq -r '.id // ""')
+api "$OWNER" POST /karyawan "{\"nama\":\"Kasir 286\",\"email\":\"kasir286-$SUF286@basooopa.id\",\"password\":\"Kasir286Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB286\"}" > /dev/null
+K286=$(login "kasir286-$SUF286@basooopa.id" "Kasir286Pass!")
+B286=$(api "$OWNER" POST /bahan "$(jq -nc --arg n "$NBH286" '{nama:$n, harga_beli:5000, isi:1, satuan:"pcs", pengadaan:"beli", kategori:"lain", track_stok:true}')" | jq -r '.id // ""')
+api "$OWNER" POST /stok/awal "{\"branch_id\":\"$CB286\",\"items\":[{\"ingredient_id\":\"$B286\",\"qty\":100}]}" > /dev/null
+KAT286=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+M286A=$(api "$OWNER" POST /menu "$(jq -nc --arg k "$KAT286" --arg b "$B286" --arg n "$NA286" '{nama:$n, category_id:$k, tipe:"regular", mult:2, harga_jual:20000, komponen:[{ingredient_id:$b, qty:1}]}')" | jq -r '.id // ""')
+M286B=$(api "$OWNER" POST /menu "$(jq -nc --arg k "$KAT286" --arg n "$NB286" '{nama:$n, category_id:$k, tipe:"regular", mult:2, harga_jual:8000, komponen:[]}')" | jq -r '.id // ""')
+cek "dasar §286: cabang, kasir, bahan, dua menu tercipta" "V == 1" \
+  "$([ ${#CB286} -eq 36 ] && [ -n "$K286" ] && [ ${#B286} -eq 36 ] && [ ${#M286A} -eq 36 ] && [ ${#M286B} -eq 36 ] && echo 1 || echo 0)"
+pastikanHadir "$K286" "§286"
+api "$K286" POST /shift/buka '{"modal_awal":0}' > /dev/null
+
+jual286() { api "$K286" POST /penjualan "$1"; }
+S286_1=$(jual286 "$(jq -nc --arg a "$M286A" --arg b "$M286B" '{metode_bayar:"tunai", is_dine_in:false, uang_diterima:50000, diskon_tipe:"persen", diskon_nilai:10, items:[{menu_id:$a, qty:2},{menu_id:$b, qty:1}]}')")
+S286_2=$(jual286 "$(jq -nc --arg a "$M286A" '{metode_bayar:"qris", is_dine_in:false, diskon_tipe:"nominal", diskon_nilai:5000, items:[{menu_id:$a, qty:1}]}')")
+S286_3=$(jual286 "$(jq -nc --arg b "$M286B" '{metode_bayar:"tunai", is_dine_in:false, uang_diterima:30000, items:[{menu_id:$b, qty:3}]}')")
+SID286_1=$(echo "$S286_1" | jq -r '.sale.id // ""'); SID286_2=$(echo "$S286_2" | jq -r '.sale.id // ""'); SID286_3=$(echo "$S286_3" | jq -r '.sale.id // ""')
+cek "dasar §286: tiga nota tercatat" "V == 1" \
+  "$([ ${#SID286_1} -eq 36 ] && [ ${#SID286_2} -eq 36 ] && [ ${#SID286_3} -eq 36 ] && echo 1 || echo 0)"
+# Premis angka per nota — kalau ini meleset, laporan di bawah meleset karena
+# nota, bukan karena laporannya.
+cek "premis §286: S1 total 47.520 & HPP 10.000" "V == 1" \
+  "$(echo "$S286_1" | jq '((.sale.total==47520) and (.sale.totalHpp==10000))|if . then 1 else 0 end')"
+cek "premis §286: S2 total 16.500 & HPP 5.000" "V == 1" \
+  "$(echo "$S286_2" | jq '((.sale.total==16500) and (.sale.totalHpp==5000))|if . then 1 else 0 end')"
+cek "premis §286: S3 total 26.400 & HPP 0" "V == 1" \
+  "$(echo "$S286_3" | jq '((.sale.total==26400) and (.sale.totalHpp==0))|if . then 1 else 0 end')"
+
+# Sajian S1 dan S2 diselesaikan (dikerjakan → selesai) SEBELUM refund, supaya
+# baris durasinya lahir dari sajian yang memang dibuat.
+for sid in "$SID286_1" "$SID286_2"; do
+  api "$K286" POST "/pesanan/penjualan/$sid/status" '{"status":"dikerjakan"}' > /dev/null
+  api "$K286" POST "/pesanan/penjualan/$sid/status" '{"status":"selesai"}' > /dev/null
+done
+
+IT286_1A=$(echo "$S286_1" | jq -r --arg m "$M286A" '[.items[]|select(.menuId==$m)][0].id // ""')
+IT286_3B=$(echo "$S286_3" | jq -r --arg m "$M286B" '[.items[]|select(.menuId==$m)][0].id // ""')
+R286_1=$(api "$K286" POST "/penjualan/$SID286_1/refund" "{\"alasan\":\"uji 286\",\"items\":[{\"sale_item_id\":\"$IT286_1A\",\"qty\":1}]}")
+R286_3=$(api "$K286" POST "/penjualan/$SID286_3/refund" "{\"alasan\":\"uji 286\",\"items\":[{\"sale_item_id\":\"$IT286_3B\",\"qty\":3}]}")
+cek "premis §286: refund S1 A×1 nominal 19.800" "abs(V - 19800) < 0.001" "$(echo "$R286_1" | jq -r '.nominal // 0')"
+cek "premis §286: refund S3 B×3 nominal 26.400 (penuh)" "abs(V - 26400) < 0.001" "$(echo "$R286_3" | jq -r '.nominal // 0')"
+
+# Faktur beli 10 pcs @1.000 di cabang ini. Untuk pembelian di cabang SENDIRI,
+# tahap `menunggu` = barang tiba & stok masuk (status `dikonfirmasi`, lihat
+# `beli121` §121); terima-sebagian (prorata harga) hanya ada di jalur KIRIMAN
+# CK→cabang (§52b), yang bukan `tipe='beli'` dan memang tak masuk laporan ini.
+# Versi pertama seksi ini mengira pembelian bisa diterima 7 dari 10 dan
+# menagih 7.000 — yang salah harapannya, bukan laporannya (10.000 benar).
+F286=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CB286\",\"items\":[{\"ingredient_id\":\"$B286\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":10000}]}" | jq -r '.faktur_id // ""')
+api "$OWNER" POST "/pembelian/tahap/$F286" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$F286" '{"ke":"menunggu"}' > /dev/null
+cek "premis §286: faktur beli cabang ini sudah dikonfirmasi (stok masuk)" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian?branch_id=$CB286&per_page=200" | jq --arg f "$F286" '([.rows[]|select(.faktur_id==$f)][0].status=="dikonfirmasi")|if . then 1 else 0 end')"
+
+LAP286=$(api "$OWNER" GET "/laporan?dari=$TODAY&sampai=$TODAY&branch_id=$CB286")
+cek "§286 omzet 48.000 (Σ subtotal sesudah refund)" "abs(V - 48000) < 0.001" "$(echo "$LAP286" | jq -r '.omzet')"
+cek "§286 total_diskon 7.800" "abs(V - 7800) < 0.001" "$(echo "$LAP286" | jq -r '.total_diskon')"
+cek "§286 pb1_terkumpul 4.020" "abs(V - 4020) < 0.001" "$(echo "$LAP286" | jq -r '.pb1_terkumpul')"
+cek "§286 total_hpp 10.000 (HPP porsi yang direfund ikut menyusut)" "abs(V - 10000) < 0.001" "$(echo "$LAP286" | jq -r '.total_hpp')"
+cek "§286 estimasi_profit 30.200 = omzet − diskon − HPP" "abs(V - 30200) < 0.001" "$(echo "$LAP286" | jq -r '.estimasi_profit')"
+cek "§286 jumlah_transaksi 3 (nota yang direfund PENUH tetap satu nota)" "V == 3" "$(echo "$LAP286" | jq -r '.jumlah_transaksi')"
+cek "§286 total_refund 46.200 dari 2 refund" "V == 1" \
+  "$(echo "$LAP286" | jq '((.total_refund==46200) and (.jumlah_refund==2))|if . then 1 else 0 end')"
+# Σ subtotal SEBELUM refund = 48.000 + 20.000 + 24.000. Layar dulu menulis
+# omzet + total_refund = 94.200 — omzet kotor ditambah nominal bersih.
+cek "§286 omzet_sebelum_refund 92.000 (Σ subtotal_asal — bukan omzet + refund = 94.200)" "abs(V - 92000) < 0.001" \
+  "$(echo "$LAP286" | jq -r '.omzet_sebelum_refund // -1')"
+cek "§286 per_metode tunai 2 nota / 27.720 (S3 yang direfund penuh menyumbang 0)" "V == 1" \
+  "$(echo "$LAP286" | jq '([.per_metode[]|select(.metode=="tunai")][0]) | ((.jumlah==2) and (.total==27720))|if . then 1 else 0 end')"
+cek "§286 per_metode qris 1 nota / 16.500" "V == 1" \
+  "$(echo "$LAP286" | jq '([.per_metode[]|select(.metode=="qris")][0]) | ((.jumlah==1) and (.total==16500))|if . then 1 else 0 end')"
+cek "§286 Σ per_metode = omzet − diskon + pb1 (44.220): uang masuk sepakat dengan kartu" "abs(V - 44220) < 0.001" \
+  "$(echo "$LAP286" | jq '[.per_metode[].total]|add')"
+cek "§286 item_terjual A: 2 porsi / 40.000 (porsi yang direfund tak dihitung)" "V == 1" \
+  "$(echo "$LAP286" | jq --arg na "$NA286" '([.item_terjual[]|select(.menu_nama==$na)][0]) | ((.qty==2) and (.omzet==40000))|if . then 1 else 0 end')"
+cek "§286 item_terjual B: 1 porsi / 8.000 (tiga porsi S3 kembali semua)" "V == 1" \
+  "$(echo "$LAP286" | jq --arg nb "$NB286" '([.item_terjual[]|select(.menu_nama==$nb)][0]) | ((.qty==1) and (.omzet==8000))|if . then 1 else 0 end')"
+cek "§286 Σ item_terjual.omzet = omzet kartu (48.000)" "abs(V - 48000) < 0.001" \
+  "$(echo "$LAP286" | jq '[.item_terjual[].omzet]|add')"
+cek "§286 per_jam: Σ jumlah = 3 dan Σ omzet = 48.000 (grafik sepakat dengan kartu)" "V == 1" \
+  "$(echo "$LAP286" | jq '(([.per_jam[].jumlah]|add)==3 and ([.per_jam[].omzet]|add)==48000)|if . then 1 else 0 end')"
+cek "§286 per_jam memuat jam WIB saat ini ($(TZ=Asia/Jakarta date +%H))" "V == 1" \
+  "$(echo "$LAP286" | jq --argjson j "$(TZ=Asia/Jakarta date +%-H)" '([.per_jam[]|select(.jam==$j)]|length)>=1|if . then 1 else 0 end')"
+cek "§286 konsumsi bahan 2 pcs (porsi A yang direfund mengembalikan bahannya)" "abs(V - 2) < 0.001" \
+  "$(echo "$LAP286" | jq --arg nb "$NB286" --arg nbh "$NBH286" --arg id "$B286" '([.konsumsi_bahan[]|select(.nama==$nbh)][0].qty) // -1')"
+
+ML286=$(api "$OWNER" GET "/laporan/menu-laris?dari=$TODAY&sampai=$TODAY&branch_id=$CB286")
+cek "§286 menu-laris: A di puncak (2 porsi / 40.000)" "V == 1" \
+  "$(echo "$ML286" | jq --arg m "$M286A" '(.items[0].menu_id==$m and .items[0].qty==2 and .items[0].omzet==40000)|if . then 1 else 0 end')"
+cek "§286 menu-laris: B 1 porsi / 8.000" "V == 1" \
+  "$(echo "$ML286" | jq --arg m "$M286B" '([.items[]|select(.menu_id==$m)][0]) | ((.qty==1) and (.omzet==8000))|if . then 1 else 0 end')"
+cek "§286 menu-laris total_qty 3 & total_omzet 48.000 — sama dengan /laporan" "V == 1" \
+  "$(echo "$ML286" | jq '((.total_qty==3) and (.total_omzet==48000))|if . then 1 else 0 end')"
+
+DUR286=$(api "$OWNER" GET "/laporan/durasi-pesanan?dari=$TODAY&sampai=$TODAY&branch_id=$CB286")
+cek "§286 durasi: 3 sajian selesai (S1: A,B · S2: A) dan riwayatnya 3 baris" "V == 1" \
+  "$(echo "$DUR286" | jq '((.jumlah==3) and ((.riwayat|length)==3) and (.riwayat_terpotong==false))|if . then 1 else 0 end')"
+cek "§286 durasi per menu: A 2 baris, B 1 baris" "V == 1" \
+  "$(echo "$DUR286" | jq --arg na "$NA286" --arg nb "$NB286" '(([.per_menu[]|select(.menu_nama==$na)][0].jumlah)==2 and ([.per_menu[]|select(.menu_nama==$nb)][0].jumlah)==1)|if . then 1 else 0 end')"
+# Rata GLOBAL dicocokkan dengan rata SELURUH baris riwayat (±1 detik pembulatan).
+cek "§286 durasi: rata_detik = rata seluruh baris riwayat (±1)" "V == 1" \
+  "$(echo "$DUR286" | jq '(((.rata_detik) - (([.riwayat[].durasi_detik]|add) / (.riwayat|length)))|fabs) <= 1|if . then 1 else 0 end')"
+cek "§286 durasi per menu A: tercepat ≤ median ≤ terlama, dan rata di antaranya" "V == 1" \
+  "$(echo "$DUR286" | jq --arg na "$NA286" '([.per_menu[]|select(.menu_nama==$na)][0]) | (.tercepat_detik<=.median_detik and .median_detik<=.terlama_detik and .tercepat_detik<=.rata_detik and .rata_detik<=.terlama_detik)|if . then 1 else 0 end')"
+cek "§286 durasi: tak ada target → bertarget 0, lewat_target 0" "V == 1" \
+  "$(echo "$DUR286" | jq '((.bertarget==0) and (.lewat_target==0))|if . then 1 else 0 end')"
+
+PB286=$(api "$OWNER" GET "/laporan/pembelian?dari=$TODAY&sampai=$TODAY&branch_id=$CB286")
+cek "§286 pembelian: total 10.000 (10 pcs @1.000)" "abs(V - 10000) < 0.001" "$(echo "$PB286" | jq -r '.total_pengeluaran')"
+cek "§286 pembelian: 1 faktur, 1 item" "V == 1" \
+  "$(echo "$PB286" | jq '((.jumlah_faktur==1) and (.jumlah_item==1))|if . then 1 else 0 end')"
+cek "§286 pembelian per_bahan: qty 10 / 10.000, satuan pcs" "V == 1" \
+  "$(echo "$PB286" | jq '(.per_bahan[0].qty==10 and .per_bahan[0].total==10000 and .per_bahan[0].satuan=="pcs")|if . then 1 else 0 end')"
+cek "§286 pembelian per_supplier: satu baris (tanpa supplier), total 10.000" "V == 1" \
+  "$(echo "$PB286" | jq '((.per_supplier|length)==1 and .per_supplier[0].total==10000 and .per_supplier[0].jumlah_faktur==1)|if . then 1 else 0 end')"
+
+# PASANGAN: cakupan. Owner "semua cabang" ≥ cabang ini; KASIR tak boleh
+# membaca laporan sama sekali (`requireRole("owner","admin")`, app.ts) —
+# versi pertama seksi ini mengira kasir membaca cabangnya sendiri, dan yang
+# salah lagi-lagi harapannya: matriks izin §? sudah menutup pintunya.
+cek "PASANGAN §286: 'semua cabang' milik owner ≥ cabang ini" "V == 1" \
+  "$(api "$OWNER" GET "/laporan?dari=$TODAY&sampai=$TODAY&branch_id=all" | jq '(.omzet >= 48000)|if . then 1 else 0 end')"
+cek "PASANGAN §286: kasir tak boleh membaca laporan → 403" "V == 403" \
+  "$(status_code "$K286" GET "/laporan?dari=$TODAY&sampai=$TODAY")"
+cek "PASANGAN §286: …juga dengan branch_id=all → 403" "V == 403" \
+  "$(status_code "$K286" GET "/laporan?dari=$TODAY&sampai=$TODAY&branch_id=all")"
+api "$K286" POST /shift/tutup '{"uang_fisik":27720}' > /dev/null
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

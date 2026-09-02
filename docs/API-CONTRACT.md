@@ -1451,7 +1451,7 @@ Laporan:
 
 ## 8. `/api/laporan` — Laporan (`modules/laporan/routes.ts`) — group guard **[owner/admin]**
 
-- `GET /api/laporan` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?` — res: `LaporanHarian`
+- `GET /api/laporan` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?` — res: `LaporanHarian` (**sejak 2026-09-02** memuat `omzet_sebelum_refund` = Σ subtotal seperti sebelum refund mana pun; jangan merakitnya dari `omzet + total_refund` — satuannya berbeda: `omzet` kotor, `total_refund` nominal bersih)
   - **`per_jam: { jam, jumlah, omzet }[]` — sebaran transaksi per jam.** Deretnya sudah BERSAMBUNG dan sudah DIPANGKAS ujungnya: mulai dari jam transaksi pertama, berhenti di yang terakhir. **Jam kosong DI TENGAH ikut, bernilai nol, dan jangan disaring klien** — itu jeda sungguhan, dan membuangnya membuat jam 12 dan jam 17 tergambar bersebelahan sehingga bentuk harinya berbohong. `[]` berarti tak ada transaksi pada rentangnya.
   - **`jam` dihitung di ZONA PERUSAHAAN** (`companies.timezone`, bawaan `Asia/Jakarta`) — bukan UTC dan bukan zona perangkat, jadi klien tidak boleh menggesernya lagi. Server berjalan UTC: tanpa konversi ini seluruh grafik meleset tujuh jam di WIB, dan "jam ramai" yang dibaca pemilik warung jadi jam yang salah.
   - **`jumlah` memakai saringan yang sama dengan `jumlah_transaksi`**, jadi jumlah seluruh ember dijamin sama dengan kartu "Transaksi". `omzet` per ember adalah `SUM(sales.subtotal)` — sudah bersih dari refund, sama seperti `omzet` di tingkat laporan; jangan menguranginya lagi dengan `total_refund`.
@@ -3330,6 +3330,13 @@ export interface LaporanHarian {
   total_refund: number;
   /** banyaknya kejadian refund yang menyusutkan rentang ini */
   jumlah_refund: number;
+  /**
+   * Σ subtotal seperti SEBELUM refund mana pun (jangkar `subtotal_asal`).
+   * Dihitung server sejak 2026-09-02: `omzet + total_refund` di layar salah,
+   * sebab `total_refund` nominal bersih (diskon dipotong, PB1 ditambah)
+   * sedangkan `omzet` kotor.
+   */
+  omzet_sebelum_refund: number;
   pb1_terkumpul: number;
   total_hpp: number;
   estimasi_profit: number;

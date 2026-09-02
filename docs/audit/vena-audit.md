@@ -50,6 +50,97 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kebenaran ANGKA LAPORAN — lima rute dibandingkan hitungan tangan, empat halaman dibandingkan servernya — server + web — 2026-09-02
+
+- **Kenapa vena ini ada**: pemetaan cakupan 2026-09-02 — kelima rute
+  `/laporan/*` diketuk `verify-api.sh` (56 asersi) tapi hanya BEP (§171) yang
+  angkanya dibandingkan terhadap NILAI YANG DIHITUNG TANGAN dari data yang
+  dibuat skrip; laporan harian, menu laris, lama pesanan, pembelian hanya
+  dicek bentuk/sifat parsialnya. Di web, `LaporanMenuLarisPage`,
+  `LaporanDurasiPesananPage`, `LaporanPembelianPage`, `GrafikTransaksiPerJam`,
+  `LaporanTabs` tak pernah disentuh satu uji pun. Angka laporan adalah yang
+  dibaca pemilik warung untuk memutuskan; salah di sini tak pernah "terlihat
+  salah" — cuma berbeda dari yang diingat orang.
+
+- **Populasi**: 5 rute server (`laporan/routes.ts:74-669`), 6 berkas halaman
+  laporan web, 1 DTO (`LaporanHarian`). Ponsel membaca `LaporanHarian`
+  (`operasional_models.dart:566`) — dicatat, tak digarap.
+
+- **Metode (Aturan 6), §286 baru — 43 asersi**: cabang + kasir + bahan + dua
+  menu BARU supaya tak satu pun nota seksi lain ikut terhitung (versi pertama
+  memakai cabang §170 dan angkanya tercemar; nama-nama diberi akhiran waktu
+  supaya seksinya bisa dijalankan ulang di DB yang sama saat dikembangkan).
+  Bahan Rp5.000/pcs → HPP menu A 5.000/porsi; PB1 10%. Tiga nota (diskon
+  persen & nominal, tunai & QRIS), refund SEBAGIAN (A×1 dari S1) dan PENUH
+  (S3), sajian S1/S2 diselesaikan, faktur beli 10 pcs @1.000. Angka
+  harapannya ditulis tangan di komentar skrip dari rumus `service.ts:589-621`
+  dan `refund.ts`.
+
+- **Hasil server: SEMUA COCOK.** omzet 48.000 · diskon 7.800 · PB1 4.020 ·
+  HPP 10.000 (porsi yang direfund ikut menyusut) · laba 30.200 · transaksi 3
+  (nota yang direfund penuh tetap satu nota) · refund 46.200/2 · tunai
+  2/27.720, QRIS 1/16.500, Σ per metode 44.220 = omzet − diskon + PB1 · item
+  terjual A 2/40.000, B 1/8.000, Σ = omzet · per jam Σ = kartu, ember jam WIB
+  saat ini · konsumsi bahan 2 pcs · menu laris = item terjual, total 3/48.000 ·
+  durasi 3 baris (A 2, B 1), rata global = rata seluruh riwayat ±1 dtk,
+  tercepat ≤ median ≤ terlama · pembelian 10.000 / 1 faktur / 1 item / 1
+  supplier. PASANGAN: `branch_id=all` ≥ cabang; kasir → 403 (dua bentuk).
+
+- **Dua harapanku sendiri yang salah, dan keduanya dicatat di skripnya
+  (bukan dihapus)**: (1) kukira pembelian di cabang sendiri bisa "diterima 7
+  dari 10" lalu diprorata — terima-sebagian hanya ada di jalur KIRIMAN
+  CK→cabang (§52b), yang bukan `tipe='beli'`; untuk pembelian sendiri, tahap
+  `menunggu` = barang tiba & stok masuk. Laporan 10.000 BENAR, harapanku
+  yang 7.000. (2) kukira kasir membaca laporan cabangnya — `/laporan/*`
+  `requireRole("owner","admin")` (app.ts:188); 403 adalah jawabannya, dan
+  matriks izin sudah menutupnya sejak 2026-08-25. Tuduhan yang ditulis hati-hati
+  dan dibuktikan salah oleh pengukuran, seperti sebelumnya.
+
+- **TEMUAN, di KLIEN — satuan yang tercampur**: `LaporanPage` menulis
+  *"sebelum refund, omzetnya {omzet + total_refund}"*. `omzet` KOTOR (Σ
+  subtotal) sedangkan `total_refund` nominal BERSIH (diskon sudah dipotong,
+  PB1 ditambah). Terukur pada data §286: layar **94.200** untuk omzet sebelum
+  refund **92.000** (48.000 + 20.000 + 24.000). Dibayar dari servernya:
+  `omzet_sebelum_refund = Σ COALESCE(subtotal_asal, subtotal)` — jangkar
+  `subtotal_asal` diisi sekali pada refund pertama (`refund.ts:125`), jadi
+  COALESCE-nya persis "subtotal seperti sebelum refund mana pun". Layar
+  mencetaknya, tak merakit. Kontrak + Lampiran A + CHANGELOG 🟢 + fikstur
+  kunci ponsel (didaftarkan belum dibaca, beralasan; CI ponsel).
+
+- **Penjaga**: (1) e2e `laporan.spec.ts` (2 kasus; Playwright 17 → 19):
+  kartu Omzet/Transaksi/Diskon/HPP/Estimasi Profit/PB1, kaki tabel per jam,
+  kalimat refund, dan tab Menu Terlaris / Pembelian / Lama Pesanan = balasan
+  API untuk periode & cabang yang sama. Sesi DISUNTIK dari API
+  (`masukLewatSesi`), bukan lewat layar login — kuota login 10/5 menit sempat
+  habis pada jalan ketiga dan menyamar jadi "masih di /login"; `sesiApi`
+  diekspor dari util alih-alih disalin. (2) `laporan-tak-menghitung-ulang.test.ts`:
+  aritmetika atas medan angka balasan (`.omzet/.total/.qty/.jumlah/…`) di
+  `pages/laporan/*.tsx` wajib terdaftar beralasan berkunci `berkas:pengenal`
+  (kunci nomor baris ditolak, sesuai aturan 2026-09-01); TIGA situs sah — Σ
+  per jam yang dicetak untuk dicocokkan (`totalTransaksi`, `omzetGrafik`;
+  yang kedua dihoist dari JSX inline supaya bernama), komparator urutan
+  `items`, tinggi batang `tinggi`. Daftar dijaga dua arah. Pembacanya diuji
+  dengan sumber palsu (Aturan 7).
+
+- **Bukti merah, dipulihkan byte-per-byte**: kalimat lama `omzet +
+  total_refund` dipasang lagi → penjaga statis merah (`LaporanPage.tsx:baris-194`)
+  DAN e2e merah (angka layar ≠ server) · `omzet_sebelum_refund` dicabut dari
+  server → §286 merah (42 lolos, 1 gagal).
+
+- **Batas yang ditulis jujur**: `rata_detik` global dihitung dari rata per
+  menu yang sudah dibulatkan (`routes.ts:529`) — meleset ≤ 1 detik, diuji
+  dengan toleransi itu, TIDAK "diperbaiki" sebab tak terukur bedanya; pemindai
+  klien leksikal (pembantu di luar berkas laporan tak terlihat); durasi diuji
+  atas urutan, bukan nilai mutlak (jam dinding); kedaluwarsa/target durasi
+  tak disentuh; ponsel belum menampilkan kalimat refund — bila kelak, wajib
+  membaca medan ini.
+
+- **Gerbang penuh HIJAU**: typecheck bersih · `npm test` **219 berkas / 2667 uji** ·
+  `verify-api.sh` **3435 lolos, 0 gagal** · `audit:invarian` 27/27 · Playwright
+  **19/19** · CI ponsel #14 hijau.
+
+---
+
 ## Lupa/reset password dilihat dari BROWSER — dua layar yang tak pernah disentuh uji apa pun — web + server — 2026-09-02
 
 - **Kenapa vena ini ada**: pemetaan cakupan 2026-09-02 (modul × rute × uji ×
@@ -9292,6 +9383,11 @@ berlaku di situ).
       Pengaturan Email. Klaim "akun tiba-tiba terverifikasi" dijawab dari
       backfill 0065 — bukan bug. Sambil lalu: peta label web membawa sebab
       kuburan, dan §279 distaging ulang seperti §280d
+- [x] ~~**Kebenaran angka laporan**~~ — SELESAI, lihat entri di atas. Lima
+      rute dibandingkan hitungan tangan (§286, 43 asersi): server cocok
+      semua. Temuan di KLIEN: "omzet sebelum refund" dirakit dari satuan yang
+      berbeda (94.200 vs 92.000) → medan `omzet_sebelum_refund` dari server.
+      Empat halaman laporan kini punya e2e + penjaga statis
 - [x] ~~**Alur lupa/reset password di web: nol uji browser**~~ — SELESAI, lihat
       entri di atas. 2 merah dari 4 kasus pada jalan pertama: akun belum
       terverifikasi ditolak masuk SESUDAH mereset lewat inbox-nya, dan tautan

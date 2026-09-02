@@ -57,7 +57,7 @@ export async function tampak(l: Locator, ms = 5000) {
  * Terukur saat berkas ini ditulis: jalan 1 lolos 5/5, jalan 2 lolos 4/5,
  * jalan 3 lolos 3/5 — makin lama makin merah tanpa satu baris pun berubah.
  */
-async function sesiApi(request: APIRequestContext, email: string, pass: string) {
+export async function sesiApi(request: APIRequestContext, email: string, pass: string) {
   const tersimpan = sesiTersimpan.get(email);
   if (tersimpan) return tersimpan;
   const masuk = await request.post(`${BASE}/api/auth/login`, { data: { email, password: pass } });

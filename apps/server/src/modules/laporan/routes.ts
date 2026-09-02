@@ -94,6 +94,18 @@ export const laporanRoutes = new Hono<AppEnv>()
     const [agg] = await db
       .select({
         omzet: sum(sales.subtotal),
+        /*
+         * OMZET SEBELUM REFUND, dihitung di sini — bukan di layar.
+         *
+         * `LaporanPage` dulu menulis "sebelum refund, omzetnya {omzet +
+         * total_refund}": menjumlahkan omzet KOTOR (Σ subtotal) dengan
+         * nominal refund yang BERSIH (sudah dipotong diskon, ditambah PB1).
+         * Terukur §286: omzet 48.000 + refund 46.200 = 94.200 di layar,
+         * padahal Σ subtotal sebelum refund 92.000. `subtotal_asal` adalah
+         * jangkar yang diisi sekali pada refund pertama (`refund.ts`), jadi
+         * COALESCE-nya persis "subtotal seperti sebelum refund mana pun".
+         */
+        omzetSebelumRefund: sql<number>`COALESCE(SUM(COALESCE(${sales.subtotalAsal}, ${sales.subtotal})), 0)::float8`,
         diskon: sum(sales.diskon),
         pb1: sum(sales.pb1Amount),
         totalHpp: sum(sales.totalHpp),
@@ -224,6 +236,7 @@ export const laporanRoutes = new Hono<AppEnv>()
       total_diskon: totalDiskon,
       total_refund: Number(aggRefund?.nominal ?? 0),
       jumlah_refund: aggRefund?.jumlah ?? 0,
+      omzet_sebelum_refund: Number(agg?.omzetSebelumRefund ?? 0),
       pb1_terkumpul: Number(agg?.pb1 ?? 0),
       total_hpp: totalHpp,
       // laba mundur oleh diskon yang diberikan: omzet(kotor) − diskon − HPP
