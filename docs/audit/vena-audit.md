@@ -50,6 +50,105 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Putaran PONSEL: layar verifikasi yang meminta token sementara suratnya mengirim kode, jeda yang ditulis klien, sesi dari `/register` yang dibawa ke layar kode, dan 401 yang bisu — ponsel — 2026-09-02
+
+- **Kenapa vena ini ada**: antrean ledger + pemetaan cakupan 2026-09-02 —
+  sisi ponsel adalah yang paling lama tak disentuh, dan tiap butirnya sudah
+  TERUKUR di putaran server sebelumnya: surat verifikasi dipimpin KODE 6
+  angka sejak 2026-08-31 (§281 memaku `POST /auth/verify-email {email,
+  kode}`; jalur `{token}` tetap hidup untuk tautan), server menahan jeda
+  kirim ulang **120 detik** dan menyebutnya di `retry_after_detik` (§281),
+  `/register` memulangkan SESI bila akun sudah aktif dan password cocok
+  (§284/§285, rilis 10b0882), dan 401 di luar login mematikan sesi seketika
+  (§287). Ponsel belum membaca satu pun dari keempatnya. Diputuskan pemilik
+  repo: putaran terpisah, sesudah vena sesi.
+
+- **Populasi — 5 berkas `lib/features/auth/` + 1 titik di `core/`**, dibaca
+  seluruhnya, bukan disapu regex: `verifikasi_email_page.dart` (layar kode),
+  `register_page.dart`, `login_page.dart`, `lupa_password_page.dart`,
+  `auth_controller.dart` (pemilik sesi; `onUnauthorized`), dan
+  `core/api_client.dart:539` (tempat 401 memanggilnya). Cara hitung kedua:
+  `grep -l "auth_controller\|verifyEmail\|resendVerification" lib` → 5
+  berkas yang sama.
+
+- **Metode & batasnya, ditulis lebih dulu**: Flutter **tak terpasang** di
+  mesin ini, jadi pengukuran ponsel hanya bisa lewat uji Dart yang
+  dijalankan CI (push ke `claude`, ±3 menit per jalan). Kontrak HTTP-nya
+  TIDAK diukur ulang di sini — ia sudah dipaku §281/§284/§285/§287 di repo
+  server dan tayang; yang diukur adalah apa yang dikirim dan ditampilkan
+  layarnya. Uji widget merekam BADAN yang dikirim ke `post()` (kelas
+  `_ApiPerekam extends ApiClient`), lalu melempar `ApiException` sebelum
+  `setSession` — sesi (secure storage) sengaja tak disentuh uji.
+
+- **Diukur sebelum diperbaiki (kode 2026-09-02, dibaca baris per baris)**:
+
+  | | sebelum | sesudah |
+  |---|---|---|
+  | kalimat layar | "salin token di tautan, lalu tempel di bawah" | "Kode 6 angka sedang dikirim ke … (berlaku 60 menit)" — tautan tetap disebut |
+  | apa pun yang diketik | dikirim `{token}` | 6 angka → `{email, kode}` · 64 hex → `{token}` · selain itu **tak dikirim**, dikatakan |
+  | jeda kirim ulang | `_mulaiCooldown(30)` — angka klien | `retry_after_detik` dari balasan (**120**); cadangan `kJedaKirimUlangBawaan` hanya bila server diam |
+  | jeda saat layar dibuka sesudah daftar | 0 — tombol tampak siap | `jedaAwal` dari balasan `/register`, hitung mundur sudah berjalan |
+  | balasan `/register` berisi `token` | dibawa ke layar kode | `balasanDaftarMemuatSesi` → `setSession` + "Akun ini sudah aktif — Anda langsung dimasukkan." |
+  | 401 di luar login | `logout(bersihkanData:false)`, **tanpa kalimat** | `alasanKeluarProvider` ditulis dulu; layar login mengucapkannya (kotak kuning), dihapus begitu orangnya bertindak |
+  | lupa password | "tautan reset **sudah** dikirim" | "**sedang** dikirim … (berlaku 1 jam)" — sejajar web |
+
+  Semua aturan murninya (`bentukVerifikasi`, `jedaKirimUlang`,
+  `balasanDaftarMemuatSesi`, tiga kalimat) dikumpulkan di
+  `verifikasi_bentuk.dart` supaya DIUJI tanpa widget.
+
+- **Penjaga**: `verifikasi_kode_test.dart` (5 uji widget: 6 angka →
+  `{email,kode}`; 64 hex → `{token}`; 5 angka → tak dikirim + kalimat "6
+  angka"; kirim ulang → "Kirim ulang dalam 120s" dari balasan palsu
+  `retry_after_detik: 120`; `jedaAwal: 120` → hitung mundur sejak dibuka) ·
+  `sesi_berakhir_ponsel_test.dart` (4 pemindai sumber: `onUnauthorized`
+  menulis sebab LALU `logout(`; layar login membaca provider itu; layar
+  daftar memanggil `balasanDaftarMemuatSesi(`; tak ada `_mulaiCooldown(30)`
+  dan pembacaan `retry_after_detik` hidup di controller) ·
+  `verifikasi_bentuk_test.dart` (murni). Uji di-commit LEBIH DULU
+  (`ac445c0`), perbaikannya menyusul (`020fd0a`, `e07b98e`).
+
+- **Bukti merah — dan apa yang TIDAK dibuktikannya, ditulis jujur**: CI #16
+  pada commit uji memerah di **`flutter analyze`**, bukan di `flutter test`:
+  *"The named parameter 'jedaAwal' isn't defined"* — uji widget menyebut
+  parameter yang belum ada. Job berhenti di sana; `flutter test` **tidak
+  pernah berjalan** pada kode lama. Jadi yang terbukti adalah bahwa ujinya
+  tak bisa hijau pada kode lama (ia bahkan tak terkompilasi), BUKAN bahwa
+  tiap asersinya menuduh perilaku yang salah. Untuk empat pemindai sumber,
+  kemampuan menuduhnya terbaca dari kode lama (`_mulaiCooldown(30)` ada,
+  `alasanKeluarProvider` tak ada); untuk lima uji widget, kemampuan itu
+  belum pernah DIJALANKAN. Tak dibayar dengan jalan CI tambahan — biaya
+  menit Actions adalah keputusan pemilik repo — dan dicatat sebagai batas.
+
+- **Gerbang ponsel menangkap dua hal di jalan pertamanya**: (1) log CI #16
+  juga memuat satu **info** — `dangling_library_doc_comments` pada kepala
+  `verifikasi_bentuk.dart` — dan `flutter analyze` di CI memerah pada info
+  sekalipun; perbaikan 020fd0a tak menyentuhnya, jadi CI #17 merah di analyze juga.
+  Dibayar `e07b98e` (komentar kepala jadi komentar biasa). (2) Riverpod
+  3.x: `StateProvider` hanya ada di `legacy.dart`; sebab keluar ditulis
+  sebagai `Notifier<String?>` seperti sembilan pemberitahu lain di repo ini —
+  ketahuan dari pubspec sebelum di-push, bukan dari CI.
+
+- **Anggapan rencana yang salah, dicatat**: rencana menulis "ratchet
+  `kunci-belum-dibaca.txt` menyusut: `retry_after_detik` dkk. kini dibaca".
+  Tidak: `kunci-kontrak-server.txt` dihasilkan dari antarmuka `types.ts`,
+  dan balasan `/auth/*` (`token`, `kode`, `retry_after_detik`,
+  `dev_verify_kode`) **bukan** DTO di sana — ratchet itu tak pernah melihat
+  vena ini, tak menyusut, dan tak bisa menjaganya. Batas detektor yang
+  sudah ada, bukan temuan baru.
+
+- **Gerbang**: CI ponsel `claude` #19 hijau — sesudah #18 merah karena SATU `unused_import` (impor pembantu di layar login yang tak dipakai; kalimatnya sudah dibawa nilai provider) · `Production` #20 hijau (merge `acf4f2f`, pohon identik dengan `claude`: `git diff claude Production` kosong).
+  `flutter test` **599 → 615** uji (CI #14 → #19). Tak ada perubahan server;
+  tak ada entri CHANGELOG-API.
+
+- **Batas yang ditulis jujur**: tak ada uji widget untuk layar daftar & login
+  (jalur `/register` → sesi dan kotak kuning dijaga pemindai sumber, bukan
+  perilaku yang dijalankan); deep link tautan verifikasi belum ada di ponsel
+  — "token 64 hex" hanya lewat tempel manual ke kotak yang sama; papan
+  ketik angka mengutamakan kode, tempel tetap bisa. `X-Kakarut-Terpotong`
+  di delapan rute (tugas berikutnya di antrean) tak disentuh putaran ini.
+
+---
+
 ## Daur hidup SESI — yang kedaluwarsa ditolak, yang dicabut mati seketika, dan layar login yang akhirnya MENGATAKANNYA — server + web — 2026-09-02
 
 - **Kenapa vena ini ada**: pemetaan cakupan 2026-09-02 — `JWT_EXPIRES_IN`
@@ -9476,20 +9575,13 @@ berlaku di situ).
       terverifikasi ditolak masuk SESUDAH mereset lewat inbox-nya, dan tautan
       bekas tak punya jalan keluar. Klaim surat inline ketiga dibayar ke rumah
       bersama; populasi gerbangnya 3 → 4 layar
-- [ ] **Ponsel masih pada alur TOKEN lama untuk verifikasi email** — layarnya
-      meminta "salin token di tautan, lalu tempel di bawah"
-      (`verifikasi_email_page.dart:134-159`) sementara surat kini dipimpin kode
-      6 angka dan URL mentahnya bahkan tak dicetak sebagai teks di versi HTML.
-      Ditambah: jeda kirim ulang ditulis **30 detik di klien**
-      (`_mulaiCooldown(30)`) sementara server menahan **120**, dan
-      `resendVerification` membuang badan responsnya sehingga
-      `retry_after_detik` tak pernah dibaca — tombolnya tampak siap, ditekan,
-      dan tak ada surat berangkat. **Sejak 2026-09-02 ditambah satu lagi**:
-      `/register` bisa memulangkan SESI (akun aktif + password cocok), dan
-      `register_page.dart` hanya membaca `dev_verify_url` — balasan sesi
-      membawanya ke layar kode yang tak akan pernah menerima kode. Terukur,
-      bernama, dan **tidak** menjelaskan surat yang tak sampai; digarap
-      terpisah atas keputusan pemilik repo
+- [x] ~~**Ponsel masih pada alur TOKEN lama untuk verifikasi email**~~ —
+      TEMUAN, dibayar 2026-09-02 (entri "Putaran PONSEL" di atas): layar kode
+      6 angka + tautan tetap, jeda dari `retry_after_detik` (30 → 120 milik
+      server, dan sudah berjalan saat layar dibuka), balasan sesi `/register`
+      → `setSession` + keterangan, 401 → sebab diucapkan layar login. Uji
+      di-commit lebih dulu; bukti merah CI-nya bukti KOMPILASI, bukan
+      perilaku — ditulis apa adanya di entrinya
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama
