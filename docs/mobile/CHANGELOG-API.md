@@ -40,6 +40,8 @@ masih kosong (akun yang sudah terverifikasi tak berubah). **Untuk ponsel:**
 sesudah reset sukses (dari tautan web), login langsung bisa; tak perlu lagi
 mengarahkan ke layar verifikasi.
 
+**Sudah di-merge ke production.**
+
 ## `POST /auth/register` bisa MEMULANGKAN SESI: akun terverifikasi + password cocok
 
 🟡 **PERLU DICEK** — layar daftar ponsel.
