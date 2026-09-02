@@ -116,6 +116,18 @@ export function Layout() {
       roleGuard === "kitchen" ||
       roleGuard === "bar" ||
       (manajemenGuard && divisi !== "store"));
+  /**
+   * Badge BELI hanya untuk peran yang boleh membaca `/pembelian` di server
+   * (owner/admin, tim CK). Kitchen & bar boleh `/produksi` (produksi lokal
+   * divisinya) tapi BUKAN `/pembelian` — dan nav mereka memang tak punya
+   * tautan Beli Bahan. Sampai 2026-09-02 `lihatPengadaan` menyalakan KEDUA
+   * badge untuk mereka: tiap muat halaman + tiap 60 detik satu tembakan
+   * `GET /pembelian` yang pasti 403 — 211 kali dalam 7 hari di log galat
+   * production, semuanya akun kitchen/bar, untuk lencana yang tak pernah
+   * dirender. Klien yang menembak pintu yang ia tahu tertutup adalah derau di
+   * log yang menutupi galat sungguhan.
+   */
+  const lihatBeli = lihatPengadaan && roleGuard !== "kitchen" && roleGuard !== "bar";
   // Cakupan badge = cakupan HALAMAN pengadaan (TambahStokPage): dari Kantor =
   // SELURUH cabang (branch_id=all), selain itu cabang datanya. Sebelumnya badge
   // memakai slot data "store" (useCabangData tanpa fokus) — faktur di Central
@@ -131,7 +143,7 @@ export function Layout() {
   const { data: beliNav, error: beliGagal } = useQuery({
     queryKey: ["pembelian-nav", scopePengadaan],
     queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/pembelian${qsPengadaan}`),
-    enabled: lihatPengadaan,
+    enabled: lihatBeli,
     refetchInterval: 60_000,
   });
   const BELUM_SELESAI = new Set(["rencana", "dikerjakan", "menunggu"]);
