@@ -105,9 +105,13 @@ test.describe("lupa / reset password dari browser", () => {
     await expect(page.getByRole("link", { name: "Minta tautan baru" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Simpan Password Baru" })).toHaveCount(0);
 
-    // Password baru benar-benar berlaku — dan yang lama tidak.
+    // Password baru benar-benar berlaku — dan yang lama tidak. Kalimatnya
+    // menyebut PASSWORD, bukan "email atau password": sejak 2026-09-03 login
+    // mengatakan alasan penolakannya (lihat `PESAN_LOGIN` di shared). Di sini
+    // itu justru asersi yang lebih kuat — akunnya jelas ada, jadi kalimat yang
+    // masih menyebut email berarti tokennya tak benar-benar mengganti apa pun.
     await login(page, email, PASS_LAMA);
-    await expect(page.getByText(/Email atau password salah/)).toBeVisible();
+    await expect(page.getByText(/Password salah/)).toBeVisible();
     await login(page, email, PASS_BARU);
     await expect(page).not.toHaveURL(/\/login$/);
   });

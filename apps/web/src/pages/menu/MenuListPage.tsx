@@ -12,7 +12,7 @@ import {
 } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
-import { labelCabang, useBranch } from "../../context/BranchContext";
+import { labelCabang, opsiLokasiMenu, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
 
@@ -66,7 +66,13 @@ export function MenuListPage() {
   const [lokasi, setLokasi] = useState<string>("all");
   const [cari, setCari] = useState("");
   const [filterKat, setFilterKat] = useState("");
-  const lokasiOpsi = cabang.filter((b) => b.is_active && b.tipe !== "kantor");
+  // Central Kitchen TIDAK berjualan, jadi tak pernah bisa jadi lokasi menu —
+  // aturannya tinggal satu rumah, `opsiLokasiMenu`. Baris ini dulu berbunyi
+  // `tipe !== "kantor"`, sisa dari sebelum aturan store-only, dan karenanya
+  // menawarkan 🏭 Central Kitchen di pemilih "Tampil di lokasi". Memilihnya
+  // hanya menyisakan menu ber-`branch_ids` KOSONG — "tanpa pembatasan lokasi"
+  // yang terbaca operator sebagai "dijual di Central Kitchen".
+  const lokasiOpsi = opsiLokasiMenu(cabang);
 
   if (isLoading) return <Spinner />;
 
@@ -169,6 +175,7 @@ export function MenuListPage() {
           <select
             value={lokasi}
             onChange={(e) => setLokasi(e.target.value)}
+            aria-label="Tampil di lokasi"
             className="rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm"
           >
             <option value="all">Semua lokasi</option>

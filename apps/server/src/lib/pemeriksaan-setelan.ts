@@ -61,6 +61,48 @@ export function nilaiProxy(
         `login bisa dilewati dengan mengganti satu header.`,
     };
   }
+  // RANTAI LEBIH PANJANG daripada yang dijanjikan — dan ini yang paling mudah
+  // luput, sebab tak ada yang tampak rusak.
+  //
+  // `ipKlien` mengambil entri ke-`hops` DARI KANAN. Tiap proxy menambahkan satu
+  // entri, jadi `hops` yang benar = panjang rantai. Bila proxy-nya dua
+  // (mis. CDN di depan reverse proxy) sementara `hops` masih 1, yang terambil
+  // adalah simpul proxy TERDEKAT, bukan pengunjung — alamat yang sah, terlihat
+  // wajar di log, dan salah orang.
+  //
+  // Terukur di production 2026-09-02: SELURUH alamat di panel Log Galat berada
+  // di rentang milik satu CDN. Akibatnya bukan cuma kolom log yang keliru —
+  // `ipKlien` juga MENGUNCI PEMBATAS LAJU, dan empat embernya berkunci alamat
+  // saja (pendaftaran, tamu, reset, verifikasi). Bila semua orang tampak datang
+  // dari segelintir simpul yang sama, jatah itu ditanggung bersama oleh
+  // perusahaan yang tak berhubungan.
+  //
+  // YANG DIPAKAI RANTAI TERPENDEK, BUKAN TERPANJANG, dan itu keputusan
+  // keamanan. Rantai bisa DIPANJANGKAN oleh siapa pun yang mengirim
+  // `X-Forwarded-For`-nya sendiri (proxy menambahkan, tak mengganti), jadi
+  // menyarankan `hops` dari maksimum berarti seorang penyerang bisa membuat
+  // panel ini menyuruh pemiliknya menyetel angka yang membuat `ipKlien`
+  // memulangkan entri karangannya — lubang yang ditulis di kepala
+  // `pengamatan-proxy.ts`. Minimum tak bisa dipendekkan dari luar: tiap
+  // permintaan sah melewati semua proxy yang memang ada.
+  //
+  // Ketiga tuduhan lain tidak menjangkau keadaan ini: `hops` bukan 0, XFF-nya
+  // ada, dan rantainya tidak lebih pendek. Tanpa cabang ini setelannya salah
+  // tanpa satu pun keluhan.
+  if (hops > 0 && rasio >= 0.9 && amatan.rantai_terpendek > hops) {
+    return {
+      kode: "proxy_hops_terlalu_rendah_dari_rantai",
+      rincian:
+        `TRUST_PROXY_HOPS=${hops}, tapi rantai X-Forwarded-For TERPENDEK yang pernah ` +
+        `masuk sepanjang ${amatan.rantai_terpendek} entri. Artinya alamat yang tercatat ` +
+        `adalah PROXY terdekat, bukan pengunjungnya: log galat tak bisa menunjuk perangkat ` +
+        `mana, dan pembatas laju yang berkunci alamat saja (pendaftaran, tamu, reset ` +
+        `password, verifikasi email) ditanggung bersama oleh semua pemakai di belakang ` +
+        `proxy yang sama — satu perusahaan bisa menghabiskan jatah perusahaan lain. ` +
+        `Setel ke ${amatan.rantai_terpendek}.`,
+    };
+  }
+
   // Rantai lebih pendek daripada yang dijanjikan: `ipKlien` jatuh ke X-Real-IP
   // atau alamat koneksi, jadi tidak berbahaya — tapi setelannya tetap salah.
   if (hops > 0 && rasio >= 0.9 && amatan.rantai_terpanjang > 0 && amatan.rantai_terpanjang < hops) {

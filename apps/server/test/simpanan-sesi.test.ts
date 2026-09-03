@@ -251,11 +251,24 @@ describe("sapuan: tak ada lagi sentuhan localStorage telanjang di web", () => {
   });
 
   it("sesi memang lewat penjaga itu", () => {
+    // DIPERBARUI KE NIATNYA, 2026-09-03. Dua asersi di sini dulu memaku BENTUK
+    // SATU-BARIS `saveAuth` (`if (state) tulisLokal(…);` / `else hapusLokal(…)`)
+    // dan memerah begitu badannya tumbuh satu pernyataan — padahal yang
+    // dijaga adalah "sesi ditulis lewat pembantu bersama, bukan localStorage
+    // telanjang", dan itu tak berubah sedikit pun. Kini yang dituntut
+    // panggilannya, di dalam badan `saveAuth`, apa pun tata letaknya.
     const API = readFileSync(join(WEB, "lib/api.ts"), "utf8");
     expect(API).toContain('import { bacaLokal, hapusLokal, tulisLokal } from "./simpanan";');
     expect(API).toContain("const raw = bacaLokal(STORAGE_KEY);");
-    expect(API).toContain("if (state) tulisLokal(STORAGE_KEY, JSON.stringify(state));");
-    expect(API).toContain("else hapusLokal(STORAGE_KEY);");
+
+    const iSimpan = API.indexOf("export function saveAuth(state: AuthState | null) {");
+    expect(iSimpan, "premis: `saveAuth` masih ada dengan tanda tangan itu").toBeGreaterThan(-1);
+    const badan = API.slice(iSimpan, API.indexOf("\n}\n", iSimpan));
+    expect(badan).toContain("tulisLokal(STORAGE_KEY, JSON.stringify(state))");
+    expect(badan).toContain("hapusLokal(STORAGE_KEY)");
+    // PASANGAN: kedua arahnya ada di badan yang SAMA — menulis tanpa pernah
+    // menghapus meninggalkan sesi mati di penyimpanan selamanya.
+    expect(badan.includes("if (state)"), "cabang tulis/hapus masih dipisah").toBe(true);
   });
 
   it("PREMISNYA: `api()` masih mengambil token dari penyimpanan, bukan state React", () => {

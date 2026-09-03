@@ -29,6 +29,26 @@ import { suratReset, suratResetTeks, suratVerifikasi, suratVerifikasiTeks } from
 import { autoTerimaUndanganEmail } from "../onboarding/service";
 import { GUEST } from "../../seed/guest";
 import { buatSesi } from "./session";
+import { PESAN_LOGIN, SEBAB_LOGIN, type SebabLogin } from "@kakarut/shared";
+
+/**
+ * Penolakan masuk yang membawa SEBAB terstruktur, bukan cuma kalimat.
+ *
+ * `sebab` dipasang sebagai PROPERTI (bukan `cause`): `app.onError` membacanya
+ * lewat `(err as { sebab?: string }).sebab` dan hanya properti itu yang sampai
+ * ke badan respons — bentuk yang sama dengan `PenjualanGagal` dan
+ * `SedangDiproses`. Dilempar, bukan di-`return c.json`: jalur `throw`-lah yang
+ * lewat `catatGalat`, dan penolakan masuk HARUS tetap tercatat di panel Log
+ * Galat (panel itu justru yang membuat pemilik melihat banjir 401).
+ */
+class LoginDitolak extends HTTPException {
+  constructor(
+    message: string,
+    readonly sebab: SebabLogin,
+  ) {
+    super(401, { message });
+  }
+}
 
 /** Token reset disimpan sebagai hash (bukan nilai mentah). */
 const hashToken = (t: string) => createHash("sha256").update(t).digest("hex");
@@ -356,17 +376,51 @@ export const authRoutes = new Hono<AppEnv>()
   .post("/login", batasLogin, zValidator("json", LoginSchema), async (c) => {
     const { email, password } = c.req.valid("json");
     const [user] = await db.select().from(users).where(eq(users.email, email));
-    if (
-      !user ||
-      user.deletedAt ||
-      !user.isActive ||
-      !bcrypt.compareSync(password, user.passwordHash)
-    ) {
-      throw new HTTPException(401, { message: "Email atau password salah" });
+    /*
+     * ALASAN PENOLAKAN DISEBUTKAN — KEPUTUSAN SADAR PEMILIK REPO (2026-09-03),
+     * dan konsekuensinya ditulis di sini supaya tak ada yang "memperbaikinya"
+     * balik tanpa tahu apa yang sedang ia batalkan.
+     *
+     * Sampai hari ini keempat keadaan di bawah dijawab satu kalimat yang sama,
+     * "Email atau password salah" — email tak pernah terdaftar, akun dihapus,
+     * akun dinonaktifkan admin, dan password salah. Itu menutup ENUMERASI
+     * AKUN: orang luar tak bisa menempelkan daftar email lalu memanen mana yang
+     * punya akun di sistem ini.
+     *
+     * Pemilik meminta alasannya disebutkan, biayanya disampaikan lebih dulu,
+     * dan ia memilih tetap. Yang hilang: enumerasi kini terbuka. Yang tersisa
+     * sebagai penahan HANYA `batasLogin` — 10 percobaan per 5 menit per
+     * (IP + email). Yang didapat sebagai gantinya nyata: karyawan yang akunnya
+     * dinonaktifkan dulu menerima "password salah", lalu mereset passwordnya
+     * berulang kali tanpa hasil — sebab passwordnya memang tak pernah salah.
+     *
+     * TIDAK ikut berubah: `/lupa-password` tetap memulangkan kalimat yang SAMA
+     * untuk email dikenal maupun tidak (dipaku `lupa-password.spec.ts`). Pintu
+     * itu bisa ditembak tanpa modal apa pun; pintu ini setidaknya berbatas laju.
+     *
+     * Status tetap 401 pada keempatnya — yang berubah kalimatnya, bukan
+     * kontraknya (`verify-api.sh` §61 memaku 401 untuk akun nonaktif). Yang
+     * BERTAMBAH `sebab` (lihat `LoginDitolak` di atas): kalimatnya untuk
+     * manusia, kodenya untuk klien yang harus bercabang — aplikasi ponsel ada
+     * di repo lain dan tak bisa membaca `PESAN_LOGIN` sama sekali.
+     */
+    if (!user) {
+      throw new LoginDitolak(PESAN_LOGIN.takTerdaftar, SEBAB_LOGIN.takTerdaftar);
+    }
+    if (user.deletedAt) {
+      throw new LoginDitolak(PESAN_LOGIN.terhapus, SEBAB_LOGIN.terhapus);
+    }
+    if (!user.isActive) {
+      throw new LoginDitolak(PESAN_LOGIN.nonaktif, SEBAB_LOGIN.nonaktif);
+    }
+    if (!bcrypt.compareSync(password, user.passwordHash)) {
+      throw new LoginDitolak(PESAN_LOGIN.passwordSalah, SEBAB_LOGIN.passwordSalah);
     }
     // Email WAJIB terverifikasi (super admin dikecualikan). Dicek SETELAH
-    // password benar → hanya pemilik password yang tahu status ini, jadi BUKAN
-    // oracle enumerasi (penebak password tetap dapat pesan generik di atas).
+    // password benar — urutannya tetap dipertahankan meski keempat pesan di
+    // atas kini bicara: status verifikasi hanya diketahui orang yang memang
+    // memegang passwordnya, jadi ia tak ikut menambah apa pun yang bisa dipanen
+    // dari luar.
     if (!user.isSuperAdmin && !user.emailVerifiedAt) {
       throw new HTTPException(403, {
         message: "Email belum diverifikasi. Cek email Anda atau minta kode verifikasi baru.",

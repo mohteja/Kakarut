@@ -1,7 +1,14 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { LaporanHarian, LaporanPembelian, MenuLaris, StokRowDto } from "@kakarut/shared";
+import {
+  type LaporanHarian,
+  type LaporanPembelian,
+  type MenuLaris,
+  type RingkasSelisihDto,
+  SELISIH_TERLAMBAT_HARI,
+  type StokRowDto,
+} from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, StatCard, StatusBadge, tdClass, thClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { labelCabang, useBranch } from "../context/BranchContext";
@@ -32,6 +39,98 @@ function AttnCard({ to, ikon, label, jumlah, satuan, aktif }: { to: string | nul
     <Link to={to} className={`${kelas} hover:shadow`}>
       {isi}
     </Link>
+  );
+}
+
+/**
+ * SELISIH KAS YANG MENUNGGU — di Beranda, bukan cuma di halamannya sendiri.
+ *
+ * Sampai 2026-09-03 antrean ini hanya punya satu permukaan: panel di dalam
+ * halaman Operasional Cabang. Artinya ia mengingatkan orang yang sudah ingat.
+ * Pemilik repo menemukan 26 selisih menunggu, yang tertua 12 hari, dan
+ * menuliskannya persis begitu: "selisih tidak ada notif harus di putuskan".
+ *
+ * Kuncinya SAMA dengan lencana sidebar (`["shift-selisih","ringkas"]`), jadi
+ * kartu ini tak menambah satu permintaan pun — react-query menyatukannya.
+ */
+function SelisihMenungguKartu() {
+  const { auth } = useAuth();
+  const { divisi } = useBranch();
+  const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
+  // Syarat yang sama dengan tautan /operasional di sidebar: owner divisi store
+  // memang tak bisa membuka halamannya, jadi kartu yang menautkannya ke sana
+  // hanya akan menjanjikan pintu yang terkunci.
+  const penuh = !divisi || divisi === "kantor";
+  const boleh = !!auth && !auth.user.is_super_admin && isManajemen && penuh;
+  const { data, error: gagal } = useQuery({
+    queryKey: ["shift-selisih", "ringkas"],
+    queryFn: () => api<RingkasSelisihDto>("/shift/selisih/ringkas"),
+    enabled: boleh,
+    refetchInterval: 60_000,
+  });
+  if (!boleh) return null;
+  /*
+    GAGAL ≠ NOL, dan di kartu ini bedanya persis semahal di panelnya sendiri:
+    kartu yang lenyap saat bacaannya gagal mengatakan "tak ada yang menunggu
+    keputusanmu" — satu-satunya kalimat yang kartu ini dibuat untuk mencegah.
+  */
+  if (gagal) {
+    return (
+      <Card className="mb-4 border-amber-300 bg-amber-50 p-4">
+        <div className="text-sm font-bold text-amber-900">
+          ⚠ Jumlah selisih kas yang menunggu <b>tidak terbaca</b>
+        </div>
+        <ErrorText error={gagal} />
+        <div className="mt-1 text-sm text-amber-900">
+          Ini <b>bukan</b> berarti tak ada yang perlu diputuskan.{" "}
+          <Link to="/operasional" className="font-semibold underline">
+            Buka Operasional Cabang
+          </Link>{" "}
+          untuk memeriksanya langsung.
+        </div>
+      </Card>
+    );
+  }
+  if (!data || data.menunggu === 0) return null;
+  const tertuaHari =
+    data.tertua_ditutup_pada != null
+      ? Math.floor((Date.now() - Date.parse(data.tertua_ditutup_pada)) / 86_400_000)
+      : null;
+  return (
+    <Card className="mb-4 border-red-300 bg-red-50 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-bold text-red-800">
+          ⏳ {formatAngka(data.menunggu)} selisih kas menunggu keputusan Anda
+          {data.terpotong ? "+" : ""}
+        </div>
+        <Link
+          to="/operasional"
+          className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
+        >
+          Putuskan sekarang →
+        </Link>
+      </div>
+      {data.terlambat > 0 && (
+        <div className="mt-1 text-sm text-red-800">
+          <b>{formatAngka(data.terlambat)}</b> di antaranya sudah lewat {SELISIH_TERLAMBAT_HARI}{" "}
+          hari
+          {tertuaHari != null && data.tertua_ditutup_pada != null ? (
+            <>
+              {" "}
+              — yang paling lama ditutup {formatTanggal(data.tertua_ditutup_pada.slice(0, 10))} (
+              {formatAngka(tertuaHari)} hari lalu)
+            </>
+          ) : null}
+          .
+        </div>
+      )}
+      {data.terpotong && (
+        <div className="mt-2 rounded-lg border border-red-300 bg-white p-2 text-xs text-red-800">
+          Angka ini <b>batas bawah</b>: antrean yang diperiksa sudah menyentuh langit-langitnya,
+          jadi masih ada selisih lebih lama yang belum ikut terhitung.
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -169,6 +268,8 @@ export function DashboardPage() {
           ))}
         </div>
       )}
+
+      <SelisihMenungguKartu />
 
       {galat ? (
         <Card className="p-4">

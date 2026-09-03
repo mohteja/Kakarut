@@ -50,6 +50,702 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Login menyebut ALASAN penolakannya — dan harganya keputusan pemilik, bukan kelalaian — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo meminta dua hal dalam satu pesan —
+  *"sesi anda berakhir silahkan masuk kembali cukup saja gitu"* dan *"kalo pas
+  login ternyata tidak terdaftar / sebutkan alasan tidak terdaftarnya kenapaa"*.
+
+- **Keadaan sebelumnya**: `POST /login` punya **empat** keadaan penolakan yang
+  berbeda dan **satu** kalimat untuk semuanya — `"Email atau password salah"`.
+  Diukur pada DB gerbang, berapa orang yang benar-benar berdiri di belakang
+  masing-masing:
+
+  | keadaan | baris di DB gerbang | yang ia baca dulu |
+  | --- | --- | --- |
+  | diundang, belum pernah mendaftar | **6** undangan `pending` tanpa baris `users` | "Email atau password salah" |
+  | akun dinonaktifkan owner/admin | **8** `users.is_active = false` | "Email atau password salah" |
+  | akun tombstone (`deleted_at`) | **2**, dan **keduanya** emailnya sudah diganti | (jatuh ke "tak terdaftar") |
+  | password salah | — | "Email atau password salah" |
+
+  Yang paling mahal baris kedua: delapan orang yang, saat mencoba masuk, dulu
+  membaca kalimat yang menyebut password — lalu mereset passwordnya berulang
+  kali tanpa hasil, sebab passwordnya memang tak pernah salah. Baris pertama
+  hampir sama buruknya dengan arah terbalik: enam orang yang SUDAH diundang
+  pemiliknya, tapi `POST /karyawan/undang` hanya menulis baris `invitations` —
+  akunnya baru lahir saat mereka mendaftar sendiri. Yang mereka simpulkan dari
+  layar: undangannya gagal, dan orang lain harus memperbaikinya.
+
+- **Harganya disampaikan lebih dulu, dan pemilik memilih tetap.** Kalimat
+  gabungan itu menutup **enumerasi akun**: orang luar tak bisa menempelkan
+  daftar alamat lalu memanen mana yang punya akun di sistem ini. Memisahkannya
+  membuka itu. Pemilik ditanya dengan biayanya disebut, dan jawabannya
+  *"Sebutkan juga 'email tidak terdaftar'"*. Maka yang dikerjakan bukan
+  menawar keputusan itu melainkan **menuliskannya di tempat yang akan dibaca
+  orang berikutnya** — di `POST /login`, di `PESAN_LOGIN`, di kontrak API, dan
+  di changelog ponsel — supaya tak ada yang "merapikannya" balik tanpa tahu apa
+  yang sedang ia batalkan, dan sebaliknya tak ada yang menyangka ini
+  kecelakaan. Penahan yang tersisa: `batasLogin`, 10 percobaan per 5 menit per
+  (IP + email).
+
+- **Yang TIDAK ikut berubah, dan itu batas yang dipilih**: `/forgot-password`
+  tetap membalas `200 { ok: true }` yang identik untuk alamat dikenal maupun
+  tidak. Pintu itu tak berpassword sama sekali — membocorkan keterdaftaran di
+  sana berarti memberikannya cuma-cuma, tanpa batas laju per akun yang menahan.
+  Dipaku dua kali: statis (`login-beralasan.test.ts` mengiris penangannya dan
+  menuntut nol `HTTPException`, nol `message:`, satu `return c.json`) dan lewat
+  HTTP (§290 membandingkan badan balasannya untuk kedua alamat).
+
+- **Yang dikerjakan**:
+  - `PESAN_LOGIN` di `packages/shared/src/constants.ts` — satu rumah untuk
+    keempat kalimatnya. Bukan kerapian: web **membandingkan** kalimatnya untuk
+    memutuskan kapan menawarkan tautan "Daftar", dan kalimat yang diketik ulang
+    di layar akan bergeser sendiri — yang hilang diam-diam bukan tulisannya
+    melainkan tautannya, tanpa satu uji pun merah. `LoginPage` sudah punya satu
+    contoh cara itu gagal (`msg.includes("belum diverifikasi")`).
+  - Empat cabang di `POST /login`, **semuanya tetap 401** — yang berubah
+    kalimatnya, bukan kontraknya.
+  - Kalimat yang punya jalan keluar **menunjukkannya**: "Email tidak
+    terdaftar — periksa ejaannya, atau daftar dulu" + tautan `Daftar dengan
+    email ini →` yang membawa alamatnya (`/daftar?email=`), dan `SignupPage`
+    kini benar-benar membacanya. Tautan yang menjanjikan "email ini" lalu
+    membuka formulir kosong berbohong, dan orangnya mengetik ulang alamat yang
+    barusan ditolak — kesempatan kedua untuk salah ketik yang membuatnya sampai
+    ke sana. Pada akun nonaktif kalimatnya menyebut **siapa yang harus
+    dihubungi**; jalan keluarnya bukan reset password, dan menawarkan reset
+    password justru yang membuat orang berputar-putar.
+  - Kalimat sesi berakhir dipendekkan jadi *"Sesi Anda berakhir. Silakan masuk
+    kembali."* Versi panjangnya menyebut ketiga sebabnya dalam kurung; ketiganya
+    menuntut tindakan yang SAMA, dan dua di antaranya tak bisa ia perbaiki
+    sendiri. Yang penting tetap ada: ia dikeluarkan karena SESUATU.
+  - Tiga komentar yang jadi salah dibetulkan, bukan dibiarkan
+    (`superadmin.ts` ×2 — termasuk `console.warn` yang kini **menginterpolasi**
+    konstantanya, dan `ui.tsx` yang menerangkan tombol lihat-password dengan
+    kalimat lama).
+
+- **`sebab` terstruktur ikut, dan itu koreksi atas versi pertama saya sendiri.**
+  Putaran ini mula-mula membuat layar login MEMBANDINGKAN kalimatnya untuk
+  memutuskan kapan menawarkan tautan "Daftar". Itu bekerja, dan salah: repo ini
+  sudah menuliskan jawabannya dua kali dengan alasan yang identik —
+  `PenjualanGagal.sebab` (*"Teks pesan tak boleh jadi dasar keputusan itu — ia
+  berubah kapan saja dan tak bisa diuji"*) dan `ApiError.data.kode` di
+  `lib/api.ts`. Yang menyadarkan bukan pemikiran ulang melainkan pertanyaan
+  ponsel: aplikasi ponsel ada di repo lain dan **tak bisa** membaca
+  `PESAN_LOGIN` sama sekali, jadi satu-satunya cara ia ikut bercabang adalah
+  menyalin kalimat lintas repo — persis kelas cacat yang putaran ini
+  tegakkan aturannya. Maka keempat penolakan kini lewat `LoginDitolak extends
+  HTTPException` yang membawa `sebab`, dan layar login bercabang atas kode itu,
+  bukan atas kalimat. `throw` (bukan `return c.json`) disengaja: hanya jalur
+  `throw` yang lewat `catatGalat`, dan penolakan masuk harus tetap tercatat di
+  panel Log Galat — panel yang justru membuat pemilik melihat banjir 401.
+
+- **Ponsel: TAK ADA perubahan kode, dan itu diperiksa, bukan diasumsikan.**
+  `kakarut-mobile/lib/features/auth/login_page.dart` sudah menyetel
+  `_error = e.message` lalu merendernya apa adanya, jadi keempat kalimat baru
+  sampai ke layarnya tanpa satu baris pun disentuh. Yang belum: tombol "Daftar"
+  di layar yang sama tak membawa alamatnya. Itu sengaja tak dikerjakan
+  putaran ini — sebelum ada `sebab`, satu-satunya cara ponsel tahu kapan
+  menawarkannya adalah menyalin kalimat lintas repo. Sesudah `sebab` ada,
+  pekerjaan itu jadi kecil dan aman; ia masuk antrean, bukan diselundupkan ke
+  putaran ini.
+
+- **Batas yang diketahui**: (1) enumerasi terbuka — itu memang yang diminta,
+  tapi ditulis di sini supaya tercatat sebagai keadaan, bukan sebagai
+  kelalaian; (2) cabang `terhapus` praktis tak pernah terbaca — jalan yang
+  menuliskannya ikut mengganti nama emailnya, jadi alamat aslinya jatuh ke
+  "tak terdaftar" (yang justru jawaban benar: alamatnya bebas dipakai ulang).
+  Cabangnya tetap ada sebagai jaring untuk tombstone dari jalan lain; (3)
+  §290 memeriksa KALIMATNYA cuma sejauh "bisa dibedakan & menyebut sebabnya",
+  bukan bunyi persisnya — bunyinya dipaku uji statis supaya skrip gerbang tak
+  jadi salinan keempat yang menua sendiri. Yang dipaku persis justru
+  **kodenya** (`email_tak_dikenal`, `password_salah`, `akun_nonaktif`): klien
+  yang sudah dirilis bercabang atasnya, jadi kode yang diganti nama wajib
+  terlihat sebagai gerbang merah; (4) `/register` dan
+  `/resend-verification` tetap netral dan **tidak** diperiksa ulang putaran ini
+  — keduanya permukaan enumerasi juga, dan sekarang keduanya lebih ketat
+  daripada `/login` di sebelahnya. Ketimpangan itu disengaja (yang satu diminta
+  pemilik, yang lain tidak) tapi belum pernah ditanyakan.
+
+- **Bukti merah, enam, tiap satu dipulihkan byte-per-byte (`cmp`)**: satu pesan
+  diketik ulang di server → 2 merah · `/lupa-password` mulai melempar 404
+  "Email tidak terdaftar" → 1 merah · layar login kembali **mengendus**
+  kalimatnya dengan `includes` → 1 merah · tautannya berhenti membawa emailnya
+  → 1 merah · layar daftar berhenti membaca query-nya → 1 merah · kata
+  "ENUMERASI" dihapus dari catatan sumbernya → 1 merah.
+
+- **Gerbang**: typecheck · build · `npm test` 233 berkas / **2.819** uji
+  (+1 berkas, +13 uji) · `verify-api.sh` **3.499 lolos, 0 gagal** (dari 3.477,
+  §290 +22 lengan) · `audit:invarian` 27/27 · Playwright **30 spek** (dari 28).
+  `rute-diketuk.txt` diregenerasi — tak ada rute baru.
+
+## Riwayat pengadaan jadi TABEL, dan ringkasannya menghitung populasi — bukan halaman — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo meminta dua hal atas halaman Produksi
+  Bahan Baku — *"riwayat produksi ini ingin di ubah menjadi tabel"* dan *"buat
+  summarynya di atas produksi yang harus di kerjakan dan sudah selesai"*.
+
+- **Pengukuran yang menentukan seluruh bentuk pekerjaannya**, diambil sebelum
+  satu baris pun ditulis:
+
+  | | |
+  |---|---|
+  | `GET /produksi` `total` (faktur) | **61** |
+  | faktur di halaman 1 (`per_page` bawaan 20) | **20** |
+  | di antaranya BELUM selesai | **20 — kedua puluhnya** |
+
+  Server memang mengurutkan faktur yang belum selesai lebih dulu
+  (`routes.ts:2648`). Jadi ringkasan yang dijumlahkan klien dari baris yang
+  tampil tak sekadar meleset: ia akan **selalu** berbunyi "0 selesai" sampai
+  orangnya menelusuri ke halaman terakhir. Itu yang membuat putaran ini
+  menyentuh server, dan alasannya ditulis lebih dulu supaya tak terlihat
+  sebagai pelebaran ruang lingkup.
+
+- **Angka sesudahnya, diukur lewat HTTP dan disilangkan dengan SQL tangan**:
+
+  | | produksi | beli |
+  |---|---|---|
+  | total | 61 | 103 |
+  | harus dikerjakan | **36** faktur / 73 bahan | **44** / 55 |
+  | sudah selesai | **25** / 33 | **58** / 71 |
+  | ditolak | 0 / 0 | **1** / 3 |
+  | selesai tapi BELUM SAMPAI | **6** / 20 | 5 / 5 |
+  | `harus + selesai + ditolak == total` | ✔ 61 | ✔ 103 |
+
+  Jalur beli **cocok persis** dengan hitungan `GROUP BY` tangan atas basis data
+  (44 / 58 / 1 dan 55 / 71 / 3); jalur produksi berbeda dari hitungan tangan
+  hanya karena rutenya memang mengecualikan faktur transfer (`TF-`) dan
+  mengurung per perusahaan.
+
+- **Aturan "belum selesai" sudah ditulis TIGA kali sebelum putaran ini** —
+  `Layout.tsx:150` (lencana nav), `TimBerandaPage.tsx:11` (salinan
+  byte-per-byte), dan `TambahStokPage.belumSelesai()`. Ringkasan baru akan jadi
+  salinan keempat. Kanonisnya pindah ke `@kakarut/shared/pengadaan.ts`, kedua
+  salinan lain dibuang, dan servernya memakai himpunan yang sama.
+
+- **KOREKSI atas dugaan awal saya, dan ia mengubah angkanya.** Saya sempat
+  menyimpulkan "selesai" butuh dua rumus, sebab label produksi untuk tahap
+  `menunggu` berbunyi *"✅ Selesai — masuk stok"* sementara label beli untuk
+  tahap yang sama berbunyi *"🚚 Dikirim"*. Label produksi itu **aspirasi, bukan
+  keadaan**: `POST /tahap` meng-auto-konfirmasi baris CK-lokal di dalam
+  transaksi yang sama (`routes.ts:1276-1297`), jadi baris yang benar-benar
+  DUDUK di `menunggu` hampir selalu work-order beralamat yang belum sampai.
+  Servernya sendiri sudah memakai satu predikat untuk kedua jalur. Satu aturan,
+  bukan dua — dan uji murni memakukannya supaya tak "diperbaiki" balik oleh
+  siapa pun yang membaca labelnya saja.
+
+- **Ubin keempat yang tak diminta, dan yang paling berharga**: *"selesai tapi
+  belum sampai"* — **6 faktur / 20 bahan** pada jalur produksi. Tiga keadaan
+  bersembunyi di balik status "selesai" yang tak akan disebut selesai oleh
+  pemiliknya: hasil `untuk_cabang` yang sudah masuk stok CK tapi belum
+  di-`kirim-hasil`, barang yang sudah dikirim tapi belum diterima cabang, dan
+  kiriman menggantung. Semuanya stok yang tak bisa dipakai siapa pun sementara
+  papan menyatakan pekerjaannya beres. Predikatnya disalin dari
+  `stok/service.ts` (`qtyDiJalan`), bukan dikarang.
+
+- **Populasi kartu → kolom.** Kartu lama merender **28 hal** (dihitung satu per
+  satu dari sumbernya). Yang jadi kolom: dokumen+asal faktur, waktu, bahan+qty
+  +sisa tugas, tahap+peringatan, lokasi/tujuan+pelaksana, divisi (produksi) /
+  nilai+dana cair (beli), dibuat/diterima oleh, aksi. Yang **pindah ke modal
+  detail** beserta rumah barunya: Dokumen RAB/belanja, Laporan Harga, Dokumen
+  kirim — tombol yang dibuang dari baris tanpa tempat lain adalah kemampuan
+  yang hilang diam-diam. Yang **tetap di baris**: Ubah Tahap dan Kirim —
+  kiriman yang menunggu di CK adalah stok yang tak bisa dipakai siapa pun, dan
+  dua klik untuk itu terlalu mahal.
+
+- **Sepuluh sinyal turunan diekstrak lebih dulu**, sebelum satu kolom pun
+  ditulis: `sinyalFaktur()`. Tabel desktop, kartu HP (`TabelResponsif` merender
+  keduanya dari kolom yang sama), dan modal detail kini membaca sinyal yang
+  SAMA — sepuluh `const` yang tertanam di dalam `.map` tak bisa dipakai bertiga
+  maupun diuji. Modal detail memakainya juga untuk menilai kelayakan ketiga
+  tombol yang pindah; dua penilaian terpisah akan menampilkan tombol berbeda
+  untuk faktur yang sama.
+
+- **`qty_teks` yang selama ini diabaikan**: server mengirimnya (dan
+  `docs/API-CONTRACT.md` mencantumkannya), tapi `StokMasukRow` tak pernah
+  mendeklarasikannya dan layarnya merakit ulang `formatAngka(qty) + satuan`
+  sendiri — medan itu ada persis untuk mencegah itu. Kolom Bahan kini
+  memakainya.
+
+- **Detektor DIBUKTIKAN bisa menuduh — EMPAT kali, dipulihkan byte-per-byte**:
+  `menunggu` dipindah ke sisi selesai → uji murni merah · satu kolom diganti
+  namanya → penjaga urutan merah · `galat` dicabut dari tabel → penjaga merah ·
+  **PERAMBAN**: ubin dialihkan menghitung `grup`, dibangun ulang, server
+  dinyalakan ulang → spek "ubin tak berubah saat pindah halaman" merah karena
+  angkanya berbeda dari agregat server.
+
+- **Gerbangnya sendiri menemukan LIMA hal**, dan tiap satunya penjaga yang
+  bekerja: (1) lima ekspresi `sql<number>` di subkueri baru tak bercast — tiba
+  sebagai string saat dijalankan; (2) ratchet `daftar-tanpa-langit-langit`
+  63 → 64, dinaikkan **beralasan** dan pemindainya SENGAJA tak ditumpulkan
+  (melebarkan polanya ke `bool_or|bool_and` akan membungkam
+  `penjualan/routes.ts:161` yang memang daftar baris); (3) registri
+  `kueri-terkurung-tenant` 4 → 5 situs beralasan; (4) fikstur kontrak ponsel
+  basi; (5) `jangkar-iris` menolak jangkar `indexOf` uji baru saya karena
+  jalurnya dirakit template dan tak bisa ia telusuri — jalurnya ditulis literal.
+
+- **Batas yang jujur**: `StokMasukPage`/`StokMasukRow` masih dideklarasikan
+  LOKAL di halamannya, bukan di `packages/shared`. Hanya `RingkasPengadaan` +
+  `PasanganHitung` yang dipindah (medan barunya), sebab memindahkan seluruh
+  DTO baris berarti ~40 kunci kontrak baru sekaligus — putaran tersendiri, masuk
+  antrean. Dan e2e-nya menyentuh jalur owner saja; peran kitchen/bar yang juga
+  membuka `/produksi` belum punya spek.
+
+- **Gerbang**: typecheck · `npm test` 232 berkas / **2.806** uji (+1 berkas,
+  +18 uji) · build · `verify-api.sh` **3.477 lolos, 0 gagal** (dari 3.466,
+  §289 +11 lengan) · `audit:invarian` 27/27 · Playwright **28 spek** (dari 25).
+
+## Antrean putusan selisih kas: 26 menunggu, yang tertua 12 hari, dan nol tanda di luar halamannya sendiri — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo membuka Operasional Cabang, melihat
+  *"Selisih kas menunggu keputusan Anda (26)"* dengan baris tertua ditutup
+  **22 Agustus**, lalu menulis: *"selisih tidak ada notif harus di putuskan."*
+
+- **Sebabnya tertulis, dan itu yang membuat entri ini bukan sekadar fitur
+  kurang.** `docs/mobile/CHANGELOG-API.md` menjawab pertanyaan tim ponsel
+  *"apakah owner perlu notifikasi?"* dengan: *"Ya — `GET /shift/selisih?status=
+  menunggu` adalah sumber badge-nya… Web memakai endpoint yang sama dan
+  mem-poll tiap 60 detik **saat halaman Operasional terbuka**."* Kalimat
+  terakhir itu celahnya: "notifikasi" dilingkupi, sadar dan tercatat, sebagai
+  lencana yang hanya hidup DI DALAM halaman yang seharusnya ia ingatkan. Tak
+  ada yang keliru di jalannya; yang keliru lingkupnya, dan lingkup itu tak
+  pernah ditinjau ulang selama antreannya menumpuk.
+
+- **Dan di web lencananya bahkan tak pernah dipasang** — padahal ponsel sudah
+  punya (`kasir_page.dart`, `badgeMerah(selisihMenunggu)`). Panel di halamannya
+  sendiri justru dibangun sangat hati-hati: ia membedakan "gagal terbaca" dari
+  "kosong" (`OperasionalPage.tsx:51-65`) dan mengaku saat daftarnya terpotong.
+  Kehati-hatian penuh pada satu permukaan, nol permukaan lainnya.
+
+- **Populasi sapuan: 49 `NavLink` di sidebar, 13 tapak `badgeOranye`, 9 nama
+  lencana berbeda.** Dipilah tangan jadi (a) tautan katalog — menu, resep,
+  bahan, member, laporan: tak menunggu keputusan siapa pun, lencana tak
+  bermakna; (b) tautan ANTREAN — produksi, beli, beli perlengkapan, pesanan,
+  meja, pengajuan cuti, kebersihan, stok, penerimaan: semuanya berlencana; dan
+  (c) **selisih kas** — antrean yang menunggu keputusan owner, satu-satunya di
+  kelompok (b) yang angkanya tak pernah keluar dari halamannya. Kini 10 nama
+  lencana.
+
+- **Diukur lewat HTTP + SQL pada DB hasil gerbang**, bukan dibaca dari kode:
+
+  | | |
+  |---|---|
+  | antrean `?status=menunggu` | **19** menunggu · 20 pas · 2 disetujui · 1 ditolak |
+  | shift tertutup kandidat (`selisih_status` NULL/menunggu) | **39** |
+  | `GET /shift/selisih?status=menunggu` | 41–66 ms · **4.581 byte** |
+  | `GET /shift/selisih/ringkas` | 36–42 ms · **96 byte** |
+
+  Beban servernya IDENTIK — keduanya memanggil `antreanSelisih` yang sama, dan
+  `rekapWindow` di dalamnya 2+ kueri per baris. Yang dihemat jaringan (48×) dan
+  nominal kas tiap shift yang tak perlu ikut ke setiap halaman. **Batas yang
+  jujur**: pada 39 kandidat biayanya ~30 ms; ia tumbuh linier terhadap jumlah
+  shift tertutup, dan di langit-langit `AMBIL_SELISIH` (200) menjadi ~150 ms
+  per pollingan. Pembatchan `rekapWindow` jadi satu agregat masuk antrean —
+  **tidak** dikerjakan di sini, sebab angkanya belum menuntutnya.
+
+- **Ketiga medannya disilangkan dengan daftarnya sendiri**, bukan dengan angka
+  mati: `menunggu` 19 == panjang daftar 19; `tertua_ditutup_pada` identik
+  dengan `min(ditutup_pada)`; `terlambat` identik dengan hitungan ulang atas
+  daftar itu memakai ambang yang sama.
+
+- **Ambangnya dibuktikan MENGGIGIT, ujung ke ujung**: satu shift yang benar-
+  benar ada di daftar menunggu dimundurkan 5 hari lewat SQL →
+  `terlambat` **0 → 1** dan `tertua_ditutup_pada` bergeser ke **2026-08-29**;
+  dipulihkan → kembali 0. Sasarannya diambil dari jawaban RUTENYA SENDIRI,
+  bukan dari tebakan SQL — percobaan pertama memundurkan shift yang ternyata
+  berstatus "pas" dan tak berpengaruh apa pun.
+
+- **Satu perhitungan, dua pintu.** `antreanSelisih` diekstrak dari handler
+  daftarnya; `GET /shift/selisih/ringkas` memakai fungsi yang sama. Aturan
+  "menunggu" TIDAK BISA jadi `count(*)` di SQL — statusnya diturunkan dari
+  selisih yang HIDUP (`kas_sistem` dihitung ulang tiap dibaca), dan komentar
+  `routes.ts:411-434` sudah menuliskan akibatnya: penjualan bertanggal mundur
+  dari sinkron offline mengubah shift "pas" jadi kurang 40.000 tanpa kolomnya
+  bergerak. Menulis ulang aturan itu untuk sebuah lencana = dua tempat yang
+  akan berselisih pendapat soal shift yang sama.
+
+- **Ambang terlambat = fungsi, bukan perbandingan yang diketik ulang.**
+  `SELISIH_TERLAMBAT_HARI = 3` + `selisihTerlambat()` di `@kakarut/shared`,
+  dipakai server (menghitung) dan web (menulis kalimatnya). Pemiliknya memilih
+  3 hari; ia juga menolak tampilan umur per baris dan email otomatis, jadi
+  yang dipasang hanya dua permukaan agregat.
+
+- **Detektor DIBUKTIKAN bisa menuduh — LIMA kali, semuanya dipulihkan
+  byte-per-byte (`cmp`)**:
+
+  1. `/operasional` dikembalikan jadi `linkClass` → penjaga statis merah 2 uji.
+  2. Gerbang kueri dilonggarkan (buang `manajemenGuard`) → merah 1.
+  3. Galat tak lagi diteruskan ke `badgeOranye` → merah 1.
+  4. `>` jadi `>=` pada ambangnya → merah pada asersi "tepat di ambang".
+  5. **PERAMBAN**: lencana + kartu dicabut, dibangun ulang, server dinyalakan
+     ulang → kedua spek Playwright merah pada elemen yang tak ditemukan.
+
+- **Gerbangnya sendiri yang menemukan EMPAT hal, bukan saya** — dan tiap
+  satunya penjaga yang bekerja persis seperti maksudnya:
+
+  1. `verify-api-token.test.ts`: §288 memakai `$KASIR`, token yang sudah
+     DICABUT di §105. Asersi 403-nya akan hijau karena sebab yang salah (401).
+     Diganti `$REISS105`.
+  2. `potong-berpenanda.test.ts`: memindahkan `.limit()` ke `antreanSelisih`
+     memisahkannya dari penandanya, jadi situs yang tadinya BERPENANDA terbaca
+     SENYAP. Diadjudikasi beralasan — bentuk yang sama dengan
+     `modules/kebersihan/routes.ts` yang sudah lebih dulu ada di daftar itu:
+     batas di pembantu, penanda di pemanggil, dan di pemanggil itulah ia
+     dinilai. Kedua pemanggilnya memang mengatakannya (`HEADER_TERPOTONG` dan
+     medan `terpotong`).
+  3. `kunci-satu-kontrak.test.ts`: fikstur kontrak ponsel basi — 4 kunci
+     `RingkasSelisihDto` diregenerasi ke repo ponsel.
+  4. `cakupan-rute.test.ts`: rute baru tak pernah diketuk. `rute-diketuk.txt`
+     diregenerasi dari `JEJAK_RUTE` pada jalan gerbang yang sama.
+
+- **Batas yang tersisa, ditulis jujur.** `AMBIL_SELISIH` = 200 shift tertutup
+  TERBARU, dan "pas" berbagi kolom `selisih_status` NULL dengan "menunggu" —
+  jadi antrean tua bisa terdorong keluar oleh shift-shift "pas" yang lebih
+  baru. Di DB gerbang `terpotong` = `false` (39 kandidat), tapi pada penyewa
+  sungguhan yang sudah setahun beroperasi ambang itu bisa tersentuh, dan saat
+  itu terjadi `menunggu` pun jadi BATAS BAWAH. Karena itu `terpotong`
+  dipulangkan dan dirender ("+" pada lencana, kalimat pada kartunya) alih-alih
+  disimpulkan sendiri oleh pembacanya.
+
+- **Antrean baru dari putaran ini**: (1) pembatchan `rekapWindow` jadi satu
+  agregat per shift — biayanya linier hari ini dan hanya itu yang menahan
+  pollingan lebih rapat; (2) repo ponsel, `shift_repository.dart:54`
+  `catch (_) { return 0; }` menelan semua galat jadi nol pada provider yang
+  memberi makan lencana selisih — persis "lencana gagal ≠ lencana nol" yang
+  sudah ditegakkan repo itu sendiri lewat `badgeAsync`.
+
+- **Gerbang**: typecheck · `npm test` 231 berkas / **2.788** uji (+1 berkas,
+  +9 uji) · build · `verify-api.sh` **3.466 lolos, 0 gagal** (dari 3.457,
+  §288 +9 lengan) · `audit:invarian` 27/27 · Playwright **25 spek** (dari 23).
+
+## Central Kitchen ditawarkan sebagai lokasi menu — dapur yang tak berjualan, dan angka yang menjawab pertanyaan yang tak pernah diajukan — web — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo mengirim tangkapan layar Menu & HPP
+  dengan *"Tampil di lokasi: 🏭 Central Kitchen"* terpilih dan judul **"Menu &
+  HPP (13 dari 40)"**, lalu menulis: *"menu dan hpp ini tidak ada di central
+  kitchen karna central kitchen tidak berjualan… berbeda dengan resep yang ada
+  lokasi produksinya."* Keberatannya benar sampai ke struktur datanya.
+
+- **SELURUH sistem sudah menganut aturan itu — kecuali satu baris.** Server
+  menolak menyimpan lokasi menu non-store (**400** *"Hanya cabang store
+  (kasir/POS) yang bisa jadi lokasi menu"*, `menu/routes.ts:177`), dipaku
+  `verify-api.sh` §52. Formulir menu memakai `tipe === "store"` di empat tapak
+  dan bahkan MEMBUANG id non-store sebelum menyimpan. Sidebar tak menaruh
+  `/menu` di `BOLEH_CK`, jadi divisi Central Kitchen tak bisa membuka halaman
+  ini sama sekali — sementara `/resep` dan `/bahan` ADA di sana, persis
+  pembedaan yang ditulis pemilik.
+
+  Yang menyimpang `MenuListPage.tsx:69`: `b.tipe !== "kantor"`. Itu predikat
+  **lama**. Commit `b3237cc` (17 Juli 2026, *"menu store-only"*) mengubah
+  formulirnya dari `!== "kantor"` jadi `=== "store"` dan **melewatkan halaman
+  daftarnya**. Bentuk yang diperingatkan berkas ini di paragraf pembukanya:
+  aturannya sudah dipikirkan dan ditulis, penjaganya dipasang di satu pintu,
+  pintu kedua ke keadaan yang sama dibiarkan terbuka — dua tahun, tanpa satu
+  pun uji merah (`apps/web/e2e/` tak punya spek menu; `apps/server/test/` tak
+  punya penjaga lokasi menu).
+
+- **Kontras resep vs menu — dua model, karena dua pertanyaan.** Lokasi produksi
+  resep enum `ingredients.produksi_di` (`'ck' | 'cabang'`, NOT NULL, default
+  `ck`) — CK di sana sebuah **mode**, dan id cabang CK tak pernah tersimpan
+  pada resep; cabang produsen yang benar-benar disimpan
+  (`ingredient_produksi_branches`) justru **wajib store** juga. Lokasi menu
+  tabel gandeng `menu_branches` berisi `branch_id` sungguhan. "Dibuat di mana"
+  dan "dijual di mana" tak pernah boleh dijawab satu bentuk.
+
+- **Populasi — sapuan A: 90 penyebutan literal tipe cabang di 22 berkas**
+  `apps/web/src` (`"store"`/`"central_kitchen"`/`"kantor"`, di luar deklarasi
+  tipe). Dipilah tangan jadi **penjualan** (wajib store-only) vs
+  **stok/produksi/peran/navigasi** (CK memang sah: transfer, dashboard, tahap,
+  perlengkapan, detail bahan, karyawan, faktur). Menyimpang: **1**.
+
+- **Populasi — sapuan B: 13 pemanggil `/menu` & `/menu/ketersediaan`** (10 web,
+  3 ponsel), tiap satu ditelusuri "id cabang apa yang BISA dibawanya". Sapuan
+  ini yang membuktikan server tak perlu diubah, dan jawabannya tak seperti
+  dugaan awal:
+
+  - `StokPage:76,81` MEMANG bisa membawa id CK (`useCabangData()` dari Kantor
+    menawarkan cabang non-kantor) — tapi keduanya `enabled: tab === "menu"`,
+    dan `bolehStokMenu` (`StokPage:58`) memaksa tab keluar dari "menu" untuk
+    CK/kantor. Tak pernah menyala.
+  - `TambahStokDariMenuPage:222,226` memakai `tujuanId`, dan daftar tujuannya
+    store aktif saja (`:200`).
+  - `LihatMenuPage:83` mengirim cabang aktif, tapi `/menu/lihat` tak ada di
+    `BOLEH_CK` dan disembunyikan navigasi saat `dCk`.
+  - `KasirPage` + ponsel `kasir_repository`: cabang kasir, dan kasir di CK
+    ditolak server (**400**, `users/routes.ts:138`).
+  - Ponsel **punya** halaman Menu & HPP (`menu_hpp_page.dart`, "versi baca"),
+    dan ia **nol penyaring lokasi** — `GET /menu?semua=true` tanpa `branch_id`.
+    Tak tersentuh cacat ini.
+
+  Jadi tak satu pun klien bisa mengirim `branch_id` CK ke `/menu`. Cacatnya
+  murni di DAFTAR PILIHAN, bukan di permintaannya.
+
+- **Ukurannya, diukur lewat HTTP + SQL atas DB hasil gerbang** (satu menu
+  dibatasi ke cabang store lebih dulu — tanpa itu keempat angkanya sama-sama 96
+  dan pengukurannya HAMPA):
+
+  | pertanyaan | jawaban server |
+  |---|---|
+  | katalog penuh (`GET /menu`) | **96** |
+  | `?branch_id=<store Pusat>` | **96** |
+  | `?branch_id=<Central Kitchen>` | HTTP **200** → **95** |
+  | menu TANPA pembatasan lokasi | **95** |
+  | himpunan CK == himpunan tanpa-pembatasan | **YA** |
+
+  Artinya panel akan menuliskan **"95 dari 96"** di bawah 🏭 Central Kitchen —
+  bentuk yang persis sama dengan "13 dari 40" milik pemilik. Angka yang
+  benar-benar ada, menjawab pertanyaan yang tak pernah diajukan: sembilan puluh
+  lima itu "menu tanpa pembatasan lokasi", bukan "menu yang dijual di dapur
+  pusat". Dan HPP-nya tak pernah dihitung per cabang (`hitungHpp` tak menerima
+  `branchId`; `loadKatalog` hanya `companyId`), jadi seluruh kolom angkanya
+  identik di lokasi mana pun — pemilihnya tak pernah mengubah satu rupiah pun.
+
+- **Perbaikannya satu rumah, bukan satu baris.** `bolehJadiLokasiMenu` +
+  `opsiLokasiMenu` di `BranchContext.tsx` (sebelah `labelCabang`), dipakai
+  daftar DAN formulir. **Dua fungsi, sengaja**: daftar pilihan wajib membuang
+  cabang nonaktif, jalur SIMPAN tak boleh — server (`validateRefs`) hanya
+  memeriksa perusahaan + tipe, jadi menyaring `is_active` saat menyimpan akan
+  menghapus pembatasan lokasi menu yang cabangnya sedang dinonaktifkan
+  sementara, diam-diam MELEBARKANNYA ke semua cabang. Perilaku hari ini
+  dipertahankan persis.
+
+- **Detektor DIBUKTIKAN bisa menuduh — tiga kali, semuanya dipulihkan
+  byte-per-byte (`cmp`)**:
+
+  1. `MenuListPage:69` dikembalikan ke `!== "kantor"` → penjaga statis merah 2
+     uji, tuduhannya menyebut barisnya utuh: `MenuListPage.tsx: const
+     lokasiOpsi = cabang.filter((b) => b.is_active && b.tipe !== "kantor");`
+  2. `bolehJadiLokasiMenu` dilebarkan jadi `!== "kantor"` → uji "rumah aturannya
+     berbunyi store" merah. Melebarkan helper melebarkan seluruh pemakainya
+     sekaligus, jadi nilainya dipaku DI RUMAHNYA, bukan di tiap layar.
+  3. Bukti merah PERAMBAN: revert + build + nyalakan ulang server → spek
+     Playwright merah dengan isi dropdown apa adanya —
+     `["Semua lokasi", "🏪 Pusat", "🏭 Central Kitchen", "🏪 Cabang 2"]`.
+
+- **Penjaganya melarang BENTUKNYA, bukan ejaannya.**
+  `apps/server/test/lokasi-menu-hanya-store.test.ts` (5 uji) tak melarang
+  `!== "kantor"` — pelarangan ejaan selalu bisa dilangkahi ejaan lain. Ia
+  melarang berkas mana pun di `apps/web/src/pages/menu/` MENULIS ATURANNYA
+  SENDIRI: nol literal tipe cabang, kecuali yang terdaftar di `DIADILI` beserta
+  alasannya (hari ini satu: `LihatMenuPage:80` `divisi === "kantor"`, yang
+  DIVISI kerja, bukan penyaring daftar cabang). Uji kedua menuntut tiap entri
+  `DIADILI` masih cocok dengan kodenya, supaya daftarnya tak jadi kuburan.
+
+- **Batas detektornya, jujur.** Pemindainya hanya melihat
+  `apps/web/src/pages/menu/`. `StokPage:58` menulis aturan yang SAMA di luar
+  jangkauan itu, sebagai pengecualian (`!== "central_kitchen" && !== "kantor"`)
+  — benar hari ini, dan komentarnya sendiri berbunyi *"central_kitchen →
+  produksi bahan, TIDAK jual menu"*. **Sengaja tidak diubah**: `selTipe` di sana
+  bisa `undefined` selagi `/cabang` dalam perjalanan, dan hari ini `undefined`
+  berarti tab Stok Menu TAMPIL; mengalirkannya lewat helper akan membalik itu
+  jadi tersembunyi-lalu-muncul. Menyatukannya menuntut keputusan tersendiri soal
+  kasus `undefined` — masuk antrean, bukan diselundupkan ke putaran ini.
+
+- **Server sengaja TIDAK diubah.** `GET /menu?branch_id=<CK>` tetap **200** dan
+  memulangkan himpunan tanpa-pembatasan; yang keliru pertanyaannya, bukan
+  permintaannya, dan sapuan B menunjukkan tak ada klien yang bisa mengajukannya.
+  Yang ditambahkan `verify-api.sh` §52 **+4 lengan** yang MENULISKAN janji itu
+  hitam-di-atas-putih (dengan premis dibuktikan lebih dulu: katalog penuh harus
+  lebih besar dari himpunan tanpa-pembatasan, atau asersinya lolos hampa),
+  supaya mengubahnya kelak jadi keputusan sadar, bukan kelalaian.
+
+- **Data warisan — diukur, tidak ditebak, dan tidak dimigrasi buta.** Sebelum 17
+  Juli 2026 CK BOLEH disimpan sebagai lokasi menu; menu yang lokasinya hanya CK
+  tak terlihat di kasir mana pun dan ditolak **400** saat dijual, tanpa pesan.
+  Di DB hasil gerbang: **0 baris** `menu_branches` menunjuk cabang non-store,
+  **0 menu** aktif yang seluruh lokasinya non-store. Untuk produksi, dua kueri
+  **baca-saja** diserahkan ke pemilik alih-alih migrasi — menghapus baris begitu
+  mengubah menu dari "tak terlihat" jadi "tampil di SEMUA cabang store", dan itu
+  perubahan katalog nyata pada data yang tak pernah dilihat sesi ini.
+
+- **Cakupan sisi lain**: `aria-label="Tampil di lokasi"` dipasang pada
+  pemilihnya — perbaikan aksesibilitas yang sekaligus memberi spek Playwright
+  pengait yang stabil (halaman ini punya dua `<select>`: satu di sidebar).
+
+- **Gerbang**: typecheck · `npm test` 230 berkas / **2.779** uji (+1 berkas, +5
+  uji) · build · `verify-api.sh` **3.457 lolos, 0 gagal** (dari 3.453) ·
+  `audit:invarian` 27/27 · Playwright **23 spek** (dari 22).
+
+- **Catatan jalannya**: spek e2e pertama merah karena PREMIS, bukan asersi —
+  `POST /auth/register` ternyata **tidak** membuat perusahaan (`company_id` &
+  `role` masih null sesudah verifikasi), jadi `POST /company/mode` menolak
+  **403**. Usahanya lahir di `POST /onboarding/perusahaan`, yang memulangkan
+  token baru berisi `company_id` + peran `owner`. Kegagalan itu MENJATUHKAN
+  `stok-awal-gagal.spec.ts:66` yang tadinya hijau; sesudah spek diperbaiki
+  keduanya hijau di gerbang penuh — merah ikutan, bukan sebab sendiri, dan
+  dicatat apa adanya. Satu lagi: membangun ulang web selagi server hidup membuat
+  aset lama **404** dan halaman kosong — bukti merah peramban wajib mengikuti
+  urutan gerbang (bangun → nyalakan → uji).
+
+## Panel galat: ponsel mengaku siapa dirinya, dan "Masalah berbeda" berhenti berbohong (312 vs 200) — server + web + ponsel — 2026-09-03
+
+- **Kenapa vena ini ada**: lanjutan langsung dari entri di bawah. Pemilik repo
+  bertanya *"cek bagian mobile — apakah sudah punya galat log di superadmin?"*
+
+- **Jawabannya TIDAK, dan itu keputusan yang sudah tertulis.** Akun super admin
+  bahkan ditolak masuk ke aplikasi ponsel (`auth_controller.dart:118`, *"Akun
+  super admin tidak didukung di aplikasi. Gunakan web."*); nol berkas layar
+  super admin di `lib/`; nol tembakan `/admin/*` (8 kecocokan `grep` semuanya
+  kalimat antarmuka "owner/admin", bukan jalur). Keputusannya terdaftar di
+  `docs/mobile/PROMPT-AUTH-ONBOARDING.md` ("Yang TIDAK perlu dibangun di
+  mobile") dan di fikstur `kunci-belum-dibaca.txt` — *"bukan 'belum',
+  melainkan bukan untuk perangkat itu"* — dengan ratchet yang menegakkannya.
+  **Tidak dibalik.** Pemilik memilih dua temuan lain dari pemeriksaan yang sama.
+
+- **Temuan 1 — ponsel tak pernah menyebut dirinya (ponsel).** `BaseOptions`
+  hanya menyetel `Content-Type`; sapuan seluruh repo menemukan nol penyetelan
+  `User-Agent`. Yang sampai ke server bawaan `dart:io` — `Dart/3.12 (dart:io)`,
+  sama untuk tiap versi, tiap perangkat, tiap sistem. Kolom yang baru dirender
+  di panel karena itu cuma bisa menjawab "ponsel atau web" dan berhenti di situ.
+  Kini `Kakarut/<versi> (<os>; <versi os>)`, tanpa dependensi baru: `dart:io`
+  memberi platformnya, dan versinya konstanta yang **dijaga tak boleh hanyut**
+  dari `pubspec.yaml`.
+
+- **Temuan 2 — "Masalah berbeda" salah DUA kali, dan diukur (server+web).**
+  `jumlah_kelompok: rows.length`, sementara `rows` dipotong `LIMIT_KELOMPOK`
+  DAN disaring. Diukur lewat HTTP pada DB hasil gerbang:
+
+  | saringan | `jumlah_kelompok` | baris tampil |
+  |---|---|---|
+  | `semua` | **312** | 200 |
+  | `4xx`   | **312** | 200 |
+  | `5xx`   | **312** | 2 |
+
+  Sebelum perbaikan angka itu akan terbaca **200 / 200 / 2** — kartu melaporkan
+  200 masalah untuk 312 yang sebenarnya ada, lalu **anjlok ke 2** begitu tab
+  "Galat server" ditekan. Ketiga kartu lain sengaja tak ikut tersaring;
+  komentar di atas kuerinya sendiri menuliskannya, dan kartu keempat melanggar
+  aturan itu sepuluh baris di bawahnya. Kini dihitung `count(distinct sidik)`
+  di kueri ringkasan yang sama — nol pemindaian tambahan. Header
+  `x-kakarut-terpotong: 200` terkirim dan dirender: pemotongannya nyata pada DB
+  itu, bukan hipotesis.
+
+- **GERBANG LAMA MENGARAHKAN SELURUH BENTUK PERBAIKANNYA**, dan ini bagian yang
+  paling layak dicatat. Lima penjaga menuntut berturut-turut, tiap tuntutan
+  benar: (1) `pemotongan-terungkap` menolak panggilan `potongLarik` bersarang
+  yang argumennya tak terbaca → panggilannya dirapikan; (2) penjaga yang sama
+  menuntut layarnya MEMBACA header → `ErrorLogPage` memasang `bacaTerpotong`;
+  (3) `potong-berpenanda` menandai entri adjudikasi lama jadi kuburan →
+  diperbarui, dan alasan lamanya ternyata KELIRU ("tak ada angka yang mengecil
+  karena potongan" — padahal kartu itu justru mengecil); (4)
+  `daftar-tanpa-langit-langit` menuduh kueri berbatas sebagai tanpa-batas; (5)
+  `changelog-stempel-rilis` dari putaran sebelumnya menagih entri tak berstempel.
+
+- **Batas pemindai yang ditemukan sambil lalu**: `daftar-tanpa-langit-langit`
+  kehilangan jejak `.limit()` bila ada komentar menyela di TENGAH rantai kueri,
+  lalu menuduh kueri berbatas. Diuji dua arah (komentar di dalam rantai →
+  merah; dipindah ke atas rantai → hijau). Tidak dibungkam dengan menaikkan
+  DASAR; letak komentarnya dipindah dan sebabnya ditulis di tempat itu supaya
+  tak dikembalikan orang berikutnya. Pemindainya sendiri belum diperbaiki —
+  batas yang diketahui, dicatat di sini.
+
+- **Bukti merah**: `jumlah_kelompok` dikembalikan ke `rows.length` → 1 merah;
+  `LIMIT_KELOMPOK + 1` → `LIMIT_KELOMPOK` → 2 merah (penjaga baru + registri
+  pintu); semua dipulihkan byte-per-byte. Ponsel: uji di-commit merah dulu,
+  **tapi merahnya BUKAN yang direncanakan** — CI #29/#30 gagal di `analyze`
+  karena `library;` kutaruh sesudah impor, jadi tak satu uji pun sempat
+  berjalan. Merah karena kompilasi, bukan karena perilaku; kedua kalinya bentuk
+  ini muncul di repo ini, dan ditulis apa adanya alih-alih diklaim sebagai
+  bukti yang bukan.
+
+- **Gerbang**: typecheck · npm test 229 berkas / 2.774 · build · verify-api
+  **3.453**/0 (naik 4: lengan §142 baru) · audit:invarian 27/27 · Playwright 22.
+
+---
+
+## 1.744 penolakan 401 di panel galat: satu sesi mati = ~14 baris, dan pemalsuan tanda tangan tenggelam di antaranya — server + web + ponsel — 2026-09-03
+
+- **Kenapa vena ini ada**: BUKAN dari antrean — pemilik repo membuka panel Log
+  Galat super admin dan bertanya "kalau ini galat apa?". Layarnya: **1.744
+  penolakan 4xx dalam 7 hari, NOL 5xx, 157 kelompok**, seluruhnya
+  `401 Token tidak valid atau kedaluwarsa`.
+
+- **Jawabannya bukan bug, dan itu bagian pentingnya.** Token hidup 12 jam tanpa
+  refresh (`JWT_EXPIRES_IN`, ditulis di `API-CONTRACT.md`), jadi tiap sesi mati
+  tepat waktu — takdir setiap orang yang memakai aplikasi ini dua kali sehari.
+  Yang perlu diperbaiki bukan penolakannya, melainkan tiga hal yang tersembunyi
+  di baliknya.
+
+- **MEKANISMENYA DIBUKTIKAN DARI DATA PEMILIK SENDIRI, bukan dari tebakan.**
+  Dugaan pertamaku salah bentuk: kusangka polling yang merembes sesudah token
+  mati. Yang benar **kipas serentak** — `refetchOnWindowFocus` tak pernah diset
+  (jadi bawaan react-query `true`) dengan `staleTime` global 10 detik, sehingga
+  satu tab yang kembali difokuskan menembakkan SELURUH kueri yang terpasang
+  dalam satu tick. Buktinya ada di panel itu juga: `/company` dan `/cabang`
+  duduk BERDAMPINGAN dengan `/kategori` di KasirPage tapi **nol** di log —
+  bedanya cuma `staleTime` 5 menit (`KUNCI_MASTER`). **Sebaran 401 mengikuti
+  garis masa-basi, bukan garis interval.** Aritmetiknya menutup: 1.744 ÷ 7 ≈
+  249/hari ÷ ~14 ≈ 18 ledakan/hari, dan `/auth/me` 113 ÷ 7 ≈ 16/hari — rute itu
+  praktis penghitung sesi-mati. Gugus jam 07.50/07.51/07.53 pada tiga hari
+  berturut-turut = sesi semalam yang ditemukan mati saat toko dibuka.
+
+- **Temuan 1 — pemalsuan tanda tangan tak dapat dibedakan (server).**
+  `requireAuth` menangkap `catch {` TANPA mengikat galatnya, jadi
+  `TokenExpiredError` dan `JsonWebTokenError: invalid signature` menulis baris
+  yang identik sampai ke `sidikGalat`. Pengamanan `algorithms: ["HS256"]`
+  dipasang dua baris di atasnya khusus untuk menolak serangan itu, lalu
+  buktinya dibuang sebelum ada yang sempat membacanya. Kini dua kalimat, dua
+  sidik jari. §287 +4 asersi (3.445 → 3.449).
+
+- **Temuan 2 — alamat yang tercatat adalah PROXY, dan jatah ditanggung bersama
+  (server).** Seluruh alamat di panel berada di rentang milik satu CDN.
+  `TRUST_PROXY_HOPS` bawaan 1 sementara rantai `X-Forwarded-For` 2 entri.
+  Bukan cuma kolom log: `ipKlien` mengunci **empat pembatas laju yang berkunci
+  alamat saja** (register 20/jam, guest 30/5mnt, reset 20/15mnt, verif), jadi
+  penyewa yang tak berhubungan berbagi jatah. **Pemeriksa setelannya buta pada
+  kasus ini** — ketiga tuduhannya menjangkau hops=0, hops-tanpa-XFF, dan
+  rantai-lebih-pendek; keadaan production tak memenuhi satu pun. Ditambah
+  tuduhan keempat yang simetris. Nilainya sendiri milik pemilik (Dokploy).
+
+- **Temuan 3 — 401 yang ditelan diam-diam (ponsel).** `_revalidasiLatar` hanya
+  menangani 304 dan 2xx; `validateStatus` memulangkan true untuk semua status,
+  jadi 401 tak melempar DAN tak masuk cabang mana pun. Di sinyal jelek layar
+  menyajikan cache seolah baik-baik saja, token mati tak pernah dihapus, dan
+  siklusnya berulang tanpa batas. Sesi mati yang tak pernah mengumumkan
+  kematiannya — kasir mengira dirinya bekerja.
+
+- **Perbaikannya menghapus SEBAB, bukan membungkam instrumen.** Menyaring 401
+  keluar dari `error_logs` sempat kupertimbangkan dan ditolak: preseden repo
+  ini sudah memutuskannya di kelas yang sama persis
+  (`lencana-beli-tak-menembak-403`, 403 × 211 untuk lencana yang tak pernah
+  dirender) — *"layar menyesuaikan diri pada pintu, bukan sebaliknya."* Jadi
+  kedua klien kini memeriksa `exp` SEBELUM mengirim. Palang sekali-jalan saja
+  tak cukup dan itu inti rancangannya: keempat belas permintaan berangkat
+  sebelum balasan pertama tiba.
+
+- **Jam perangkat tidak dipercaya begitu saja.** Web mempelajari selisih jam
+  dari header `Date` tiap balasan dan menyimpannya (supaya muat-ulang pagi hari
+  sudah tahu jam server sebelum permintaan pertamanya berangkat); ponsel sudah
+  punya `waktuServer()` sejak lama untuk menstempel perintah offline — bahannya
+  tersedia dan belum pernah dipakai untuk ini. Selisih basi menyembuhkan diri
+  sendiri karena balasan LOGIN ikut memperbaruinya, jadi berputar di layar
+  login tak mungkin terjadi.
+
+- **GERBANGNYA MEMBETULKANKU DUA KALI.** (1) Jalan pertama masih meloloskan
+  satu `/cabang`: begitu `saveAuth(null)` jalan, kueri yang tersisa di tick
+  yang sama berangkat TELANJANG dan dibalas "Perlu login (token tidak ada)" —
+  kelas pesan lain, baris log yang sama sia-sianya. Palangnya kini ikut menahan
+  susulan. (2) Versi pertama spec e2e-nya sendiri cacat: menanam sesi lewat
+  `addInitScript`, yang menanam ulang tiap navigasi sehingga ujinya berputar
+  antara `/kasir` dan `/login` tanpa menguji apa pun — ditemukan justru oleh
+  bukti merahnya.
+
+- **Bukti merah**: `catch {` dikembalikan → 2 asersi merah; cabang proxy
+  keempat dicabut → 2 merah; angka tetap menggantikan panjang rantai → 1 merah;
+  spec e2e dijalankan terhadap bundel SEBELUM perubahan → 3 permintaan ber-sesi
+  (`/company`, `/cabang`, `/auth/me`) dengan token mati. Semua dipulihkan
+  byte-per-byte (`cmp`). Ponsel: uji di-commit merah lebih dulu (CI #27 —
+  analyze lolos, 631 hijau, 6 uji pemasangan merah), lalu dibayar.
+
+- **Yang TIDAK diklaim**: 1.744 itu tak bisa dipilah per pengguna — penolakan
+  terjadi SEBELUM `c.set("auth")`, jadi barisnya anonim. Berapa orang yang
+  mengalaminya tak diketahui, dan datanya memang tak ada. Panel kini merender
+  user-agent supaya setidaknya "web atau ponsel" bisa dijawab.
+
+- **Sisa untuk pemilik**: setel `TRUST_PROXY_HOPS` sesuai panjang rantai
+  sebenarnya di Dokploy — kode hanya membuat nilainya yang salah jadi terlihat.
+
+---
+
 ## Putaran PONSEL: layar verifikasi yang meminta token sementara suratnya mengirim kode, jeda yang ditulis klien, sesi dari `/register` yang dibawa ke layar kode, dan 401 yang bisu — ponsel — 2026-09-02
 
 - **Kenapa vena ini ada**: antrean ledger + pemetaan cakupan 2026-09-02 —
@@ -9474,8 +10170,48 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
+- [ ] **Ponsel: tombol "Daftar" di layar masuk belum membawa alamatnya** —
+      `login_page.dart` sudah merender kalimat penolakan apa adanya (tak ada
+      yang salah di sana), tapi `sebab == "email_tak_dikenal"` belum dipakai
+      untuk membuka `RegisterPage` dengan emailnya terisi. Web sudah. Kecil,
+      dan sekarang aman dikerjakan sebab tak lagi menuntut menyalin kalimat
+      lintas repo
+- [ ] **`/register` & `/resend-verification` masih netral sementara `/login` di
+      sebelahnya kini bicara** — ketimpangan yang lahir 2026-09-03 dan belum
+      pernah ditanyakan ke pemilik. Keduanya permukaan enumerasi yang sama;
+      sesudah `/login` dibuka, netralitas keduanya melindungi lebih sedikit
+      daripada sebelumnya sambil tetap membuat orang yang salah ketik alamat
+      di layar daftar tak tahu apa-apa. Pilihannya dua-duanya sah — dirapatkan
+      ke `/login`, atau dibiarkan sebagai batas yang disengaja — tapi harus
+      dipilih, bukan diwarisi
+- [ ] **`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman** — dideklarasikan
+      di `TambahStokPage.tsx`, bukan `packages/shared`, sehingga Lampiran A &
+      fikstur ponsel tak pernah melihatnya dan medan yang server kirim bisa
+      hilang dari tipenya diam-diam (`qty_teks` sudah membuktikannya: dikirim
+      sejak lama, tak pernah dideklarasikan, dirakit ulang di klien). ~40 kunci
+      kontrak sekaligus — putaran tersendiri
+- [ ] **`rekapWindow` ditembakkan sekali PER BARIS** — `GET /shift/selisih`
+      (dan kini `/selisih/ringkas`) memanggilnya untuk tiap shift kandidat, dan
+      ia sendiri 2+ kueri. Terukur 2026-09-03: ~30 ms pada 39 kandidat, tumbuh
+      linier, ~150 ms di langit-langit 200. Satu agregat `GROUP BY shift`
+      menggantikan N panggilan — belum dikerjakan karena angkanya belum
+      menuntutnya, dan itu yang akan berubah lebih dulu
+- [ ] **`StokPage:58` menulis aturan lokasi menu untuk kedua kalinya** — lahir
+      dari entri "Central Kitchen ditawarkan sebagai lokasi menu". Ia berbunyi
+      `selTipe !== "central_kitchen" && selTipe !== "kantor"`, benar hari ini
+      dan komentarnya sendiri menyebut alasannya, tapi ia pengecualian bukan
+      penyertaan: tipe cabang keempat kelak lolos diam-diam. Menyatukannya ke
+      `bolehJadiLokasiMenu` menuntut keputusan lebih dulu soal `selTipe`
+      `undefined` (selagi `/cabang` dalam perjalanan) yang hari ini berarti tab
+      Stok Menu TAMPIL — mengalirkannya lewat helper membalik itu
 
 ### Mobile
+- [ ] **`shift_repository.dart:54` menelan galat jadi NOL** — provider yang
+      memberi makan lencana selisih kas berbunyi `catch (_) { return 0; }`,
+      jadi jaringan putus atau 403 terbaca sebagai "tak ada yang menunggu
+      keputusan". Aturan "lencana gagal ≠ lencana nol" sudah ditegakkan repo
+      itu sendiri lewat `badgeAsync`; pintu ini terlewat. Ditemukan saat
+      putaran lencana selisih di web (2026-09-03)
 - [x] ~~**Enum status dibandingkan sebagai teks**~~ — BERSIH dua arah, lihat
       entri di atas. 156 perbandingan / 41 nilai diadu dengan 297 baris
       kontrak server; artefaknya tautan mekanis yang selama ini tak ada

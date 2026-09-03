@@ -5,6 +5,127 @@ export const STOK_MENIPIS_THRESHOLD = 0.15;
 export const DEFAULT_PB1_RATE = 10;
 
 /**
+ * Sesudah berapa HARI sebuah selisih kas yang menunggu keputusan dianggap
+ * TERLAMBAT diputuskan.
+ *
+ * Tiga hari: cukup longgar untuk melewati akhir pekan atau pemilik yang sedang
+ * di luar, tapi masih jauh dari "sudah dua minggu dan tak ada yang tahu" —
+ * keadaan yang melahirkan angka ini (26 selisih menunggu, yang tertua 12 hari,
+ * tanpa satu pun tanda di luar halaman Operasional Cabang).
+ *
+ * Ditaruh di `shared` supaya server (yang menghitung `terlambat` di
+ * `GET /shift/selisih/ringkas`) dan web (yang menulis kalimatnya) tak bisa
+ * berbeda pendapat soal kapan sesuatu terlambat.
+ */
+export const SELISIH_TERLAMBAT_HARI = 3;
+
+/**
+ * Apakah sebuah selisih kas yang menunggu sudah TERLAMBAT diputuskan.
+ *
+ * Fungsi, bukan perbandingan yang ditulis ulang di tiap pemakai: server
+ * menghitung `terlambat` di `GET /shift/selisih/ringkas`, web menulis
+ * kalimatnya di kartu Beranda, dan dua tempat yang menurunkan "terlambat"
+ * sendiri-sendiri adalah dua tempat yang akan berselisih pendapat soal shift
+ * yang sama.
+ *
+ * `sekarangMs` disuntikkan, bukan diambil dari `Date.now()` di dalam, supaya
+ * ambangnya bisa diuji tanpa menunggu tiga hari.
+ *
+ * `null` (shift tanpa waktu tutup) = BUKAN terlambat: ia bahkan belum masuk
+ * antrean putusan.
+ */
+export function selisihTerlambat(ditutupPada: string | null, sekarangMs: number): boolean {
+  if (!ditutupPada) return false;
+  const t = Date.parse(ditutupPada);
+  if (!Number.isFinite(t)) return false;
+  return sekarangMs - t > SELISIH_TERLAMBAT_HARI * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * ALASAN PENOLAKAN MASUK — satu rumah, sebab dua pihak mengucapkannya.
+ *
+ * Server melemparnya sebagai pesan HTTPException; web MEMBANDINGKANNYA untuk
+ * tahu kapan menawarkan tautan "Daftar". Kalimat yang diketik ulang di layar
+ * adalah kalimat yang akan bergeser sendiri — dan yang bergeser diam-diam
+ * bukan tulisannya, melainkan tautannya: ia berhenti muncul, tanpa satu uji
+ * pun berubah warna. `LoginPage` sudah punya satu contoh cara itu gagal
+ * (`msg.toLowerCase().includes("belum diverifikasi")`, mengendus kalimat yang
+ * tinggal di berkas lain).
+ *
+ * KEEMPATNYA 401. Yang membedakannya kalimatnya, bukan kontraknya.
+ */
+/**
+ * SEBAB PENOLAKAN MASUK — kode yang bisa dibaca MESIN, berpasangan dengan
+ * `PESAN_LOGIN` di bawah.
+ *
+ * Kalimatnya untuk manusia; kode ini untuk klien yang harus BERCABANG. Aturan
+ * itu sudah tertulis di dua tempat lain di repo ini dengan alasan yang sama
+ * persis — `PenjualanGagal.sebab` ("Teks pesan tak boleh jadi dasar keputusan
+ * itu — ia berubah kapan saja dan tak bisa diuji") dan `ApiError.data.kode` di
+ * `lib/api.ts` — jadi pintu keempat yang butuh percabangan tak perlu menemukan
+ * ulang caranya.
+ *
+ * Yang bercabang atasnya hari ini: layar masuk menawarkan tautan "Daftar"
+ * hanya pada `email_tak_dikenal`. Tanpa kode ini ia harus MEMBANDINGKAN
+ * kalimat — dan kalimat yang bergeser sedikit membuat tautannya diam-diam
+ * berhenti muncul, tanpa satu uji pun merah. Aplikasi ponsel tak punya akses
+ * ke `PESAN_LOGIN` sama sekali (repo lain), jadi bagi ia kode ini satu-satunya
+ * cara ikut bercabang tanpa menyalin kalimat lintas repo.
+ *
+ * Kosakatanya sengaja SAMA dengan yang sudah dipakai `catatTakDicoba` di
+ * `/forgot-password` (`email_tak_dikenal`, `akun_terhapus`, `akun_nonaktif`) —
+ * keadaan yang sama tak perlu dua nama, walau salurannya berbeda (yang satu
+ * log internal, yang satu badan respons).
+ */
+export const SEBAB_LOGIN = {
+  takTerdaftar: "email_tak_dikenal",
+  terhapus: "akun_terhapus",
+  nonaktif: "akun_nonaktif",
+  passwordSalah: "password_salah",
+} as const;
+
+export type SebabLogin = (typeof SEBAB_LOGIN)[keyof typeof SEBAB_LOGIN];
+
+export const PESAN_LOGIN = {
+  /**
+   * Tak ada baris `users` untuk alamat ini. Dua sebab nyata di sistem ini, dan
+   * keduanya berujung pada tindakan yang SAMA (daftar): (1) diundang tapi
+   * belum pernah mendaftar — `POST /karyawan/undang` hanya menulis baris
+   * `invitations`, akunnya baru lahir saat orangnya mendaftar sendiri;
+   * (2) akun yang menghapus dirinya sendiri — `POST /onboarding/hapus-akun`
+   * mengganti nama emailnya jadi `deleted:<id>:<email>`, jadi alamat aslinya
+   * memang bebas dipakai ulang.
+   *
+   * SENGAJA TIDAK menyebut undangannya. "Anda punya undangan dari PT X" akan
+   * membocorkan siapa bekerja di mana kepada siapa pun yang bisa mengetik
+   * alamat email — satu tingkat lebih jauh dari yang diminta pemilik, dan
+   * bocorannya milik orang lain, bukan miliknya.
+   */
+  takTerdaftar: "Email tidak terdaftar — periksa ejaannya, atau daftar dulu",
+  /**
+   * Tombstone `users.deletedAt` — DAN ia praktis tak pernah terbaca, sengaja
+   * disebut supaya tak ada yang mengira cabangnya menganggur karena lupa.
+   * Satu-satunya jalan yang menuliskannya (`POST /onboarding/hapus-akun`) ikut
+   * mengganti nama emailnya jadi `deleted:<id>:<email>`, jadi alamat aslinya
+   * jatuh ke `takTerdaftar` — dan itu jawaban yang BENAR: alamatnya memang
+   * bebas dipakai ulang. Terukur pada DB gerbang 2026-09-03: 2 baris
+   * tombstone, KEDUANYA sudah berganti nama. Cabangnya tetap ada sebagai
+   * jaring untuk tombstone yang lahir dari jalan lain (tangan, migrasi).
+   */
+  terhapus: "Akun ini sudah dihapus",
+  /**
+   * `users.is_active = false` — dimatikan owner/admin lewat PATCH karyawan,
+   * dan BISA dinyalakan lagi olehnya. Karena itu kalimatnya menyebut ke siapa
+   * harus mengadu: orang yang membacanya tak bisa memperbaikinya sendiri, dan
+   * dulu ia menerima "password salah" lalu mereset passwordnya berulang kali
+   * tanpa hasil — sebab passwordnya memang tak pernah salah.
+   */
+  nonaktif: "Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda",
+  /** Baris ada, akun hidup, bcrypt tak cocok. Jalan keluarnya /lupa-password. */
+  passwordSalah: "Password salah",
+} as const;
+
+/**
  * Panduan markup per jenis kategori (persen) — hanya panduan saat membuat
  * menu baru; menu yang sudah ada memakai `mult` tersimpan.
  */

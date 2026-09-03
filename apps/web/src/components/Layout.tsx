@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import type { KonfirmasiStatus, RingkasSelisihDto } from "@kakarut/shared";
+import { barisBelumSelesai } from "@kakarut/shared";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -136,19 +138,26 @@ export function Layout() {
   const qsPengadaan = `${scopePengadaan}${scopePengadaan ? "&" : "?"}per_page=500`;
   const { data: prodNav, error: prodGagal } = useQuery({
     queryKey: ["produksi-nav", scopePengadaan],
-    queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/produksi${qsPengadaan}`),
+    queryFn: () => api<{ rows: { faktur_id: string; status: KonfirmasiStatus }[] }>(`/produksi${qsPengadaan}`),
     enabled: lihatPengadaan,
     refetchInterval: 60_000,
   });
   const { data: beliNav, error: beliGagal } = useQuery({
     queryKey: ["pembelian-nav", scopePengadaan],
-    queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/pembelian${qsPengadaan}`),
+    queryFn: () => api<{ rows: { faktur_id: string; status: KonfirmasiStatus }[] }>(`/pembelian${qsPengadaan}`),
     enabled: lihatBeli,
     refetchInterval: 60_000,
   });
-  const BELUM_SELESAI = new Set(["rencana", "dikerjakan", "menunggu"]);
-  const hitungBelum = (rows?: { faktur_id: string; status: string }[]) =>
-    new Set((rows ?? []).filter((r) => BELUM_SELESAI.has(r.status)).map((r) => r.faktur_id)).size;
+  /*
+    Aturannya di `@kakarut/shared` (`barisBelumSelesai`), bukan di sini. Sampai
+    2026-09-03 himpunan ini ditulis TIGA kali — di berkas ini, di
+    `TimBerandaPage.tsx` byte-per-byte sama, dan di `TambahStokPage`. Bentuk
+    `new Set(...).size` DIPERTAHANKAN: ia menghitung FAKTUR, bukan baris, dan
+    sapuan `kueri-web.ts` mengenali pembantu satu-lompatan yang berakhir
+    `.size` — mengubahnya jadi bentuk lain membutakan penjaga itu.
+  */
+  const hitungBelum = (rows?: { faktur_id: string; status: KonfirmasiStatus }[]) =>
+    new Set((rows ?? []).filter((r) => barisBelumSelesai(r.status)).map((r) => r.faktur_id)).size;
   const produksiBelum = hitungBelum(prodNav?.rows);
   const beliBelum = hitungBelum(beliNav?.rows);
   // Faktur BELI PERLENGKAPAN yang masih aktif (menunggu dibeli / diproses) →
@@ -215,6 +224,29 @@ export function Layout() {
     refetchInterval: 30_000,
   });
   const mejaTerisi = (mejaNav ?? []).filter((r) => r.status === "isi").length;
+
+  /**
+   * Selisih kas yang menunggu keputusan — lencana "Operasional Cabang".
+   *
+   * Syaratnya SAMA PERSIS dengan syarat render tautannya di bawah
+   * (`isManajemen && penuh`), dan itu bukan pengulangan yang bisa dibuang:
+   * `74b9165` lahir dari lencana yang menembak pintu yang ia tahu tertutup —
+   * 211 galat 403 dalam 7 hari untuk lencana yang tak pernah dirender. Nilainya
+   * dihitung di sini, di atas `if (!auth) return null`, karena hook tak boleh
+   * dipanggil sesudah return awal.
+   *
+   * `/shift/*` digerbang owner/admin/kasir di server; kasir tak pernah melihat
+   * tautan ini, jadi tanpa `manajemenGuard` lencananya akan menembak untuk
+   * peran yang tak punya layarnya.
+   */
+  const penuhGuard = !divisi || divisi === "kantor";
+  const lihatSelisih = !!auth && !auth.user.is_super_admin && manajemenGuard && penuhGuard;
+  const { data: selisihNav, error: selisihGagal } = useQuery({
+    queryKey: ["shift-selisih", "ringkas"],
+    queryFn: () => api<RingkasSelisihDto>("/shift/selisih/ringkas"),
+    enabled: lihatSelisih,
+    refetchInterval: 60_000,
+  });
 
   if (!auth) return null;
 
@@ -629,8 +661,9 @@ export function Layout() {
                     Operasional
                   </div>
                   {penuh && (
-                    <NavLink to="/operasional" className={linkClass}>
-                      🕐 Operasional Cabang
+                    <NavLink to="/operasional" className={navFlex}>
+                      <span>🕐 Operasional Cabang</span>
+                      {badgeOranye(selisihNav?.menunggu ?? 0, selisihGagal, "nav-lencana-selisih")}
                     </NavLink>
                   )}
                   <NavLink to="/produksi" className={navFlex}>

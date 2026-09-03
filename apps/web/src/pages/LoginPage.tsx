@@ -6,6 +6,8 @@ import { useAuth } from "../context/AuthContext";
 import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
 import { PESAN_KIRIM_ULANG } from "../lib/pesan-verifikasi";
 import { NILAI_SESI_BERAKHIR, PARAM_SESI, PESAN_SESI_BERAKHIR } from "../lib/pesan-sesi";
+import { SEBAB_LOGIN } from "@kakarut/shared";
+import { ApiError } from "../lib/api";
 
 export function LoginPage() {
   const { login, masukTamu, kirimUlangVerifikasi } = useAuth();
@@ -16,6 +18,7 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sebabTolak, setSebabTolak] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tamuLoading, setTamuLoading] = useState<null | "owner" | "kasir">(null);
   // Bila login gagal karena email belum diverifikasi → tawarkan kirim ulang.
@@ -30,10 +33,29 @@ export function LoginPage() {
     return () => clearInterval(t);
   }, [email]);
   const [verifDevKode, setVerifDevUrl] = useState<string | null>(null);
+  /*
+   * ALASAN PENOLAKAN YANG PUNYA JALAN KELUAR HARUS MENUNJUKKANNYA.
+   *
+   * Sejak 2026-09-03 server menyebut alasannya (keputusan pemilik; lihat
+   * `PESAN_LOGIN` di `@kakarut/shared` dan catatan panjang di `POST /login`).
+   * "Email tidak terdaftar" adalah satu-satunya dari keempatnya yang bisa
+   * diselesaikan orangnya sendiri di layar ini juga — dan pembacanya yang
+   * paling sering adalah karyawan yang SUDAH diundang: undangan cuma menulis
+   * baris `invitations`, akunnya baru lahir saat ia mendaftar sendiri. Tanpa
+   * tautan di sebelah kalimatnya, ia menyimpulkan undangannya gagal.
+   *
+   * Yang dibandingkan KODE `sebab`, bukan kalimatnya. Kalimat yang bergeser
+   * sedikit di server akan membuat tautan ini berhenti muncul tanpa satu uji
+   * pun merah — bentuk kegagalan yang contohnya ada tepat di berkas ini juga
+   * (`belumVerif` mengendus kalimat dengan `includes`) dan yang sudah punya
+   * jawabannya di repo ini: `PenjualanGagal.sebab`, `ApiError.data.kode`.
+   */
+  const takTerdaftar = sebabTolak === SEBAB_LOGIN.takTerdaftar;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setSebabTolak(null);
     setBelumVerif(false);
     setVerifKirim("idle");
     setLoading(true);
@@ -43,6 +65,9 @@ export function LoginPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Gagal login";
       setError(msg);
+      setSebabTolak(
+        err instanceof ApiError && typeof err.data?.sebab === "string" ? err.data.sebab : null,
+      );
       setBelumVerif(msg.toLowerCase().includes("belum diverifikasi"));
     } finally {
       setLoading(false);
@@ -74,6 +99,7 @@ export function LoginPage() {
 
   async function cobaTamu(peran: "owner" | "kasir") {
     setError(null);
+    setSebabTolak(null);
     setTamuLoading(peran);
     try {
       await masukTamu(peran);
@@ -134,7 +160,19 @@ export function LoginPage() {
               placeholder="••••••••"
             />
           </div>
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+              {takTerdaftar && (
+                <Link
+                  to={`/daftar?email=${encodeURIComponent(email)}`}
+                  className="mt-1 block font-semibold underline"
+                >
+                  Daftar dengan email ini →
+                </Link>
+              )}
+            </div>
+          )}
           {belumVerif && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {verifKirim === "sent" ? (

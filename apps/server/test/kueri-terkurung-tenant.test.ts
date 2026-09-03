@@ -64,8 +64,8 @@ import { grafPanggilan } from "./util/panggilan";
  * baru di berkas yang sama menaikkan jumlahnya → merah, dan menagih keputusan.
  */
 const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
-  ["modules/produksi/routes.ts", { situs: 4, alasan:
-    "kunci `inArray` lahir dari baris yang SUDAH terkurung (`byId`, `rows`, `kirimMap`, `batchByProd`); sisanya menulis ke `productions.id` hasil select ber-`conds` yang memuat companyId. ENAM situs `.where(and(...conds))` KELUAR dari daftar ini sejak graf panggilan bisa membuktikannya: `conds` parameter `tahapSebagian`/`tahapSeluruhFaktur`, dan satu-satunya situs panggilnya (:1653) mengoper kondisi ber-`eq(productions.companyId, auth.company_id!)` — kelas P" }],
+  ["modules/produksi/routes.ts", { situs: 5, alasan:
+    "kunci `inArray` lahir dari baris yang SUDAH terkurung (`byId`, `rows`, `kirimMap`, `batchByProd`); sisanya menulis ke `productions.id` hasil select ber-`conds` yang memuat companyId. ENAM situs `.where(and(...conds))` KELUAR dari daftar ini sejak graf panggilan bisa membuktikannya: `conds` parameter `tahapSebagian`/`tahapSeluruhFaktur`, dan satu-satunya situs panggilnya (:1653) mengoper kondisi ber-`eq(productions.companyId, auth.company_id!)` — kelas P. SITUS KELIMA (2026-09-03): subkueri agregat `per_faktur` yang memberi makan medan `ringkas` memakai `.where(and(...conds))` yang SAMA PERSIS dengan kueri `total` dan kueri kunci halaman di handler yang sama — `conds` dirakit beberapa baris di atasnya dan memuat `eq(productions.companyId, auth.company_id!)`; kalau ia bocor, `total` dan daftarnya sudah bocor lebih dulu" }],
   ["modules/bahan/routes.ts", { situs: 9, alasan:
     "`id` diverifikasi `eq(ingredients.companyId, auth.company_id!)` lebih dulu di handler yang sama (mis. :638, :1062, :1663) yang membalas 404, lalu anak-anaknya (`ingredientSteps`, `ingredientComponents`, `ingredientSuppliers`, `menuComponents`) dibaca/dihapus lewat id yang sudah lolos itu. Empat situs baru: pembuktinya kueri lain, bukan panggilan bernama — dan kueri tetangga bukan verifikasi" }],
   ["modules/pesanan/routes.ts", { situs: 8, alasan:

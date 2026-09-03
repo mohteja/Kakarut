@@ -19,10 +19,14 @@ import { amatiProxy, pengamatanProxy, resetPengamatanProxy } from "../src/lib/pe
  */
 
 describe("nilaiProxy: setelan proxy versus lalu lintas nyata", () => {
-  const amatan = (total: number, denganXff: number, rantai = 1) => ({
+  // `terpendek` bawaannya = `rantai`: lalu lintas yang seragam, yang memang
+  // keadaan normal. Kasus di mana keduanya BERBEDA justru yang paling penting
+  // dijaga — lihat uji "rantai yang dipanjangkan penyerang" di bawah.
+  const amatan = (total: number, denganXff: number, rantai = 1, terpendek = rantai) => ({
     total,
     dengan_xff: denganXff,
     rantai_terpanjang: rantai,
+    rantai_terpendek: terpendek,
   });
 
   it("sampel kecil belum bercerita apa pun", () => {
@@ -46,6 +50,60 @@ describe("nilaiProxy: setelan proxy versus lalu lintas nyata", () => {
     expect(t?.kode).toBe("proxy_hops_terlalu_tinggi");
   });
 
+  /**
+   * KEADAAN PRODUCTION 2026-09-02, dan ketiga tuduhan lama BUTA padanya.
+   *
+   * Aplikasi berdiri di belakang CDN + reverse proxy (rantai 2 entri)
+   * sementara `TRUST_PROXY_HOPS` masih bawaan 1. `hops` bukan 0, XFF-nya ada,
+   * rantainya tidak lebih pendek — tak satu pun cabang lama memenuhi syarat.
+   * Yang tercatat di panel Log Galat: SELURUH alamat milik satu CDN, bukan
+   * satu pun pengunjung.
+   */
+  it("hops LEBIH RENDAH daripada rantai → alamat yang tercatat adalah proxy, bukan pengunjung", () => {
+    const t = nilaiProxy(1, amatan(500, 500, 2));
+    expect(t?.kode).toBe("proxy_hops_terlalu_rendah_dari_rantai");
+    // Rinciannya wajib menyebut angka yang benar, bukan cuma "salah setel":
+    // yang membaca panel ini harus tahu harus menyetel ke berapa.
+    expect(t?.rincian).toContain("Setel ke 2");
+    // Dan menyebut akibat yang paling mahal — jatah yang ditanggung bersama —
+    // bukan cuma soal log yang keliru.
+    expect(t?.rincian).toMatch(/pembatas laju|jatah/i);
+  });
+
+  it("rantai 3 → menyuruh setel ke 3, bukan angka tetap", () => {
+    expect(nilaiProxy(1, amatan(500, 500, 3))?.rincian).toContain("Setel ke 3");
+    expect(nilaiProxy(2, amatan(500, 500, 3))?.kode).toBe("proxy_hops_terlalu_rendah_dari_rantai");
+  });
+
+  /**
+   * RANTAI YANG DIPANJANGKAN PENYERANG TIDAK BOLEH MENAIKKAN SARANNYA.
+   *
+   * Siapa pun bisa mengirim `X-Forwarded-For` versinya sendiri, dan proxy di
+   * depan MENAMBAHKAN entri alih-alih menggantinya. Jadi maksimum panjang
+   * rantai dikendalikan peminta. Kalau saran `hops` diturunkan dari maksimum,
+   * satu permintaan dengan lima entri karangan cukup untuk membuat panel ini
+   * menyuruh pemiliknya menyetel angka yang membuat `ipKlien` memulangkan
+   * entri karangan itu — pembatas laju login dilewati dengan mengganti satu
+   * header, persis lubang yang ditulis di kepala `pengamatan-proxy.ts`.
+   *
+   * Dua proxy sungguhan, satu permintaan disuntik jadi tujuh entri:
+   */
+  it("saran `hops` tak bisa dinaikkan dengan menyuntik X-Forwarded-For", () => {
+    const t = nilaiProxy(1, amatan(500, 500, 7, 2));
+    expect(t?.kode).toBe("proxy_hops_terlalu_rendah_dari_rantai");
+    expect(t?.rincian, "sarannya dari rantai TERPENDEK, bukan yang disuntik").toContain(
+      "Setel ke 2",
+    );
+    expect(t?.rincian).not.toContain("Setel ke 7");
+  });
+
+  it("PASANGAN: sesudah disetel benar, suntikan pun tak membangunkan tuduhannya", () => {
+    // hops=2 dengan minimum 2 → setelannya memang benar; rantai 7 dari
+    // suntikan tak boleh membuat panel menuduh lagi (dan menyeret pemiliknya
+    // menaikkan angka lebih jauh).
+    expect(nilaiProxy(2, amatan(500, 500, 7, 2))).toBeNull();
+  });
+
   it("hops lebih panjang daripada rantai yang benar-benar datang", () => {
     const t = nilaiProxy(2, amatan(100, 100, 1));
     expect(t?.kode).toBe("proxy_hops_lebih_panjang_dari_rantai");
@@ -61,6 +119,13 @@ describe("nilaiProxy: setelan proxy versus lalu lintas nyata", () => {
     });
     it("hops=2 di belakang CDN + proxy", () => {
       expect(nilaiProxy(2, amatan(500, 500, 2))).toBeNull();
+    });
+    // PASANGAN untuk tuduhan baru: begitu pemilik menyetelnya ke panjang
+    // rantai yang benar, panelnya WAJIB diam lagi. Tuduhan yang tak bisa
+    // dipadamkan dengan memperbaiki sebabnya adalah tuduhan yang akan
+    // diabaikan.
+    it("hops=1 di belakang satu proxy — rantai 1, bukan 2", () => {
+      expect(nilaiProxy(1, amatan(500, 500, 1))).toBeNull();
     });
     it("campuran yang ambigu → tak menuduh", () => {
       // Separuh lewat proxy, separuh langsung (mis. pemantau internal). Tak
@@ -88,7 +153,12 @@ describe("amatiProxy: mencacah bentuk lalu lintas", () => {
     amatiProxy(null);
     amatiProxy("");
     amatiProxy("1.2.3.4");
-    expect(pengamatanProxy()).toEqual({ total: 4, dengan_xff: 1, rantai_terpanjang: 1 });
+    expect(pengamatanProxy()).toEqual({
+      total: 4,
+      dengan_xff: 1,
+      rantai_terpanjang: 1,
+      rantai_terpendek: 1,
+    });
   });
 
   it("panjang rantai dihitung per-entri, bukan per-koma", () => {
@@ -102,6 +172,22 @@ describe("amatiProxy: mencacah bentuk lalu lintas", () => {
     amatiProxy("1.1.1.1, 2.2.2.2, 3.3.3.3");
     amatiProxy("9.9.9.9");
     expect(pengamatanProxy().rantai_terpanjang).toBe(3);
+  });
+
+  it("dan rantai TERPENDEK, yang tak bisa dipendekkan dari luar", () => {
+    // Nol berarti "belum ada rantai yang teramati" — bukan "rantai kosong".
+    // Tanpa pembedaan itu, minimum akan terkunci di 0 selamanya dan saran
+    // `hops` tak pernah muncul.
+    expect(pengamatanProxy().rantai_terpendek).toBe(0);
+    amatiProxy("1.1.1.1, 2.2.2.2, 3.3.3.3");
+    expect(pengamatanProxy().rantai_terpendek).toBe(3);
+    amatiProxy("1.1.1.1, 2.2.2.2");
+    expect(pengamatanProxy().rantai_terpendek).toBe(2);
+    // Rantai yang lebih panjang tak menaikkannya — inilah yang membuat saran
+    // `hops` kebal terhadap XFF suntikan.
+    amatiProxy("a, b, c, d, e, f, g");
+    expect(pengamatanProxy().rantai_terpendek).toBe(2);
+    expect(pengamatanProxy().rantai_terpanjang).toBe(7);
   });
 });
 

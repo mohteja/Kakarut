@@ -64,6 +64,13 @@ const BELUM_TAYANG = new Set([
   // bukan rilis
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",
+  // belum di-merge — pemilik repo meminta putaran ini berhenti di cabang kerja
+  // sampai ia minta rilis. Stempelnya dipasang dan baris ini dihapus saat
+  // merge ke `production` terjadi.
+  "## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing",
+  "## `GET /shift/selisih/ringkas` — jumlah antrean putusan tanpa menarik daftarnya",
+  "## `GET /produksi` & `/pembelian` memulangkan `ringkas` — antrean pengadaan tanpa menghitung sendiri",
+  "## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

@@ -27,7 +27,12 @@ import {
   btnSecondary,
   inputClass,
 } from "../../components/ui";
-import { labelCabang, useBranch } from "../../context/BranchContext";
+import {
+  bolehJadiLokasiMenu,
+  labelCabang,
+  opsiLokasiMenu,
+  useBranch,
+} from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
@@ -271,9 +276,12 @@ export function MenuFormPage() {
           .filter((k) => k.ingredient_id && angkaDari(k.qty) > 0)
           .map((k) => ({ ingredient_id: k.ingredient_id, qty: angkaDari(k.qty) })),
         // hanya cabang store (POS) yang jadi lokasi menu — buang id non-store
-        // (mis. central kitchen dari data lama) agar simpan tak ditolak server
+        // (mis. central kitchen dari data lama) agar simpan tak ditolak server.
+        // `bolehJadiLokasiMenu`, BUKAN `opsiLokasiMenu`: menyaring `is_active`
+        // di sini akan membuang cabang store yang sedang dinonaktifkan sementara
+        // dan diam-diam melebarkan menu ini ke semua cabang.
         branch_ids: branchIds.filter((bid) =>
-          cabang.some((b) => b.id === bid && b.tipe === "store"),
+          cabang.some((b) => b.id === bid && bolehJadiLokasiMenu(b)),
         ),
       };
       return id
@@ -494,7 +502,7 @@ export function MenuFormPage() {
 
         {/* Pembatasan lokasi hanya relevan di mode Pro (multi-lokasi).
             Kantor bukan lokasi penjualan → tidak ditawarkan. */}
-        {isPro && cabang.some((b) => b.is_active && b.tipe === "store") && (
+        {isPro && opsiLokasiMenu(cabang).length > 0 && (
           <Card className="space-y-3 p-4">
             <div className="text-sm font-semibold text-stone-700">📍 Tampil di lokasi</div>
             <label className="flex items-center gap-2 text-sm">
@@ -504,9 +512,7 @@ export function MenuFormPage() {
                 onChange={(e) => {
                   if (e.target.checked) setBranchIds([]);
                   else
-                    setBranchIds(
-                      cabang.filter((b) => b.is_active && b.tipe === "store").map((b) => b.id),
-                    );
+                    setBranchIds(opsiLokasiMenu(cabang).map((b) => b.id));
                 }}
               />
               <span className="font-medium">Semua lokasi</span>
@@ -514,24 +520,22 @@ export function MenuFormPage() {
             </label>
             {branchIds.length > 0 && (
               <div className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
-                {cabang
-                  .filter((b) => b.is_active && b.tipe === "store")
-                  .map((b) => (
-                    <label key={b.id} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={branchIds.includes(b.id)}
-                        onChange={(e) =>
-                          setBranchIds(
-                            e.target.checked
-                              ? [...branchIds, b.id]
-                              : branchIds.filter((x) => x !== b.id),
-                          )
-                        }
-                      />
-                      {labelCabang(b)}
-                    </label>
-                  ))}
+                {opsiLokasiMenu(cabang).map((b) => (
+                  <label key={b.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={branchIds.includes(b.id)}
+                      onChange={(e) =>
+                        setBranchIds(
+                          e.target.checked
+                            ? [...branchIds, b.id]
+                            : branchIds.filter((x) => x !== b.id),
+                        )
+                      }
+                    />
+                    {labelCabang(b)}
+                  </label>
+                ))}
               </div>
             )}
             <p className="text-xs text-stone-500">

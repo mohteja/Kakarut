@@ -35,6 +35,9 @@ export function FakturDetailModal({
   endpoint,
   onClose,
   onUbahTahap,
+  onDokumen,
+  onLaporanHarga,
+  onDokumenKirim,
 }: {
   grup: FakturGroup;
   tipe: JenisPengadaan;
@@ -42,6 +45,19 @@ export function FakturDetailModal({
   onClose: () => void;
   /** ganti tahap langsung dari detail (parent membuka halaman Ubah Tahap) */
   onUbahTahap?: (ke: TahapTujuan) => void;
+  /*
+   * TIGA AKSI YANG PINDAH KE SINI saat riwayatnya jadi tabel (2026-09-03).
+   * Di kartu lama semuanya berdiri berdampingan; di baris tabel hanya yang
+   * dipakai tiap hari yang tinggal (Ubah Tahap, Kirim). Ketiganya WAJIB punya
+   * rumah baru — tombol yang dibuang dari baris tanpa tempat lain adalah
+   * kemampuan yang hilang diam-diam.
+   *
+   * `undefined` = tak berlaku untuk faktur ini (parent yang menilainya, dengan
+   * `sinyalFaktur` yang sama dengan tabelnya).
+   */
+  onDokumen?: () => void;
+  onLaporanHarga?: { buka: () => void; sudahSelesai: boolean };
+  onDokumenKirim?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"lihat" | "hapus">("lihat");
@@ -390,6 +406,43 @@ export function FakturDetailModal({
                   </select>
                 );
               })()}
+            {/* Dokumen belanja/RAB — tersedia sejak RAB agar finance bisa
+                meninjau anggaran, jadi pegangan pembelanja saat diproses, lalu
+                arsip setelah masuk stok. Bisa dicetak & diunduh. */}
+            {onDokumen && (
+              <button
+                onClick={onDokumen}
+                className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-700"
+              >
+                📄{" "}
+                {grup.rows.every((r) => r.status === "rencana" || r.status === "ditolak")
+                  ? "Dokumen RAB"
+                  : "Dokumen belanja"}
+              </button>
+            )}
+            {/* LAPORAN HARGA: catat harga riil setelah barang diterima →
+                faktur jadi "Selesai". */}
+            {onLaporanHarga && (
+              <button
+                onClick={onLaporanHarga.buka}
+                className={`rounded-lg border px-4 py-2 text-sm font-semibold ${
+                  onLaporanHarga.sudahSelesai
+                    ? "border-stone-300 bg-white text-stone-700 hover:border-emerald-400"
+                    : "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                }`}
+              >
+                💰 {onLaporanHarga.sudahSelesai ? "Ubah Laporan Harga" : "Laporan Harga"}
+              </button>
+            )}
+            {/* surat jalan barang yang sedang dalam perjalanan */}
+            {onDokumenKirim && (
+              <button
+                onClick={onDokumenKirim}
+                className="rounded-lg border border-purple-300 bg-white px-4 py-2 text-sm font-semibold text-purple-700 hover:border-purple-500"
+              >
+                📄 Dokumen kirim
+              </button>
+            )}
             {/* Faktur dari permintaan → Batalkan (relasi permintaan); input
                 langsung → Hapus biasa. Keduanya ke Tempat Sampah (dpt dipulihkan). */}
             {dariPermintaan ? (

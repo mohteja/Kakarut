@@ -46,7 +46,15 @@ set base URL ke `https://<host-produksi>` lalu tambahkan path (mis.
   itu menggantikan yang lama agar sesi tetap hidup tanpa login ulang.
 - **Umur & pencabutan sesi (diukur §287 `verify-api.sh`, 2026-09-02):** token
   berumur `JWT_EXPIRES_IN` (bawaan **12 jam**, tanpa refresh token); yang
-  kedaluwarsa dijawab **401** `"Token tidak valid atau kedaluwarsa"`. Karyawan
+  kedaluwarsa dijawab **401** `"Sesi kedaluwarsa — silakan masuk kembali"`,
+  sedangkan token yang **bukan terbitan server ini** (tanda tangan asing,
+  `jwt malformed`, algoritma di luar HS256) dijawab **401** `"Token tidak
+  valid"` — dua kalimat, sebab dua peristiwa yang berbeda: yang pertama rutin
+  dan dialami setiap orang tiap 12 jam, yang kedua tak pernah wajar. Sampai
+  2026-09-03 keduanya berbunyi sama (`"Token tidak valid atau kedaluwarsa"`)
+  sehingga percobaan pemalsuan tak dapat dibedakan dari sesi yang habis di
+  panel galat. Klien tak perlu menyesuaikan diri: keduanya tetap 401 dan
+  ditangani jalur "sesi berakhir" yang sama. Karyawan
   yang **dinonaktifkan/diarsipkan** admin kehilangan sesinya **seketika** pada
   permintaan berikutnya (401 `"Sesi tidak berlaku lagi — silakan masuk kembali"`
   atau `"Akses ke perusahaan ini sudah tidak berlaku"`), tanpa menunggu token
@@ -185,7 +193,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 >
 > **PRASYARAT PRODUKSI — SMTP wajib aktif.** `register`, `verify-email`, `resend-verification`, `forgot-password`, dan undangan karyawan semuanya bergantung pada email **benar-benar terkirim**. Field bantuan `dev_verify_kode` / `dev_verify_url` / `dev_reset_url` **hanya** muncul saat email server BELUM dikonfigurasi **dan** `NODE_ENV !== "production"` — di produksi tidak pernah dibocorkan. Tanpa SMTP aktif di produksi, alur daftar/verifikasi/reset **mati total** (server tetap balas `200` netral demi anti-enumerasi, tapi tak ada email masuk). Super-admin WAJIB mengatur SMTP di panel sistem + memastikan tes kirim berhasil sebelum go-live.
 
-- `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: sesi (`company` bisa null bila user belum punya perusahaan) — error: **401** email/password salah **atau akun dihapus/nonaktif**; **403** `{ error: "Email belum diverifikasi. …" }` bila email **belum diverifikasi** (dicek SETELAH password benar; super-admin dikecualikan). Klien: tangani `403` → tampilkan layar "verifikasi email" dengan tombol **kirim ulang** (panggil `/resend-verification`). **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — user tanpa perusahaan login sukses dgn `company: null`; 403 di login kini KHUSUS email belum terverifikasi.)**
+- `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: sesi (`company` bisa null bila user belum punya perusahaan) — error: **401** dengan **empat kalimat yang berbeda** (2026-09-03; sebelumnya keempatnya dijawab satu kalimat gabungan "Email atau password salah"): `"Email tidak terdaftar — periksa ejaannya, atau daftar dulu"` · `"Akun ini sudah dihapus"` · `"Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda"` · `"Password salah"`. **Statusnya tetap 401 pada keempatnya** — yang berubah kalimatnya, bukan kontraknya; klien yang bercabang atas status TIDAK perlu berubah, klien yang menampilkan `error` apa adanya otomatis ikut membaik. Badan 401-nya juga membawa **`sebab`** — kode untuk mesin, berpasangan satu-satu dengan kalimatnya: `email_tak_dikenal` · `akun_terhapus` · `akun_nonaktif` · `password_salah`. **Klien yang harus BERCABANG wajib memakai `sebab`, bukan mencocokkan teks** — kalimatnya bisa diperbaiki kapan saja dan pencocokan teks akan berhenti cocok tanpa gejala. Rumah keduanya `PESAN_LOGIN` & `SEBAB_LOGIN` di `packages/shared/src/constants.ts` — **bukan** di Lampiran A, yang hanya menyalin `types.ts`; karena itu keempatnya dikutip lengkap di sini. **KEPUTUSAN SADAR PEMILIK REPO, bukan kelalaian:** ini membuka **enumerasi akun** — dari luar orang bisa memanen alamat mana yang punya akun. Biayanya disampaikan lebih dulu dan pilihannya tetap; penahannya kini hanya batas laju login (10 per 5 menit per IP+email). `POST /auth/forgot-password` **tidak ikut berubah** dan tetap netral. Jangan "merapikan" keempatnya kembali jadi satu tanpa menanyakan pemilik. Saran klien: pada `"Email tidak terdaftar…"` tawarkan tautan **Daftar** yang membawa emailnya (web melakukannya lewat `/daftar?email=`), pada `"…dinonaktifkan…"` jangan tawarkan reset password; **403** `{ error: "Email belum diverifikasi. …" }` bila email **belum diverifikasi** (dicek SETELAH password benar; super-admin dikecualikan). Klien: tangani `403` → tampilkan layar "verifikasi email" dengan tombol **kirim ulang** (panggil `/resend-verification`). **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — user tanpa perusahaan login sukses dgn `company: null`; 403 di login kini KHUSUS email belum terverifikasi.)**
 - `POST /api/auth/register` — [public] — req: `{ nama, email (email valid, lowercase), password (min 8) }` — res: **200** `{ ok: true, message, retry_after_detik, dev_verify_kode?, dev_verify_url? }` — **TANPA sesi** (tidak auto-login) untuk email baru. **SATU pengecualian (2026-09-02):** bila email itu milik akun yang **sudah terverifikasi** DAN `password`-nya **cocok**, balasannya adalah **sesi login** (bentuk sama dengan `POST /auth/login`) ditambah `sudah_aktif: true` — klien wajib memeriksa `token` dan langsung memasukkan pengguna, jangan diarahkan ke layar kode. Yang dibocorkan pengecualian ini TEPAT SAMA dengan yang dibocorkan `/login` (keberadaan akun hanya terungkap kepada pemegang password yang benar); password yang salah tetap menerima balasan netral yang identik dengan email baru. Akun yang **belum** terverifikasi tidak pernah diberi sesi dari sini walau passwordnya cocok — kodenya dikirim (ulang), verifikasi tetap wajib. Respons **selalu netral** (anti-enumerasi akun) di luar pengecualian itu: baik email baru maupun email yang sudah terdaftar mengembalikan `200` yang sama — **tak ada lagi `409`**. Untuk email baru, email berisi **KODE 6 ANGKA** (jalan utama) **dan** tautan verifikasi (untuk deep link mobile) — keduanya dari **satu penerbitan**: memakai salah satunya mematikan yang lain. `retry_after_detik` (tetap `120`) = jarak minimum sebelum kode berikutnya boleh diminta; nilainya SAMA untuk email terdaftar maupun tidak, jadi ia tak membocorkan apa pun — pakai untuk hitung mundur tombol "kirim ulang". `dev_verify_kode`/`dev_verify_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi. — error: **400** validasi. Setelah ini, arahkan user ke layar "masukkan kode".
 - `POST /api/auth/verify-email` — [public] — req: **`{ email, kode }` ATAU `{ token }`** — res: **sesi** `{ token, user, company, branch }` (auto-login begitu email terverifikasi) — error: **400** kode/token salah, kedaluwarsa, atau terpakai **atau** akun nonaktif.
   - **`{ email, kode }`** — `kode` = **6 angka** dari email. Dipakai web, dan bisa dipakai mobile bila lebih suka layar isian daripada deep link.
@@ -262,7 +270,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > (`/api/bahan/:id`). Badan request, query string, dan header `Authorization`
 > **tidak** disimpan. Retensi 30 hari / 50.000 baris terbaru.
 
-- `GET /api/admin/error-log` — query: `hari` (1–90, default 7), `status` (`4xx`|`5xx`; selain itu = semua), `q` (cari pada pesan/pola jalur) — res: `ErrorLogDto` (`{ hari, total, total_5xx, total_4xx, jumlah_kelompok, rows: ErrorLogKelompokRow[] }`; ringkasan dihitung atas seluruh rentang, tak ikut tersaring)
+- `GET /api/admin/error-log` — query: `hari` (1–90, default 7), `status` (`4xx`|`5xx`; selain itu = semua), `q` (cari pada pesan/pola jalur) — res: `ErrorLogDto` (`{ hari, total, total_5xx, total_4xx, jumlah_kelompok, rows: ErrorLogKelompokRow[] }`; **keempat** angka ringkasan — `total`, `total_5xx`, `total_4xx`, `jumlah_kelompok` — dihitung atas seluruh rentang dan TIDAK ikut tersaring; `rows` berlangit-langit **200 kelompok** dan pemotongannya diumumkan lewat header `X-Kakarut-Terpotong`)
 - `GET /api/admin/error-log/:sidik` — query: `hari` — res: `ErrorLogDetailDto` (`{ kelompok, kejadian: ErrorLogKejadianRow[] }`, maks 50 kejadian terbaru; `stack` hanya terisi untuk 5xx) — error: **404** sidik tak ada pada rentang itu
 - `DELETE /api/admin/error-log` — res: `{ ok, dihapus }` — buang SEMUA baris
 - `POST /api/admin/error-log/pangkas` — res: `{ ok, dihapus }` — jalankan retensi sekarang (biasanya lewat penjadwal tiap 6 jam)
@@ -659,7 +667,11 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   - **Kolam median hanya memuat lot yang harganya pernah dilihat manusia** (`productions.harga_tebakan = false`): harga diisi di faktur, dilaporkan lewat endpoint ini, atau direalisasi di `POST /{mod}/tahap`. Faktur yang dibuat **tanpa** `total_harga` memakai tebakan `qty × harga acuan saat itu`; bila tebakan ikut dihitung, harga acuan menyeret dirinya sendiri (acuan → tebakan → median → acuan) dan HPP seluruh menu hanyut naik tanpa ada yang mengubah harga jual.
 - `POST /api/pembelian/laporan-harga/:fakturId/dampak` — **[gate grup: owner/admin ATAU `tim` di Central Kitchen — TANPA penyempitan tambahan]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `DampakLaporanHarga` `{ food_cost_maks, bahan: [{ingredient_id, nama, satuan, acuan_lama, acuan_baru, jumlah_menu_terdampak}], menu_lewat_ambang: [{menu_id, nama, food_cost_lama, food_cost_baru}] }` — error: **400**, **404**. Pratinjau **tanpa menulis apa pun**: memakai fungsi hitung yang sama dengan endpoint di atas, jadi angkanya identik dengan hasil bila disimpan. POST (bukan GET) karena dampak bergantung pada angka yang sedang diketik user. `menu_lewat_ambang` hanya memuat menu aktif yang **menyeberang** ambang food cost (bukan yang sudah di atas ambang sejak awal).
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
-- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `harga_tebakan` (bool — `total_harga` masih tebakan, belum pernah dilihat manusia: estimasi RAB / belanja otomatis / hasil skala saat realisasi melebihi rencana; baris bertanda ini dikecualikan dari median harga acuan), `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang; juga `diterima_oleh` (nama penerima, dari `confirmed_by`) + `diterima_pada` (`confirmed_at`) — untuk barang beralamat cabang keduanya HANYA bisa terisi lewat tombol Terima di `/api/penerimaan`, jadi kosongnya berarti barang itu memang belum diterima siapa pun). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
+- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran, ringkas }` (tiap row memuat `harga_tebakan` (bool — `total_harga` masih tebakan, belum pernah dilihat manusia: estimasi RAB / belanja otomatis / hasil skala saat realisasi melebihi rencana; baris bertanda ini dikecualikan dari median harga acuan), `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang; juga `diterima_oleh` (nama penerima, dari `confirmed_by`) + `diterima_pada` (`confirmed_at`) — untuk barang beralamat cabang keduanya HANYA bisa terisi lewat tombol Terima di `/api/penerimaan`, jadi kosongnya berarti barang itu memang belum diterima siapa pun). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
+  - **`ringkas: RingkasPengadaan`** — `{ harus_dikerjakan, selesai, ditolak, belum_sampai }`, tiap satu `{ faktur: int, bahan: int }`. Dihitung SERVER atas populasi yang sama dengan `total` (perusahaan, cabang, tipe, rentang tanggal, saringan divisi), **bukan** atas `rows`. Sumber ubin ringkasan di atas tabel riwayat.
+    - Klasifikasinya per FAKTUR (dikelompokkan lebih dulu), sejajar dengan lencana nav yang juga menghitung faktur: **harus dikerjakan** = punya baris ber-status `rencana`/`dikerjakan`/`menunggu`; **selesai** = tak punya baris begitu dan bukan faktur yang seluruhnya `ditolak`; **ditolak** = seluruh barisnya `ditolak`. Ketiganya saling lepas, jadi `harus + selesai + ditolak == total`.
+    - **`belum_sampai`** = bagian dari `selesai` yang barangnya belum sampai: baris `menunggu` beralamat cabang (belum berangkat atau sedang di jalan), atau baris `dikonfirmasi` ber-`untuk_branch_id` (hasil produksi yang sudah masuk stok CK tapi belum di-`kirim-hasil`). Keduanya berbunyi "beres" di papan sementara barangnya tak bisa dipakai siapa pun.
+    - Kenapa server, bukan klien: daftarnya berhalaman 20 dan diurutkan "belum selesai dulu". Terukur 2026-09-03 — `/produksi` bertotal **61** faktur, halaman pertamanya memuat **20** faktur yang **kedua puluhnya** belum selesai. Ringkasan yang dijumlahkan dari `rows` karena itu akan selalu berbunyi "0 selesai" sampai halaman terakhir.
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
 - `DELETE /api/{mod}/faktur/:key` — soft delete → Tempat Sampah (tanpa password) — res: `{ ok, jumlah_baris }` — error: **404**
 
@@ -1212,6 +1224,10 @@ lahir sebagai pekerjaan baru yang belum tersentuh.
 - `POST /api/shift/kunci-hitungan` — **[cashier]** — query: `branch_id?` — req: `{ uang_fisik: number(≥0) }` — res: `{ uang_fisik, kas_sistem, selisih }` — error: **400** tak ada shift terbuka, **409** hitungan sudah dikunci dengan nominal LAIN. **Ini "reveal"-nya**: `kas_sistem` & `selisih` dibuka di sini, setelah nominal fisik terkunci. Nominal yang **sama** dikirim ulang tetap **200** (retry jaringan bukan kecurangan). Respons 409 tetap membawa `uang_fisik`/`kas_sistem`/`selisih` milik penguncian pertama, di samping `error`.
 - `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik?: number(≥0)|null, catatan?|null, selisih_alasan?|null (max300) }` — `selisih_alasan` diisi `selisih_alasan?.trim() || catatan?.trim() || null`, hanya saat `selisih ≠ 0` — res: `Shift` — error: **400** tak ada shift terbuka / tak ada nominal (belum dikunci & `uang_fisik` tak dikirim), **409** `uang_fisik` berbeda dari yang sudah dikunci. Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan. Belum mengunci → wajib diisi (jalur satu langkah untuk klien yang membutakan di UI saja). Selisih (|selisih| > 0,005) → `status_selisih: "menunggu"`; uang PAS → `status_selisih: "pas"` (tak butuh persetujuan). `selisih_alasan` diisi dari field itu, atau dari `catatan` bila tak dikirim (klien lama hanya punya satu kolom catatan).
 - `GET /api/shift/selisih` — **[owner/admin]** — query: `status?: "pas"|"menunggu"|"disetujui"|"ditolak"` (default `menunggu`), `branch_id?` — res: `SelisihKasRow[]` (maks 50, urut tutup terbaru). Sumber badge "perlu ACC". Sengaja terpisah dari `/pantau`: selisih yang menunggu bisa berasal dari shift kemarin di cabang yang hari ini belum buka.
+- `GET /api/shift/selisih/ringkas` — **[owner/admin]** — tanpa query — res: `RingkasSelisihDto` `{ menunggu: int, terlambat: int, tertua_ditutup_pada: string|null, terpotong: bool }`. **Sumber lencana nav "Operasional Cabang" + kartu Beranda** — ada supaya antrean putusan bisa DIKETAHUI tanpa membuka halamannya; sebelumnya satu-satunya sumbernya daftar penuh di atas, yang hanya ditarik oleh halaman Operasional sendiri.
+  - `menunggu` = hasil saringan PENUH, **tidak** dipotong 50 seperti daftarnya — lencana yang berhenti di 50 mengatakan "tinggal 50" pada antrean yang lebih panjang.
+  - `terlambat` = bagian dari `menunggu` yang ditutup lebih lama dari `SELISIH_TERLAMBAT_HARI` (**3**, di `@kakarut/shared`); aturannya `selisihTerlambat()` yang sama dipakai server & web.
+  - `terpotong` = kueri menyentuh langit-langit `AMBIL_SELISIH` (200 shift tertutup terbaru), jadi `menunggu` pun bisa KURANG dari sebenarnya. Memakai perhitungan (`antreanSelisih`) yang SAMA dengan daftarnya — aturan "menunggu" diturunkan dari selisih yang hidup, tak bisa jadi `count(*)` di SQL.
 - `POST /api/shift/:id/selisih/putuskan` — **[owner/admin]** — req: `{ status: "disetujui"|"ditolak", alasan_tolak?|null (max300) }` — res: `Shift` — error: **400** (shift tak punya selisih; menolak tanpa `alasan_tolak`), **404**, **409** sudah pernah diputuskan (pola sama dengan `POST /pengajuan/:id/putuskan`). `selisih_disetujui_oleh`/`selisih_diputus_pada` terisi pada **kedua** putusan — namanya warisan kolom DB, maknanya **pemutus**, bukan "yang menyetujui". Mencatat KEPUTUSAN saja — `uang_fisik` & `kas_sistem` adalah fakta yang sudah terjadi dan tak pernah diubah; **menolak tidak membuka kembali shift**, ia penanda untuk ditindaklanjuti di luar aplikasi. Kasir **tak bisa** memutuskan selisihnya sendiri (**403** dari guard peran).
 
 > ### ⚠️ Kenapa hitung buta
@@ -1553,6 +1569,17 @@ Laporan:
   belum diverifikasi (tampilkan layar verifikasi + tombol kirim ulang); sukses →
   simpan `token` di secure storage → set header `Authorization: Bearer <token>`
   di semua request → `GET /api/auth/me` saat buka app untuk validasi sesi.
+- **`401` dari login kini punya kalimat yang berbeda-beda (2026-09-03) —
+  TAMPILKAN `error` apa adanya, jangan menimpanya dengan kalimat sendiri; dan
+  bila mau bercabang (mis. menawarkan layar Daftar), bercabanglah atas
+  `sebab`, bukan atas teksnya.**
+  Sebelumnya keempat sebabnya (email tak terdaftar / akun dihapus / akun
+  dinonaktifkan / password salah) dijawab satu kalimat gabungan, jadi klien
+  yang menulis kalimatnya sendiri tidak kehilangan apa pun. Sekarang ia
+  kehilangan seluruh isinya — termasuk kasus yang paling mahal: karyawan yang
+  akunnya **dinonaktifkan** admin dulu membaca "password salah" dan mereset
+  passwordnya berulang kali padahal passwordnya tak pernah salah. Statusnya
+  tetap `401`, jadi tak ada percabangan yang perlu diubah.
 - **Segarkan sesi dari `/api/auth/me`, jangan percaya sesi tersimpan.** Peran &
   cabang karyawan bisa diubah admin **saat sesinya berjalan**; token lama tetap
   sah (server membaca ulang keanggotaan tiap request), jadi satu-satunya yang
@@ -1840,7 +1867,16 @@ export interface ErrorLogDto {
   total_5xx: number;
   /** kejadian 4xx — penolakan (validasi/izin/tak ditemukan/rate limit) */
   total_4xx: number;
-  /** jumlah kelompok berbeda pada hasil yang disaring */
+  /**
+   * Jumlah kelompok BERBEDA dalam rentang `hari` — dihitung SQL atas populasi
+   * penuh, sengaja TANPA saringan status/pencarian, sejajar dengan ketiga
+   * medan `total*` di atasnya.
+   *
+   * Sampai 2026-09-03 ia diturunkan dari `rows.length`, jadi ia ikut menyusut
+   * saat tab disaring DAN tercekik di langit-langit daftar (200) tanpa satu
+   * penanda pun. `rows` sendiri tetap berlangit-langit; pemotongannya diumumkan
+   * lewat header `X-Kakarut-Terpotong`, bukan lewat medan ini.
+   */
   jumlah_kelompok: number;
   rows: ErrorLogKelompokRow[];
 }
@@ -3734,6 +3770,63 @@ export interface SelisihKasRow {
   selisih: number;
   catatan: string | null;
   status_selisih: StatusSelisih;
+}
+
+/**
+ * Ringkasan antrean putusan selisih kas — `GET /shift/selisih/ringkas`.
+ *
+ * Ada supaya antrean ini bisa DIKETAHUI tanpa membukanya. Sebelum ini
+ * satu-satunya sumbernya daftar penuh, jadi lencana nav atau kartu beranda
+ * berarti menarik seluruh baris beserta nominal kasnya ke SETIAP halaman —
+ * dan angkanya tetap tercekik `BATAS_SELISIH`.
+ */
+/** Satu pasang angka ringkasan: berapa FAKTUR, dan berapa BAHAN di dalamnya. */
+export interface PasanganHitung {
+  faktur: number;
+  bahan: number;
+}
+
+/**
+ * Ringkasan antrean pengadaan atas SELURUH populasi tersaring — bukan halaman
+ * yang sedang tampil.
+ *
+ * Kenapa itu ditekankan: daftarnya berhalaman 20 dan servernya mengurutkan
+ * faktur yang BELUM selesai lebih dulu. Terukur 2026-09-03 pada DB gerbang,
+ * `/produksi` dengan `total` 61: halaman pertama memuat 20 faktur dan
+ * KEDUA PULUHNYA belum selesai. Ringkasan yang dihitung dari halaman berjalan
+ * karena itu tak sekadar meleset — ia akan selalu berbunyi "0 selesai" sampai
+ * orangnya menelusuri ke halaman terakhir.
+ */
+export interface RingkasPengadaan {
+  harus_dikerjakan: PasanganHitung;
+  selesai: PasanganHitung;
+  ditolak: PasanganHitung;
+  /** Bagian dari `selesai` yang barangnya belum sampai — lihat `barisBelumSampai`. */
+  belum_sampai: PasanganHitung;
+}
+
+export interface RingkasSelisihDto {
+  /**
+   * Jumlah yang menunggu keputusan, HASIL SARINGAN PENUH — tidak dipotong
+   * `BATAS_SELISIH` seperti daftarnya. Angka inilah yang benar untuk lencana.
+   */
+  menunggu: number;
+  /**
+   * Bagian dari `menunggu` yang ditutup lebih lama dari
+   * `SELISIH_TERLAMBAT_HARI`. Bukan sekadar hiasan: antrean yang menumpuk
+   * selama dua minggu terbaca sama saja dengan antrean kemarin bila cuma
+   * jumlahnya yang disebut.
+   */
+  terlambat: number;
+  /** Kapan yang PALING LAMA menunggu itu ditutup. `null` bila antreannya kosong. */
+  tertua_ditutup_pada: string | null;
+  /**
+   * `true` bila kuerinya sendiri menyentuh langit-langit `AMBIL_SELISIH`,
+   * jadi `menunggu` pun bisa KURANG dari yang sebenarnya. Sebab pemotongan
+   * yang tak terlihat dari angka mana pun — karena itu dikatakan, bukan
+   * dibiarkan disimpulkan.
+   */
+  terpotong: boolean;
 }
 
 /**

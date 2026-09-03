@@ -34,8 +34,32 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     payload = jwt.verify(header.slice(7), env.JWT_SECRET, {
       algorithms: ["HS256"],
     }) as AuthUser & { tv?: number };
-  } catch {
-    throw new HTTPException(401, { message: "Token tidak valid atau kedaluwarsa" });
+  } catch (e) {
+    // DUA SEBAB YANG MENUNTUT REAKSI BERLAWANAN, dan dulu keduanya menulis
+    // baris log yang IDENTIK — status, pesan, dan `sidikGalat` sama persis:
+    //
+    //   · `TokenExpiredError` — sesi 12 jam berakhir tepat waktu. Peristiwa
+    //     paling rutin di sistem ini: tanpa refresh token, SETIAP orang yang
+    //     memakai aplikasi dua kali sehari menabraknya. Terukur di panel galat
+    //     production 2026-09-02: 1.744 penolakan dalam 7 hari, nol 5xx.
+    //   · tanda tangan asing / `jwt malformed` / `alg` di luar HS256 —
+    //     seseorang menyodorkan token yang bukan terbitan server ini. Persis
+    //     kelas yang `algorithms: ["HS256"]` di atas dipasang untuk menolak.
+    //
+    // Versi lama menangkap `catch {` TANPA MENGIKAT galatnya, jadi kelas galat
+    // dari `jsonwebtoken` dibuang di titik ini dan tak pernah tiba di
+    // `catatGalat`. Akibatnya bisa dinyatakan sebagai fakta: satu percobaan
+    // pemalsuan tanda tangan tak dapat dibedakan dari 1.744 baris rutin itu —
+    // ia tenggelam di antaranya, di panel yang justru dibangun untuk
+    // menemukannya.
+    //
+    // Kata "kedaluwarsa" DIPERTAHANKAN di cabang pertama: §287 memaku bunyi
+    // itu, dan klien (web `?sesi=berakhir`, ponsel `kPesanSesiBerakhir`)
+    // mengucapkan kalimatnya sendiri, jadi teks ini dibaca mesin & operator.
+    if (e instanceof jwt.TokenExpiredError) {
+      throw new HTTPException(401, { message: "Sesi kedaluwarsa — silakan masuk kembali" });
+    }
+    throw new HTTPException(401, { message: "Token tidak valid" });
   }
 
   // Validasi sesi terhadap keadaan TERKINI di database — bukan hanya isi token.

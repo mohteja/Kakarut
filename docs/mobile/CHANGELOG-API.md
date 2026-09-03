@@ -25,6 +25,194 @@ tanpa akses repo server.
 
 ---
 
+## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)
+
+🟡 **PERLU DICEK** — status **tidak berubah** (tetap `401` pada keempat
+sebabnya). Yang berubah isi `error`. Klien yang menampilkan `error` apa adanya
+otomatis ikut membaik; klien yang **menimpanya** dengan kalimat sendiri kini
+membuang seluruh isinya.
+
+**Kenapa berubah.** Sampai 2026-09-03 keempat penolakan dijawab satu kalimat
+yang sama, `"Email atau password salah"`. Yang paling mahal dari itu: karyawan
+yang akunnya **dinonaktifkan** admin membaca "password salah", lalu mereset
+passwordnya berulang kali tanpa hasil — passwordnya memang tak pernah salah.
+
+```
+POST /api/auth/login   → 401  { "error": "<kalimatnya>", "sebab": "<kodenya>" }
+```
+
+| keadaan | `sebab` (untuk mesin) | `error` (untuk orang) |
+| --- | --- | --- |
+| tak ada akun untuk alamat itu | `email_tak_dikenal` | `Email tidak terdaftar — periksa ejaannya, atau daftar dulu` |
+| akun tombstone (`deleted_at`) | `akun_terhapus` | `Akun ini sudah dihapus` |
+| akun dinonaktifkan owner/admin | `akun_nonaktif` | `Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda` |
+| akun hidup, password tak cocok | `password_salah` | `Password salah` |
+
+**`sebab` ikut di badan yang sama, dan ITU yang dipakai untuk bercabang.**
+Bentuknya sama dengan `sebab` yang sudah dikenal aplikasi ini dari
+`POST /penjualan` dan `POST /sync`. Kalimatnya boleh — dan akan — diperbaiki;
+kodenya tidak berubah tanpa entri changelog tersendiri. Aplikasi ponsel ada di
+repo lain dan tak bisa membaca `PESAN_LOGIN`, jadi **mencocokkan teks di sini
+adalah cara paling sunyi kehilangan percabangan**: kalimatnya bergeser sedikit,
+cabangnya berhenti jalan, dan tak ada yang merah.
+
+Bunyi kalimatnya hidup di satu tempat, `PESAN_LOGIN` (berpasangan dengan
+`SEBAB_LOGIN`) di `packages/shared/src/constants.ts` — **tidak** ikut Lampiran A
+(lampiran itu hanya menyalin `types.ts`), jadi tabel di atas acuannya.
+
+**Yang perlu dicek di aplikasi ponsel:**
+
+- Layar masuk **menampilkan `error` dari server**, bukan kalimat tetap seperti
+  "Email atau password salah" / "Gagal masuk". Ini satu-satunya perubahan yang
+  benar-benar dituntut entri ini. Diperiksa 2026-09-03 di `kakarut-mobile`:
+  `login_page.dart` sudah menyetel `_error = e.message` dan merendernya apa
+  adanya, jadi **tak ada perubahan kode yang wajib** — entri ini menjaga agar
+  ia tetap begitu.
+- Pada `sebab == "email_tak_dikenal"`, tawarkan **daftar** dengan alamat yang
+  sudah terisi (layar Daftar sudah ada di tombol sebelahnya — yang kurang cuma
+  membawa alamatnya). Pembacanya yang paling sering adalah karyawan yang sudah **diundang**:
+  undangan hanya menulis baris `invitations`, akunnya baru lahir saat ia
+  mendaftar sendiri — tanpa jalan keluar di layar itu ia menyimpulkan
+  undangannya gagal. (Web melakukannya lewat `/daftar?email=`.)
+- Pada `sebab == "akun_nonaktif"`, **jangan** tawarkan reset password: jalan
+  keluarnya bukan password, dan menawarkannya persis yang membuat orang
+  berputar-putar.
+
+**KEPUTUSAN SADAR PEMILIK REPO, dan harganya ditulis di sini supaya tak ada
+yang "memperbaikinya" balik tanpa tahu apa yang ia batalkan:** kalimat gabungan
+tadi menutup **enumerasi akun** — orang luar tak bisa menempelkan daftar alamat
+lalu memanen mana yang punya akun. Sekarang bisa. Biayanya disampaikan lebih
+dulu dan pemilik memilih tetap; penahan yang tersisa hanya batas laju login
+(10 percobaan per 5 menit per IP+email).
+
+**`POST /auth/forgot-password` TIDAK ikut berubah** dan tak boleh diubah: ia
+tetap membalas `200 { ok: true }` yang identik untuk alamat dikenal maupun
+tidak. Pintu itu tak berpassword sama sekali; membocorkan keterdaftaran di sana
+berarti memberikannya cuma-cuma, tanpa batas laju per akun yang menahan.
+
+---
+
+## `GET /produksi` & `/pembelian` memulangkan `ringkas` — antrean pengadaan tanpa menghitung sendiri
+
+🟢 **BARU** — medan tambahan pada balasan yang sudah ada; `rows`, `total`,
+`page`, `per_page`, `total_pengeluaran` **tidak berubah** sedikit pun.
+
+**Kenapa ada.** Riwayat pengadaan di web berubah dari daftar kartu jadi TABEL,
+dengan ubin ringkasan "harus dikerjakan / sudah selesai" di atasnya. Angkanya
+tak boleh dihitung klien: daftar ini berhalaman 20 dan server mengurutkan
+faktur yang **belum selesai lebih dulu**. Terukur pada DB uji — `/produksi`
+bertotal **61 faktur**, halaman pertamanya memuat **20** faktur dan **kedua
+puluhnya** belum selesai. Ringkasan yang dijumlahkan dari `rows` karena itu tak
+sekadar meleset; ia akan selalu berbunyi "0 selesai" sampai halaman terakhir.
+
+```
+GET /api/produksi?branch_id=all&per_page=20&page=1   → 200
+{ ..., "total": 61,
+  "ringkas": {
+    "harus_dikerjakan": { "faktur": 36, "bahan": 73 },
+    "selesai":          { "faktur": 25, "bahan": 33 },
+    "ditolak":          { "faktur":  0, "bahan":  0 },
+    "belum_sampai":     { "faktur":  6, "bahan": 20 } } }
+```
+
+- Dihitung atas populasi **yang sama dengan `total`** (perusahaan, cabang,
+  tipe, rentang tanggal, saringan divisi) — bukan atas `rows`.
+- Klasifikasinya **per FAKTUR**, sejajar dengan lencana yang sudah ada:
+  *harus dikerjakan* = punya baris `rencana`/`dikerjakan`/`menunggu`;
+  *selesai* = tak punya baris begitu dan bukan faktur yang seluruhnya ditolak;
+  *ditolak* = seluruh barisnya ditolak. Ketiganya saling lepas:
+  `harus + selesai + ditolak == total`.
+- **`belum_sampai`** bagian dari `selesai` yang barangnya belum sampai — baris
+  `menunggu` beralamat cabang, atau `dikonfirmasi` ber-`untuk_branch_id` (hasil
+  produksi yang masuk stok CK tapi belum di-`kirim-hasil`). Keduanya berbunyi
+  "beres" sementara barangnya tak bisa dipakai siapa pun.
+
+**Untuk ponsel — tidak wajib.** Tapi bila layar pengadaan di ponsel kelak
+menampilkan angka antrean, medan ini yang benar untuk dipakai; menghitungnya
+dari halaman yang sedang dimuat akan salah dengan cara yang sama.
+
+**Catatan aturan bersama.** `TAHAP_BELUM_SELESAI` (`rencana`, `dikerjakan`,
+`menunggu`) kini tinggal di `@kakarut/shared` dan dipakai server maupun web.
+Perhatikan `menunggu`: label produksi untuk tahap itu berbunyi "✅ Selesai —
+masuk stok", tapi itu **aspirasi, bukan keadaan** — baris CK-lokal
+di-auto-konfirmasi dalam transaksi yang sama, jadi baris yang benar-benar duduk
+di `menunggu` hampir selalu work-order yang belum sampai ke cabang.
+
+---
+
+## `GET /shift/selisih/ringkas` — jumlah antrean putusan tanpa menarik daftarnya
+
+🟢 **BARU** — endpoint tambahan; `GET /shift/selisih` **tidak berubah** sedikit
+pun, jadi kode ponsel yang ada tetap benar.
+
+**Kenapa ada.** Pemilik repo membuka Operasional Cabang di web dan menemukan 26
+selisih kas menunggu keputusannya, yang tertua ditutup dua belas hari
+sebelumnya. Keluhannya: *"selisih tidak ada notif harus di putuskan."*
+Jawaban lama kita untuk "apakah owner perlu notifikasi?" ada di changelog ini
+sendiri — *"Ya, `GET /shift/selisih?status=menunggu` adalah sumber badge-nya…
+di-poll tiap 60 detik saat halaman Operasional terbuka"* — dan justru
+kalimat terakhir itu celahnya: lencananya hanya hidup di dalam halaman yang
+seharusnya ia ingatkan.
+
+```
+GET /api/shift/selisih/ringkas        [owner/admin]  → 200
+{ "menunggu": 19, "terlambat": 1,
+  "tertua_ditutup_pada": "2026-08-29T05:20:57.937Z", "terpotong": false }
+```
+
+- `menunggu` — hasil saringan **penuh**, tidak dipotong 50 seperti daftarnya.
+  Ini yang benar untuk sebuah lencana: angka yang berhenti bertambah di 50
+  mengatakan "tinggal 50" pada antrean yang lebih panjang.
+- `terlambat` — bagian dari `menunggu` yang ditutup lebih lama dari
+  **3 hari** (`SELISIH_TERLAMBAT_HARI` di `@kakarut/shared`).
+- `tertua_ditutup_pada` — `null` bila antreannya kosong.
+- `terpotong` — `true` bila kuerinya menyentuh langit-langit 200 shift tertutup
+  terbaru, sehingga `menunggu` pun bisa **kurang** dari sebenarnya.
+
+**Untuk ponsel — tidak wajib, tapi dua hal patut ditimbang.**
+
+1. `selisihMenungguProvider` (`shift_repository.dart`) hari ini menarik
+   **seluruh daftar** hanya untuk menghitung panjangnya. Balasan ringkas ini
+   96 byte melawan 4.581 byte pada data uji yang sama — beban servernya
+   identik, yang dihemat jaringannya, dan nominal kas tiap shift tak perlu
+   ikut ke layar yang cuma butuh angka.
+2. Provider itu juga menelan semua galat jadi `0`
+   (`catch (_) { return 0; }`), sehingga jaringan putus atau 403 terbaca
+   sebagai "tak ada yang menunggu keputusan". Itu justru aturan yang sudah
+   ditegakkan repo ponsel sendiri lewat `badgeAsync` — *"lencana gagal ≠
+   lencana nol"*. Layak diperbaiki saat endpoint ini dipakai.
+
+Sisi web putaran ini: lencana di nav "Operasional Cabang" (sebelumnya
+satu-satunya butir nav manajemen tanpa lencana, padahal ponsel sudah punya) +
+kartu di Beranda yang menyebut berapa yang sudah lewat 3 hari.
+
+---
+
+## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing
+
+⚪️ **INFO** — status tetap **401** pada kedua kelas, dan ponsel sudah
+mengucapkan kalimatnya sendiri (`'Sesi berakhir. Silakan login ulang.'` di
+`api_client.dart`), jadi tak ada yang perlu disesuaikan.
+
+Sebelumnya `requireAuth` menjawab `"Token tidak valid atau kedaluwarsa"` untuk
+**dua peristiwa yang berbeda jauh**: sesi 12 jam yang berakhir tepat waktu, dan
+token yang bukan terbitan server ini (tanda tangan asing, `jwt malformed`,
+algoritma di luar HS256). Keduanya menulis baris log yang identik sampai ke
+sidik jari kelompoknya, jadi satu percobaan pemalsuan tak dapat dibedakan dari
+1.744 penolakan rutin yang terukur di panel galat production 2026-09-02.
+
+Sekarang:
+
+| sebab | 401 dengan pesan |
+| --- | --- |
+| token kedaluwarsa | `"Sesi kedaluwarsa — silakan masuk kembali"` |
+| tanda tangan asing / cacat / algoritma lain | `"Token tidak valid"` |
+
+Kelas "tak ada header `Authorization`" tak berubah: `"Perlu login (token tidak
+ada)"`. Bila suatu saat ponsel ingin membedakan keduanya (mis. mengucapkan
+"sesi Anda habis" vs "token tak dikenali"), medannya sudah tersedia — tapi
+tidak ada kewajiban. Dipaku §287 `verify-api.sh`.
+
 ## `GET /laporan` membawa `omzet_sebelum_refund`
 
 🟢 **BARU** — satu medan tambahan pada `LaporanHarian`; tak ada yang berubah bentuknya.
