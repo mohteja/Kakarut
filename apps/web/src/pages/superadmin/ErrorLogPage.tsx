@@ -278,6 +278,26 @@ function BarisKelompok({
                       )}
                       {e.perusahaan_nama && <span>🏢 {e.perusahaan_nama}</span>}
                       {e.ip && <span className="text-stone-400">{e.ip}</span>}
+                      {/* JENIS PERANGKATNYA, apa adanya. Sudah direkam sejak
+                          awal (`error-log.ts`) tapi tak pernah dirender, jadi
+                          pertanyaan pertama tiap diagnosis — "ini web atau
+                          aplikasi ponsel?" — tak bisa dijawab dari panel ini.
+                          Terasa pada 401 sesi mati: barisnya anonim (penolakan
+                          terjadi SEBELUM `c.set("auth")`), jadi user-agent satu-
+                          satunya penanda yang tersisa. Tak diterjemahkan jadi
+                          label ringkas: menebak "Chrome di Android" dari teks
+                          ini salah lebih sering daripada yang orang kira, dan
+                          tebakan yang salah di alat diagnosis lebih buruk
+                          daripada teks panjang. Dipotong CSS, utuhnya di
+                          `title`. */}
+                      {e.user_agent && (
+                        <span
+                          title={e.user_agent}
+                          className="max-w-[18rem] truncate font-mono text-stone-400"
+                        >
+                          {e.user_agent}
+                        </span>
+                      )}
                     </div>
                     {e.stack && (
                       <pre className="mt-2 max-h-56 overflow-auto rounded bg-stone-900 p-2 text-[11px] leading-relaxed text-stone-100">

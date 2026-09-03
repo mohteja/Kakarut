@@ -46,6 +46,31 @@ describe("nilaiProxy: setelan proxy versus lalu lintas nyata", () => {
     expect(t?.kode).toBe("proxy_hops_terlalu_tinggi");
   });
 
+  /**
+   * KEADAAN PRODUCTION 2026-09-02, dan ketiga tuduhan lama BUTA padanya.
+   *
+   * Aplikasi berdiri di belakang CDN + reverse proxy (rantai 2 entri)
+   * sementara `TRUST_PROXY_HOPS` masih bawaan 1. `hops` bukan 0, XFF-nya ada,
+   * rantainya tidak lebih pendek — tak satu pun cabang lama memenuhi syarat.
+   * Yang tercatat di panel Log Galat: SELURUH alamat milik satu CDN, bukan
+   * satu pun pengunjung.
+   */
+  it("hops LEBIH RENDAH daripada rantai → alamat yang tercatat adalah proxy, bukan pengunjung", () => {
+    const t = nilaiProxy(1, amatan(500, 500, 2));
+    expect(t?.kode).toBe("proxy_hops_terlalu_rendah_dari_rantai");
+    // Rinciannya wajib menyebut angka yang benar, bukan cuma "salah setel":
+    // yang membaca panel ini harus tahu harus menyetel ke berapa.
+    expect(t?.rincian).toContain("Setel ke 2");
+    // Dan menyebut akibat yang paling mahal — jatah yang ditanggung bersama —
+    // bukan cuma soal log yang keliru.
+    expect(t?.rincian).toMatch(/pembatas laju|jatah/i);
+  });
+
+  it("rantai 3 → menyuruh setel ke 3, bukan angka tetap", () => {
+    expect(nilaiProxy(1, amatan(500, 500, 3))?.rincian).toContain("Setel ke 3");
+    expect(nilaiProxy(2, amatan(500, 500, 3))?.kode).toBe("proxy_hops_terlalu_rendah_dari_rantai");
+  });
+
   it("hops lebih panjang daripada rantai yang benar-benar datang", () => {
     const t = nilaiProxy(2, amatan(100, 100, 1));
     expect(t?.kode).toBe("proxy_hops_lebih_panjang_dari_rantai");
@@ -61,6 +86,13 @@ describe("nilaiProxy: setelan proxy versus lalu lintas nyata", () => {
     });
     it("hops=2 di belakang CDN + proxy", () => {
       expect(nilaiProxy(2, amatan(500, 500, 2))).toBeNull();
+    });
+    // PASANGAN untuk tuduhan baru: begitu pemilik menyetelnya ke panjang
+    // rantai yang benar, panelnya WAJIB diam lagi. Tuduhan yang tak bisa
+    // dipadamkan dengan memperbaiki sebabnya adalah tuduhan yang akan
+    // diabaikan.
+    it("hops=1 di belakang satu proxy — rantai 1, bukan 2", () => {
+      expect(nilaiProxy(1, amatan(500, 500, 1))).toBeNull();
     });
     it("campuran yang ambigu → tak menuduh", () => {
       // Separuh lewat proxy, separuh langsung (mis. pemantau internal). Tak
