@@ -54,6 +54,38 @@ export function selisihTerlambat(ditutupPada: string | null, sekarangMs: number)
  *
  * KEEMPATNYA 401. Yang membedakannya kalimatnya, bukan kontraknya.
  */
+/**
+ * SEBAB PENOLAKAN MASUK — kode yang bisa dibaca MESIN, berpasangan dengan
+ * `PESAN_LOGIN` di bawah.
+ *
+ * Kalimatnya untuk manusia; kode ini untuk klien yang harus BERCABANG. Aturan
+ * itu sudah tertulis di dua tempat lain di repo ini dengan alasan yang sama
+ * persis — `PenjualanGagal.sebab` ("Teks pesan tak boleh jadi dasar keputusan
+ * itu — ia berubah kapan saja dan tak bisa diuji") dan `ApiError.data.kode` di
+ * `lib/api.ts` — jadi pintu keempat yang butuh percabangan tak perlu menemukan
+ * ulang caranya.
+ *
+ * Yang bercabang atasnya hari ini: layar masuk menawarkan tautan "Daftar"
+ * hanya pada `email_tak_dikenal`. Tanpa kode ini ia harus MEMBANDINGKAN
+ * kalimat — dan kalimat yang bergeser sedikit membuat tautannya diam-diam
+ * berhenti muncul, tanpa satu uji pun merah. Aplikasi ponsel tak punya akses
+ * ke `PESAN_LOGIN` sama sekali (repo lain), jadi bagi ia kode ini satu-satunya
+ * cara ikut bercabang tanpa menyalin kalimat lintas repo.
+ *
+ * Kosakatanya sengaja SAMA dengan yang sudah dipakai `catatTakDicoba` di
+ * `/forgot-password` (`email_tak_dikenal`, `akun_terhapus`, `akun_nonaktif`) —
+ * keadaan yang sama tak perlu dua nama, walau salurannya berbeda (yang satu
+ * log internal, yang satu badan respons).
+ */
+export const SEBAB_LOGIN = {
+  takTerdaftar: "email_tak_dikenal",
+  terhapus: "akun_terhapus",
+  nonaktif: "akun_nonaktif",
+  passwordSalah: "password_salah",
+} as const;
+
+export type SebabLogin = (typeof SEBAB_LOGIN)[keyof typeof SEBAB_LOGIN];
+
 export const PESAN_LOGIN = {
   /**
    * Tak ada baris `users` untuk alamat ini. Dua sebab nyata di sistem ini, dan

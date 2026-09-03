@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { PESAN_LOGIN } from "@kakarut/shared";
+import { PESAN_LOGIN, SEBAB_LOGIN } from "@kakarut/shared";
 import { butaKomentar } from "../src/scripts/buta-komentar";
 
 /**
@@ -108,20 +108,38 @@ describe("POST /login menyebut alasan penolakannya", () => {
     expect(PESAN_LOGIN.nonaktif).toMatch(/hubungi/i);
   });
 
-  it("empat cabang, keempatnya 401, dan tak satu pun mengetik kalimatnya sendiri", () => {
+  it("empat cabang, keempatnya 401 ber-sebab, dan tak satu pun mengetik kalimatnya sendiri", () => {
     const i = auth.indexOf('.post("/login"');
     expect(i).toBeGreaterThan(0);
     const j = auth.indexOf('.post(\n    "/guest"', i);
     expect(j).toBeGreaterThan(i);
     const handler = auth.slice(i, j);
+    const empat = handler.match(
+      /new LoginDitolak\(PESAN_LOGIN\.([a-zA-Z]+), SEBAB_LOGIN\.([a-zA-Z]+)\)/g,
+    );
+    expect(empat).toHaveLength(4);
+    // Kalimat dan kode WAJIB sepasang: `PESAN_LOGIN.x` bertemu `SEBAB_LOGIN.x`.
+    // Tanpa ini, kalimat "akun dinonaktifkan" bisa terkirim ber-kode
+    // `password_salah` dan klien bercabang ke jalan yang salah — persis
+    // kegagalan yang `sebab` ada untuk mencegahnya.
     for (const medan of ["takTerdaftar", "terhapus", "nonaktif", "passwordSalah"]) {
-      expect(handler).toContain(`PESAN_LOGIN.${medan}`);
+      expect(handler).toContain(`new LoginDitolak(PESAN_LOGIN.${medan}, SEBAB_LOGIN.${medan})`);
     }
     // Semuanya 401: yang berubah kalimatnya, bukan kontraknya. (403-nya milik
     // "belum diverifikasi", yang dicek SESUDAH password benar.)
-    const empat = handler.match(/HTTPException\(401, \{ message: PESAN_LOGIN\.[a-zA-Z]+ \}\)/g);
-    expect(empat).toHaveLength(4);
+    expect(auth).toMatch(/class LoginDitolak extends HTTPException/);
+    expect(auth.slice(auth.indexOf("class LoginDitolak"), auth.indexOf("class LoginDitolak") + 400))
+      .toContain("super(401,");
     expect(auth).toContain('from "@kakarut/shared"');
+  });
+
+  it("keempat kodenya ada, berbeda, dan berpasangan satu-satu dengan kalimatnya", () => {
+    const kode = Object.values(SEBAB_LOGIN);
+    expect(new Set(kode).size).toBe(4);
+    expect(Object.keys(SEBAB_LOGIN)).toEqual(Object.keys(PESAN_LOGIN));
+    // Kodenya untuk MESIN: huruf kecil, tanpa spasi — kalau ia mulai terbaca
+    // seperti kalimat, orang berikutnya akan menampilkannya ke pemakai.
+    for (const k of kode) expect(k).toMatch(/^[a-z_]+$/);
   });
 
   it("kalimat lama yang menggabungkan email & password sudah tak ada di sumber", () => {
@@ -158,9 +176,13 @@ describe("layar masuk memakai kalimat itu, tak mengendusnya", () => {
   const login = baca(LOGIN_PAGE);
   const daftar = baca(SIGNUP_PAGE);
 
-  it("tautan 'Daftar' muncul karena PERBANDINGAN dengan konstanta bersama", () => {
-    expect(login).toContain("PESAN_LOGIN.takTerdaftar");
+  it("tautan 'Daftar' muncul karena KODE sebab, bukan karena kalimatnya", () => {
+    expect(login).toContain("SEBAB_LOGIN.takTerdaftar");
     expect(login).toContain('from "@kakarut/shared"');
+    // Layar ini TIDAK boleh menyentuh kalimatnya sama sekali untuk bercabang:
+    // kalimat yang bergeser sedikit di server akan membuat tautannya berhenti
+    // muncul tanpa satu uji pun merah.
+    expect(login).not.toContain("PESAN_LOGIN");
     // `includes("...")` atas kalimat yang diketik ulang adalah cara paling
     // sunyi kehilangan tautan ini — bentuk itu sudah ada sekali di berkas
     // yang sama (`belum diverifikasi`), dan tak boleh bertambah.

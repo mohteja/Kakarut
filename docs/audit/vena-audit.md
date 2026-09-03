@@ -123,15 +123,44 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
     konstantanya, dan `ui.tsx` yang menerangkan tombol lihat-password dengan
     kalimat lama).
 
+- **`sebab` terstruktur ikut, dan itu koreksi atas versi pertama saya sendiri.**
+  Putaran ini mula-mula membuat layar login MEMBANDINGKAN kalimatnya untuk
+  memutuskan kapan menawarkan tautan "Daftar". Itu bekerja, dan salah: repo ini
+  sudah menuliskan jawabannya dua kali dengan alasan yang identik —
+  `PenjualanGagal.sebab` (*"Teks pesan tak boleh jadi dasar keputusan itu — ia
+  berubah kapan saja dan tak bisa diuji"*) dan `ApiError.data.kode` di
+  `lib/api.ts`. Yang menyadarkan bukan pemikiran ulang melainkan pertanyaan
+  ponsel: aplikasi ponsel ada di repo lain dan **tak bisa** membaca
+  `PESAN_LOGIN` sama sekali, jadi satu-satunya cara ia ikut bercabang adalah
+  menyalin kalimat lintas repo — persis kelas cacat yang putaran ini
+  tegakkan aturannya. Maka keempat penolakan kini lewat `LoginDitolak extends
+  HTTPException` yang membawa `sebab`, dan layar login bercabang atas kode itu,
+  bukan atas kalimat. `throw` (bukan `return c.json`) disengaja: hanya jalur
+  `throw` yang lewat `catatGalat`, dan penolakan masuk harus tetap tercatat di
+  panel Log Galat — panel yang justru membuat pemilik melihat banjir 401.
+
+- **Ponsel: TAK ADA perubahan kode, dan itu diperiksa, bukan diasumsikan.**
+  `kakarut-mobile/lib/features/auth/login_page.dart` sudah menyetel
+  `_error = e.message` lalu merendernya apa adanya, jadi keempat kalimat baru
+  sampai ke layarnya tanpa satu baris pun disentuh. Yang belum: tombol "Daftar"
+  di layar yang sama tak membawa alamatnya. Itu sengaja tak dikerjakan
+  putaran ini — sebelum ada `sebab`, satu-satunya cara ponsel tahu kapan
+  menawarkannya adalah menyalin kalimat lintas repo. Sesudah `sebab` ada,
+  pekerjaan itu jadi kecil dan aman; ia masuk antrean, bukan diselundupkan ke
+  putaran ini.
+
 - **Batas yang diketahui**: (1) enumerasi terbuka — itu memang yang diminta,
   tapi ditulis di sini supaya tercatat sebagai keadaan, bukan sebagai
   kelalaian; (2) cabang `terhapus` praktis tak pernah terbaca — jalan yang
   menuliskannya ikut mengganti nama emailnya, jadi alamat aslinya jatuh ke
   "tak terdaftar" (yang justru jawaban benar: alamatnya bebas dipakai ulang).
   Cabangnya tetap ada sebagai jaring untuk tombstone dari jalan lain; (3)
-  §290 memeriksa alasannya **bisa dibedakan** dan tiap kalimat menyebut
-  sebabnya, bukan bunyi persisnya — bunyinya dipaku uji statis, supaya skrip
-  gerbang tak jadi salinan keempat yang menua sendiri; (4) `/register` dan
+  §290 memeriksa KALIMATNYA cuma sejauh "bisa dibedakan & menyebut sebabnya",
+  bukan bunyi persisnya — bunyinya dipaku uji statis supaya skrip gerbang tak
+  jadi salinan keempat yang menua sendiri. Yang dipaku persis justru
+  **kodenya** (`email_tak_dikenal`, `password_salah`, `akun_nonaktif`): klien
+  yang sudah dirilis bercabang atasnya, jadi kode yang diganti nama wajib
+  terlihat sebagai gerbang merah; (4) `/register` dan
   `/resend-verification` tetap netral dan **tidak** diperiksa ulang putaran ini
   — keduanya permukaan enumerasi juga, dan sekarang keduanya lebih ketat
   daripada `/login` di sebelahnya. Ketimpangan itu disengaja (yang satu diminta
@@ -144,9 +173,9 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   → 1 merah · layar daftar berhenti membaca query-nya → 1 merah · kata
   "ENUMERASI" dihapus dari catatan sumbernya → 1 merah.
 
-- **Gerbang**: typecheck · build · `npm test` 233 berkas / **2.817** uji
-  (+1 berkas, +11 uji) · `verify-api.sh` **3.494 lolos, 0 gagal** (dari 3.477,
-  §290 +17 lengan) · `audit:invarian` 27/27 · Playwright **30 spek** (dari 28).
+- **Gerbang**: typecheck · build · `npm test` 233 berkas / **2.819** uji
+  (+1 berkas, +13 uji) · `verify-api.sh` **3.499 lolos, 0 gagal** (dari 3.477,
+  §290 +22 lengan) · `audit:invarian` 27/27 · Playwright **30 spek** (dari 28).
   `rute-diketuk.txt` diregenerasi — tak ada rute baru.
 
 ## Riwayat pengadaan jadi TABEL, dan ringkasannya menghitung populasi — bukan halaman — web + server — 2026-09-03
@@ -10141,6 +10170,12 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
+- [ ] **Ponsel: tombol "Daftar" di layar masuk belum membawa alamatnya** —
+      `login_page.dart` sudah merender kalimat penolakan apa adanya (tak ada
+      yang salah di sana), tapi `sebab == "email_tak_dikenal"` belum dipakai
+      untuk membuka `RegisterPage` dengan emailnya terisi. Web sudah. Kecil,
+      dan sekarang aman dikerjakan sebab tak lagi menuntut menyalin kalimat
+      lintas repo
 - [ ] **`/register` & `/resend-verification` masih netral sementara `/login` di
       sebelahnya kini bicara** — ketimpangan yang lahir 2026-09-03 dan belum
       pernah ditanyakan ke pemilik. Keduanya permukaan enumerasi yang sama;

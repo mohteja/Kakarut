@@ -25,7 +25,7 @@ tanpa akses repo server.
 
 ---
 
-## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya
+## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)
 
 🟡 **PERLU DICEK** — status **tidak berubah** (tetap `401` pada keempat
 sebabnya). Yang berubah isi `error`. Klien yang menampilkan `error` apa adanya
@@ -38,34 +38,45 @@ yang akunnya **dinonaktifkan** admin membaca "password salah", lalu mereset
 passwordnya berulang kali tanpa hasil — passwordnya memang tak pernah salah.
 
 ```
-POST /api/auth/login   → 401  { "error": "<salah satu dari empat>" }
+POST /api/auth/login   → 401  { "error": "<kalimatnya>", "sebab": "<kodenya>" }
 ```
 
-| Sebab | `error` |
-| --- | --- |
-| tak ada akun untuk alamat itu | `Email tidak terdaftar — periksa ejaannya, atau daftar dulu` |
-| akun tombstone (`deleted_at`) | `Akun ini sudah dihapus` |
-| akun dinonaktifkan owner/admin | `Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda` |
-| akun hidup, password tak cocok | `Password salah` |
+| keadaan | `sebab` (untuk mesin) | `error` (untuk orang) |
+| --- | --- | --- |
+| tak ada akun untuk alamat itu | `email_tak_dikenal` | `Email tidak terdaftar — periksa ejaannya, atau daftar dulu` |
+| akun tombstone (`deleted_at`) | `akun_terhapus` | `Akun ini sudah dihapus` |
+| akun dinonaktifkan owner/admin | `akun_nonaktif` | `Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda` |
+| akun hidup, password tak cocok | `password_salah` | `Password salah` |
 
-Bunyi persisnya hidup di satu tempat, `PESAN_LOGIN` di
-`packages/shared/src/constants.ts` — **tidak** ikut Lampiran A (lampiran itu
-hanya menyalin `types.ts`), jadi tabel di atas adalah acuannya. Jangan
-mencocokkan teks untuk bercabang: kalau butuh cabang, mintalah kode
-terstruktur lebih dulu.
+**`sebab` ikut di badan yang sama, dan ITU yang dipakai untuk bercabang.**
+Bentuknya sama dengan `sebab` yang sudah dikenal aplikasi ini dari
+`POST /penjualan` dan `POST /sync`. Kalimatnya boleh — dan akan — diperbaiki;
+kodenya tidak berubah tanpa entri changelog tersendiri. Aplikasi ponsel ada di
+repo lain dan tak bisa membaca `PESAN_LOGIN`, jadi **mencocokkan teks di sini
+adalah cara paling sunyi kehilangan percabangan**: kalimatnya bergeser sedikit,
+cabangnya berhenti jalan, dan tak ada yang merah.
+
+Bunyi kalimatnya hidup di satu tempat, `PESAN_LOGIN` (berpasangan dengan
+`SEBAB_LOGIN`) di `packages/shared/src/constants.ts` — **tidak** ikut Lampiran A
+(lampiran itu hanya menyalin `types.ts`), jadi tabel di atas acuannya.
 
 **Yang perlu dicek di aplikasi ponsel:**
 
 - Layar masuk **menampilkan `error` dari server**, bukan kalimat tetap seperti
   "Email atau password salah" / "Gagal masuk". Ini satu-satunya perubahan yang
-  benar-benar dituntut entri ini.
-- Pada `"Email tidak terdaftar…"`, tawarkan **daftar** dengan alamat yang sudah
-  terisi. Pembacanya yang paling sering adalah karyawan yang sudah **diundang**:
+  benar-benar dituntut entri ini. Diperiksa 2026-09-03 di `kakarut-mobile`:
+  `login_page.dart` sudah menyetel `_error = e.message` dan merendernya apa
+  adanya, jadi **tak ada perubahan kode yang wajib** — entri ini menjaga agar
+  ia tetap begitu.
+- Pada `sebab == "email_tak_dikenal"`, tawarkan **daftar** dengan alamat yang
+  sudah terisi (layar Daftar sudah ada di tombol sebelahnya — yang kurang cuma
+  membawa alamatnya). Pembacanya yang paling sering adalah karyawan yang sudah **diundang**:
   undangan hanya menulis baris `invitations`, akunnya baru lahir saat ia
   mendaftar sendiri — tanpa jalan keluar di layar itu ia menyimpulkan
   undangannya gagal. (Web melakukannya lewat `/daftar?email=`.)
-- Pada `"…dinonaktifkan…"`, **jangan** tawarkan reset password: jalan keluarnya
-  bukan password, dan menawarkannya persis yang membuat orang berputar-putar.
+- Pada `sebab == "akun_nonaktif"`, **jangan** tawarkan reset password: jalan
+  keluarnya bukan password, dan menawarkannya persis yang membuat orang
+  berputar-putar.
 
 **KEPUTUSAN SADAR PEMILIK REPO, dan harganya ditulis di sini supaya tak ada
 yang "memperbaikinya" balik tanpa tahu apa yang ia batalkan:** kalimat gabungan

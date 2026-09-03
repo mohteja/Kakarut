@@ -6,7 +6,8 @@ import { useAuth } from "../context/AuthContext";
 import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
 import { PESAN_KIRIM_ULANG } from "../lib/pesan-verifikasi";
 import { NILAI_SESI_BERAKHIR, PARAM_SESI, PESAN_SESI_BERAKHIR } from "../lib/pesan-sesi";
-import { PESAN_LOGIN } from "@kakarut/shared";
+import { SEBAB_LOGIN } from "@kakarut/shared";
+import { ApiError } from "../lib/api";
 
 export function LoginPage() {
   const { login, masukTamu, kirimUlangVerifikasi } = useAuth();
@@ -17,10 +18,21 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sebabTolak, setSebabTolak] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [tamuLoading, setTamuLoading] = useState<null | "owner" | "kasir">(null);
   // Bila login gagal karena email belum diverifikasi → tawarkan kirim ulang.
   const [belumVerif, setBelumVerif] = useState(false);
+  const [verifKirim, setVerifKirim] = useState<"idle" | "loading" | "sent">("idle");
+  const [verifJeda, setVerifJeda] = useState(0);
+  // Tenggatnya tersimpan per email, jadi hitung mundurnya benar walau
+  // halamannya baru dimuat — bukan cuma selama tab ini hidup.
+  useEffect(() => {
+    setVerifJeda(sisaJeda(email));
+    const t = setInterval(() => setVerifJeda(sisaJeda(email)), 1000);
+    return () => clearInterval(t);
+  }, [email]);
+  const [verifDevKode, setVerifDevUrl] = useState<string | null>(null);
   /*
    * ALASAN PENOLAKAN YANG PUNYA JALAN KELUAR HARUS MENUNJUKKANNYA.
    *
@@ -32,27 +44,18 @@ export function LoginPage() {
    * baris `invitations`, akunnya baru lahir saat ia mendaftar sendiri. Tanpa
    * tautan di sebelah kalimatnya, ia menyimpulkan undangannya gagal.
    *
-   * Dibandingkan dengan konstanta bersama, bukan diendus dengan `includes`
-   * atas kalimat yang diketik ulang — bentuk itu ada tepat di bawah
-   * (`belumVerif`) dan ia adalah cara paling sunyi untuk kehilangan tautan
-   * ini: kalimatnya bergeser sedikit di server, tautannya berhenti muncul,
-   * dan tak ada yang merah.
+   * Yang dibandingkan KODE `sebab`, bukan kalimatnya. Kalimat yang bergeser
+   * sedikit di server akan membuat tautan ini berhenti muncul tanpa satu uji
+   * pun merah — bentuk kegagalan yang contohnya ada tepat di berkas ini juga
+   * (`belumVerif` mengendus kalimat dengan `includes`) dan yang sudah punya
+   * jawabannya di repo ini: `PenjualanGagal.sebab`, `ApiError.data.kode`.
    */
-  const [verifKirim, setVerifKirim] = useState<"idle" | "loading" | "sent">("idle");
-  const [verifJeda, setVerifJeda] = useState(0);
-  // Tenggatnya tersimpan per email, jadi hitung mundurnya benar walau
-  // halamannya baru dimuat — bukan cuma selama tab ini hidup.
-  useEffect(() => {
-    setVerifJeda(sisaJeda(email));
-    const t = setInterval(() => setVerifJeda(sisaJeda(email)), 1000);
-    return () => clearInterval(t);
-  }, [email]);
-  const [verifDevKode, setVerifDevUrl] = useState<string | null>(null);
-  const takTerdaftar = error === PESAN_LOGIN.takTerdaftar;
+  const takTerdaftar = sebabTolak === SEBAB_LOGIN.takTerdaftar;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setSebabTolak(null);
     setBelumVerif(false);
     setVerifKirim("idle");
     setLoading(true);
@@ -62,6 +65,9 @@ export function LoginPage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Gagal login";
       setError(msg);
+      setSebabTolak(
+        err instanceof ApiError && typeof err.data?.sebab === "string" ? err.data.sebab : null,
+      );
       setBelumVerif(msg.toLowerCase().includes("belum diverifikasi"));
     } finally {
       setLoading(false);
@@ -93,6 +99,7 @@ export function LoginPage() {
 
   async function cobaTamu(peran: "owner" | "kasir") {
     setError(null);
+    setSebabTolak(null);
     setTamuLoading(peran);
     try {
       await masukTamu(peran);

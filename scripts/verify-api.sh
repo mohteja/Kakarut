@@ -16967,20 +16967,34 @@ echo "── §290 login MENYEBUT alasan penolakannya (keputusan pemilik, 2026-0
 # TETAP 401 pada keempatnya. Bunyi persis kalimatnya sengaja TIDAK diketik ulang
 # di sini — ia dipaku ke satu rumah (`PESAN_LOGIN` di packages/shared) oleh
 # `login-beralasan.test.ts`, dan salinan kedua di skrip ini akan menua sendiri.
-pesan290() { curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$1\",\"password\":\"$2\"}" | jq -r '.error // ""'; }
-kode290() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
-  -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}"; }
+# SATU permintaan per keadaan, bukan satu per asersi — dan itu bukan
+# penghematan. `batasLogin` menahan 10 percobaan per 5 menit per (IP + email),
+# dan seksi ini menembak alamat yang SAMA berkali-kali; versi yang memanggil
+# ulang untuk tiap asersi berjalan di 8 dari 10 jatah, jadi asersi berikutnya
+# yang ditambahkan orang lain akan memerahkan seksi ini karena 429 — kegagalan
+# yang menuduh kodenya padahal yang habis kuotanya.
+# Bentuknya "<status>\t<error>\t<sebab>" dalam satu baris.
+tolak290() {
+  curl -s -w '\n%{http_code}' -X POST "$BASE/api/auth/login" \
+    -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}" \
+    | python3 -c 'import sys;b=sys.stdin.read().rsplit("\n",1);import json
+try: j=json.loads(b[0])
+except Exception: j={}
+print(b[1]+"\t"+str(j.get("error",""))+"\t"+str(j.get("sebab","")))'
+}
+kolom290() { printf '%s' "$1" | cut -f"$2"; }
 
 api "$OWNER" POST /karyawan '{"nama":"Karyawan Alasan 290","email":"alasan290@basooopa.id","password":"PwAlasan290!","role":"admin","branch_id":null}' > /dev/null
 U290_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="alasan290@basooopa.id")][0].user_id')
 cek "§290 PREMIS: akun ujinya benar-benar bisa masuk (kalau tidak, seluruh seksi hampa)" "V == 1" \
   "$([ -n "$(login "alasan290@basooopa.id" "PwAlasan290!")" ] && echo 1 || echo 0)"
 
-TAK290=$(pesan290 "tidakada290@basooopa.id" "PwApaSaja290!")
-SALAH290=$(pesan290 "alasan290@basooopa.id" "PwSalah290!")
-cek "§290 email tak terdaftar → 401" "V == 401" "$(kode290 "tidakada290@basooopa.id" "PwApaSaja290!")"
-cek "§290 password salah → 401" "V == 401" "$(kode290 "alasan290@basooopa.id" "PwSalah290!")"
+R_TAK290=$(tolak290 "tidakada290@basooopa.id" "PwApaSaja290!")
+R_SALAH290=$(tolak290 "alasan290@basooopa.id" "PwSalah290!")
+TAK290=$(kolom290 "$R_TAK290" 2)
+SALAH290=$(kolom290 "$R_SALAH290" 2)
+cek "§290 email tak terdaftar → 401" "V == 401" "$(kolom290 "$R_TAK290" 1)"
+cek "§290 password salah → 401" "V == 401" "$(kolom290 "$R_SALAH290" 1)"
 cek "§290 email tak terdaftar MENYEBUT keterdaftaran" "V == 1" \
   "$(printf '%s' "$TAK290" | grep -qi 'terdaftar' && echo 1 || echo 0)"
 cek "§290 email tak terdaftar MENUNJUKKAN jalan keluarnya (daftar)" "V == 1" \
@@ -16995,20 +17009,34 @@ cek "§290 kedua alasan itu BERBEDA satu sama lain" "V == 1" \
 cek "§290 alasan tak-terdaftar TIDAK menyebut password" "V == 0" \
   "$(printf '%s' "$TAK290" | grep -qi 'password' && echo 1 || echo 0)"
 
+# SEBAB TERSTRUKTUR ikut di badan yang sama. Kodenya dipaku di sini (bukan cuma
+# "ada"): klien yang sudah dirilis bercabang atasnya, jadi kode yang diganti
+# nama adalah perubahan yang merusak — dan harus terlihat sebagai gerbang merah,
+# bukan sebagai tautan yang diam-diam berhenti muncul.
+cek "§290 sebab email tak terdaftar = email_tak_dikenal" "V == 1" \
+  "$([ "$(kolom290 "$R_TAK290" 3)" = "email_tak_dikenal" ] && echo 1 || echo 0)"
+cek "§290 sebab password salah = password_salah" "V == 1" \
+  "$([ "$(kolom290 "$R_SALAH290" 3)" = "password_salah" ] && echo 1 || echo 0)"
+
 # AKUN DINONAKTIFKAN — keadaan yang paling mahal saat dijawab "password salah":
 # orangnya mereset passwordnya berulang kali padahal passwordnya tak pernah
 # salah. Dibuktikan berpasangan: nonaktif ditolak dengan kalimatnya sendiri,
 # lalu password YANG SAMA berhasil begitu akunnya dinyalakan lagi.
 api "$OWNER" PATCH "/karyawan/$U290_ID" '{"is_active":false}' > /dev/null
-MATI290=$(pesan290 "alasan290@basooopa.id" "PwAlasan290!")
+R_MATI290=$(tolak290 "alasan290@basooopa.id" "PwAlasan290!")
+MATI290=$(kolom290 "$R_MATI290" 2)
 cek "§290 akun nonaktif → tetap 401 (kontraknya tak berubah)" "V == 401" \
-  "$(kode290 "alasan290@basooopa.id" "PwAlasan290!")"
+  "$(kolom290 "$R_MATI290" 1)"
 cek "§290 akun nonaktif MENYEBUT dinonaktifkan" "V == 1" \
   "$(printf '%s' "$MATI290" | grep -qi 'dinonaktifkan' && echo 1 || echo 0)"
 cek "§290 akun nonaktif MENYURUH menghubungi orang yang bisa menyalakannya" "V == 1" \
   "$(printf '%s' "$MATI290" | grep -qi 'hubungi' && echo 1 || echo 0)"
 cek "§290 tiga alasan itu berbeda satu sama lain (tak ada dua yang sama)" "V == 3" \
   "$(printf '%s\n%s\n%s\n' "$TAK290" "$SALAH290" "$MATI290" | sort -u | wc -l)"
+cek "§290 sebab akun nonaktif = akun_nonaktif" "V == 1" \
+  "$([ "$(kolom290 "$R_MATI290" 3)" = "akun_nonaktif" ] && echo 1 || echo 0)"
+cek "§290 ketiga sebabnya berbeda satu sama lain" "V == 3" \
+  "$(printf '%s\n%s\n%s\n' "$(kolom290 "$R_TAK290" 3)" "$(kolom290 "$R_SALAH290" 3)" "$(kolom290 "$R_MATI290" 3)" | sort -u | wc -l)"
 api "$OWNER" PATCH "/karyawan/$U290_ID" '{"is_active":true}' > /dev/null
 cek "§290 password yang SAMA berhasil begitu akunnya dinyalakan lagi" "V == 1" \
   "$([ -n "$(login "alasan290@basooopa.id" "PwAlasan290!")" ] && echo 1 || echo 0)"
@@ -17030,6 +17058,8 @@ cek "§290 /lupa-password: badannya IDENTIK untuk dikenal & tak dikenal" "V == 1
   "$([ "$LUPA_ADA290" = "$LUPA_TIDAK290" ] && echo 1 || echo 0)"
 cek "§290 /lupa-password: badannya tak menyebut keterdaftaran sama sekali" "V == 0" \
   "$(printf '%s' "$LUPA_ADA290" | grep -qi 'terdaftar' && echo 1 || echo 0)"
+cek "§290 /lupa-password: badannya tak membawa sebab apa pun" "V == 0" \
+  "$(printf '%s' "$LUPA_ADA290" | grep -qi 'sebab' && echo 1 || echo 0)"
 
 if [ "$FAIL" -gt 0 ]; then
   echo
