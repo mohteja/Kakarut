@@ -50,6 +50,131 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Menu & HPP dapat bentuk IKON, dan pratinjaunya kartu kasir yang SAMA — bukan yang mirip — web — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo meminta *"menu hpp ingin ada tampilan
+  ikon juga untuk cek preview foto menu di kasir"*. Tujuannya ia sebut sendiri,
+  dan tujuan itu yang menentukan seluruh bentuk pekerjaannya.
+
+- **Keadaan sebelumnya**: `MenuDto` membawa `image_url` sejak lama dan server
+  mengirimkannya di tiap `GET /menu` (`menu/service.ts:433`) — halaman Menu &
+  HPP tak pernah sekali pun memakainya. Bukan medan yang kurang; medan yang
+  tak pernah dibuka.
+
+- **Yang membuat putaran ini lebih dari "tambah grid"**: pratinjau yang cuma
+  MIRIP kartu kasir lebih buruk daripada tak ada pratinjau. Fotonya dipasang
+  `object-cover` di kotak `h-20` — ia MEMOTONG sisi panjang, jadi kotak yang
+  sedikit lebih pendek atau kolom grid yang sedikit lebih sempit menghasilkan
+  potongan yang lain. Dan potongan itulah satu-satunya hal yang orang membuka
+  halaman ini untuk memeriksanya. Pratinjau yang keliru soal potongan membuat
+  orang mengunggah ulang foto yang sebenarnya sudah benar — kerugian yang tak
+  akan pernah ia kenali sebagai bug.
+
+  Maka kartunya bukan kartu baru: `KasirPage.tsx:1057-1093` diekstrak jadi
+  `components/KartuMenuKasir.tsx` dan dipakai KEDUA layar, grid-nya memakai
+  titik henti yang sama (2 → 3 → 4 kolom), dan penjaganya menuntut kelas
+  `h-20 w-full` muncul di **tepat satu berkas** seluruh `apps/web/src`.
+
+- **Tiga salinan `🍜` yang ditemukan sepanjang jalan**, semuanya berarti "foto
+  belum ada": `KasirPage:1069`, `LihatMenuPage:268`, dan `MenuFormPage:498`
+  (prop `placeholder`). Ketiganya kini `IKON_MENU_KOSONG`. Empat kemunculan
+  lain (`Layout` ×2, `StokPage`, `RekomendasiBeliPage`) DIADILI dan sengaja
+  dibiarkan: di sana emojinya label navigasi ("🍜 Menu & HPP") yang berarti
+  "ini urusan menu", bukan "fotonya kosong" — mengikatnya ke konstanta yang
+  sama berarti sidebar ikut berubah saat lambang foto-kosong diganti.
+
+- **Chip "N tanpa foto"** menyaring menu yang fotonya belum ada. Hitungannya
+  menghormati saringan lokasi/kategori/cari (chip ini pintu KERJA — angka yang
+  lebih besar daripada yang bisa dibuka tombolnya adalah janji yang tak
+  ditepati) tapi **tidak** menghormati saringannya sendiri, sebab kalau ikut,
+  angkanya membeku begitu chipnya ditekan. Dan ia **tak dirender saat bacaannya
+  gagal**: "0 tanpa foto" di atas daftar yang gagal dimuat terbaca sebagai
+  "semua menu sudah berfoto" — aturan yang sudah ditulis panjang di
+  `nilai-stok.test.ts`.
+
+- **Yang TIDAK dikerjakan, beserta alasannya**: HPP & food cost sengaja tak
+  ikut di kartu (pilihan pemilik saat ditanya) — kartu yang membawa angka
+  manajemen berhenti jadi cermin layar kasir. Sisa porsi juga tidak: ia angka
+  per-cabang, dan Menu & HPP bukan layar per-cabang; `StokBadge` memulangkan
+  `null` saat porsinya tak diketahui, jadi yang terjadi bukan lencana kosong
+  melainkan tak ada lencana. Penjaganya memaku bahwa halaman ini tak mengoper
+  `stok=`, supaya tak ada yang kelak "melengkapinya" dengan angka karangan.
+
+- **Nol perubahan server**: tak ada kontrak yang berubah, jadi tak ada entri
+  `CHANGELOG-API.md` dan tak ada yang perlu distempel. verify-api tetap
+  3.499/0 — angka yang sama persis dengan sebelum putaran ini, dan itu memang
+  yang diharapkan.
+
+- **Empat hal yang ditemukan gerbangnya, bukan saya** — dan tiga di antaranya
+  membuat bukti merah saya sendiri tidak sah sampai diulang:
+
+  1. **`prettier` bukan bagian repo ini.** Saya menjalankannya atas inisiatif
+     sendiri dan ia memformat ulang seluruh `MenuListPage` — 424 baris berubah
+     untuk perubahan yang seharusnya 122. Dikembalikan, lalu diulang tanpa
+     pemformat. Diff yang membengkak bukan cuma berisik: ia bisa memutus
+     irisan `indexOf` penjaga lain tanpa ada yang menyadarinya.
+  2. **`StokBadge` ikut pindah rumah, dan `kasir-sisa-porsi-gagal.test.ts`
+     MERAH karenanya** — bukan hampa, dan itu perbedaan yang menyelamatkan.
+     Klaimnya tak berubah sedikit pun; alamatnya yang berubah. Penjaganya
+     diarahkan ke rumah baru DAN ditambahi asersi bahwa `KasirPage` tak lagi
+     mendefinisikannya sendiri.
+  3. **Spek baru melewati langit-langit kuota login.** `/auth/login` dibatasi
+     10 per 5 menit per (IP+email); **sepuluh** berkas spek memakai akun owner
+     yang sama, satu login per berkas (tiap berkas satu worker, satu cache).
+     Spek ke-sepuluh membuat `stok-awal-gagal.spec.ts` merah — berkas itu
+     menembak `/auth/login` sendiri di samping `login()` layarnya, jadi ia
+     butuh DUA jatah. Diperbaiki di sumbernya: ia kini memakai `sesiApi` yang
+     ber-cache, yang sekaligus menghapus kegagalan bisu — `(await
+     masuk.json()).token` tanpa memeriksa `.ok()` mengubah 429 jadi
+     `TypeError: Cannot read properties of undefined`, di baris yang tak
+     menyebut kuota sama sekali.
+  4. **Dua bukti merah peramban saya SAH-SEOLAH-OLAH, dan sebenarnya tidak.**
+     Keduanya "merah" — tapi pada asersi yang salah, sebab server menyajikan
+     `index.html` yang di-cache saat boot: membangun ulang tanpa me-restart
+     server membuat bundel ber-hash baru tak pernah dirujuk, halamannya kosong,
+     dan SETIAP asersi gagal. Yang menyingkapnya justru ketidakcocokan
+     kalimatnya — merah yang benar harus berbunyi asersinya sendiri. Diulang
+     dengan urutan mutasi → build → **restart server** → uji, dan barulah
+     keduanya berbunyi "kartu ikon tidak membuka layar ubah menu" dan "kotak
+     fotonya bukan kotak kasir".
+
+- **Terukur pada DB gerbang**: 104 menu aktif, **4 berfoto, 100 tanpa foto** —
+  dan keempat yang berfoto seluruhnya buatan `verify-api.sh` & spek ini
+  sendiri. Data seed repo ini tak memuat satu pun foto menu. Itu yang membuat
+  spek peramban WAJIB menanam menunya sendiri: spek yang cuma membuka halaman
+  lalu mencari `<img>` akan hijau di gerbang penuh (verify-api jalan lebih
+  dulu) dan merah saat `npm run test:e2e` dijalankan sendiri — hijau karena
+  sampah orang lain adalah bentuk hampa yang paling sulit terlihat.
+
+- **Batas yang diketahui**: (1) penjaga statis membaca teks sumber, jadi ia tak
+  bisa mengatakan pikselnya sama — yang mengukur itu spek peramban, dan
+  keduanya sepasang; (2) kartu di Menu & HPP tak menampilkan sisa porsi,
+  jadi pratinjaunya setara dalam FOTO & tata letak, bukan dalam seluruh isi
+  kartu — disengaja, dan ditulis di komponennya; (3) `POST /menu` menuntut
+  `mult` untuk menu reguler (400 "Menu reguler wajib punya mult"), yang
+  ketahuan sebagai premis merah pada gerbang pertama, bukan dari membaca skema.
+
+- **Untuk pemilik, kueri baca-saja di produksi** (kolom `deleted_at` TIDAK ada
+  di tabel `menus` — arsipnya lewat `is_active`, diperiksa langsung di skema):
+
+  ```sql
+  select count(*) filter (where image_url is null) as tanpa_foto,
+         count(*) as total_aktif
+  from menus where is_active;
+  ```
+
+- **Bukti merah**: tujuh statis + tiga peramban, tiap satu dipulihkan
+  byte-per-byte (`cmp`). Statis: kelas foto disalin balik ke `KasirPage` ·
+  grid ikon dilebarkan · chip dirender walau gagal · `🍜` diketik ulang ·
+  `tulisLokal` dicabut · bawaan diam-diam jadi ikon · pratinjau mengoper
+  `stok=`. Peramban: pilihan bentuk tak bertahan · kartu tak bisa diklik ·
+  kotak foto dikecilkan.
+
+- **Gerbang**: typecheck · build · `npm test` 234 berkas / **2.836** uji
+  (+1 berkas, +17 uji) · `verify-api.sh` **3.499 lolos, 0 gagal** (tak berubah
+  — nol perubahan server) · `audit:invarian` 27/27 · Playwright **32 spek**
+  (dari 30). `rute-diketuk.txt` diregenerasi — tak ada rute baru.
+
 ## Login menyebut ALASAN penolakannya — dan harganya keputusan pemilik, bukan kelalaian — web + server — 2026-09-03
 
 - **Kenapa vena ini ada**: pemilik repo meminta dua hal dalam satu pesan —

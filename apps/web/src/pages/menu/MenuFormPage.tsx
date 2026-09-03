@@ -16,6 +16,7 @@ import {
 } from "@kakarut/shared";
 import { BahanPicker } from "../../components/BahanPicker";
 import { ImageUpload } from "../../components/ImageUpload";
+import { IKON_MENU_KOSONG } from "../../components/KartuMenuKasir";
 import {
   Card,
   ErrorText,
@@ -495,7 +496,12 @@ export function MenuFormPage() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Foto menu</label>
-              <ImageUpload value={imageUrl} onChange={setImageUrl} tujuan="menu" placeholder="🍜" />
+              <ImageUpload
+                value={imageUrl}
+                onChange={setImageUrl}
+                tujuan="menu"
+                placeholder={IKON_MENU_KOSONG}
+              />
             </div>
           </div>
         </Card>
