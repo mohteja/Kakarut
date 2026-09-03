@@ -1,5 +1,6 @@
 import { bacaLokal, hapusLokal, tulisLokal } from "./simpanan";
 import { NILAI_SESI_BERAKHIR, PARAM_SESI } from "./pesan-sesi";
+import { tokenSudahMati } from "./umurToken";
 
 export interface AuthState {
   token: string;
@@ -57,8 +58,85 @@ export function loadAuth(): AuthState | null {
 }
 
 export function saveAuth(state: AuthState | null) {
-  if (state) tulisLokal(STORAGE_KEY, JSON.stringify(state));
-  else hapusLokal(STORAGE_KEY);
+  if (state) {
+    tulisLokal(STORAGE_KEY, JSON.stringify(state));
+    // Sesi baru dipasang → palang sesi-mati dibuka lagi. Tanpa ini, masuk
+    // ulang di tab yang sama (tanpa muat ulang) mewarisi palang dari sesi
+    // sebelumnya dan kematian berikutnya lewat tanpa satu kalimat pun.
+    sesiMatiSudahDiumumkan = false;
+  } else hapusLokal(STORAGE_KEY);
+}
+
+/**
+ * SELISIH JAM SERVER, dipelajari dari header `Date` tiap balasan.
+ *
+ * Gerbang umur token membandingkan `exp` dengan jam — dan jam perangkat bisa
+ * meleset, terutama pada tablet murah yang dipakai sepanjang hari. Selisihnya
+ * DISIMPAN supaya muat-ulang pagi hari (tepat saat sesi semalam mati) sudah
+ * tahu jam server sebelum permintaan pertamanya berangkat; tanpa itu gerbangnya
+ * baru bekerja setelah satu balasan diterima, padahal keempat belas permintaan
+ * berangkat serentak sebelum balasan mana pun tiba.
+ *
+ * Selisih yang basi (jam perangkat diperbaiki di antara dua sesi) menyembuhkan
+ * dirinya sendiri: balasan berikutnya menimpanya, dan balasan LOGIN termasuk —
+ * jadi sesi baru selalu dinilai dengan selisih yang segar. Itu yang menutup
+ * kemungkinan terburuknya, yaitu berputar di layar login.
+ */
+const KUNCI_SELISIH_JAM = "kakarut.selisihJam";
+let selisihJamMs = (() => {
+  const n = Number(bacaLokal(KUNCI_SELISIH_JAM));
+  return Number.isFinite(n) ? n : 0;
+})();
+
+export function catatJamServer(headerDate: string | null): void {
+  if (!headerDate) return;
+  const server = Date.parse(headerDate);
+  if (!Number.isFinite(server)) return;
+  selisihJamMs = server - Date.now();
+  tulisLokal(KUNCI_SELISIH_JAM, String(selisihJamMs));
+}
+
+/** Perkiraan jam SERVER sekarang, dalam milidetik epoch. */
+export function waktuServerKira(): number {
+  return Date.now() + selisihJamMs;
+}
+
+/**
+ * Satu sesi yang mati = satu pengumuman, bukan satu per permintaan.
+ * Bentuknya meniru `updateSudahDiberitahu` di bawah, yang sudah memakai palang
+ * sekali-jalan untuk alasan yang sama persis.
+ */
+let sesiMatiSudahDiumumkan = false;
+
+/**
+ * Bersihkan sesi lalu antar ke layar login dengan SEBABNYA. Dipanggil dari dua
+ * tempat: gerbang umur token (sebelum permintaan berangkat) dan penanganan 401
+ * (kalau server yang lebih dulu tahu — token dicabut, bukan kedaluwarsa).
+ */
+function umumkanSesiMati(): void {
+  saveAuth(null);
+  if (sesiMatiSudahDiumumkan) return;
+  sesiMatiSudahDiumumkan = true;
+  window.location.href = `/login?${PARAM_SESI}=${NILAI_SESI_BERAKHIR}`;
+}
+
+/**
+ * Jalur di bawah `/auth/` yang MEMBAWA SESI. Di server hanya `/auth/me` yang
+ * dipasangi `requireAuth`; `/login`, `/register`, `/forgot-password`,
+ * `/reset-password`, `/verify-email`, `/resend-verification`, dan `/guest`
+ * publik — token mati di sana diabaikan, tak pernah melahirkan 401.
+ *
+ * Menggerbanginya bukan sekadar mubazir, melainkan berbahaya: orang yang
+ * tokennya mati DAN sedang berusaha memulihkan aksesnya justru yang paling
+ * butuh pintu-pintu itu terbuka. Dipasangkan uji yang membaca daftar
+ * `requireAuth` di sumber server, supaya rute ber-sesi baru di bawah `/auth/`
+ * tak bisa lahir tanpa daftar ini ikut ditinjau.
+ */
+const JALUR_AUTH_BERSESI = new Set(["/auth/me"]);
+
+function digerbangiUmurToken(path: string): boolean {
+  const bersih = path.split("?")[0];
+  return !bersih.startsWith("/auth/") || JALUR_AUTH_BERSESI.has(bersih);
 }
 
 export class ApiError extends Error {
@@ -122,6 +200,29 @@ export async function api<T = unknown>(
   } = {},
 ): Promise<T> {
   const auth = loadAuth();
+
+  // GERBANG UMUR TOKEN — satu-satunya titik yang masih bisa memotong ledakannya.
+  // Lihat `lib/umurToken.ts` untuk alasan lengkapnya: saat sesi mati, seluruh
+  // kueri yang terpasang berangkat dalam SATU momen, jadi apa pun yang
+  // dikerjakan saat balasan pertama tiba sudah terlambat untuk tiga belas
+  // sisanya. Yang tak terbaca dianggap masih hidup — server tetap otoritasnya.
+  if (digerbangiUmurToken(path)) {
+    // Sudah diumumkan mati → halaman sedang berpindah ke /login, dan apa pun
+    // yang berangkat sekarang tak akan pernah dibaca siapa pun. Ini termasuk
+    // permintaan TANPA token: begitu `saveAuth(null)` jalan, kueri yang tersisa
+    // di tick yang sama berangkat telanjang dan dibalas "Perlu login (token
+    // tidak ada)" — kelas pesan lain, baris log yang sama sia-sianya. Terlihat
+    // saat gerbang penuh dijalankan: satu `/cabang` masih lolos sesudah tiga
+    // belas lainnya tertahan.
+    if (sesiMatiSudahDiumumkan) {
+      throw new ApiError(401, "Sesi berakhir, silakan login ulang");
+    }
+    if (auth?.token && tokenSudahMati(auth.token, waktuServerKira())) {
+      umumkanSesiMati();
+      throw new ApiError(401, "Sesi berakhir, silakan login ulang");
+    }
+  }
+
   const headers: Record<string, string> = {};
   if (auth?.token) headers.Authorization = `Bearer ${auth.token}`;
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
@@ -141,15 +242,17 @@ export async function api<T = unknown>(
 
   // Deteksi versi frontend baru pada tiap respons (header build id server).
   periksaBuildServer(res.headers.get("X-Kakarut-Build"));
+  // Jam server ikut dipungut di titik yang sama — headernya sudah ada di tiap
+  // balasan, jadi tak ada permintaan tambahan untuk mengetahuinya.
+  catatJamServer(res.headers.get("Date"));
 
   // 401 pada endpoint selain login = sesi berakhir → paksa ke halaman login.
   // Login yang gagal harus tetap menampilkan pesan asli dari server.
   if (res.status === 401 && !path.startsWith("/auth/login")) {
-    saveAuth(null);
+    umumkanSesiMati();
     // SEBABNYA IKUT: `throw` di bawah tak pernah dibaca siapa pun (dokumennya
     // sudah dibuang oleh perpindahan), jadi kalimatnya diucapkan halaman
     // login lewat query — lihat `lib/pesan-sesi.ts`.
-    window.location.href = `/login?${PARAM_SESI}=${NILAI_SESI_BERAKHIR}`;
     throw new ApiError(401, "Sesi berakhir, silakan login ulang");
   }
   if (!res.ok) {

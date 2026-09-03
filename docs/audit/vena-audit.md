@@ -50,6 +50,100 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## 1.744 penolakan 401 di panel galat: satu sesi mati = ~14 baris, dan pemalsuan tanda tangan tenggelam di antaranya — server + web + ponsel — 2026-09-03
+
+- **Kenapa vena ini ada**: BUKAN dari antrean — pemilik repo membuka panel Log
+  Galat super admin dan bertanya "kalau ini galat apa?". Layarnya: **1.744
+  penolakan 4xx dalam 7 hari, NOL 5xx, 157 kelompok**, seluruhnya
+  `401 Token tidak valid atau kedaluwarsa`.
+
+- **Jawabannya bukan bug, dan itu bagian pentingnya.** Token hidup 12 jam tanpa
+  refresh (`JWT_EXPIRES_IN`, ditulis di `API-CONTRACT.md`), jadi tiap sesi mati
+  tepat waktu — takdir setiap orang yang memakai aplikasi ini dua kali sehari.
+  Yang perlu diperbaiki bukan penolakannya, melainkan tiga hal yang tersembunyi
+  di baliknya.
+
+- **MEKANISMENYA DIBUKTIKAN DARI DATA PEMILIK SENDIRI, bukan dari tebakan.**
+  Dugaan pertamaku salah bentuk: kusangka polling yang merembes sesudah token
+  mati. Yang benar **kipas serentak** — `refetchOnWindowFocus` tak pernah diset
+  (jadi bawaan react-query `true`) dengan `staleTime` global 10 detik, sehingga
+  satu tab yang kembali difokuskan menembakkan SELURUH kueri yang terpasang
+  dalam satu tick. Buktinya ada di panel itu juga: `/company` dan `/cabang`
+  duduk BERDAMPINGAN dengan `/kategori` di KasirPage tapi **nol** di log —
+  bedanya cuma `staleTime` 5 menit (`KUNCI_MASTER`). **Sebaran 401 mengikuti
+  garis masa-basi, bukan garis interval.** Aritmetiknya menutup: 1.744 ÷ 7 ≈
+  249/hari ÷ ~14 ≈ 18 ledakan/hari, dan `/auth/me` 113 ÷ 7 ≈ 16/hari — rute itu
+  praktis penghitung sesi-mati. Gugus jam 07.50/07.51/07.53 pada tiga hari
+  berturut-turut = sesi semalam yang ditemukan mati saat toko dibuka.
+
+- **Temuan 1 — pemalsuan tanda tangan tak dapat dibedakan (server).**
+  `requireAuth` menangkap `catch {` TANPA mengikat galatnya, jadi
+  `TokenExpiredError` dan `JsonWebTokenError: invalid signature` menulis baris
+  yang identik sampai ke `sidikGalat`. Pengamanan `algorithms: ["HS256"]`
+  dipasang dua baris di atasnya khusus untuk menolak serangan itu, lalu
+  buktinya dibuang sebelum ada yang sempat membacanya. Kini dua kalimat, dua
+  sidik jari. §287 +4 asersi (3.445 → 3.449).
+
+- **Temuan 2 — alamat yang tercatat adalah PROXY, dan jatah ditanggung bersama
+  (server).** Seluruh alamat di panel berada di rentang milik satu CDN.
+  `TRUST_PROXY_HOPS` bawaan 1 sementara rantai `X-Forwarded-For` 2 entri.
+  Bukan cuma kolom log: `ipKlien` mengunci **empat pembatas laju yang berkunci
+  alamat saja** (register 20/jam, guest 30/5mnt, reset 20/15mnt, verif), jadi
+  penyewa yang tak berhubungan berbagi jatah. **Pemeriksa setelannya buta pada
+  kasus ini** — ketiga tuduhannya menjangkau hops=0, hops-tanpa-XFF, dan
+  rantai-lebih-pendek; keadaan production tak memenuhi satu pun. Ditambah
+  tuduhan keempat yang simetris. Nilainya sendiri milik pemilik (Dokploy).
+
+- **Temuan 3 — 401 yang ditelan diam-diam (ponsel).** `_revalidasiLatar` hanya
+  menangani 304 dan 2xx; `validateStatus` memulangkan true untuk semua status,
+  jadi 401 tak melempar DAN tak masuk cabang mana pun. Di sinyal jelek layar
+  menyajikan cache seolah baik-baik saja, token mati tak pernah dihapus, dan
+  siklusnya berulang tanpa batas. Sesi mati yang tak pernah mengumumkan
+  kematiannya — kasir mengira dirinya bekerja.
+
+- **Perbaikannya menghapus SEBAB, bukan membungkam instrumen.** Menyaring 401
+  keluar dari `error_logs` sempat kupertimbangkan dan ditolak: preseden repo
+  ini sudah memutuskannya di kelas yang sama persis
+  (`lencana-beli-tak-menembak-403`, 403 × 211 untuk lencana yang tak pernah
+  dirender) — *"layar menyesuaikan diri pada pintu, bukan sebaliknya."* Jadi
+  kedua klien kini memeriksa `exp` SEBELUM mengirim. Palang sekali-jalan saja
+  tak cukup dan itu inti rancangannya: keempat belas permintaan berangkat
+  sebelum balasan pertama tiba.
+
+- **Jam perangkat tidak dipercaya begitu saja.** Web mempelajari selisih jam
+  dari header `Date` tiap balasan dan menyimpannya (supaya muat-ulang pagi hari
+  sudah tahu jam server sebelum permintaan pertamanya berangkat); ponsel sudah
+  punya `waktuServer()` sejak lama untuk menstempel perintah offline — bahannya
+  tersedia dan belum pernah dipakai untuk ini. Selisih basi menyembuhkan diri
+  sendiri karena balasan LOGIN ikut memperbaruinya, jadi berputar di layar
+  login tak mungkin terjadi.
+
+- **GERBANGNYA MEMBETULKANKU DUA KALI.** (1) Jalan pertama masih meloloskan
+  satu `/cabang`: begitu `saveAuth(null)` jalan, kueri yang tersisa di tick
+  yang sama berangkat TELANJANG dan dibalas "Perlu login (token tidak ada)" —
+  kelas pesan lain, baris log yang sama sia-sianya. Palangnya kini ikut menahan
+  susulan. (2) Versi pertama spec e2e-nya sendiri cacat: menanam sesi lewat
+  `addInitScript`, yang menanam ulang tiap navigasi sehingga ujinya berputar
+  antara `/kasir` dan `/login` tanpa menguji apa pun — ditemukan justru oleh
+  bukti merahnya.
+
+- **Bukti merah**: `catch {` dikembalikan → 2 asersi merah; cabang proxy
+  keempat dicabut → 2 merah; angka tetap menggantikan panjang rantai → 1 merah;
+  spec e2e dijalankan terhadap bundel SEBELUM perubahan → 3 permintaan ber-sesi
+  (`/company`, `/cabang`, `/auth/me`) dengan token mati. Semua dipulihkan
+  byte-per-byte (`cmp`). Ponsel: uji di-commit merah lebih dulu (CI #27 —
+  analyze lolos, 631 hijau, 6 uji pemasangan merah), lalu dibayar.
+
+- **Yang TIDAK diklaim**: 1.744 itu tak bisa dipilah per pengguna — penolakan
+  terjadi SEBELUM `c.set("auth")`, jadi barisnya anonim. Berapa orang yang
+  mengalaminya tak diketahui, dan datanya memang tak ada. Panel kini merender
+  user-agent supaya setidaknya "web atau ponsel" bisa dijawab.
+
+- **Sisa untuk pemilik**: setel `TRUST_PROXY_HOPS` sesuai panjang rantai
+  sebenarnya di Dokploy — kode hanya membuat nilainya yang salah jadi terlihat.
+
+---
+
 ## Putaran PONSEL: layar verifikasi yang meminta token sementara suratnya mengirim kode, jeda yang ditulis klien, sesi dari `/register` yang dibawa ke layar kode, dan 401 yang bisu — ponsel — 2026-09-02
 
 - **Kenapa vena ini ada**: antrean ledger + pemetaan cakupan 2026-09-02 —
