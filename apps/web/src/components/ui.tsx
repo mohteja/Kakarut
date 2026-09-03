@@ -187,11 +187,12 @@ export const tdClass = "px-3 py-2 text-sm text-stone-700";
  * MEDAN PASSWORD DENGAN TOMBOL LIHAT.
  *
  * Password yang tak bisa dilihat adalah satu-satunya isian di aplikasi ini yang
- * pemakainya TAK BISA memeriksa sendiri sebelum menekan kirim. Salah ketik
- * satu huruf, dan yang ia terima "Email atau password salah" — kalimat yang
- * sengaja netral (anti-enumerasi), jadi ia tak pernah tahu bahwa yang salah
- * cuma jarinya. Di layar sentuh, dengan papan ketik yang menyembunyikan huruf
- * besar, itu terjadi sepanjang hari.
+ * pemakainya TAK BISA memeriksa sendiri sebelum menekan kirim. Salah ketik satu
+ * huruf, dan yang ia terima "Password salah" (2026-09-03; sebelumnya kalimat
+ * netral "Email atau password salah") — kini ia setidaknya tahu yang salah
+ * jarinya dan bukan alamatnya, tapi tetap tak tahu huruf yang mana. Di layar
+ * sentuh, dengan papan ketik yang menyembunyikan huruf besar, itu terjadi
+ * sepanjang hari, dan menebak ulang berkali-kali menabrak `batasLogin`.
  *
  * `type` sengaja TIDAK bisa dioper pemanggil: justru itu yang sedang diatur di
  * sini. Sisa prop `<input>` diteruskan apa adanya — `autoComplete`

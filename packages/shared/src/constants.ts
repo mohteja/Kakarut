@@ -42,6 +42,58 @@ export function selisihTerlambat(ditutupPada: string | null, sekarangMs: number)
 }
 
 /**
+ * ALASAN PENOLAKAN MASUK — satu rumah, sebab dua pihak mengucapkannya.
+ *
+ * Server melemparnya sebagai pesan HTTPException; web MEMBANDINGKANNYA untuk
+ * tahu kapan menawarkan tautan "Daftar". Kalimat yang diketik ulang di layar
+ * adalah kalimat yang akan bergeser sendiri — dan yang bergeser diam-diam
+ * bukan tulisannya, melainkan tautannya: ia berhenti muncul, tanpa satu uji
+ * pun berubah warna. `LoginPage` sudah punya satu contoh cara itu gagal
+ * (`msg.toLowerCase().includes("belum diverifikasi")`, mengendus kalimat yang
+ * tinggal di berkas lain).
+ *
+ * KEEMPATNYA 401. Yang membedakannya kalimatnya, bukan kontraknya.
+ */
+export const PESAN_LOGIN = {
+  /**
+   * Tak ada baris `users` untuk alamat ini. Dua sebab nyata di sistem ini, dan
+   * keduanya berujung pada tindakan yang SAMA (daftar): (1) diundang tapi
+   * belum pernah mendaftar — `POST /karyawan/undang` hanya menulis baris
+   * `invitations`, akunnya baru lahir saat orangnya mendaftar sendiri;
+   * (2) akun yang menghapus dirinya sendiri — `POST /onboarding/hapus-akun`
+   * mengganti nama emailnya jadi `deleted:<id>:<email>`, jadi alamat aslinya
+   * memang bebas dipakai ulang.
+   *
+   * SENGAJA TIDAK menyebut undangannya. "Anda punya undangan dari PT X" akan
+   * membocorkan siapa bekerja di mana kepada siapa pun yang bisa mengetik
+   * alamat email — satu tingkat lebih jauh dari yang diminta pemilik, dan
+   * bocorannya milik orang lain, bukan miliknya.
+   */
+  takTerdaftar: "Email tidak terdaftar — periksa ejaannya, atau daftar dulu",
+  /**
+   * Tombstone `users.deletedAt` — DAN ia praktis tak pernah terbaca, sengaja
+   * disebut supaya tak ada yang mengira cabangnya menganggur karena lupa.
+   * Satu-satunya jalan yang menuliskannya (`POST /onboarding/hapus-akun`) ikut
+   * mengganti nama emailnya jadi `deleted:<id>:<email>`, jadi alamat aslinya
+   * jatuh ke `takTerdaftar` — dan itu jawaban yang BENAR: alamatnya memang
+   * bebas dipakai ulang. Terukur pada DB gerbang 2026-09-03: 2 baris
+   * tombstone, KEDUANYA sudah berganti nama. Cabangnya tetap ada sebagai
+   * jaring untuk tombstone yang lahir dari jalan lain (tangan, migrasi).
+   */
+  terhapus: "Akun ini sudah dihapus",
+  /**
+   * `users.is_active = false` — dimatikan owner/admin lewat PATCH karyawan,
+   * dan BISA dinyalakan lagi olehnya. Karena itu kalimatnya menyebut ke siapa
+   * harus mengadu: orang yang membacanya tak bisa memperbaikinya sendiri, dan
+   * dulu ia menerima "password salah" lalu mereset passwordnya berulang kali
+   * tanpa hasil — sebab passwordnya memang tak pernah salah.
+   */
+  nonaktif: "Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda",
+  /** Baris ada, akun hidup, bcrypt tak cocok. Jalan keluarnya /lupa-password. */
+  passwordSalah: "Password salah",
+} as const;
+
+/**
  * Panduan markup per jenis kategori (persen) — hanya panduan saat membuat
  * menu baru; menu yang sudah ada memakai `mult` tersimpan.
  */

@@ -25,6 +25,62 @@ tanpa akses repo server.
 
 ---
 
+## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya
+
+🟡 **PERLU DICEK** — status **tidak berubah** (tetap `401` pada keempat
+sebabnya). Yang berubah isi `error`. Klien yang menampilkan `error` apa adanya
+otomatis ikut membaik; klien yang **menimpanya** dengan kalimat sendiri kini
+membuang seluruh isinya.
+
+**Kenapa berubah.** Sampai 2026-09-03 keempat penolakan dijawab satu kalimat
+yang sama, `"Email atau password salah"`. Yang paling mahal dari itu: karyawan
+yang akunnya **dinonaktifkan** admin membaca "password salah", lalu mereset
+passwordnya berulang kali tanpa hasil — passwordnya memang tak pernah salah.
+
+```
+POST /api/auth/login   → 401  { "error": "<salah satu dari empat>" }
+```
+
+| Sebab | `error` |
+| --- | --- |
+| tak ada akun untuk alamat itu | `Email tidak terdaftar — periksa ejaannya, atau daftar dulu` |
+| akun tombstone (`deleted_at`) | `Akun ini sudah dihapus` |
+| akun dinonaktifkan owner/admin | `Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda` |
+| akun hidup, password tak cocok | `Password salah` |
+
+Bunyi persisnya hidup di satu tempat, `PESAN_LOGIN` di
+`packages/shared/src/constants.ts` — **tidak** ikut Lampiran A (lampiran itu
+hanya menyalin `types.ts`), jadi tabel di atas adalah acuannya. Jangan
+mencocokkan teks untuk bercabang: kalau butuh cabang, mintalah kode
+terstruktur lebih dulu.
+
+**Yang perlu dicek di aplikasi ponsel:**
+
+- Layar masuk **menampilkan `error` dari server**, bukan kalimat tetap seperti
+  "Email atau password salah" / "Gagal masuk". Ini satu-satunya perubahan yang
+  benar-benar dituntut entri ini.
+- Pada `"Email tidak terdaftar…"`, tawarkan **daftar** dengan alamat yang sudah
+  terisi. Pembacanya yang paling sering adalah karyawan yang sudah **diundang**:
+  undangan hanya menulis baris `invitations`, akunnya baru lahir saat ia
+  mendaftar sendiri — tanpa jalan keluar di layar itu ia menyimpulkan
+  undangannya gagal. (Web melakukannya lewat `/daftar?email=`.)
+- Pada `"…dinonaktifkan…"`, **jangan** tawarkan reset password: jalan keluarnya
+  bukan password, dan menawarkannya persis yang membuat orang berputar-putar.
+
+**KEPUTUSAN SADAR PEMILIK REPO, dan harganya ditulis di sini supaya tak ada
+yang "memperbaikinya" balik tanpa tahu apa yang ia batalkan:** kalimat gabungan
+tadi menutup **enumerasi akun** — orang luar tak bisa menempelkan daftar alamat
+lalu memanen mana yang punya akun. Sekarang bisa. Biayanya disampaikan lebih
+dulu dan pemilik memilih tetap; penahan yang tersisa hanya batas laju login
+(10 percobaan per 5 menit per IP+email).
+
+**`POST /auth/forgot-password` TIDAK ikut berubah** dan tak boleh diubah: ia
+tetap membalas `200 { ok: true }` yang identik untuk alamat dikenal maupun
+tidak. Pintu itu tak berpassword sama sekali; membocorkan keterdaftaran di sana
+berarti memberikannya cuma-cuma, tanpa batas laju per akun yang menahan.
+
+---
+
 ## `GET /produksi` & `/pembelian` memulangkan `ringkas` — antrean pengadaan tanpa menghitung sendiri
 
 🟢 **BARU** — medan tambahan pada balasan yang sudah ada; `rows`, `total`,

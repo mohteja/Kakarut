@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { jamPasir, sisaJeda, tulisJeda } from "../lib/jeda-verifikasi";
 import { PESAN_KIRIM_ULANG } from "../lib/pesan-verifikasi";
 import { NILAI_SESI_BERAKHIR, PARAM_SESI, PESAN_SESI_BERAKHIR } from "../lib/pesan-sesi";
+import { PESAN_LOGIN } from "@kakarut/shared";
 
 export function LoginPage() {
   const { login, masukTamu, kirimUlangVerifikasi } = useAuth();
@@ -20,6 +21,23 @@ export function LoginPage() {
   const [tamuLoading, setTamuLoading] = useState<null | "owner" | "kasir">(null);
   // Bila login gagal karena email belum diverifikasi → tawarkan kirim ulang.
   const [belumVerif, setBelumVerif] = useState(false);
+  /*
+   * ALASAN PENOLAKAN YANG PUNYA JALAN KELUAR HARUS MENUNJUKKANNYA.
+   *
+   * Sejak 2026-09-03 server menyebut alasannya (keputusan pemilik; lihat
+   * `PESAN_LOGIN` di `@kakarut/shared` dan catatan panjang di `POST /login`).
+   * "Email tidak terdaftar" adalah satu-satunya dari keempatnya yang bisa
+   * diselesaikan orangnya sendiri di layar ini juga — dan pembacanya yang
+   * paling sering adalah karyawan yang SUDAH diundang: undangan cuma menulis
+   * baris `invitations`, akunnya baru lahir saat ia mendaftar sendiri. Tanpa
+   * tautan di sebelah kalimatnya, ia menyimpulkan undangannya gagal.
+   *
+   * Dibandingkan dengan konstanta bersama, bukan diendus dengan `includes`
+   * atas kalimat yang diketik ulang — bentuk itu ada tepat di bawah
+   * (`belumVerif`) dan ia adalah cara paling sunyi untuk kehilangan tautan
+   * ini: kalimatnya bergeser sedikit di server, tautannya berhenti muncul,
+   * dan tak ada yang merah.
+   */
   const [verifKirim, setVerifKirim] = useState<"idle" | "loading" | "sent">("idle");
   const [verifJeda, setVerifJeda] = useState(0);
   // Tenggatnya tersimpan per email, jadi hitung mundurnya benar walau
@@ -30,6 +48,7 @@ export function LoginPage() {
     return () => clearInterval(t);
   }, [email]);
   const [verifDevKode, setVerifDevUrl] = useState<string | null>(null);
+  const takTerdaftar = error === PESAN_LOGIN.takTerdaftar;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -134,7 +153,19 @@ export function LoginPage() {
               placeholder="••••••••"
             />
           </div>
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+              {takTerdaftar && (
+                <Link
+                  to={`/daftar?email=${encodeURIComponent(email)}`}
+                  className="mt-1 block font-semibold underline"
+                >
+                  Daftar dengan email ini →
+                </Link>
+              )}
+            </div>
+          )}
           {belumVerif && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               {verifKirim === "sent" ? (

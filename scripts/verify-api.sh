@@ -16954,6 +16954,83 @@ KOSONG289=$(api "$OWNER" GET "/produksi?branch_id=all&dari=1990-01-01&sampai=199
 cek "§289 rentang tanpa data → total 0 DAN ringkas nol semua" "V == 1" \
   "$(echo "$KOSONG289" | jq '((.total == 0) and (.ringkas.harus_dikerjakan.faktur == 0) and (.ringkas.selesai.faktur == 0))|if . then 1 else 0 end')"
 
+echo
+echo "── §290 login MENYEBUT alasan penolakannya (keputusan pemilik, 2026-09-03) ──"
+# Sampai hari ini keempat penolakan `POST /login` dijawab satu kalimat yang
+# SAMA — "Email atau password salah" — untuk email tak terdaftar, akun
+# terhapus, akun dinonaktifkan, dan password salah. Itu menutup enumerasi akun.
+# Pemilik meminta alasannya disebutkan; biayanya disampaikan lebih dulu
+# (enumerasi terbuka, penahannya tinggal `batasLogin`) dan ia memilih tetap.
+#
+# Yang diuji DI SINI adalah perilakunya lewat HTTP: alasannya benar-benar bisa
+# dibedakan dari luar, tiap kalimat menyebut sebabnya sendiri, dan statusnya
+# TETAP 401 pada keempatnya. Bunyi persis kalimatnya sengaja TIDAK diketik ulang
+# di sini — ia dipaku ke satu rumah (`PESAN_LOGIN` di packages/shared) oleh
+# `login-beralasan.test.ts`, dan salinan kedua di skrip ini akan menua sendiri.
+pesan290() { curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$1\",\"password\":\"$2\"}" | jq -r '.error // ""'; }
+kode290() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/login" \
+  -H 'Content-Type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}"; }
+
+api "$OWNER" POST /karyawan '{"nama":"Karyawan Alasan 290","email":"alasan290@basooopa.id","password":"PwAlasan290!","role":"admin","branch_id":null}' > /dev/null
+U290_ID=$(api "$OWNER" GET /karyawan | jq -r '[.[] | select(.email=="alasan290@basooopa.id")][0].user_id')
+cek "§290 PREMIS: akun ujinya benar-benar bisa masuk (kalau tidak, seluruh seksi hampa)" "V == 1" \
+  "$([ -n "$(login "alasan290@basooopa.id" "PwAlasan290!")" ] && echo 1 || echo 0)"
+
+TAK290=$(pesan290 "tidakada290@basooopa.id" "PwApaSaja290!")
+SALAH290=$(pesan290 "alasan290@basooopa.id" "PwSalah290!")
+cek "§290 email tak terdaftar → 401" "V == 401" "$(kode290 "tidakada290@basooopa.id" "PwApaSaja290!")"
+cek "§290 password salah → 401" "V == 401" "$(kode290 "alasan290@basooopa.id" "PwSalah290!")"
+cek "§290 email tak terdaftar MENYEBUT keterdaftaran" "V == 1" \
+  "$(printf '%s' "$TAK290" | grep -qi 'terdaftar' && echo 1 || echo 0)"
+cek "§290 email tak terdaftar MENUNJUKKAN jalan keluarnya (daftar)" "V == 1" \
+  "$(printf '%s' "$TAK290" | grep -qi 'daftar dulu' && echo 1 || echo 0)"
+cek "§290 password salah MENYEBUT password" "V == 1" \
+  "$(printf '%s' "$SALAH290" | grep -qi 'password' && echo 1 || echo 0)"
+# INTI SEKSI INI: keduanya BERBEDA. Kalau kelak seseorang mengembalikan kalimat
+# gabungan, lengan-lengan "menyebut …" di atas tetap hijau (kalimat lamanya
+# memuat kedua kata itu) — yang menangkapnya cuma perbandingan ini.
+cek "§290 kedua alasan itu BERBEDA satu sama lain" "V == 1" \
+  "$([ "$TAK290" != "$SALAH290" ] && echo 1 || echo 0)"
+cek "§290 alasan tak-terdaftar TIDAK menyebut password" "V == 0" \
+  "$(printf '%s' "$TAK290" | grep -qi 'password' && echo 1 || echo 0)"
+
+# AKUN DINONAKTIFKAN — keadaan yang paling mahal saat dijawab "password salah":
+# orangnya mereset passwordnya berulang kali padahal passwordnya tak pernah
+# salah. Dibuktikan berpasangan: nonaktif ditolak dengan kalimatnya sendiri,
+# lalu password YANG SAMA berhasil begitu akunnya dinyalakan lagi.
+api "$OWNER" PATCH "/karyawan/$U290_ID" '{"is_active":false}' > /dev/null
+MATI290=$(pesan290 "alasan290@basooopa.id" "PwAlasan290!")
+cek "§290 akun nonaktif → tetap 401 (kontraknya tak berubah)" "V == 401" \
+  "$(kode290 "alasan290@basooopa.id" "PwAlasan290!")"
+cek "§290 akun nonaktif MENYEBUT dinonaktifkan" "V == 1" \
+  "$(printf '%s' "$MATI290" | grep -qi 'dinonaktifkan' && echo 1 || echo 0)"
+cek "§290 akun nonaktif MENYURUH menghubungi orang yang bisa menyalakannya" "V == 1" \
+  "$(printf '%s' "$MATI290" | grep -qi 'hubungi' && echo 1 || echo 0)"
+cek "§290 tiga alasan itu berbeda satu sama lain (tak ada dua yang sama)" "V == 3" \
+  "$(printf '%s\n%s\n%s\n' "$TAK290" "$SALAH290" "$MATI290" | sort -u | wc -l)"
+api "$OWNER" PATCH "/karyawan/$U290_ID" '{"is_active":true}' > /dev/null
+cek "§290 password yang SAMA berhasil begitu akunnya dinyalakan lagi" "V == 1" \
+  "$([ -n "$(login "alasan290@basooopa.id" "PwAlasan290!")" ] && echo 1 || echo 0)"
+
+# /LUPA-PASSWORD TIDAK IKUT BICARA — dan itu bukan kelalaian melainkan batasnya.
+# Pintu login setidaknya berbatas laju per (IP + email); pintu ini bisa ditembak
+# tanpa modal apa pun, jadi jawabannya wajib tetap identik. `dev_reset_url`
+# hanya lahir saat email BELUM dikonfigurasi dan bukan produksi — ia dibuang
+# sebelum dibandingkan, sebab di produksi ia memang tak pernah ada.
+LUPA_ADA290=$(curl -s -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' \
+  -d '{"email":"alasan290@basooopa.id"}' | jq -cS 'del(.dev_reset_url)')
+LUPA_TIDAK290=$(curl -s -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' \
+  -d '{"email":"tidakada290@basooopa.id"}' | jq -cS 'del(.dev_reset_url)')
+cek "§290 /lupa-password: email dikenal → 200" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' -d '{"email":"alasan290@basooopa.id"}')"
+cek "§290 /lupa-password: email tak dikenal → 200 (sama)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: application/json' -d '{"email":"tidakada290@basooopa.id"}')"
+cek "§290 /lupa-password: badannya IDENTIK untuk dikenal & tak dikenal" "V == 1" \
+  "$([ "$LUPA_ADA290" = "$LUPA_TIDAK290" ] && echo 1 || echo 0)"
+cek "§290 /lupa-password: badannya tak menyebut keterdaftaran sama sekali" "V == 0" \
+  "$(printf '%s' "$LUPA_ADA290" | grep -qi 'terdaftar' && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

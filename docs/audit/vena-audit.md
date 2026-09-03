@@ -50,6 +50,105 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Login menyebut ALASAN penolakannya — dan harganya keputusan pemilik, bukan kelalaian — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo meminta dua hal dalam satu pesan —
+  *"sesi anda berakhir silahkan masuk kembali cukup saja gitu"* dan *"kalo pas
+  login ternyata tidak terdaftar / sebutkan alasan tidak terdaftarnya kenapaa"*.
+
+- **Keadaan sebelumnya**: `POST /login` punya **empat** keadaan penolakan yang
+  berbeda dan **satu** kalimat untuk semuanya — `"Email atau password salah"`.
+  Diukur pada DB gerbang, berapa orang yang benar-benar berdiri di belakang
+  masing-masing:
+
+  | keadaan | baris di DB gerbang | yang ia baca dulu |
+  | --- | --- | --- |
+  | diundang, belum pernah mendaftar | **6** undangan `pending` tanpa baris `users` | "Email atau password salah" |
+  | akun dinonaktifkan owner/admin | **8** `users.is_active = false` | "Email atau password salah" |
+  | akun tombstone (`deleted_at`) | **2**, dan **keduanya** emailnya sudah diganti | (jatuh ke "tak terdaftar") |
+  | password salah | — | "Email atau password salah" |
+
+  Yang paling mahal baris kedua: delapan orang yang, saat mencoba masuk, dulu
+  membaca kalimat yang menyebut password — lalu mereset passwordnya berulang
+  kali tanpa hasil, sebab passwordnya memang tak pernah salah. Baris pertama
+  hampir sama buruknya dengan arah terbalik: enam orang yang SUDAH diundang
+  pemiliknya, tapi `POST /karyawan/undang` hanya menulis baris `invitations` —
+  akunnya baru lahir saat mereka mendaftar sendiri. Yang mereka simpulkan dari
+  layar: undangannya gagal, dan orang lain harus memperbaikinya.
+
+- **Harganya disampaikan lebih dulu, dan pemilik memilih tetap.** Kalimat
+  gabungan itu menutup **enumerasi akun**: orang luar tak bisa menempelkan
+  daftar alamat lalu memanen mana yang punya akun di sistem ini. Memisahkannya
+  membuka itu. Pemilik ditanya dengan biayanya disebut, dan jawabannya
+  *"Sebutkan juga 'email tidak terdaftar'"*. Maka yang dikerjakan bukan
+  menawar keputusan itu melainkan **menuliskannya di tempat yang akan dibaca
+  orang berikutnya** — di `POST /login`, di `PESAN_LOGIN`, di kontrak API, dan
+  di changelog ponsel — supaya tak ada yang "merapikannya" balik tanpa tahu apa
+  yang sedang ia batalkan, dan sebaliknya tak ada yang menyangka ini
+  kecelakaan. Penahan yang tersisa: `batasLogin`, 10 percobaan per 5 menit per
+  (IP + email).
+
+- **Yang TIDAK ikut berubah, dan itu batas yang dipilih**: `/forgot-password`
+  tetap membalas `200 { ok: true }` yang identik untuk alamat dikenal maupun
+  tidak. Pintu itu tak berpassword sama sekali — membocorkan keterdaftaran di
+  sana berarti memberikannya cuma-cuma, tanpa batas laju per akun yang menahan.
+  Dipaku dua kali: statis (`login-beralasan.test.ts` mengiris penangannya dan
+  menuntut nol `HTTPException`, nol `message:`, satu `return c.json`) dan lewat
+  HTTP (§290 membandingkan badan balasannya untuk kedua alamat).
+
+- **Yang dikerjakan**:
+  - `PESAN_LOGIN` di `packages/shared/src/constants.ts` — satu rumah untuk
+    keempat kalimatnya. Bukan kerapian: web **membandingkan** kalimatnya untuk
+    memutuskan kapan menawarkan tautan "Daftar", dan kalimat yang diketik ulang
+    di layar akan bergeser sendiri — yang hilang diam-diam bukan tulisannya
+    melainkan tautannya, tanpa satu uji pun merah. `LoginPage` sudah punya satu
+    contoh cara itu gagal (`msg.includes("belum diverifikasi")`).
+  - Empat cabang di `POST /login`, **semuanya tetap 401** — yang berubah
+    kalimatnya, bukan kontraknya.
+  - Kalimat yang punya jalan keluar **menunjukkannya**: "Email tidak
+    terdaftar — periksa ejaannya, atau daftar dulu" + tautan `Daftar dengan
+    email ini →` yang membawa alamatnya (`/daftar?email=`), dan `SignupPage`
+    kini benar-benar membacanya. Tautan yang menjanjikan "email ini" lalu
+    membuka formulir kosong berbohong, dan orangnya mengetik ulang alamat yang
+    barusan ditolak — kesempatan kedua untuk salah ketik yang membuatnya sampai
+    ke sana. Pada akun nonaktif kalimatnya menyebut **siapa yang harus
+    dihubungi**; jalan keluarnya bukan reset password, dan menawarkan reset
+    password justru yang membuat orang berputar-putar.
+  - Kalimat sesi berakhir dipendekkan jadi *"Sesi Anda berakhir. Silakan masuk
+    kembali."* Versi panjangnya menyebut ketiga sebabnya dalam kurung; ketiganya
+    menuntut tindakan yang SAMA, dan dua di antaranya tak bisa ia perbaiki
+    sendiri. Yang penting tetap ada: ia dikeluarkan karena SESUATU.
+  - Tiga komentar yang jadi salah dibetulkan, bukan dibiarkan
+    (`superadmin.ts` ×2 — termasuk `console.warn` yang kini **menginterpolasi**
+    konstantanya, dan `ui.tsx` yang menerangkan tombol lihat-password dengan
+    kalimat lama).
+
+- **Batas yang diketahui**: (1) enumerasi terbuka — itu memang yang diminta,
+  tapi ditulis di sini supaya tercatat sebagai keadaan, bukan sebagai
+  kelalaian; (2) cabang `terhapus` praktis tak pernah terbaca — jalan yang
+  menuliskannya ikut mengganti nama emailnya, jadi alamat aslinya jatuh ke
+  "tak terdaftar" (yang justru jawaban benar: alamatnya bebas dipakai ulang).
+  Cabangnya tetap ada sebagai jaring untuk tombstone dari jalan lain; (3)
+  §290 memeriksa alasannya **bisa dibedakan** dan tiap kalimat menyebut
+  sebabnya, bukan bunyi persisnya — bunyinya dipaku uji statis, supaya skrip
+  gerbang tak jadi salinan keempat yang menua sendiri; (4) `/register` dan
+  `/resend-verification` tetap netral dan **tidak** diperiksa ulang putaran ini
+  — keduanya permukaan enumerasi juga, dan sekarang keduanya lebih ketat
+  daripada `/login` di sebelahnya. Ketimpangan itu disengaja (yang satu diminta
+  pemilik, yang lain tidak) tapi belum pernah ditanyakan.
+
+- **Bukti merah, enam, tiap satu dipulihkan byte-per-byte (`cmp`)**: satu pesan
+  diketik ulang di server → 2 merah · `/lupa-password` mulai melempar 404
+  "Email tidak terdaftar" → 1 merah · layar login kembali **mengendus**
+  kalimatnya dengan `includes` → 1 merah · tautannya berhenti membawa emailnya
+  → 1 merah · layar daftar berhenti membaca query-nya → 1 merah · kata
+  "ENUMERASI" dihapus dari catatan sumbernya → 1 merah.
+
+- **Gerbang**: typecheck · build · `npm test` 233 berkas / **2.817** uji
+  (+1 berkas, +11 uji) · `verify-api.sh` **3.494 lolos, 0 gagal** (dari 3.477,
+  §290 +17 lengan) · `audit:invarian` 27/27 · Playwright **30 spek** (dari 28).
+  `rute-diketuk.txt` diregenerasi — tak ada rute baru.
+
 ## Riwayat pengadaan jadi TABEL, dan ringkasannya menghitung populasi — bukan halaman — web + server — 2026-09-03
 
 - **Kenapa vena ini ada**: pemilik repo meminta dua hal atas halaman Produksi
@@ -10042,6 +10141,14 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
+- [ ] **`/register` & `/resend-verification` masih netral sementara `/login` di
+      sebelahnya kini bicara** — ketimpangan yang lahir 2026-09-03 dan belum
+      pernah ditanyakan ke pemilik. Keduanya permukaan enumerasi yang sama;
+      sesudah `/login` dibuka, netralitas keduanya melindungi lebih sedikit
+      daripada sebelumnya sambil tetap membuat orang yang salah ketik alamat
+      di layar daftar tak tahu apa-apa. Pilihannya dua-duanya sah — dirapatkan
+      ke `/login`, atau dibiarkan sebagai batas yang disengaja — tapi harus
+      dipilih, bukan diwarisi
 - [ ] **`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman** — dideklarasikan
       di `TambahStokPage.tsx`, bukan `packages/shared`, sehingga Lampiran A &
       fikstur ponsel tak pernah melihatnya dan medan yang server kirim bisa

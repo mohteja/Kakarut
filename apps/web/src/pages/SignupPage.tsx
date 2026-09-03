@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
@@ -21,7 +21,20 @@ import { PESAN_DAFTAR, PESAN_SUDAH_AKTIF } from "../lib/pesan-verifikasi";
 export function SignupPage() {
   const { register } = useAuth();
   const [nama, setNama] = useState("");
-  const [email, setEmail] = useState("");
+  /*
+   * EMAILNYA IKUT DARI LAYAR MASUK, dan itu sepasang dengan tautan di sana.
+   *
+   * `LoginPage` menawarkan "Daftar dengan email ini →" saat server menjawab
+   * `PESAN_LOGIN.takTerdaftar`. Tautan yang menjanjikan "email ini" lalu
+   * membuka formulir kosong adalah tautan yang berbohong, dan orangnya
+   * mengetik ulang alamat yang barusan ditolak — persis kesempatan kedua untuk
+   * salah ketik yang membuatnya sampai ke sini.
+   *
+   * Dibaca SEKALI sebagai nilai awal, bukan disinkronkan terus: sesudah layar
+   * ini terbuka, yang berkuasa atas isiannya adalah orangnya.
+   */
+  const [paramDaftar] = useSearchParams();
+  const [email, setEmail] = useState(() => paramDaftar.get("email")?.trim().toLowerCase() ?? "");
   const [password, setPassword] = useState("");
   const [konfirmasi, setKonfirmasi] = useState("");
   const [error, setError] = useState<string | null>(null);

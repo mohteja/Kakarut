@@ -4,6 +4,7 @@ import { env } from "../../config/env";
 import type { Db, Tx } from "../../db/client";
 import { kunciAntrean } from "../../lib/kunci";
 import { users } from "../../db/schema";
+import { PESAN_LOGIN } from "@kakarut/shared";
 
 /**
  * Pastikan ADA satu super admin platform yang aktif. Dipanggil saat boot —
@@ -85,8 +86,9 @@ export async function pastikanSuperAdmin(dbx: Db | Tx): Promise<boolean> {
  * `SEED_SUPERADMIN_PASSWORD` hanya dibaca SEKALI, saat akunnya dibuat. Sesudah
  * itu passwordnya hidup sebagai hash di basis data, dan mengubah nilai env
  * tidak mengubah apa pun. Yang terlihat pemilik sistem: env-nya jelas berisi
- * password yang benar, tapi masuk selalu ditolak "Email atau password salah" —
- * kalimat yang SENGAJA netral (anti-enumerasi), jadi ia tak bisa menolong.
+ * password yang benar, tapi masuk selalu ditolak "Password salah" — kalimat
+ * yang benar dan tetap tak menolong: yang salah bukan yang ia ketik, melainkan
+ * anggapannya bahwa env itu masih dibaca.
  *
  * Terukur: akun super admin dengan password bawaan → 200; nilai env apa pun
  * yang lain → 401, dengan akun aktif, terverifikasi, `token_version` 0. Tak
@@ -117,7 +119,7 @@ async function peringatkanEnvMenyimpang(dbx: Db | Tx): Promise<void> {
     console.warn(
       `SEED_SUPERADMIN_PASSWORD TIDAK cocok dengan password akun ${sa.email} yang ada. ` +
         "Nilai env hanya dipakai saat akun pertama dibuat — mengubahnya tidak mengubah " +
-        "password. Masuk akan ditolak 'Email atau password salah'. Untuk menggantinya, " +
+        `password. Masuk akan ditolak '${PESAN_LOGIN.passwordSalah}'. Untuk menggantinya, ` +
         "pakai alur lupa password, atau setel ulang password_hash-nya langsung " +
         "(dan naikkan token_version supaya sesi lama ikut mati).",
     );
