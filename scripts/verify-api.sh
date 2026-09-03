@@ -1851,6 +1851,36 @@ cek "store baru auto-tertaut saat CK hanya satu (Cabang Uji 46)" "V == 1" \
 cek "menu dgn lokasi central kitchen → 400 (CK bukan POS)" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/menu" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d "{\"nama\":\"Menu CK 52\",\"category_id\":\"$(api "$OWNER" GET /kategori | jq -r '.[0].id')\",\"tipe\":\"regular\",\"mult\":2,\"harga_jual\":10000,\"branch_ids\":[\"$CK52_UTAMA\"]}")"
 
+# MEMBACA menu "di" central kitchen: server TIDAK menolaknya, dan itu keputusan
+# sadar — yang keliru pertanyaannya, bukan permintaannya. Yang dipulangkan
+# persis himpunan menu TANPA pembatasan lokasi, sebab `tampilDiCabang` berbunyi
+# "tak ada pembatasan = tampil di mana saja".
+#
+# Dipaku di sini karena justru dari situ layar bisa berbohong: halaman Menu &
+# HPP dulu menawarkan CK sebagai pilihan "Tampil di lokasi", dan tiga belas
+# menu tanpa pembatasan lokasi terbaca operator sebagai "tiga belas menu dijual
+# di dapur pusat". Sisi webnya diperbaiki + dijaga (`MenuListPage`,
+# `lokasi-menu-hanya-store.test.ts`, `lokasi-menu-tanpa-ck.spec.ts`); lengan ini
+# menuliskan apa yang server memang janjikan, supaya mengubahnya jadi keputusan
+# sadar, bukan kelalaian.
+#
+# PREMISNYA DIBUKTIKAN LEBIH DULU: tanpa satu pun menu yang dibatasi lokasi,
+# kedua himpunan itu sama-sama seluruh katalog dan asersinya lolos HAMPA.
+PUT52CK=$(api "$OWNER" GET "/menu/$PBA_ID" | jq --arg b "$PUSAT51_ID" '{nama, kode, category_id, tipe, mult, base_menu_id, base_mult, harga_jual, image_url, is_active, komponen: [.komponen[] | {ingredient_id, qty}], branch_ids: [$b]}')
+api "$OWNER" PUT "/menu/$PBA_ID" "$PUT52CK" > /dev/null
+cek "PREMIS: katalog penuh > himpunan menu tanpa pembatasan lokasi" "V == 1" \
+  "$(api "$OWNER" GET /menu | jq '((length) > ([.[] | select(.branch_ids | length == 0)] | length)) | if . then 1 else 0 end')"
+cek "GET /menu?branch_id=<CK> tetap 200 (bukan galat)" "V == 200" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/menu?branch_id=$CK52_UTAMA" -H "Authorization: Bearer $OWNER")"
+CKSET=$(api "$OWNER" GET "/menu?branch_id=$CK52_UTAMA" | jq -c '[.[].id] | sort')
+BEBASSET=$(api "$OWNER" GET /menu | jq -c '[.[] | select(.branch_ids | length == 0) | .id] | sort')
+cek "?branch_id=<CK> == himpunan menu TANPA pembatasan lokasi" "V == 1" \
+  "$([ "$CKSET" = "$BEBASSET" ] && echo 1 || echo 0)"
+# pulihkan seperti akhir §51 — seksi berikutnya mengandaikan menu ini tak dibatasi
+api "$OWNER" PUT "/menu/$PBA_ID" "$(echo "$PUT52CK" | jq '.branch_ids = null')" > /dev/null
+cek "pulih: menu tak lagi dibatasi lokasi" "V == 0" \
+  "$(api "$OWNER" GET "/menu/$PBA_ID" | jq '.branch_ids | length')"
+
 # kini ada 2 CK (Central Kitchen + Central Kitchen 47) → wajib memilih pemasok
 cek "dua CK: store baru tanpa pilih pemasok → 400" "V == 400" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/cabang" -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' -d '{"nama":"Store 52"}')"

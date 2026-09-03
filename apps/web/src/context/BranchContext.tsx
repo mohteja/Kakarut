@@ -37,6 +37,39 @@ export function labelCabang(b: Pick<Cabang, "nama" | "tipe">) {
 }
 
 /**
+ * SATU-SATUNYA definisi "cabang yang boleh jadi lokasi menu".
+ *
+ * Hanya cabang `store` yang punya kasir/POS. Central kitchen memproduksi lalu
+ * MENGIRIM ke store; kantor tak menjual apa pun. Server menegakkan hal yang
+ * sama dan menolak selainnya dengan **400** ("Hanya cabang store (kasir/POS)
+ * yang bisa jadi lokasi menu", `modules/menu/routes.ts`), dipaku verify-api.
+ *
+ * Ditulis di sini, bukan di tiap layar, karena persis itu yang pernah hanyut:
+ * commit `b3237cc` mengubah FORMULIR menu dari `tipe !== "kantor"` jadi
+ * `tipe === "store"` dan melewatkan halaman DAFTARNYA, yang lalu menawarkan
+ * Central Kitchen sebagai pilihan "Tampil di lokasi" selama dua tahun tanpa
+ * satu pun uji merah. `apps/server/test/lokasi-menu-hanya-store.test.ts`
+ * menjaga agar halaman menu tak menulis aturan ini sendiri lagi.
+ *
+ * Menerima `undefined`/`null` supaya `find()` yang tak ketemu bisa dialirkan
+ * langsung tanpa penjaga tambahan di pemanggilnya.
+ */
+export const bolehJadiLokasiMenu = (b?: Pick<Cabang, "tipe"> | null) => b?.tipe === "store";
+
+/**
+ * Pilihan lokasi menu untuk dropdown/checkbox: boleh punya menu DAN masih aktif.
+ *
+ * DUA fungsi, bukan satu, dan itu bukan kelebihan. Daftar PILIHAN memang harus
+ * membuang cabang nonaktif — tak ada gunanya menawarkannya. Tapi jalur SIMPAN
+ * tidak boleh memakai `is_active`: server (`validateRefs`) hanya memeriksa
+ * perusahaan + tipe, jadi menyaring id cabang store yang sedang dinonaktifkan
+ * sementara akan MENGHAPUS pembatasan lokasi menu itu — diam-diam melebarkannya
+ * ke semua cabang. Jalur simpan memakai `bolehJadiLokasiMenu` saja.
+ */
+export const opsiLokasiMenu = (cabang: Cabang[]) =>
+  cabang.filter((b) => b.is_active && bolehJadiLokasiMenu(b));
+
+/**
  * DIVISI kerja manajemen = jenis lokasi yang dipilih di sidebar. Satu
  * perusahaan, beda divisi: pilih Central Kitchen → hanya menu produksi;
  * pilih cabang store → hanya menu kasir; pilih Kantor (pusat) → semua menu.

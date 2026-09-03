@@ -50,6 +50,165 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Central Kitchen ditawarkan sebagai lokasi menu — dapur yang tak berjualan, dan angka yang menjawab pertanyaan yang tak pernah diajukan — web — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo mengirim tangkapan layar Menu & HPP
+  dengan *"Tampil di lokasi: 🏭 Central Kitchen"* terpilih dan judul **"Menu &
+  HPP (13 dari 40)"**, lalu menulis: *"menu dan hpp ini tidak ada di central
+  kitchen karna central kitchen tidak berjualan… berbeda dengan resep yang ada
+  lokasi produksinya."* Keberatannya benar sampai ke struktur datanya.
+
+- **SELURUH sistem sudah menganut aturan itu — kecuali satu baris.** Server
+  menolak menyimpan lokasi menu non-store (**400** *"Hanya cabang store
+  (kasir/POS) yang bisa jadi lokasi menu"*, `menu/routes.ts:177`), dipaku
+  `verify-api.sh` §52. Formulir menu memakai `tipe === "store"` di empat tapak
+  dan bahkan MEMBUANG id non-store sebelum menyimpan. Sidebar tak menaruh
+  `/menu` di `BOLEH_CK`, jadi divisi Central Kitchen tak bisa membuka halaman
+  ini sama sekali — sementara `/resep` dan `/bahan` ADA di sana, persis
+  pembedaan yang ditulis pemilik.
+
+  Yang menyimpang `MenuListPage.tsx:69`: `b.tipe !== "kantor"`. Itu predikat
+  **lama**. Commit `b3237cc` (17 Juli 2026, *"menu store-only"*) mengubah
+  formulirnya dari `!== "kantor"` jadi `=== "store"` dan **melewatkan halaman
+  daftarnya**. Bentuk yang diperingatkan berkas ini di paragraf pembukanya:
+  aturannya sudah dipikirkan dan ditulis, penjaganya dipasang di satu pintu,
+  pintu kedua ke keadaan yang sama dibiarkan terbuka — dua tahun, tanpa satu
+  pun uji merah (`apps/web/e2e/` tak punya spek menu; `apps/server/test/` tak
+  punya penjaga lokasi menu).
+
+- **Kontras resep vs menu — dua model, karena dua pertanyaan.** Lokasi produksi
+  resep enum `ingredients.produksi_di` (`'ck' | 'cabang'`, NOT NULL, default
+  `ck`) — CK di sana sebuah **mode**, dan id cabang CK tak pernah tersimpan
+  pada resep; cabang produsen yang benar-benar disimpan
+  (`ingredient_produksi_branches`) justru **wajib store** juga. Lokasi menu
+  tabel gandeng `menu_branches` berisi `branch_id` sungguhan. "Dibuat di mana"
+  dan "dijual di mana" tak pernah boleh dijawab satu bentuk.
+
+- **Populasi — sapuan A: 90 penyebutan literal tipe cabang di 22 berkas**
+  `apps/web/src` (`"store"`/`"central_kitchen"`/`"kantor"`, di luar deklarasi
+  tipe). Dipilah tangan jadi **penjualan** (wajib store-only) vs
+  **stok/produksi/peran/navigasi** (CK memang sah: transfer, dashboard, tahap,
+  perlengkapan, detail bahan, karyawan, faktur). Menyimpang: **1**.
+
+- **Populasi — sapuan B: 13 pemanggil `/menu` & `/menu/ketersediaan`** (10 web,
+  3 ponsel), tiap satu ditelusuri "id cabang apa yang BISA dibawanya". Sapuan
+  ini yang membuktikan server tak perlu diubah, dan jawabannya tak seperti
+  dugaan awal:
+
+  - `StokPage:76,81` MEMANG bisa membawa id CK (`useCabangData()` dari Kantor
+    menawarkan cabang non-kantor) — tapi keduanya `enabled: tab === "menu"`,
+    dan `bolehStokMenu` (`StokPage:58`) memaksa tab keluar dari "menu" untuk
+    CK/kantor. Tak pernah menyala.
+  - `TambahStokDariMenuPage:222,226` memakai `tujuanId`, dan daftar tujuannya
+    store aktif saja (`:200`).
+  - `LihatMenuPage:83` mengirim cabang aktif, tapi `/menu/lihat` tak ada di
+    `BOLEH_CK` dan disembunyikan navigasi saat `dCk`.
+  - `KasirPage` + ponsel `kasir_repository`: cabang kasir, dan kasir di CK
+    ditolak server (**400**, `users/routes.ts:138`).
+  - Ponsel **punya** halaman Menu & HPP (`menu_hpp_page.dart`, "versi baca"),
+    dan ia **nol penyaring lokasi** — `GET /menu?semua=true` tanpa `branch_id`.
+    Tak tersentuh cacat ini.
+
+  Jadi tak satu pun klien bisa mengirim `branch_id` CK ke `/menu`. Cacatnya
+  murni di DAFTAR PILIHAN, bukan di permintaannya.
+
+- **Ukurannya, diukur lewat HTTP + SQL atas DB hasil gerbang** (satu menu
+  dibatasi ke cabang store lebih dulu — tanpa itu keempat angkanya sama-sama 96
+  dan pengukurannya HAMPA):
+
+  | pertanyaan | jawaban server |
+  |---|---|
+  | katalog penuh (`GET /menu`) | **96** |
+  | `?branch_id=<store Pusat>` | **96** |
+  | `?branch_id=<Central Kitchen>` | HTTP **200** → **95** |
+  | menu TANPA pembatasan lokasi | **95** |
+  | himpunan CK == himpunan tanpa-pembatasan | **YA** |
+
+  Artinya panel akan menuliskan **"95 dari 96"** di bawah 🏭 Central Kitchen —
+  bentuk yang persis sama dengan "13 dari 40" milik pemilik. Angka yang
+  benar-benar ada, menjawab pertanyaan yang tak pernah diajukan: sembilan puluh
+  lima itu "menu tanpa pembatasan lokasi", bukan "menu yang dijual di dapur
+  pusat". Dan HPP-nya tak pernah dihitung per cabang (`hitungHpp` tak menerima
+  `branchId`; `loadKatalog` hanya `companyId`), jadi seluruh kolom angkanya
+  identik di lokasi mana pun — pemilihnya tak pernah mengubah satu rupiah pun.
+
+- **Perbaikannya satu rumah, bukan satu baris.** `bolehJadiLokasiMenu` +
+  `opsiLokasiMenu` di `BranchContext.tsx` (sebelah `labelCabang`), dipakai
+  daftar DAN formulir. **Dua fungsi, sengaja**: daftar pilihan wajib membuang
+  cabang nonaktif, jalur SIMPAN tak boleh — server (`validateRefs`) hanya
+  memeriksa perusahaan + tipe, jadi menyaring `is_active` saat menyimpan akan
+  menghapus pembatasan lokasi menu yang cabangnya sedang dinonaktifkan
+  sementara, diam-diam MELEBARKANNYA ke semua cabang. Perilaku hari ini
+  dipertahankan persis.
+
+- **Detektor DIBUKTIKAN bisa menuduh — tiga kali, semuanya dipulihkan
+  byte-per-byte (`cmp`)**:
+
+  1. `MenuListPage:69` dikembalikan ke `!== "kantor"` → penjaga statis merah 2
+     uji, tuduhannya menyebut barisnya utuh: `MenuListPage.tsx: const
+     lokasiOpsi = cabang.filter((b) => b.is_active && b.tipe !== "kantor");`
+  2. `bolehJadiLokasiMenu` dilebarkan jadi `!== "kantor"` → uji "rumah aturannya
+     berbunyi store" merah. Melebarkan helper melebarkan seluruh pemakainya
+     sekaligus, jadi nilainya dipaku DI RUMAHNYA, bukan di tiap layar.
+  3. Bukti merah PERAMBAN: revert + build + nyalakan ulang server → spek
+     Playwright merah dengan isi dropdown apa adanya —
+     `["Semua lokasi", "🏪 Pusat", "🏭 Central Kitchen", "🏪 Cabang 2"]`.
+
+- **Penjaganya melarang BENTUKNYA, bukan ejaannya.**
+  `apps/server/test/lokasi-menu-hanya-store.test.ts` (5 uji) tak melarang
+  `!== "kantor"` — pelarangan ejaan selalu bisa dilangkahi ejaan lain. Ia
+  melarang berkas mana pun di `apps/web/src/pages/menu/` MENULIS ATURANNYA
+  SENDIRI: nol literal tipe cabang, kecuali yang terdaftar di `DIADILI` beserta
+  alasannya (hari ini satu: `LihatMenuPage:80` `divisi === "kantor"`, yang
+  DIVISI kerja, bukan penyaring daftar cabang). Uji kedua menuntut tiap entri
+  `DIADILI` masih cocok dengan kodenya, supaya daftarnya tak jadi kuburan.
+
+- **Batas detektornya, jujur.** Pemindainya hanya melihat
+  `apps/web/src/pages/menu/`. `StokPage:58` menulis aturan yang SAMA di luar
+  jangkauan itu, sebagai pengecualian (`!== "central_kitchen" && !== "kantor"`)
+  — benar hari ini, dan komentarnya sendiri berbunyi *"central_kitchen →
+  produksi bahan, TIDAK jual menu"*. **Sengaja tidak diubah**: `selTipe` di sana
+  bisa `undefined` selagi `/cabang` dalam perjalanan, dan hari ini `undefined`
+  berarti tab Stok Menu TAMPIL; mengalirkannya lewat helper akan membalik itu
+  jadi tersembunyi-lalu-muncul. Menyatukannya menuntut keputusan tersendiri soal
+  kasus `undefined` — masuk antrean, bukan diselundupkan ke putaran ini.
+
+- **Server sengaja TIDAK diubah.** `GET /menu?branch_id=<CK>` tetap **200** dan
+  memulangkan himpunan tanpa-pembatasan; yang keliru pertanyaannya, bukan
+  permintaannya, dan sapuan B menunjukkan tak ada klien yang bisa mengajukannya.
+  Yang ditambahkan `verify-api.sh` §52 **+4 lengan** yang MENULISKAN janji itu
+  hitam-di-atas-putih (dengan premis dibuktikan lebih dulu: katalog penuh harus
+  lebih besar dari himpunan tanpa-pembatasan, atau asersinya lolos hampa),
+  supaya mengubahnya kelak jadi keputusan sadar, bukan kelalaian.
+
+- **Data warisan — diukur, tidak ditebak, dan tidak dimigrasi buta.** Sebelum 17
+  Juli 2026 CK BOLEH disimpan sebagai lokasi menu; menu yang lokasinya hanya CK
+  tak terlihat di kasir mana pun dan ditolak **400** saat dijual, tanpa pesan.
+  Di DB hasil gerbang: **0 baris** `menu_branches` menunjuk cabang non-store,
+  **0 menu** aktif yang seluruh lokasinya non-store. Untuk produksi, dua kueri
+  **baca-saja** diserahkan ke pemilik alih-alih migrasi — menghapus baris begitu
+  mengubah menu dari "tak terlihat" jadi "tampil di SEMUA cabang store", dan itu
+  perubahan katalog nyata pada data yang tak pernah dilihat sesi ini.
+
+- **Cakupan sisi lain**: `aria-label="Tampil di lokasi"` dipasang pada
+  pemilihnya — perbaikan aksesibilitas yang sekaligus memberi spek Playwright
+  pengait yang stabil (halaman ini punya dua `<select>`: satu di sidebar).
+
+- **Gerbang**: typecheck · `npm test` 230 berkas / **2.779** uji (+1 berkas, +5
+  uji) · build · `verify-api.sh` **3.457 lolos, 0 gagal** (dari 3.453) ·
+  `audit:invarian` 27/27 · Playwright **23 spek** (dari 22).
+
+- **Catatan jalannya**: spek e2e pertama merah karena PREMIS, bukan asersi —
+  `POST /auth/register` ternyata **tidak** membuat perusahaan (`company_id` &
+  `role` masih null sesudah verifikasi), jadi `POST /company/mode` menolak
+  **403**. Usahanya lahir di `POST /onboarding/perusahaan`, yang memulangkan
+  token baru berisi `company_id` + peran `owner`. Kegagalan itu MENJATUHKAN
+  `stok-awal-gagal.spec.ts:66` yang tadinya hijau; sesudah spek diperbaiki
+  keduanya hijau di gerbang penuh — merah ikutan, bukan sebab sendiri, dan
+  dicatat apa adanya. Satu lagi: membangun ulang web selagi server hidup membuat
+  aset lama **404** dan halaman kosong — bukti merah peramban wajib mengikuti
+  urutan gerbang (bangun → nyalakan → uji).
+
 ## Panel galat: ponsel mengaku siapa dirinya, dan "Masalah berbeda" berhenti berbohong (312 vs 200) — server + web + ponsel — 2026-09-03
 
 - **Kenapa vena ini ada**: lanjutan langsung dari entri di bawah. Pemilik repo
@@ -9644,6 +9803,14 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
+- [ ] **`StokPage:58` menulis aturan lokasi menu untuk kedua kalinya** — lahir
+      dari entri "Central Kitchen ditawarkan sebagai lokasi menu". Ia berbunyi
+      `selTipe !== "central_kitchen" && selTipe !== "kantor"`, benar hari ini
+      dan komentarnya sendiri menyebut alasannya, tapi ia pengecualian bukan
+      penyertaan: tipe cabang keempat kelak lolos diam-diam. Menyatukannya ke
+      `bolehJadiLokasiMenu` menuntut keputusan lebih dulu soal `selTipe`
+      `undefined` (selagi `/cabang` dalam perjalanan) yang hari ini berarti tab
+      Stok Menu TAMPIL — mengalirkannya lewat helper membalik itu
 
 ### Mobile
 - [x] ~~**Enum status dibandingkan sebagai teks**~~ — BERSIH dua arah, lihat
