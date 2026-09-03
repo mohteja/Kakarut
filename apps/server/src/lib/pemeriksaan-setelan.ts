@@ -77,20 +77,29 @@ export function nilaiProxy(
   // dari segelintir simpul yang sama, jatah itu ditanggung bersama oleh
   // perusahaan yang tak berhubungan.
   //
+  // YANG DIPAKAI RANTAI TERPENDEK, BUKAN TERPANJANG, dan itu keputusan
+  // keamanan. Rantai bisa DIPANJANGKAN oleh siapa pun yang mengirim
+  // `X-Forwarded-For`-nya sendiri (proxy menambahkan, tak mengganti), jadi
+  // menyarankan `hops` dari maksimum berarti seorang penyerang bisa membuat
+  // panel ini menyuruh pemiliknya menyetel angka yang membuat `ipKlien`
+  // memulangkan entri karangannya — lubang yang ditulis di kepala
+  // `pengamatan-proxy.ts`. Minimum tak bisa dipendekkan dari luar: tiap
+  // permintaan sah melewati semua proxy yang memang ada.
+  //
   // Ketiga tuduhan lain tidak menjangkau keadaan ini: `hops` bukan 0, XFF-nya
   // ada, dan rantainya tidak lebih pendek. Tanpa cabang ini setelannya salah
   // tanpa satu pun keluhan.
-  if (hops > 0 && rasio >= 0.9 && amatan.rantai_terpanjang > hops) {
+  if (hops > 0 && rasio >= 0.9 && amatan.rantai_terpendek > hops) {
     return {
       kode: "proxy_hops_terlalu_rendah_dari_rantai",
       rincian:
-        `TRUST_PROXY_HOPS=${hops}, tapi rantai X-Forwarded-For yang masuk sepanjang ` +
-        `${amatan.rantai_terpanjang} entri. Artinya alamat yang tercatat adalah PROXY ` +
-        `terdekat, bukan pengunjungnya: log galat tak bisa menunjuk perangkat mana, dan ` +
-        `pembatas laju yang berkunci alamat saja (pendaftaran, tamu, reset password, ` +
-        `verifikasi email) ditanggung bersama oleh semua pemakai di belakang proxy yang ` +
-        `sama — satu perusahaan bisa menghabiskan jatah perusahaan lain. ` +
-        `Setel ke ${amatan.rantai_terpanjang}.`,
+        `TRUST_PROXY_HOPS=${hops}, tapi rantai X-Forwarded-For TERPENDEK yang pernah ` +
+        `masuk sepanjang ${amatan.rantai_terpendek} entri. Artinya alamat yang tercatat ` +
+        `adalah PROXY terdekat, bukan pengunjungnya: log galat tak bisa menunjuk perangkat ` +
+        `mana, dan pembatas laju yang berkunci alamat saja (pendaftaran, tamu, reset ` +
+        `password, verifikasi email) ditanggung bersama oleh semua pemakai di belakang ` +
+        `proxy yang sama — satu perusahaan bisa menghabiskan jatah perusahaan lain. ` +
+        `Setel ke ${amatan.rantai_terpendek}.`,
     };
   }
 
