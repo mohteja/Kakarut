@@ -53,6 +53,7 @@ const MenuFormPage = lazy(() => import("./pages/menu/MenuFormPage").then((m) => 
 const MenuListPage = lazy(() => import("./pages/menu/MenuListPage").then((m) => ({ default: m.MenuListPage })));
 const AnalisisHargaPage = lazy(() => import("./pages/menu/AnalisisHargaPage").then((m) => ({ default: m.AnalisisHargaPage })));
 const FakturFormPage = lazy(() => import("./pages/produksi/FakturFormPage").then((m) => ({ default: m.FakturFormPage })));
+const FakturDetailPage = lazy(() => import("./pages/produksi/FakturDetailPage").then((m) => ({ default: m.FakturDetailPage })));
 const PembelianPage = lazy(() => import("./pages/produksi/PembelianPage").then((m) => ({ default: m.PembelianPage })));
 const PenerimaanPage = lazy(() => import("./pages/produksi/PenerimaanPage").then((m) => ({ default: m.PenerimaanPage })));
 const ProduksiPage = lazy(() => import("./pages/produksi/ProduksiPage").then((m) => ({ default: m.ProduksiPage })));
@@ -236,6 +237,12 @@ export default function App() {
                   <Route path="/pembelian" element={<PembelianPage />} />
                   <Route path="/pembelian/baru" element={<FakturFormPage tipe="beli" />} />
                   <Route path="/pembelian/tahap" element={<TahapPage />} />
+                  {/* Dokumen satu faktur — punya URL supaya bisa dikirim &
+                      dicetak. Segmen statis di atas (`/baru`, `/tahap`) menang
+                      atas `:fakturId`, aturan router yang sama dengan
+                      `/bahan/:id` di bawah. */}
+                  <Route path="/produksi/:fakturId" element={<FakturDetailPage tipe="produksi" />} />
+                  <Route path="/pembelian/:fakturId" element={<FakturDetailPage tipe="beli" />} />
                   <Route path="/bahan" element={<BahanPage />} />
                   {/* Detail Produk per bahan — /bahan/baru & /bahan/ubah menang
                       (segmen statis diprioritaskan router di atas :id) */}
@@ -251,6 +258,7 @@ export default function App() {
                   <Route path="/produksi" element={<ProduksiPage />} />
                   <Route path="/produksi/baru" element={<FakturFormPage tipe="produksi" />} />
                   <Route path="/produksi/tahap" element={<TahapPage />} />
+                  <Route path="/produksi/:fakturId" element={<FakturDetailPage tipe="produksi" />} />
                   <Route path="/resep" element={<ResepPage />} />
                 </>
               )}

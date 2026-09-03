@@ -25,6 +25,52 @@ tanpa akses repo server.
 
 ---
 
+## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya
+
+🟢 **BARU** — tak ada yang berubah pada rute lama. `GET /produksi` dan
+`GET /pembelian` tetap sama persis: query, bentuk baris, `ringkas`, semuanya.
+Rute ini tambahan, dan mobile boleh mengabaikannya sampai memang butuh.
+
+```
+GET /api/produksi/faktur/<uuid>    → 200 { "rows": StokMasukRow[] }
+GET /api/pembelian/faktur/<uuid>   → 200 { "rows": StokMasukRow[] }
+                                   → 404 { "error": "Faktur tidak ditemukan" }
+```
+
+**Kenapa ada.** Detail satu faktur sampai sekarang hanya bisa dirakit dari
+baris-baris yang sudah dimuat halaman riwayat. Itu memaksa siapa pun yang ingin
+membuka SATU faktur untuk menyisir daftarnya lebih dulu: `GET /produksi`
+berhalaman 20 dan **tak punya saringan `faktur_id` sama sekali** (parameternya
+cuma `branch_id`, `dari`, `sampai`, `tanggal`, `page`, `per_page`). Terukur
+2026-09-03 di basis data uji: **62 faktur, 4 halaman @ ~43.880 byte** —
+sementara rute ini memulangkan **9.729 byte** untuk faktur yang dituju.
+
+**`rows` bentuknya IDENTIK dengan `GET /{mod}`** — bukan "mirip". Kueri,
+join, dan pengayaannya (rak simpan, `qty_teks`, batch) satu fungsi yang sama di
+server, dan itu dipaku uji. Jadi kode pengelompokan faktur yang sudah ada di
+klien bisa dipakai apa adanya atas balasan ini; tak ada DTO baru, tak ada kunci
+kontrak baru.
+
+**Gerbangnya juga sama, dan ini yang penting kalau layar ini dibawa ke ponsel:**
+perusahaan, `deleted_at`, tipe, saringan divisi untuk role `kitchen`/`bar`, dan
+penyaring faktur transfer. Cabangnya diambil dari **token**, bukan query —
+tidak ada `?branch_id=` di rute ini. Untuk role terikat cabang (`cashier`,
+`tim`) barisnya harus menyentuh cabangnya (`branch_id`, `dari_branch_id`, atau
+`asal_branch_id` — dua yang terakhir supaya faktur yang sudah dikirim tak
+hilang dari mata CK); untuk owner/admin cabangnya tidak menyempit.
+
+**Satu `404` untuk tiga sebab** — tak ada, bukan milik perusahaan ini, atau di
+luar jangkauan peran/cabang ini. `fakturId` yang bukan uuid juga `404`, bukan
+`400`. Jangan bercabang pada bedanya: tak ada bedanya, dan itu disengaja
+(membedakannya memberi tahu penebak URL bahwa fakturnya ada).
+
+**Yang perlu dikerjakan di aplikasi ponsel:** tidak ada, kecuali memang mau
+punya layar "buka satu faktur dari nomornya". Kalau iya, rute ini
+menggantikan pola "tarik daftar lalu cari di klien" yang tak bisa benar untuk
+faktur di halaman ke-4.
+
+---
+
 ## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)
 
 🟡 **PERLU DICEK** — status **tidak berubah** (tetap `401` pada keempat

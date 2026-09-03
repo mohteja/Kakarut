@@ -70,6 +70,9 @@ const BELUM_TAYANG = new Set([
   // merge `fc56d96`, dan stempelnya dipasang pada putaran yang sama dengan
   // penghapusan baris-baris ini. Menghapusnya terpisah dari memasang stempelnya
   // adalah cara berkas ini pernah salah selama empat hari.
+  //
+  // belum di-merge (masih di cabang `claude`, ikut PR draft #225)
+  "## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

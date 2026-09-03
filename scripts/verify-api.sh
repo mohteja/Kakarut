@@ -17061,6 +17061,53 @@ cek "§290 /lupa-password: badannya tak menyebut keterdaftaran sama sekali" "V =
 cek "§290 /lupa-password: badannya tak membawa sebab apa pun" "V == 0" \
   "$(printf '%s' "$LUPA_ADA290" | grep -qi 'sebab' && echo 1 || echo 0)"
 
+echo
+echo "── §291 satu faktur punya rutenya sendiri (halaman dokumen) ──"
+# Detail faktur kini HALAMAN ber-URL (bisa dicetak & tautannya dikirim), bukan
+# modal. Halaman itu tak bisa mengambil datanya dari daftar: `GET /produksi`
+# berhalaman 20 dan TAK punya saringan `faktur_id` sama sekali. Terukur pada DB
+# gerbang 2026-09-03: 62 faktur → sampai EMPAT permintaan @ ~44 KB hanya untuk
+# menemukan satu. Rutenya sendiri memulangkan ~9,7 KB.
+#
+# YANG PALING PENTING DI SEKSI INI bukan "rutenya jalan" melainkan
+# GERBANGNYA SAMA DENGAN DAFTARNYA. Rute per-id yang lebih longgar adalah pintu
+# samping: tenant lain / divisi lain bisa membaca faktur hanya dengan menebak
+# URL, dan URL beredar di grup WhatsApp.
+P291=$(api "$OWNER" GET "/produksi?branch_id=all&per_page=20&page=1")
+FID291=$(echo "$P291" | jq -r '[.rows[]|select(.faktur_id!=null)][0].faktur_id // ""')
+cek "§291 PREMIS: ada faktur ber-faktur_id (kalau tidak, seluruh seksi hampa)" "V == 1" \
+  "$([ -n "$FID291" ] && echo 1 || echo 0)"
+D291=$(api "$OWNER" GET "/produksi/faktur/$FID291")
+cek "§291 rutenya memulangkan baris (>0)" "V == 1" \
+  "$(echo "$D291" | jq '((.rows|length) > 0)|if . then 1 else 0 end')"
+# INTI: baris yang SAMA PERSIS dengan yang ada di daftar untuk faktur itu.
+# Kalau `select`-nya menyimpang, `FakturGroup` yang dirakit klien dari keduanya
+# berhenti setara — dan badge status di halaman detail berbeda dari badge di
+# barisnya, untuk faktur yang sama.
+cek "§291 barisnya IDENTIK dengan yang di daftar (bukan bentuk lain)" "V == 1" \
+  "$(jq -n --argjson p "$P291" --argjson d "$D291" --arg f "$FID291" \
+      '(([$p.rows[]|select(.faktur_id==$f)]|sort_by(.id)) == ($d.rows|sort_by(.id)))|if . then 1 else 0 end')"
+cek "§291 id bukan-uuid → 404 (bukan 500)" "V == 404" \
+  "$(status_code "$OWNER" GET "/produksi/faktur/bukan-uuid")"
+cek "§291 uuid yang tak ada → 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/produksi/faktur/00000000-0000-0000-0000-000000000000")"
+# JALUR BELI punya rutenya sendiri dari pabrik yang sama.
+B291=$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=20&page=1")
+FIDB291=$(echo "$B291" | jq -r '[.rows[]|select(.faktur_id!=null)][0].faktur_id // ""')
+cek "§291 PREMIS: ada faktur pembelian" "V == 1" "$([ -n "$FIDB291" ] && echo 1 || echo 0)"
+cek "§291 /pembelian/faktur/:id memulangkan baris" "V == 1" \
+  "$(api "$OWNER" GET "/pembelian/faktur/$FIDB291" | jq '((.rows|length) > 0)|if . then 1 else 0 end')"
+# JALURNYA TERPISAH: faktur produksi tak bisa dibaca lewat pintu pembelian.
+# Tanpa ini, `tipe` di pabriknya bisa terlepas tanpa satu asersi pun merah.
+cek "§291 faktur produksi lewat pintu /pembelian → 404" "V == 404" \
+  "$(status_code "$OWNER" GET "/pembelian/faktur/$FID291")"
+# TENANT: token perusahaan lain tak boleh membacanya. `$UJI260` adalah tenant
+# kedua yang sudah dibuat §260 untuk pemeriksaan lintas-tenant yang sama.
+# Premisnya dibuktikan lebih dulu — 404 tenant kedua hanya berarti sesuatu bila
+# 200 tenant pertama sudah terbukti, dan itu asersi di atas.
+cek "§291 tenant LAIN membaca faktur ini → BUKAN 200" "V == 1" \
+  "$([ "$(status_code "$UJI260" GET "/produksi/faktur/$FID291")" != "200" ] && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
