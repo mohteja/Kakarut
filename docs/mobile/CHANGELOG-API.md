@@ -25,6 +25,31 @@ tanpa akses repo server.
 
 ---
 
+## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing
+
+⚪️ **INFO** — status tetap **401** pada kedua kelas, dan ponsel sudah
+mengucapkan kalimatnya sendiri (`'Sesi berakhir. Silakan login ulang.'` di
+`api_client.dart`), jadi tak ada yang perlu disesuaikan.
+
+Sebelumnya `requireAuth` menjawab `"Token tidak valid atau kedaluwarsa"` untuk
+**dua peristiwa yang berbeda jauh**: sesi 12 jam yang berakhir tepat waktu, dan
+token yang bukan terbitan server ini (tanda tangan asing, `jwt malformed`,
+algoritma di luar HS256). Keduanya menulis baris log yang identik sampai ke
+sidik jari kelompoknya, jadi satu percobaan pemalsuan tak dapat dibedakan dari
+1.744 penolakan rutin yang terukur di panel galat production 2026-09-02.
+
+Sekarang:
+
+| sebab | 401 dengan pesan |
+| --- | --- |
+| token kedaluwarsa | `"Sesi kedaluwarsa — silakan masuk kembali"` |
+| tanda tangan asing / cacat / algoritma lain | `"Token tidak valid"` |
+
+Kelas "tak ada header `Authorization`" tak berubah: `"Perlu login (token tidak
+ada)"`. Bila suatu saat ponsel ingin membedakan keduanya (mis. mengucapkan
+"sesi Anda habis" vs "token tak dikenali"), medannya sudah tersedia — tapi
+tidak ada kewajiban. Dipaku §287 `verify-api.sh`.
+
 ## `GET /laporan` membawa `omzet_sebelum_refund`
 
 🟢 **BARU** — satu medan tambahan pada `LaporanHarian`; tak ada yang berubah bentuknya.

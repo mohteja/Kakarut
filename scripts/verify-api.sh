@@ -16755,6 +16755,28 @@ cek "PASANGAN §287: payload yang SAMA dengan exp di depan → 200 (yang ditolak
   "$(status_code "$T287_HIDUP" GET /auth/me)"
 cek "PASANGAN §287: tanda tangan asing → 401" "V == 401" "$(status_code "$T287_ASING" GET /auth/me)"
 
+# TANDA TANGAN ASING TAK BOLEH BERBUNYI SEPERTI SESI YANG HABIS UMURNYA.
+#
+# Terukur di panel Log Galat production 2026-09-02: 1.744 penolakan 401 dalam 7
+# hari, NOL 5xx, seluruhnya berpesan sama. Sebabnya rutin (token 12 jam tanpa
+# refresh × kipas kueri klien), tapi akibatnya tidak: `requireAuth` menangkap
+# `catch {` tanpa mengikat galatnya, jadi percobaan pemalsuan menulis baris yang
+# IDENTIK dengan sesi yang habis — status, pesan, dan sidik jari kelompoknya
+# sama. Ia tenggelam di antara 1.744 baris itu, di panel yang justru dibangun
+# untuk menemukannya. Yang dipaku di sini: kedua sebab punya kalimat sendiri.
+PESAN287_MATI=$(api "$T287_MATI" GET /auth/me | jq -r '.error // ""')
+PESAN287_ASING=$(api "$T287_ASING" GET /auth/me | jq -r '.error // ""')
+cek "premis §287: kedua penolakan memang membawa kalimat" "V == 1" \
+  "$([ -n "$PESAN287_MATI" ] && [ -n "$PESAN287_ASING" ] && echo 1 || echo 0)"
+cek "§287 tanda tangan asing TIDAK berbunyi kedaluwarsa" "V == 0" \
+  "$(api "$T287_ASING" GET /auth/me | jq '((.error // "")|test("kedaluwarsa"))|if . then 1 else 0 end')"
+cek "§287 pemalsuan ≠ sesi habis: kalimatnya berbeda (kalau sama, pemalsuan tenggelam di log galat)" "V == 1" \
+  "$([ "$PESAN287_ASING" != "$PESAN287_MATI" ] && echo 1 || echo 0)"
+# Token yang bukan JWT sama sekali termasuk kelas yang sama — bukan kelas
+# "tak ada token" (itu punya kalimatnya sendiri: "Perlu login").
+cek "§287 token cacat sekalipun ikut kelas 'tidak valid', bukan kelas kedaluwarsa" "V == 1" \
+  "$([ "$(api bukan-jwt-sama-sekali GET /auth/me | jq -r '.error // ""')" = "$PESAN287_ASING" ] && echo 1 || echo 0)"
+
 # SESI YANG SUDAH ADA dicabut oleh NONAKTIF — dan pencabutannya bisa dibalik
 # tanpa masuk ulang (tokennya sendiri masih sah; yang diperiksa tiap
 # permintaan adalah barisnya).

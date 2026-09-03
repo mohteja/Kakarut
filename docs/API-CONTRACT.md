@@ -46,7 +46,15 @@ set base URL ke `https://<host-produksi>` lalu tambahkan path (mis.
   itu menggantikan yang lama agar sesi tetap hidup tanpa login ulang.
 - **Umur & pencabutan sesi (diukur §287 `verify-api.sh`, 2026-09-02):** token
   berumur `JWT_EXPIRES_IN` (bawaan **12 jam**, tanpa refresh token); yang
-  kedaluwarsa dijawab **401** `"Token tidak valid atau kedaluwarsa"`. Karyawan
+  kedaluwarsa dijawab **401** `"Sesi kedaluwarsa — silakan masuk kembali"`,
+  sedangkan token yang **bukan terbitan server ini** (tanda tangan asing,
+  `jwt malformed`, algoritma di luar HS256) dijawab **401** `"Token tidak
+  valid"` — dua kalimat, sebab dua peristiwa yang berbeda: yang pertama rutin
+  dan dialami setiap orang tiap 12 jam, yang kedua tak pernah wajar. Sampai
+  2026-09-03 keduanya berbunyi sama (`"Token tidak valid atau kedaluwarsa"`)
+  sehingga percobaan pemalsuan tak dapat dibedakan dari sesi yang habis di
+  panel galat. Klien tak perlu menyesuaikan diri: keduanya tetap 401 dan
+  ditangani jalur "sesi berakhir" yang sama. Karyawan
   yang **dinonaktifkan/diarsipkan** admin kehilangan sesinya **seketika** pada
   permintaan berikutnya (401 `"Sesi tidak berlaku lagi — silakan masuk kembali"`
   atau `"Akses ke perusahaan ini sudah tidak berlaku"`), tanpa menunggu token
