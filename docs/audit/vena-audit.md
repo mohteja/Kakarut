@@ -166,6 +166,35 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   daripada `/login` di sebelahnya. Ketimpangan itu disengaja (yang satu diminta
   pemilik, yang lain tidak) tapi belum pernah ditanyakan.
 
+- **GERBANG YANG TAK DIBACA BUKAN GERBANG — dan itu saya, pada putaran ini
+  juga.** Dua commit fikstur ponsel (`1e23e8e`, `39b0748`) didorong tanpa saya
+  periksa hasil CI-nya. Keduanya MERAH, ±40 menit, tanpa ada yang tahu:
+  `kunci_kontrak_server_test.dart` menuntut empat kunci kontrak baru
+  diputuskan — `belum_sampai`, `harus_dikerjakan`, `terlambat`,
+  `tertua_ditutup_pada` — dan keputusan itu memang belum pernah dituliskan.
+  Fiksturnya benar; langkah keduanya yang terlewat, persis pola yang
+  `ci.yml` ponsel sudah catat pernah terjadi sekali ("perintah itu hanya
+  MENYEGARKAN fikstur; memutuskan nasib kunci barunya langkah kedua").
+  Yang menangkapnya bukan putaran yang melahirkannya melainkan PERSIAPAN
+  RILIS — jarak yang tak boleh diandalkan. Aturan "jangan pernah dorong
+  gerbang merah" tak berguna bila hasilnya tak dilihat; yang kurang di
+  resep saya adalah langkah "baca CI-nya sebelum lanjut", bukan disiplinnya.
+  Diperbaiki di `98ce52d` (CI ponsel #34 hijau, 644 uji) — dan keempat asersi
+  gerbangnya dijalankan ulang lebih dulu sebagai skrip yang meniru logikanya,
+  sebab Flutter tak ada di lingkungan ini.
+
+- **TAYANG 2026-09-03.** Web: merge `fc56d96` → `production`, CI #492 hijau
+  bertiga (typecheck+unit test+build · verify-api+e2e+cakupan rute+invarian ·
+  build image & picu redeploy Dokploy). Gerbang penuh dijalankan lebih dulu
+  pada HASIL MERGE, bukan pada `claude` saja — `git diff claude production`
+  kosong, dan angkanya sama persis: 2.819 uji · verify-api 3.499/0 ·
+  invarian 27/27 · Playwright 30. Ponsel: merge `a0ea392` → `Production`,
+  CI #35 hijau. Empat entri `CHANGELOG-API.md` distempel pada commit yang
+  sama dengan penghapusannya dari `BELUM_TAYANG`.
+  **Belum diverifikasi dari luar**: domain produksinya tak bisa dijangkau dari
+  lingkungan ini (proxy 403 — kebijakan jaringan), jadi yang dilaporkan hijau
+  adalah pekerjaan CI-nya, bukan bacaan `X-Kakarut-Build` dari situs hidup.
+
 - **Bukti merah, enam, tiap satu dipulihkan byte-per-byte (`cmp`)**: satu pesan
   diketik ulang di server → 2 merah · `/lupa-password` mulai melempar 404
   "Email tidak terdaftar" → 1 merah · layar login kembali **mengendus**
