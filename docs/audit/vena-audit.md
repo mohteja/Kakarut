@@ -50,6 +50,149 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Detail faktur jadi HALAMAN dokumen — dan bukti merah yang membuktikan lengan `reload()` bukan kelebihan — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo membuka modal Detail Produksi (PR-0137)
+  dan meminta *"detail produksi ingin di buat form seperti form produksi dan
+  page sendiri supaya bisa di print dan share"*. Tiga hal yang tak bisa
+  diberikan sebuah modal, dan ketiganya jadi ukuran pekerjaan ini: URL yang
+  bisa dikirim, kertas yang bisa dicetak, PDF yang bisa disimpan.
+
+- **Keadaan sebelumnya**: `FakturDetailModal.tsx`, **509 baris**, merender 28
+  medan, hanya bisa dibuka dengan mengklik baris di riwayat pengadaan. Tak
+  punya URL, tak bisa dicetak, tak bisa dikirim.
+
+- **Ukuran yang menentukan bentuknya** (basis data uji, `GET /produksi`
+  `branch_id=all`, token owner):
+
+  | | |
+  | --- | --- |
+  | faktur produksi | **62** |
+  | per halaman | 20 → **4 halaman** |
+  | balasan satu halaman | **~43.880 byte** |
+  | balasan `GET /produksi/faktur/:id` | **9.729 byte** |
+
+  `GET /produksi` **tak punya saringan `faktur_id` sama sekali** —
+  parameternya cuma `branch_id`, `dari`, `sampai`, `tanggal`, `page`,
+  `per_page`. Jadi halaman yang harus menemukan fakturnya sendiri menyisir
+  sampai empat permintaan, dan faktur di halaman ke-4 tak bisa dibuka dari
+  tautan tanpa memuat tiga halaman yang tak ada hubungannya. Itu satu-satunya
+  alasan putaran ini menyentuh server; kalau saringannya ada, ini murni
+  pekerjaan web.
+
+- **Satu rute, dua jalur.** `buatRuteTambahStok(tipe)` melahirkan `/produksi`
+  DAN `/pembelian`, jadi `GET {jalur}/faktur/:fakturId` melayani keduanya.
+  `select` + join + pengayaannya (rak simpan, `qty_teks`, batch) diekstrak jadi
+  `ambilBarisFaktur()` yang dipakai daftar DAN detail — dua `select` yang
+  ditulis terpisah adalah dua bentuk baris yang pelan-pelan berbeda, dan badge
+  di halaman detail berhenti cocok dengan badge di barisnya untuk faktur yang
+  SAMA. **Kesetaraannya diukur, bukan diklaim**: verify-api §291 mengambil satu
+  `faktur_id` dari daftarnya, menembak rute barunya, dan membandingkan kedua
+  `rows` dengan `jq` deep-equal → `true`.
+
+- **Gerbangnya sama persis dengan daftarnya**, dan itu inti keamanannya: rute
+  per-id yang lebih longgar adalah pintu samping — `bar` membaca faktur
+  `kitchen` hanya dengan menebak URL. Saringan divisi + penyaring faktur
+  transfer diekstrak jadi `gerbangPengadaan(auth)`: **satu definisi, dua
+  pemanggil**. Cabangnya dari **token**, bukan `?branch_id=` — untuk peran
+  terikat barisnya harus menyentuh cabangnya (`branch_id` / `dari_branch_id` /
+  `asal_branch_id`; tanpa dua yang terakhir faktur yang sudah dikirim hilang
+  dari mata CK), untuk manajemen tak menyempit sama sekali sebab tautan tak
+  boleh mati hanya karena pemilih cabang penerimanya sedang di tempat lain.
+  Tak ada / bukan miliknya / di luar jangkauan perannya → **satu 404 yang
+  sama**; membedakannya memberi tahu penebak URL bahwa fakturnya ADA.
+
+- **LUBANG DI PENJAGA SAYA SENDIRI, yang bukti merahnya temukan.** Versi
+  pertama asersi gerbang cuma memeriksa teks `condDivisi` ADA di irisan
+  rutenya. Bukti merah 1 (mencabut saringan divisi jadi
+  `const condDivisi: SQL[] = []`) **tetap HIJAU** — teks lamanya tinggal
+  sebagai binding mati, dan penjaganya tak bisa membedakannya dari nilai yang
+  dipakai. Saya sudah memastikan mutasinya benar-benar terpasang sebelum
+  menyimpulkan, jadi yang salah memang penjaganya. **Asersi teks tak bisa
+  membuktikan sebuah NILAI dipakai.** Perbaikannya struktural, bukan asersi
+  yang lebih ketat: predikatnya diekstrak, dan yang dijaga sekarang
+  bentuknya — tepat **1** definisi `ne(ingredients.divisiProduksi, auth.role)`,
+  tepat **1** `eq(dokumenNomor.jenis, "transfer")`, tepat **2**
+  `gerbangPengadaan(auth)`. Mencabutnya dari salah satu pintu berarti
+  memanggil fungsi lain, dan itu terlihat. Sesudah diperbaiki, bukti merah 1
+  gagal benar DAN lahir bukti merah kelima (predikat disalin ke dua tempat).
+
+- **Modalnya DIHAPUS, bukan dibiarkan berdampingan.** 28 medan yang dirender
+  di dua tempat adalah 28 medan yang akan berbeda — dan yang satu diperbaiki
+  sementara yang lain tidak. Kelima aksinya ikut pindah **seluruhnya** (ubah
+  tahap, Dokumen RAB/belanja, Laporan Harga, Dokumen kirim, Hapus/Batalkan);
+  tombol yang dibuang tanpa rumah baru adalah kemampuan yang hilang
+  diam-diam. Perakit `FakturGroup` (~60 baris turunan: status agregat, jejak
+  terima terakhir, penanda kiriman/permintaan, divisi, total harga) diekstrak
+  jadi `kelompokkanFaktur()` yang diekspor — satu aturan, dua pemakai.
+
+- **Mesin cetaknya yang sudah ada, nol CSS baru**: `isi(cetak)` untuk layar dan
+  kertas, `AreaCetak id="dokumen-print"` yang aturan `@media print`-nya sudah
+  hidup di `index.css`, `buildBody()`/`unduhPdf()` dengan tiap sisipan data
+  dilewatkan `lolosHtml`, plus ruang tanda tangan — itu yang membuatnya "form".
+  `AreaCetak` sudah menuliskan alasannya sendiri: tanpa memportal ke luar
+  `#root`, tinggi shell menentukan tinggi cetakan (terukur 8 halaman, 7 kosong,
+  untuk satu struk).
+
+- **Batas "share" yang dipilih pemilik, dan DIKATAKAN di layarnya**: tautannya
+  untuk sesama karyawan — penerimanya tetap wajib login dan tetap tunduk peran
+  & cabangnya. Tak ada tautan publik bertoken. Untuk ke luar, PDF-nya yang
+  dikirim. Orang yang mengira ini tautan publik akan mengirimnya ke supplier
+  dan baru tahu keliru saat supplier itu melihat layar login, jadi kalimatnya
+  ada di halamannya, bukan cuma di komentar kode.
+
+- **Lengan peramban ditumpangkan ke `pengadaan-tabel.spec.ts`, bukan berkas
+  spec sendiri** — dan itu batas fisik, bukan selera. `/auth/login` dibatasi
+  10 per 5 menit per (IP+email), cache sesi e2e hidup per-MODUL, dan Playwright
+  menjalankan tiap berkas spec sebagai proses tersendiri. Dihitung saat
+  putaran ini: **sepuluh** berkas sudah memakai akun owner — tepat di
+  plafonnya. Berkas ke-11 memerahkan berkas MANA PUN yang berjalan terakhir
+  dengan 429, kegagalan yang menuduh kode yang tak bersalah (persis yang
+  terjadi putaran sebelumnya dan menggigit `stok-awal-gagal.spec.ts`).
+  Subjeknya pun memang satu: "riwayat pengadaan, dan apa yang terjadi saat
+  barisnya diklik". Penjaga statisnya memaku keberadaan ketiga lengan itu
+  supaya rujukan silangnya tak bisa jadi basi.
+
+- **Empat bukti merah peramban**, urutan **mutasi → build → RESTART server →
+  uji** (tanpa restart, server menyajikan `index.html` yang di-cache saat boot
+  dan tiap asersi gagal di tempat yang salah — pelajaran yang sudah dibayar dua
+  kali), tiap satu dipulihkan **byte-per-byte** (`cmp`):
+
+  | | mutasi | gagal di |
+  | --- | --- | --- |
+  | A | baris menavigasi tanpa id faktur | `toHaveURL` |
+  | B | data diwarisi cache DAFTAR | **lulus sebelum `reload`, gagal sesudahnya** |
+  | C | Salin tautan menyalin URL daftar | `toBe(URL benar)` |
+  | D | gagal muat dirender dokumen kosong | kalimat "tidak bisa dibuka" |
+
+  **B yang paling berharga**, dan ia menjawab pertanyaan yang biasanya tak
+  pernah ditanyakan: apakah lengan `page.reload()` menambah sesuatu, atau cuma
+  mengulang lengan sebelumnya? Mutasinya membuat halaman merakit detailnya dari
+  cache `GET /produksi` yang dibaca layar riwayat. Hasilnya: **lulus** pada
+  `dokumenMenyebut` yang pertama (baris 188) dan **gagal** pada yang kedua
+  (baris 200), sesudah muat ulang. Cacat itu bekerja sempurna bagi orang yang
+  mengklik dari riwayat dan runtuh tepat bagi orang yang menerima tautannya —
+  satu-satunya orang yang fitur ini dibuat untuknya. Tanpa lengan `reload()`,
+  cacat itu lolos.
+
+- **Batas yang diketahui, ditulis jujur**: penjaga statisnya membaca teks
+  sumber, jadi ia tak bisa mengatakan halamannya benar-benar tercetak rapi —
+  tak ada asersi atas hasil `window.print()` di repo ini, dan e2e-nya pun tak
+  menguji PDF-nya benar-benar terbuka. Yang dijaga: mesin cetaknya yang sudah
+  terbukti dipakai (bukan yang baru), dan tiap sisipan data dilewatkan `esc()`.
+  Lengan peramban juga tak menguji jalur `/pembelian` (kolom biaya, buku dana,
+  supplier) — jalur itu hanya dijaga verify-api §291 dan penjaga statis.
+
+- **Gerbang penuh** (DB nol → seed → verify-api → regen jejak → npm test →
+  invarian → reset batas laju → Playwright): verify-api **3.508 lolos / 0
+  gagal**, npm test **235 berkas / 2.856 uji**, invarian **27/27**, Playwright
+  **34 lolos**. `rute-diketuk.txt` mencatat kedua rute baru (277 baris).
+  Kontrak API + entri `CHANGELOG-API.md` didaftarkan di `BELUM_TAYANG` —
+  belum tayang, masih di cabang `claude`. **Tanpa rilis**, sesuai aturan
+  pemilik.
+
+---
+
 ## Menu & HPP dapat bentuk IKON, dan pratinjaunya kartu kasir yang SAMA — bukan yang mirip — web — 2026-09-03
 
 - **Kenapa vena ini ada**: pemilik repo meminta *"menu hpp ingin ada tampilan
@@ -10472,6 +10615,14 @@ berlaku di situ).
       → `setSession` + keterangan, 401 → sebab diucapkan layar login. Uji
       di-commit lebih dulu; bukti merah CI-nya bukti KOMPILASI, bukan
       perilaku — ditulis apa adanya di entrinya
+- [ ] **Jalur `/pembelian` halaman dokumen tak punya lengan peramban** —
+      kolom biaya, buku dana faktur, dan blok supplier hanya dijaga verify-api
+      §291 + penjaga statis; nol uji browser. Sebabnya bukan kelalaian
+      melainkan kuota: `/auth/login` 10 per 5 menit per (IP+email) dan sepuluh
+      berkas spec sudah memakai akun owner. **Yang membukanya** harus lebih
+      dulu memberi e2e sesi per-worker yang tak membakar kuota (sudah ditulis
+      sebagai syarat di kepala `playwright.config.ts`), atau memakai akun
+      manajemen kedua yang belum ada di seed
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama
