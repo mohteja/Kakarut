@@ -90,6 +90,8 @@ tetap membalas `200 { ok: true }` yang identik untuk alamat dikenal maupun
 tidak. Pintu itu tak berpassword sama sekali; membocorkan keterdaftaran di sana
 berarti memberikannya cuma-cuma, tanpa batas laju per akun yang menahan.
 
+**Sudah di-merge ke production.**
+
 ---
 
 ## `GET /produksi` & `/pembelian` memulangkan `ringkas` — antrean pengadaan tanpa menghitung sendiri
@@ -137,6 +139,8 @@ Perhatikan `menunggu`: label produksi untuk tahap itu berbunyi "✅ Selesai —
 masuk stok", tapi itu **aspirasi, bukan keadaan** — baris CK-lokal
 di-auto-konfirmasi dalam transaksi yang sama, jadi baris yang benar-benar duduk
 di `menunggu` hampir selalu work-order yang belum sampai ke cabang.
+
+**Sudah di-merge ke production.**
 
 ---
 
@@ -186,6 +190,8 @@ Sisi web putaran ini: lencana di nav "Operasional Cabang" (sebelumnya
 satu-satunya butir nav manajemen tanpa lencana, padahal ponsel sudah punya) +
 kartu di Beranda yang menyebut berapa yang sudah lewat 3 hari.
 
+**Sudah di-merge ke production.**
+
 ---
 
 ## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing
@@ -212,6 +218,8 @@ Kelas "tak ada header `Authorization`" tak berubah: `"Perlu login (token tidak
 ada)"`. Bila suatu saat ponsel ingin membedakan keduanya (mis. mengucapkan
 "sesi Anda habis" vs "token tak dikenali"), medannya sudah tersedia — tapi
 tidak ada kewajiban. Dipaku §287 `verify-api.sh`.
+
+**Sudah di-merge ke production.**
 
 ## `GET /laporan` membawa `omzet_sebelum_refund`
 
