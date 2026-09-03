@@ -1500,7 +1500,11 @@ Laporan:
   - **`client_ref` (opsional) = kunci idempotensi.** Kiriman ulang dengan `client_ref` yang SAMA memulangkan hasil pertama apa adanya — `rencana_id`, `nomor_permintaan`, dan seluruh id faktur identik — tanpa menerbitkan faktur kedua. Kunci `(company_id, client_ref)` memakai ledger yang sama dengan `/api/sync`, `/api/penjualan`, `/api/stok/opname`, dan `/api/transfer-stok`.
   - **Kenapa endpoint ini butuh.** Layar "Tambah Stok dari Menu" memanggil endpoint ini lalu `POST /api/perlengkapan/permintaan-otomatis?…&rencana_id=…` yang menaut ke hasilnya. Bila panggilan KEDUA gagal, yang pertama sudah menerbitkan faktur produksi/beli — dan percobaan ulang tanpa kunci menerbitkan satu set lagi untuk kebutuhan yang sama. Klien WAJIB memegang `client_ref` yang sama sampai SELURUH rantai sukses, bukan menggantinya tiap panggilan.
   - Tanpa `client_ref` perilakunya persis seperti sebelumnya (selalu membuat rencana baru), jadi klien lama tak perlu berubah.
-- `GET /api/rekomendasi/permintaan` — res: `PermintaanStokRow[]`
+- `GET /api/rekomendasi/permintaan` — query: `page?` (default 1), `per_page?` (default 20, maks 200) — res: `PermintaanStokDaftar` `{ rows: PermintaanStokRow[], total, page, per_page, ringkas }`. **BERUBAH BENTUK 2026-09-03** — dulu array telanjang `PermintaanStokRow[]`; bentuk tiap entri `rows[]` **tidak berubah sedikit pun**.
+  - **Berhalaman per RENCANA, bukan per baris.** Satu entri dirakit dari banyak baris `productions` ber-`rencana_id` sama plus faktur BP- yang lahir bersamanya, jadi `total` adalah cacah **permintaan** — bukan baris, bukan faktur. `LIMIT` atas barisnya akan memotong di tengah permintaan dan menampilkan kartu berisi separuh bagian.
+  - **Urutan**: yang **belum selesai** dulu (ada bagian yang belum `dikonfirmasi`/`ditolak`, atau perlengkapan yang masih `menunggu`/`diproses`), lalu terbaru → terlama, pemutus seri `rencana_id`. Kunci waktunya `MAX(waktu)` — konfirmasi menulis ulang `productions.waktu`, jadi `MIN` dan `MAX` berpisah begitu satu baris maju.
+  - **`ringkas: RingkasPermintaan`** — `{ berjalan, selesai, selesai_ada_ditolak }`, ketiganya cacah PERMINTAAN. Dihitung SERVER atas populasi yang sama dengan `total`, **bukan** atas `rows`: daftarnya menaruh yang belum selesai lebih dulu, jadi ringkasan dari halaman berjalan akan berbunyi "0 selesai" sampai halaman terakhir. Ketiganya **PARTISI** — jumlahnya selalu tepat `total`, dan verify-api §292 memakukannya.
+  - Aturan ketiga keadaan hidup di `packages/shared/src/permintaan-stok.ts` (`statusPermintaan`) — satu rumah untuk agregat server DAN badge klien.
 - `DELETE /api/rekomendasi/permintaan/:rencanaId` — soft delete semua faktur ber-rencana_id sama — res: `{ ok, jumlah_baris }` — error: **404**
 
 ## `/api/sampah` — Tempat sampah / record soft-deleted (`modules/sampah/routes.ts`) — group guard **[owner/admin]**
@@ -2502,6 +2506,55 @@ export interface PermintaanStokRow {
   kirim: PermintaanStokBagian | null;
   /** faktur BELI PERLENGKAPAN (BP-) yang lahir bersama permintaan ini */
   beli_perlengkapan: PermintaanStokBagianPerlengkapan | null;
+}
+
+/**
+ * Tiga keadaan satu permintaan stok — SATU sumber untuk badge di web dan
+ * agregat `ringkas` di server. Aturannya di `permintaan-stok.ts`
+ * (`statusPermintaan`); label & warnanya milik layar yang merendernya.
+ *
+ * `selesai_ada_ditolak` dipisahkan dari `selesai` dengan sengaja: permintaan
+ * yang seluruh bagiannya ditolak juga tak menyisakan pekerjaan, dan
+ * menyatukannya membuat kegagalan terbaca seperti keberhasilan di ubin.
+ */
+export type StatusPermintaan = "berjalan" | "selesai" | "selesai_ada_ditolak";
+
+/**
+ * Ringkasan antrean permintaan stok atas SELURUH populasi perusahaan — bukan
+ * halaman yang sedang tampil.
+ *
+ * Alasannya sama persis dengan `RingkasPengadaan`: daftarnya berhalaman dan
+ * server menaruh yang BELUM selesai lebih dulu, jadi ringkasan yang
+ * dijumlahkan dari `rows` akan berbunyi "0 selesai" sampai orangnya
+ * menelusuri ke halaman terakhir.
+ *
+ * Sengaja `Record<StatusPermintaan, number>`, bukan interface bermedan
+ * tangan: keadaan keempat yang lahir besok TIDAK BISA lupa dihitung —
+ * typecheck-nya merah di sini sebelum angkanya salah di layar.
+ *
+ * Ketiganya PARTISI: jumlahnya selalu tepat `PermintaanStokDaftar.total`.
+ */
+export type RingkasPermintaan = Record<StatusPermintaan, number>;
+
+/**
+ * Balasan `GET /rekomendasi/permintaan` — berhalaman per RENCANA, bukan per
+ * baris.
+ *
+ * Satu entri `rows[]` dirakit dari banyak baris `productions` yang berbagi
+ * `rencana_id` plus faktur BP- yang lahir bersamanya, jadi `total` adalah
+ * cacah PERMINTAAN — bukan cacah baris, dan bukan cacah faktur.
+ */
+export interface PermintaanStokDaftar {
+  rows: PermintaanStokRow[];
+  /** cacah PERMINTAAN pada populasi perusahaan (tak ada saringan di rute ini) */
+  total: number;
+  page: number;
+  /**
+   * Disebutkan supaya klien tak perlu menebak — `/transfer-stok` lupa
+   * menyebutnya dan itu terukur (lihat `lib/halaman-query.ts`).
+   */
+  per_page: number;
+  ringkas: RingkasPermintaan;
 }
 
 /**

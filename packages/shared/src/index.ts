@@ -10,6 +10,7 @@ export * from "./ketersediaan";
 export * from "./biaya";
 export * from "./nilai-stok";
 export * from "./pengadaan";
+export * from "./permintaan-stok";
 export * from "./perlengkapan-rak";
 export * from "./pesanan";
 export * from "./prorata";

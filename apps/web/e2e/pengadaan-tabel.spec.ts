@@ -246,3 +246,147 @@ test("faktur_id ngawur → kalimatnya sendiri, bukan dokumen kosong", async ({ p
   await expect(page.getByText(/Faktur ini tidak bisa dibuka/)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("link", { name: /Kembali ke Produksi Bahan Baku/ })).toBeVisible();
 });
+
+/*
+ * ---------------------------------------------------------------------------
+ * PERMINTAAN STOK: BENTUK TABEL, UBIN SERVER, DAN TAUTAN YANG BENAR.
+ *
+ * Menumpang berkas ini karena alasan yang SAMA dengan lengan halaman dokumen
+ * di atas — kuota `/auth/login` 10 per 5 menit per (IP+email), sepuluh berkas
+ * spec sudah memakai akun owner, dan berkas ke-11 memerahkan berkas lain
+ * dengan 429. Halaman Permintaan Stok owner/admin-only, jadi akun kasir tak
+ * bisa menggantikannya dan seed tak punya akun admin kedua.
+ *
+ * Subjeknya pun bersambung: sejak putaran ini tiap jalur di Permintaan Stok
+ * menautkan ke HALAMAN DOKUMEN FAKTURNYA — halaman yang lengan di atas baru
+ * saja menguji. Permintaan → faktur adalah satu rantai.
+ * ---------------------------------------------------------------------------
+ */
+
+/** Ringkasan server untuk permintaan — sumber kebenaran ubinnya. */
+async function ringkasPermintaan(request: APIRequestContext) {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const r = await request.get(`${BASE}/api/rekomendasi/permintaan?per_page=1`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(r.ok(), `GET /rekomendasi/permintaan (${r.status()})`).toBeTruthy();
+  return (await r.json()) as {
+    total: number;
+    ringkas: { berjalan: number; selesai: number; selesai_ada_ditolak: number };
+  };
+}
+
+test("Permintaan Stok: bentuk tabel dirender, dan pilihannya bertahan sesudah muat ulang", async ({
+  page,
+  request,
+}) => {
+  const data = await ringkasPermintaan(request);
+  expect(data.total, "PREMIS: harus ada permintaan").toBeGreaterThan(0);
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/permintaan-stok");
+  await expect(page.getByRole("heading", { name: /Data Permintaan Stok/ })).toBeVisible();
+
+  // Bawaannya KARTU — bentuk yang sudah ada sebelum tombol ini.
+  await expect(page.getByRole("button", { name: "🗂 Kartu" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.locator("table")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "☰ Tabel" }).click();
+  await expect(page.locator("table thead th").first()).toBeVisible({ timeout: 10_000 });
+  expect(await page.locator("table thead th").allTextContents()).toEqual([
+    "Dokumen",
+    "Dibuat",
+    "Tujuan",
+    "Isi",
+    "Status",
+    "Nilai",
+    "Orang",
+    "Aksi",
+  ]);
+
+  /*
+   * INTI SEBUAH SAKELAR: pilihannya bertahan. Tanpa lengan ini yang diuji cuma
+   * "tombolnya bisa diklik" — dan sakelar yang lupa pilihannya persis cacat
+   * yang tak pernah dilaporkan siapa pun, sebab orangnya cuma mengklik lagi.
+   */
+  await page.reload();
+  await expect(page.getByRole("button", { name: "☰ Tabel" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+    { timeout: 10_000 },
+  );
+  await expect(page.locator("table thead th").first()).toBeVisible();
+});
+
+test("Permintaan Stok: ubin menyebut angka SERVER, bukan jumlahan baris yang tampil", async ({
+  page,
+  request,
+}) => {
+  const data = await ringkasPermintaan(request);
+  expect(data.total, "PREMIS: harus ada permintaan").toBeGreaterThan(0);
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/permintaan-stok");
+  await expect(page.getByRole("heading", { name: /Data Permintaan Stok/ })).toBeVisible();
+
+  /*
+   * Angkanya dari agregat server atas SELURUH populasi. Bedanya bukan
+   * teoretis: server menaruh yang belum selesai lebih dulu, jadi ubin yang
+   * dijumlahkan dari halaman berjalan akan berbunyi "0 selesai" di halaman
+   * pertama mana pun. `data.ringkas.selesai` di DB gerbang > 0.
+   */
+  await expect(
+    page.getByText(`${data.ringkas.berjalan} permintaan`).first(),
+  ).toBeVisible({ timeout: 10_000 });
+  expect(
+    data.ringkas.selesai,
+    "PREMIS: butuh permintaan selesai, kalau tidak lengan ini hampa",
+  ).toBeGreaterThan(0);
+  await expect(page.getByText(`${data.ringkas.selesai} permintaan`).first()).toBeVisible();
+  // Ketiganya partisi — dan jumlahnya WAJIB total.
+  expect(
+    data.ringkas.berjalan + data.ringkas.selesai + data.ringkas.selesai_ada_ditolak,
+  ).toBe(data.total);
+});
+
+test("Permintaan Stok: lencana jalur membuka HALAMAN DOKUMEN fakturnya", async ({
+  page,
+  request,
+}) => {
+  const data = await ringkasPermintaan(request);
+  expect(data.total, "PREMIS: harus ada permintaan").toBeGreaterThan(0);
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/permintaan-stok");
+  await expect(page.getByRole("heading", { name: /Data Permintaan Stok/ })).toBeVisible();
+  await page.getByRole("button", { name: "☰ Tabel" }).click();
+  await expect(page.locator("table tbody tr").first()).toBeVisible({ timeout: 10_000 });
+
+  /*
+   * Tautannya DIBACA DARI LAYAR, bukan ditebak dari API. Versi pertama lengan
+   * ini mengambil `faktur_id` lewat `per_page=200` lalu mencarinya di tabel —
+   * dan gagal, sebab halamannya berhalaman 20 dan faktur itu duduk di halaman
+   * berikutnya. Merahnya benar, tapi ia menuduh tautannya padahal yang salah
+   * premis lengannya.
+   */
+  const tautan = page.locator('table tbody a[href^="/produksi/"]').first();
+  await expect(tautan, "PREMIS: ada lencana jalur produksi/kirim di halaman 1").toBeVisible();
+  const href = await tautan.getAttribute("href");
+  expect(href).toMatch(/^\/produksi\/[0-9a-f-]{36}$/);
+
+  /*
+   * SEBELUM putaran ini tautan ini menunjuk `/produksi` — DAFTARNYA, berhalaman
+   * 20 — jadi orangnya mendarat di halaman 1 dari 4 dan harus mencari sendiri
+   * faktur yang barusan ia klik. Yang diperiksa di sini URL-nya, bukan
+   * "sesuatu terbuka": tautan yang salah tetap membuka halaman.
+   */
+  await tautan.click();
+  await expect(page).toHaveURL(new RegExp(`${href}$`));
+  await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toContainText(
+    "Dokumen Produksi",
+    { timeout: 10_000 },
+  );
+});

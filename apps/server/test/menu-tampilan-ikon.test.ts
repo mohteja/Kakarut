@@ -32,6 +32,7 @@ const baca = (rel: string) => butaKomentar(readFileSync(AKAR + rel, "utf8"));
 const KARTU_REL = "apps/web/src/components/KartuMenuKasir.tsx";
 const KARTU = baca(KARTU_REL);
 const MENU = baca("apps/web/src/pages/menu/MenuListPage.tsx");
+const SAKELAR = baca("apps/web/src/components/SakelarTampilan.tsx");
 const KASIR = baca("apps/web/src/pages/kasir/KasirPage.tsx");
 
 function semuaTsx(dir: string): string[] {
@@ -152,16 +153,26 @@ describe("tombol bentuk & chip tanpa foto", () => {
       expect(MENU, label).toContain(label);
       expect(resep, `${label} — dua halaman tak boleh mengajarkan dua kosakata`).toContain(label);
     }
-    expect(MENU).toContain('aria-pressed={tampilan === "ikon"}');
-    expect(MENU).toContain('aria-pressed={tampilan === "daftar"}');
+    /*
+     * `aria-pressed` PINDAH RUMAH 2026-09-03 ke `components/SakelarTampilan.tsx`
+     * — markup sakelarnya diekstrak saat salinan KETIGA hendak lahir
+     * (Permintaan Stok). Yang dijaga tak berubah: dua arah, ber-`aria-pressed`,
+     * kosakata yang sama. Alamatnya yang berganti.
+     */
+    expect(SAKELAR).toContain("aria-pressed={nilai === o.nilai}");
+    expect(MENU).toContain('{ nilai: "ikon", label: "🔳 Ikon" }');
+    expect(MENU).toContain('{ nilai: "daftar", label: "☰ Daftar" }');
   });
 
   it("pilihannya disimpan, dan bawaannya DAFTAR — bentuk yang sudah ada", () => {
     expect(MENU).toContain('const KUNCI_TAMPILAN = "kakarut.menuTampilan"');
-    expect(MENU).toContain("bacaLokal(KUNCI_TAMPILAN)");
-    expect(MENU).toContain("tulisLokal(KUNCI_TAMPILAN, tampilan)");
+    // Baca/tulis `localStorage` juga pindah ke rumah bersama (`useTampilan`).
+    expect(SAKELAR).toContain("bacaLokal(kunci)");
+    expect(SAKELAR).toContain("tulisLokal(kunci, tampilan)");
     // Bawaannya: apa pun selain "ikon" jatuh ke "daftar".
-    expect(MENU).toMatch(/bacaLokal\(KUNCI_TAMPILAN\) === "ikon" \? "ikon" : "daftar"/);
+    // Bawaannya DAFTAR — argumen ketiga `useTampilan`, dan nilai tersimpan yang
+    // tak dikenal ikut jatuh ke sana (lihat `useTampilan`).
+    expect(MENU).toMatch(/useTampilan<TampilanMenu>\(\s*KUNCI_TAMPILAN,\s*\["ikon", "daftar"\],\s*"daftar",\s*\)/);
   });
 
   it("chip tanpa-foto TIDAK dirender saat bacaannya gagal", () => {

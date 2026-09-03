@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { SakelarTampilan, useTampilan } from "../../components/SakelarTampilan";
 import { Link, useSearchParams } from "react-router-dom";
 import type {
   BahanDto,
@@ -29,7 +30,6 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
-import { bacaLokal, tulisLokal } from "../../lib/simpanan";
 
 /** Baris editor resep (bahan mentah per 1 batch bahan jadi). */
 interface ResepDraft {
@@ -246,12 +246,11 @@ export function ResepPage() {
 
   // Bawaannya `ikon` — bentuk yang sudah ada sebelum tombol ini, jadi tak ada
   // yang berubah bagi pemakai yang tak menyentuhnya.
-  const [tampilan, setTampilan] = useState<TampilanResep>(() =>
-    bacaLokal(KUNCI_TAMPILAN) === "daftar" ? "daftar" : "ikon",
+  const [tampilan, setTampilan] = useTampilan<TampilanResep>(
+    KUNCI_TAMPILAN,
+    ["ikon", "daftar"],
+    "ikon",
   );
-  useEffect(() => {
-    tulisLokal(KUNCI_TAMPILAN, tampilan);
-  }, [tampilan]);
 
   const { data: bahan, isLoading, error: bahanGagal } = useQuery({
     queryKey: ["bahan", "ringkas"],
@@ -767,32 +766,15 @@ export function ResepPage() {
                 tombol aksinya berbeda (Pulihkan), jadi tombol ini hanya akan
                 menawarkan pilihan yang tak mengubah apa pun di sana. */}
             {tab !== "arsip" && (
-              <div className="ml-auto flex overflow-hidden rounded-lg border border-stone-300 text-sm">
-                <button
-                  type="button"
-                  onClick={() => setTampilan("ikon")}
-                  aria-pressed={tampilan === "ikon"}
-                  className={`px-3 py-1.5 font-medium ${
-                    tampilan === "ikon"
-                      ? "bg-orange-600 text-white"
-                      : "bg-white text-stone-600 hover:bg-stone-50"
-                  }`}
-                >
-                  🔳 Ikon
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTampilan("daftar")}
-                  aria-pressed={tampilan === "daftar"}
-                  className={`px-3 py-1.5 font-medium ${
-                    tampilan === "daftar"
-                      ? "bg-orange-600 text-white"
-                      : "bg-white text-stone-600 hover:bg-stone-50"
-                  }`}
-                >
-                  ☰ Daftar
-                </button>
-              </div>
+              <SakelarTampilan
+                nilai={tampilan}
+                atur={setTampilan}
+                opsi={[
+                  { nilai: "ikon", label: "🔳 Ikon" },
+                  { nilai: "daftar", label: "☰ Daftar" },
+                ]}
+                kelas="ml-auto"
+              />
             )}
           </div>
 

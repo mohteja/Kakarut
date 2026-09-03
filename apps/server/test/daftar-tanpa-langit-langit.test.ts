@@ -98,7 +98,30 @@ const AGREGAT = /\b(count|sum|avg)\s*\(/i;
  * langit-langit atas tabel yang tumbuh — beri `.limit()`, atau naikkan DASAR
  * dengan alasan di pesan commit.
  */
-const DASAR = 64;
+/*
+ * 64 → 65 pada 2026-09-03, dan naiknya SADAR.
+ *
+ * Situs barunya subkueri agregat `agregat_rencana` di `rekomendasi/routes.ts`,
+ * yang memberi makan `ringkas` DAN kunci halaman `GET /rekomendasi/permintaan`.
+ * Ia tertuduh karena ber-`.groupBy(` dan agregatnya `bool_or`/`bool_and`/`MAX`
+ * — bukan `count|sum|avg` yang dikenal pemindai. Tapi tak SATU BARIS PUN
+ * darinya sampai ke balasan: ia menghitung, lalu memulangkan paling banyak
+ * `per_page` kunci.
+ *
+ * Dan bahaya yang ratchet ini jaga — balasan yang membesar seumur warung buka
+ * — justru DIPERBAIKI pada putaran yang sama: kueri baris rute itu, yang dulu
+ * menarik SELURUH baris ber-`rencana_id` milik perusahaan sekaligus, kini
+ * terikat ≤ `per_page` rencana, dan kueri `supply_purchases`-nya ikut menyusut
+ * dari seluruh populasi jadi ≤ `per_page` id. Terukur: balasan yang dulu SELALU
+ * 11.790 byte untuk 24 permintaan (tanpa cara memintanya lebih kecil) kini
+ * 10.132 byte pada `per_page=20`, dan tak lagi tumbuh bersama riwayatnya.
+ *
+ * Yang TIDAK boleh dipakai menghindari kenaikan ini: memberi `.limit()`
+ * sembarang pada kueri baris halamannya. Batas yang memotong di tengah sebuah
+ * permintaan menampilkan kartu berisi separuh bagian, dan tak ada penanda apa
+ * pun yang menyebutkannya.
+ */
+const DASAR = 65;
 /*
  * 63 → 64 pada 2026-09-03, dan naiknya sadar.
  *

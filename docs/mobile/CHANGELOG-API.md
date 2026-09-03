@@ -25,6 +25,58 @@ tanpa akses repo server.
 
 ---
 
+## 🔴 `GET /rekomendasi/permintaan` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`
+
+🔴 **WAJIB** — dan ini satu-satunya entri yang benar-benar MEMATAHKAN kode yang
+sudah ada. `operasional_repository.dart` menulis `as List` pada balasannya;
+sesudah perubahan ini balasannya `Map`, jadi layar Permintaan Stok melempar
+saat runtime — bukan saat kompilasi.
+
+**Sudah dikerjakan di repo ponsel pada putaran yang sama** (cabang `claude`):
+`getPermintaan()` membaca `.rows`, model `PermintaanStokDaftar` ditambahkan,
+dan kedua lencana Beranda/Kasir beralih ke `ringkas.berjalan`. Entri ini tetap
+🔴 supaya urutan rilisnya tak salah dibaca — lihat "Urutan rilis" di bawah.
+
+```
+GET /api/rekomendasi/permintaan?page=1&per_page=20
+  → 200 { "rows": PermintaanStokRow[], "total": 24, "page": 1,
+          "per_page": 20,
+          "ringkas": { "berjalan": 17, "selesai": 7, "selesai_ada_ditolak": 0 } }
+```
+
+**Bentuk tiap entri `rows[]` TIDAK berubah** — tak ada medan yang hilang, tak
+ada yang berganti nama. Yang berubah hanya pembungkusnya.
+
+**Kenapa.** Rutenya menarik SELURUH riwayat permintaan perusahaan ke satu
+balasan — tak ada `page`/`per_page` sama sekali — lalu klien mengurut dan
+mengiris sendiri. Terukur 2026-09-03 di basis data uji: **24 permintaan =
+11.790 byte**, dan tak ada cara memintanya lebih kecil; ia tumbuh seumur usaha
+buka. Pengurutan "yang belum selesai dulu" juga hidup di klien, jadi tiap klien
+memutuskannya sendiri.
+
+**`per_page` bawaan 20, maksimum 200.** Klien yang tak punya kendali halaman
+WAJIB mengirim `per_page` besar dan mengaku bila masih kurang — daftar yang
+diam-diam berhenti di 20 membuat orang mengira permintaan lamanya sudah tak
+ada. Aplikasi ini memakai `per_page=200` + baris "Menampilkan N dari M".
+
+**`ringkas` dihitung SERVER atas SELURUH populasi**, bukan atas `rows`. Jangan
+menjumlahkannya sendiri dari halaman yang tampil: daftarnya menaruh yang belum
+selesai lebih dulu, jadi hitungan sendiri akan berbunyi "0 selesai" selamanya.
+Ketiganya partisi — `berjalan + selesai + selesai_ada_ditolak == total`.
+
+**Sekalian diperbaiki di ponsel:** lencana "permintaan berjalan" di Beranda dan
+Kasir dulu menyaring `rows` sendiri, dan penyaringnya hanya melihat
+`kirim`/`produksi`/`beli`/`beli_produksi` — permintaan yang sisa pekerjaannya
+ada di `produksi_cabang` atau `beli_perlengkapan` **tidak terhitung**.
+Keduanya kini memakai `ringkas.berjalan`.
+
+**Urutan rilis — ini bagian yang penting.** Server dan aplikasi harus tayang
+BERSAMAAN. APK lama + server baru = layar Permintaan Stok gagal; APK baru +
+server lama = `rows` kosong. Keduanya masih di cabang kerja masing-masing dan
+belum dirilis.
+
+---
+
 ## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya
 
 🟢 **BARU** — tak ada yang berubah pada rute lama. `GET /produksi` dan

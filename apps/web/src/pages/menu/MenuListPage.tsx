@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { SakelarTampilan, useTampilan } from "../../components/SakelarTampilan";
 import { Link, useNavigate } from "react-router-dom";
 import type { MenuDto } from "@kakarut/shared";
 import {
@@ -16,7 +17,6 @@ import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { labelCabang, opsiLokasiMenu, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
-import { bacaLokal, tulisLokal } from "../../lib/simpanan";
 
 /**
  * Bentuk daftar Menu & HPP: tabel angka ("daftar") atau kartu foto ("ikon").
@@ -83,12 +83,11 @@ export function MenuListPage() {
   });
 
   const navigate = useNavigate();
-  const [tampilan, setTampilan] = useState<TampilanMenu>(() =>
-    bacaLokal(KUNCI_TAMPILAN) === "ikon" ? "ikon" : "daftar",
+  const [tampilan, setTampilan] = useTampilan<TampilanMenu>(
+    KUNCI_TAMPILAN,
+    ["ikon", "daftar"],
+    "daftar",
   );
-  useEffect(() => {
-    tulisLokal(KUNCI_TAMPILAN, tampilan);
-  }, [tampilan]);
   const [kelolaKategori, setKelolaKategori] = useState(false);
   // Saring "yang fotonya belum ada" — lihat chip di baris bentuk tampilan.
   const [hanyaTanpaFoto, setHanyaTanpaFoto] = useState(false);
@@ -227,26 +226,14 @@ export function MenuListPage() {
           percabangan bentuk: keduanya sifat katalognya, bukan sifat
           tampilannya. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="inline-flex overflow-hidden rounded-lg border border-stone-300">
-          <button
-            onClick={() => setTampilan("ikon")}
-            aria-pressed={tampilan === "ikon"}
-            className={`px-3 py-1 text-xs font-semibold transition ${
-              tampilan === "ikon" ? "bg-orange-600 text-white" : "bg-white text-stone-600"
-            }`}
-          >
-            🔳 Ikon
-          </button>
-          <button
-            onClick={() => setTampilan("daftar")}
-            aria-pressed={tampilan === "daftar"}
-            className={`px-3 py-1 text-xs font-semibold transition ${
-              tampilan === "daftar" ? "bg-orange-600 text-white" : "bg-white text-stone-600"
-            }`}
-          >
-            ☰ Daftar
-          </button>
-        </div>
+        <SakelarTampilan
+          nilai={tampilan}
+          atur={setTampilan}
+          opsi={[
+            { nilai: "ikon", label: "🔳 Ikon" },
+            { nilai: "daftar", label: "☰ Daftar" },
+          ]}
+        />
         {tampilan === "ikon" && (
           <span className="text-xs text-stone-400">
             Kartunya SAMA PERSIS dengan yang dilihat kasir — termasuk potongan fotonya.

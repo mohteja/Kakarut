@@ -73,6 +73,7 @@ const BELUM_TAYANG = new Set([
   //
   // belum di-merge (masih di cabang `claude`, ikut PR draft #225)
   "## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya",
+  "## 🔴 `GET /rekomendasi/permintaan` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */
