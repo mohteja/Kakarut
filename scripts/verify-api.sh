@@ -16858,6 +16858,53 @@ cek "PASANGAN §287: diaktifkan lagi → token yang sama hidup lagi (200), tanpa
 api "$OWNER" PATCH "/karyawan/$U287" '{"arsip":true}' > /dev/null
 cek "§287 diarsipkan → sesi yang sudah ada mati (401)" "V == 401" "$(status_code "$K287" GET /auth/me)"
 
+echo
+echo "── §288 antrean putusan selisih kas bisa DIKETAHUI tanpa membukanya ──"
+# Panel Operasional Cabang sudah menampilkan antrean ini dengan hati-hati —
+# tapi ia hanya bekerja pada orang yang sudah membuka halamannya. Pemilik repo
+# menemukan 26 selisih menunggu, yang tertua dua belas hari, dan menulis
+# "selisih tidak ada notif harus di putuskan". `GET /shift/selisih/ringkas`
+# lahir dari situ: sumber lencana sidebar + kartu beranda.
+#
+# Yang dipaku di sini KECOCOKANNYA DENGAN DAFTARNYA, bukan angka mati: ringkas
+# dan daftar memakai `antreanSelisih` yang sama, jadi begitu keduanya
+# berselisih, salah satunya sudah menurunkan aturannya sendiri.
+SEL288=$(api "$OWNER" GET "/shift/selisih?status=menunggu")
+RGK288=$(api "$OWNER" GET /shift/selisih/ringkas)
+# PREMISNYA DIBUKTIKAN LEBIH DULU: antrean yang kosong membuat seluruh asersi
+# di bawah lolos secara hampa (0 == 0, null == null).
+cek "§288 PREMIS: antrean menunggu tidak kosong" "V == 1" \
+  "$(echo "$SEL288" | jq '(length > 0)|if . then 1 else 0 end')"
+cek "§288 ringkas.menunggu == panjang daftar menunggu" "V == 1" \
+  "$(jq -n --argjson r "$RGK288" --argjson d "$SEL288" '($r.menunggu == ($d|length))|if . then 1 else 0 end')"
+cek "§288 tertua_ditutup_pada == ditutup_pada TERTUA di daftar" "V == 1" \
+  "$(jq -n --argjson r "$RGK288" --argjson d "$SEL288" '($r.tertua_ditutup_pada == ([$d[].ditutup_pada]|min))|if . then 1 else 0 end')"
+# `terlambat` dihitung ulang DARI DAFTARNYA dengan ambang yang sama (3 hari).
+# Milidetik dibuang lebih dulu: `fromdateiso8601` menolak pecahan detik, dan
+# versi pertama arm ini merah karena itu — bukan karena angkanya.
+cek "§288 terlambat == dihitung ulang dari daftar (ambang 3 hari)" "V == 1" \
+  "$(jq -n --argjson r "$RGK288" --argjson d "$SEL288" --argjson now "$(date +%s)" \
+     '($r.terlambat == ([$d[]|select(.ditutup_pada != null and ((.ditutup_pada|sub("\\.[0-9]+Z$";"Z")|fromdateiso8601) < ($now - 3*86400)))]|length))|if . then 1 else 0 end')"
+cek "§288 terpotong = false selama antreannya di bawah langit-langit" "V == 1" \
+  "$(echo "$RGK288" | jq '(.terpotong == false)|if . then 1 else 0 end')"
+# Gerbang perannya sama dengan daftarnya: kasir tak pernah melihat layarnya.
+# `$REISS105`, bukan `$KASIR`: sesi kasir yang pertama sudah DICABUT di §105,
+# jadi token itu membalas 401 dan asersi 403 di sini akan merah karena sebab
+# yang salah. `verify-api-token.test.ts` menjaga persis kekeliruan itu.
+cek "§288 kasir → 403" "V == 403" "$(status_code "$REISS105" GET /shift/selisih/ringkas)"
+cek "§288 tanpa token → 401" "V == 401" \
+  "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/shift/selisih/ringkas")"
+# Dan yang paling menggigit: memutuskan satu selisih HARUS menurunkan angkanya.
+# Lencana yang tak turun sesudah keputusan diambil sama menyesatkannya dengan
+# lencana yang tak pernah menyala.
+SID288=$(echo "$SEL288" | jq -r '.[0].id')
+N288=$(echo "$RGK288" | jq '.menunggu')
+api "$OWNER" POST "/shift/$SID288/selisih/putuskan" '{"status":"disetujui"}' > /dev/null
+cek "§288 sesudah diputuskan: menunggu berkurang TEPAT satu" "V == 1" \
+  "$(api "$OWNER" GET /shift/selisih/ringkas | jq --argjson n "$N288" '(.menunggu == ($n - 1))|if . then 1 else 0 end')"
+cek "§288 shift itu tak lagi ada di daftar menunggu" "V == 0" \
+  "$(api "$OWNER" GET "/shift/selisih?status=menunggu" | jq --arg i "$SID288" '[.[]|select(.id==$i)]|length')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { RingkasSelisihDto } from "@kakarut/shared";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -215,6 +216,29 @@ export function Layout() {
     refetchInterval: 30_000,
   });
   const mejaTerisi = (mejaNav ?? []).filter((r) => r.status === "isi").length;
+
+  /**
+   * Selisih kas yang menunggu keputusan — lencana "Operasional Cabang".
+   *
+   * Syaratnya SAMA PERSIS dengan syarat render tautannya di bawah
+   * (`isManajemen && penuh`), dan itu bukan pengulangan yang bisa dibuang:
+   * `74b9165` lahir dari lencana yang menembak pintu yang ia tahu tertutup —
+   * 211 galat 403 dalam 7 hari untuk lencana yang tak pernah dirender. Nilainya
+   * dihitung di sini, di atas `if (!auth) return null`, karena hook tak boleh
+   * dipanggil sesudah return awal.
+   *
+   * `/shift/*` digerbang owner/admin/kasir di server; kasir tak pernah melihat
+   * tautan ini, jadi tanpa `manajemenGuard` lencananya akan menembak untuk
+   * peran yang tak punya layarnya.
+   */
+  const penuhGuard = !divisi || divisi === "kantor";
+  const lihatSelisih = !!auth && !auth.user.is_super_admin && manajemenGuard && penuhGuard;
+  const { data: selisihNav, error: selisihGagal } = useQuery({
+    queryKey: ["shift-selisih", "ringkas"],
+    queryFn: () => api<RingkasSelisihDto>("/shift/selisih/ringkas"),
+    enabled: lihatSelisih,
+    refetchInterval: 60_000,
+  });
 
   if (!auth) return null;
 
@@ -629,8 +653,9 @@ export function Layout() {
                     Operasional
                   </div>
                   {penuh && (
-                    <NavLink to="/operasional" className={linkClass}>
-                      🕐 Operasional Cabang
+                    <NavLink to="/operasional" className={navFlex}>
+                      <span>🕐 Operasional Cabang</span>
+                      {badgeOranye(selisihNav?.menunggu ?? 0, selisihGagal, "nav-lencana-selisih")}
                     </NavLink>
                   )}
                   <NavLink to="/produksi" className={navFlex}>

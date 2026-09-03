@@ -2143,6 +2143,38 @@ export interface SelisihKasRow {
 }
 
 /**
+ * Ringkasan antrean putusan selisih kas — `GET /shift/selisih/ringkas`.
+ *
+ * Ada supaya antrean ini bisa DIKETAHUI tanpa membukanya. Sebelum ini
+ * satu-satunya sumbernya daftar penuh, jadi lencana nav atau kartu beranda
+ * berarti menarik seluruh baris beserta nominal kasnya ke SETIAP halaman —
+ * dan angkanya tetap tercekik `BATAS_SELISIH`.
+ */
+export interface RingkasSelisihDto {
+  /**
+   * Jumlah yang menunggu keputusan, HASIL SARINGAN PENUH — tidak dipotong
+   * `BATAS_SELISIH` seperti daftarnya. Angka inilah yang benar untuk lencana.
+   */
+  menunggu: number;
+  /**
+   * Bagian dari `menunggu` yang ditutup lebih lama dari
+   * `SELISIH_TERLAMBAT_HARI`. Bukan sekadar hiasan: antrean yang menumpuk
+   * selama dua minggu terbaca sama saja dengan antrean kemarin bila cuma
+   * jumlahnya yang disebut.
+   */
+  terlambat: number;
+  /** Kapan yang PALING LAMA menunggu itu ditutup. `null` bila antreannya kosong. */
+  tertua_ditutup_pada: string | null;
+  /**
+   * `true` bila kuerinya sendiri menyentuh langit-langit `AMBIL_SELISIH`,
+   * jadi `menunggu` pun bisa KURANG dari yang sebenarnya. Sebab pemotongan
+   * yang tak terlihat dari angka mana pun — karena itu dikatakan, bukan
+   * dibiarkan disimpulkan.
+   */
+  terpotong: boolean;
+}
+
+/**
  * Jenis perintah yang bisa diantre offline & disinkron via POST /api/sync.
  * Fase 1: penjualan + absen. Fase 2: opname, perlengkapan, faktur tahap/kirim,
  * penerimaan. Payload = body endpoint asli (+ path param bila ditandai).

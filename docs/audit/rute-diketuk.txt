@@ -115,6 +115,7 @@ GET /api/shift/:id
 GET /api/shift/aktif
 GET /api/shift/pantau
 GET /api/shift/selisih
+GET /api/shift/selisih/ringkas
 GET /api/stok
 GET /api/stok/awal
 GET /api/stok/exp

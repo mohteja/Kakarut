@@ -227,6 +227,22 @@ const daftar: Record<string, Record<string, Alasan>> = {
   // Dibayar 2026-08-27 — pintu itu ternyata tidak berhalaman sama sekali
   // melainkan daftar ber-langit-langit, jadi yang benar penanda pemotongan
   // (`rows_terpotong`), bukan nomor halaman. Batasnya ikut turun.
+  "modules/shift/routes.ts": {
+    "(perluHitung ? AMBIL_SELISIH : BATAS_SELISIH) + 1": {
+      kelas: "sah",
+      jumlah: 1,
+      teks:
+        "Batasnya ada di `antreanSelisih`, PENANDANYA di kedua pemanggilnya — " +
+        "dan itu memang tempat yang benar untuk menilainya, sama seperti " +
+        "`modules/kebersihan/routes.ts` di atas. `GET /shift/selisih` " +
+        "mengatakannya lewat `HEADER_TERPOTONG` + `potongLarik`; " +
+        "`GET /shift/selisih/ringkas` lewat medan `terpotong` pada DTO-nya. " +
+        "Situs ini dulu terbaca BERPENANDA karena batas & penandanya berada " +
+        "di satu fungsi; keduanya dipisah saat ringkasnya lahir (2026-09-03) " +
+        "supaya aturan 'menunggu' hanya punya satu rumah — pemindainya yang " +
+        "kehilangan jejak, bukan pintunya yang jadi bisu.",
+    },
+  },
   "modules/users/routes.ts": {
     "100": {
       kelas: "sah",

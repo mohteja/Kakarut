@@ -50,6 +50,129 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Antrean putusan selisih kas: 26 menunggu, yang tertua 12 hari, dan nol tanda di luar halamannya sendiri — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo membuka Operasional Cabang, melihat
+  *"Selisih kas menunggu keputusan Anda (26)"* dengan baris tertua ditutup
+  **22 Agustus**, lalu menulis: *"selisih tidak ada notif harus di putuskan."*
+
+- **Sebabnya tertulis, dan itu yang membuat entri ini bukan sekadar fitur
+  kurang.** `docs/mobile/CHANGELOG-API.md` menjawab pertanyaan tim ponsel
+  *"apakah owner perlu notifikasi?"* dengan: *"Ya — `GET /shift/selisih?status=
+  menunggu` adalah sumber badge-nya… Web memakai endpoint yang sama dan
+  mem-poll tiap 60 detik **saat halaman Operasional terbuka**."* Kalimat
+  terakhir itu celahnya: "notifikasi" dilingkupi, sadar dan tercatat, sebagai
+  lencana yang hanya hidup DI DALAM halaman yang seharusnya ia ingatkan. Tak
+  ada yang keliru di jalannya; yang keliru lingkupnya, dan lingkup itu tak
+  pernah ditinjau ulang selama antreannya menumpuk.
+
+- **Dan di web lencananya bahkan tak pernah dipasang** — padahal ponsel sudah
+  punya (`kasir_page.dart`, `badgeMerah(selisihMenunggu)`). Panel di halamannya
+  sendiri justru dibangun sangat hati-hati: ia membedakan "gagal terbaca" dari
+  "kosong" (`OperasionalPage.tsx:51-65`) dan mengaku saat daftarnya terpotong.
+  Kehati-hatian penuh pada satu permukaan, nol permukaan lainnya.
+
+- **Populasi sapuan: 49 `NavLink` di sidebar, 13 tapak `badgeOranye`, 9 nama
+  lencana berbeda.** Dipilah tangan jadi (a) tautan katalog — menu, resep,
+  bahan, member, laporan: tak menunggu keputusan siapa pun, lencana tak
+  bermakna; (b) tautan ANTREAN — produksi, beli, beli perlengkapan, pesanan,
+  meja, pengajuan cuti, kebersihan, stok, penerimaan: semuanya berlencana; dan
+  (c) **selisih kas** — antrean yang menunggu keputusan owner, satu-satunya di
+  kelompok (b) yang angkanya tak pernah keluar dari halamannya. Kini 10 nama
+  lencana.
+
+- **Diukur lewat HTTP + SQL pada DB hasil gerbang**, bukan dibaca dari kode:
+
+  | | |
+  |---|---|
+  | antrean `?status=menunggu` | **19** menunggu · 20 pas · 2 disetujui · 1 ditolak |
+  | shift tertutup kandidat (`selisih_status` NULL/menunggu) | **39** |
+  | `GET /shift/selisih?status=menunggu` | 41–66 ms · **4.581 byte** |
+  | `GET /shift/selisih/ringkas` | 36–42 ms · **96 byte** |
+
+  Beban servernya IDENTIK — keduanya memanggil `antreanSelisih` yang sama, dan
+  `rekapWindow` di dalamnya 2+ kueri per baris. Yang dihemat jaringan (48×) dan
+  nominal kas tiap shift yang tak perlu ikut ke setiap halaman. **Batas yang
+  jujur**: pada 39 kandidat biayanya ~30 ms; ia tumbuh linier terhadap jumlah
+  shift tertutup, dan di langit-langit `AMBIL_SELISIH` (200) menjadi ~150 ms
+  per pollingan. Pembatchan `rekapWindow` jadi satu agregat masuk antrean —
+  **tidak** dikerjakan di sini, sebab angkanya belum menuntutnya.
+
+- **Ketiga medannya disilangkan dengan daftarnya sendiri**, bukan dengan angka
+  mati: `menunggu` 19 == panjang daftar 19; `tertua_ditutup_pada` identik
+  dengan `min(ditutup_pada)`; `terlambat` identik dengan hitungan ulang atas
+  daftar itu memakai ambang yang sama.
+
+- **Ambangnya dibuktikan MENGGIGIT, ujung ke ujung**: satu shift yang benar-
+  benar ada di daftar menunggu dimundurkan 5 hari lewat SQL →
+  `terlambat` **0 → 1** dan `tertua_ditutup_pada` bergeser ke **2026-08-29**;
+  dipulihkan → kembali 0. Sasarannya diambil dari jawaban RUTENYA SENDIRI,
+  bukan dari tebakan SQL — percobaan pertama memundurkan shift yang ternyata
+  berstatus "pas" dan tak berpengaruh apa pun.
+
+- **Satu perhitungan, dua pintu.** `antreanSelisih` diekstrak dari handler
+  daftarnya; `GET /shift/selisih/ringkas` memakai fungsi yang sama. Aturan
+  "menunggu" TIDAK BISA jadi `count(*)` di SQL — statusnya diturunkan dari
+  selisih yang HIDUP (`kas_sistem` dihitung ulang tiap dibaca), dan komentar
+  `routes.ts:411-434` sudah menuliskan akibatnya: penjualan bertanggal mundur
+  dari sinkron offline mengubah shift "pas" jadi kurang 40.000 tanpa kolomnya
+  bergerak. Menulis ulang aturan itu untuk sebuah lencana = dua tempat yang
+  akan berselisih pendapat soal shift yang sama.
+
+- **Ambang terlambat = fungsi, bukan perbandingan yang diketik ulang.**
+  `SELISIH_TERLAMBAT_HARI = 3` + `selisihTerlambat()` di `@kakarut/shared`,
+  dipakai server (menghitung) dan web (menulis kalimatnya). Pemiliknya memilih
+  3 hari; ia juga menolak tampilan umur per baris dan email otomatis, jadi
+  yang dipasang hanya dua permukaan agregat.
+
+- **Detektor DIBUKTIKAN bisa menuduh — LIMA kali, semuanya dipulihkan
+  byte-per-byte (`cmp`)**:
+
+  1. `/operasional` dikembalikan jadi `linkClass` → penjaga statis merah 2 uji.
+  2. Gerbang kueri dilonggarkan (buang `manajemenGuard`) → merah 1.
+  3. Galat tak lagi diteruskan ke `badgeOranye` → merah 1.
+  4. `>` jadi `>=` pada ambangnya → merah pada asersi "tepat di ambang".
+  5. **PERAMBAN**: lencana + kartu dicabut, dibangun ulang, server dinyalakan
+     ulang → kedua spek Playwright merah pada elemen yang tak ditemukan.
+
+- **Gerbangnya sendiri yang menemukan EMPAT hal, bukan saya** — dan tiap
+  satunya penjaga yang bekerja persis seperti maksudnya:
+
+  1. `verify-api-token.test.ts`: §288 memakai `$KASIR`, token yang sudah
+     DICABUT di §105. Asersi 403-nya akan hijau karena sebab yang salah (401).
+     Diganti `$REISS105`.
+  2. `potong-berpenanda.test.ts`: memindahkan `.limit()` ke `antreanSelisih`
+     memisahkannya dari penandanya, jadi situs yang tadinya BERPENANDA terbaca
+     SENYAP. Diadjudikasi beralasan — bentuk yang sama dengan
+     `modules/kebersihan/routes.ts` yang sudah lebih dulu ada di daftar itu:
+     batas di pembantu, penanda di pemanggil, dan di pemanggil itulah ia
+     dinilai. Kedua pemanggilnya memang mengatakannya (`HEADER_TERPOTONG` dan
+     medan `terpotong`).
+  3. `kunci-satu-kontrak.test.ts`: fikstur kontrak ponsel basi — 4 kunci
+     `RingkasSelisihDto` diregenerasi ke repo ponsel.
+  4. `cakupan-rute.test.ts`: rute baru tak pernah diketuk. `rute-diketuk.txt`
+     diregenerasi dari `JEJAK_RUTE` pada jalan gerbang yang sama.
+
+- **Batas yang tersisa, ditulis jujur.** `AMBIL_SELISIH` = 200 shift tertutup
+  TERBARU, dan "pas" berbagi kolom `selisih_status` NULL dengan "menunggu" —
+  jadi antrean tua bisa terdorong keluar oleh shift-shift "pas" yang lebih
+  baru. Di DB gerbang `terpotong` = `false` (39 kandidat), tapi pada penyewa
+  sungguhan yang sudah setahun beroperasi ambang itu bisa tersentuh, dan saat
+  itu terjadi `menunggu` pun jadi BATAS BAWAH. Karena itu `terpotong`
+  dipulangkan dan dirender ("+" pada lencana, kalimat pada kartunya) alih-alih
+  disimpulkan sendiri oleh pembacanya.
+
+- **Antrean baru dari putaran ini**: (1) pembatchan `rekapWindow` jadi satu
+  agregat per shift — biayanya linier hari ini dan hanya itu yang menahan
+  pollingan lebih rapat; (2) repo ponsel, `shift_repository.dart:54`
+  `catch (_) { return 0; }` menelan semua galat jadi nol pada provider yang
+  memberi makan lencana selisih — persis "lencana gagal ≠ lencana nol" yang
+  sudah ditegakkan repo itu sendiri lewat `badgeAsync`.
+
+- **Gerbang**: typecheck · `npm test` 231 berkas / **2.788** uji (+1 berkas,
+  +9 uji) · build · `verify-api.sh` **3.466 lolos, 0 gagal** (dari 3.457,
+  §288 +9 lengan) · `audit:invarian` 27/27 · Playwright **25 spek** (dari 23).
+
 ## Central Kitchen ditawarkan sebagai lokasi menu — dapur yang tak berjualan, dan angka yang menjawab pertanyaan yang tak pernah diajukan — web — 2026-09-03
 
 - **Kenapa vena ini ada**: pemilik repo mengirim tangkapan layar Menu & HPP
@@ -9803,6 +9926,12 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
+- [ ] **`rekapWindow` ditembakkan sekali PER BARIS** — `GET /shift/selisih`
+      (dan kini `/selisih/ringkas`) memanggilnya untuk tiap shift kandidat, dan
+      ia sendiri 2+ kueri. Terukur 2026-09-03: ~30 ms pada 39 kandidat, tumbuh
+      linier, ~150 ms di langit-langit 200. Satu agregat `GROUP BY shift`
+      menggantikan N panggilan — belum dikerjakan karena angkanya belum
+      menuntutnya, dan itu yang akan berubah lebih dulu
 - [ ] **`StokPage:58` menulis aturan lokasi menu untuk kedua kalinya** — lahir
       dari entri "Central Kitchen ditawarkan sebagai lokasi menu". Ia berbunyi
       `selTipe !== "central_kitchen" && selTipe !== "kantor"`, benar hari ini
@@ -9813,6 +9942,12 @@ berlaku di situ).
       Stok Menu TAMPIL — mengalirkannya lewat helper membalik itu
 
 ### Mobile
+- [ ] **`shift_repository.dart:54` menelan galat jadi NOL** — provider yang
+      memberi makan lencana selisih kas berbunyi `catch (_) { return 0; }`,
+      jadi jaringan putus atau 403 terbaca sebagai "tak ada yang menunggu
+      keputusan". Aturan "lencana gagal ≠ lencana nol" sudah ditegakkan repo
+      itu sendiri lewat `badgeAsync`; pintu ini terlewat. Ditemukan saat
+      putaran lencana selisih di web (2026-09-03)
 - [x] ~~**Enum status dibandingkan sebagai teks**~~ — BERSIH dua arah, lihat
       entri di atas. 156 perbandingan / 41 nilai diadu dengan 297 baris
       kontrak server; artefaknya tautan mekanis yang selama ini tak ada

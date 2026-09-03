@@ -5,6 +5,43 @@ export const STOK_MENIPIS_THRESHOLD = 0.15;
 export const DEFAULT_PB1_RATE = 10;
 
 /**
+ * Sesudah berapa HARI sebuah selisih kas yang menunggu keputusan dianggap
+ * TERLAMBAT diputuskan.
+ *
+ * Tiga hari: cukup longgar untuk melewati akhir pekan atau pemilik yang sedang
+ * di luar, tapi masih jauh dari "sudah dua minggu dan tak ada yang tahu" —
+ * keadaan yang melahirkan angka ini (26 selisih menunggu, yang tertua 12 hari,
+ * tanpa satu pun tanda di luar halaman Operasional Cabang).
+ *
+ * Ditaruh di `shared` supaya server (yang menghitung `terlambat` di
+ * `GET /shift/selisih/ringkas`) dan web (yang menulis kalimatnya) tak bisa
+ * berbeda pendapat soal kapan sesuatu terlambat.
+ */
+export const SELISIH_TERLAMBAT_HARI = 3;
+
+/**
+ * Apakah sebuah selisih kas yang menunggu sudah TERLAMBAT diputuskan.
+ *
+ * Fungsi, bukan perbandingan yang ditulis ulang di tiap pemakai: server
+ * menghitung `terlambat` di `GET /shift/selisih/ringkas`, web menulis
+ * kalimatnya di kartu Beranda, dan dua tempat yang menurunkan "terlambat"
+ * sendiri-sendiri adalah dua tempat yang akan berselisih pendapat soal shift
+ * yang sama.
+ *
+ * `sekarangMs` disuntikkan, bukan diambil dari `Date.now()` di dalam, supaya
+ * ambangnya bisa diuji tanpa menunggu tiga hari.
+ *
+ * `null` (shift tanpa waktu tutup) = BUKAN terlambat: ia bahkan belum masuk
+ * antrean putusan.
+ */
+export function selisihTerlambat(ditutupPada: string | null, sekarangMs: number): boolean {
+  if (!ditutupPada) return false;
+  const t = Date.parse(ditutupPada);
+  if (!Number.isFinite(t)) return false;
+  return sekarangMs - t > SELISIH_TERLAMBAT_HARI * 24 * 60 * 60 * 1000;
+}
+
+/**
  * Panduan markup per jenis kategori (persen) — hanya panduan saat membuat
  * menu baru; menu yang sudah ada memakai `mult` tersimpan.
  */

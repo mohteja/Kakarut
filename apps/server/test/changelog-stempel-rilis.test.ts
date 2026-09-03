@@ -68,6 +68,7 @@ const BELUM_TAYANG = new Set([
   // sampai ia minta rilis. Stempelnya dipasang dan baris ini dihapus saat
   // merge ke `production` terjadi.
   "## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing",
+  "## `GET /shift/selisih/ringkas` — jumlah antrean putusan tanpa menarik daftarnya",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

@@ -1220,6 +1220,10 @@ lahir sebagai pekerjaan baru yang belum tersentuh.
 - `POST /api/shift/kunci-hitungan` — **[cashier]** — query: `branch_id?` — req: `{ uang_fisik: number(≥0) }` — res: `{ uang_fisik, kas_sistem, selisih }` — error: **400** tak ada shift terbuka, **409** hitungan sudah dikunci dengan nominal LAIN. **Ini "reveal"-nya**: `kas_sistem` & `selisih` dibuka di sini, setelah nominal fisik terkunci. Nominal yang **sama** dikirim ulang tetap **200** (retry jaringan bukan kecurangan). Respons 409 tetap membawa `uang_fisik`/`kas_sistem`/`selisih` milik penguncian pertama, di samping `error`.
 - `POST /api/shift/tutup` — **[cashier]** — req: `{ uang_fisik?: number(≥0)|null, catatan?|null, selisih_alasan?|null (max300) }` — `selisih_alasan` diisi `selisih_alasan?.trim() || catatan?.trim() || null`, hanya saat `selisih ≠ 0` — res: `Shift` — error: **400** tak ada shift terbuka / tak ada nominal (belum dikunci & `uang_fisik` tak dikirim), **409** `uang_fisik` berbeda dari yang sudah dikunci. Sudah `kunci-hitungan` → `uang_fisik` boleh dihilangkan. Belum mengunci → wajib diisi (jalur satu langkah untuk klien yang membutakan di UI saja). Selisih (|selisih| > 0,005) → `status_selisih: "menunggu"`; uang PAS → `status_selisih: "pas"` (tak butuh persetujuan). `selisih_alasan` diisi dari field itu, atau dari `catatan` bila tak dikirim (klien lama hanya punya satu kolom catatan).
 - `GET /api/shift/selisih` — **[owner/admin]** — query: `status?: "pas"|"menunggu"|"disetujui"|"ditolak"` (default `menunggu`), `branch_id?` — res: `SelisihKasRow[]` (maks 50, urut tutup terbaru). Sumber badge "perlu ACC". Sengaja terpisah dari `/pantau`: selisih yang menunggu bisa berasal dari shift kemarin di cabang yang hari ini belum buka.
+- `GET /api/shift/selisih/ringkas` — **[owner/admin]** — tanpa query — res: `RingkasSelisihDto` `{ menunggu: int, terlambat: int, tertua_ditutup_pada: string|null, terpotong: bool }`. **Sumber lencana nav "Operasional Cabang" + kartu Beranda** — ada supaya antrean putusan bisa DIKETAHUI tanpa membuka halamannya; sebelumnya satu-satunya sumbernya daftar penuh di atas, yang hanya ditarik oleh halaman Operasional sendiri.
+  - `menunggu` = hasil saringan PENUH, **tidak** dipotong 50 seperti daftarnya — lencana yang berhenti di 50 mengatakan "tinggal 50" pada antrean yang lebih panjang.
+  - `terlambat` = bagian dari `menunggu` yang ditutup lebih lama dari `SELISIH_TERLAMBAT_HARI` (**3**, di `@kakarut/shared`); aturannya `selisihTerlambat()` yang sama dipakai server & web.
+  - `terpotong` = kueri menyentuh langit-langit `AMBIL_SELISIH` (200 shift tertutup terbaru), jadi `menunggu` pun bisa KURANG dari sebenarnya. Memakai perhitungan (`antreanSelisih`) yang SAMA dengan daftarnya — aturan "menunggu" diturunkan dari selisih yang hidup, tak bisa jadi `count(*)` di SQL.
 - `POST /api/shift/:id/selisih/putuskan` — **[owner/admin]** — req: `{ status: "disetujui"|"ditolak", alasan_tolak?|null (max300) }` — res: `Shift` — error: **400** (shift tak punya selisih; menolak tanpa `alasan_tolak`), **404**, **409** sudah pernah diputuskan (pola sama dengan `POST /pengajuan/:id/putuskan`). `selisih_disetujui_oleh`/`selisih_diputus_pada` terisi pada **kedua** putusan — namanya warisan kolom DB, maknanya **pemutus**, bukan "yang menyetujui". Mencatat KEPUTUSAN saja — `uang_fisik` & `kas_sistem` adalah fakta yang sudah terjadi dan tak pernah diubah; **menolak tidak membuka kembali shift**, ia penanda untuk ditindaklanjuti di luar aplikasi. Kasir **tak bisa** memutuskan selisihnya sendiri (**403** dari guard peran).
 
 > ### ⚠️ Kenapa hitung buta
@@ -3751,6 +3755,38 @@ export interface SelisihKasRow {
   selisih: number;
   catatan: string | null;
   status_selisih: StatusSelisih;
+}
+
+/**
+ * Ringkasan antrean putusan selisih kas — `GET /shift/selisih/ringkas`.
+ *
+ * Ada supaya antrean ini bisa DIKETAHUI tanpa membukanya. Sebelum ini
+ * satu-satunya sumbernya daftar penuh, jadi lencana nav atau kartu beranda
+ * berarti menarik seluruh baris beserta nominal kasnya ke SETIAP halaman —
+ * dan angkanya tetap tercekik `BATAS_SELISIH`.
+ */
+export interface RingkasSelisihDto {
+  /**
+   * Jumlah yang menunggu keputusan, HASIL SARINGAN PENUH — tidak dipotong
+   * `BATAS_SELISIH` seperti daftarnya. Angka inilah yang benar untuk lencana.
+   */
+  menunggu: number;
+  /**
+   * Bagian dari `menunggu` yang ditutup lebih lama dari
+   * `SELISIH_TERLAMBAT_HARI`. Bukan sekadar hiasan: antrean yang menumpuk
+   * selama dua minggu terbaca sama saja dengan antrean kemarin bila cuma
+   * jumlahnya yang disebut.
+   */
+  terlambat: number;
+  /** Kapan yang PALING LAMA menunggu itu ditutup. `null` bila antreannya kosong. */
+  tertua_ditutup_pada: string | null;
+  /**
+   * `true` bila kuerinya sendiri menyentuh langit-langit `AMBIL_SELISIH`,
+   * jadi `menunggu` pun bisa KURANG dari yang sebenarnya. Sebab pemotongan
+   * yang tak terlihat dari angka mana pun — karena itu dikatakan, bukan
+   * dibiarkan disimpulkan.
+   */
+  terpotong: boolean;
 }
 
 /**

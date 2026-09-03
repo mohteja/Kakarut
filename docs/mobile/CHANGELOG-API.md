@@ -25,6 +25,54 @@ tanpa akses repo server.
 
 ---
 
+## `GET /shift/selisih/ringkas` — jumlah antrean putusan tanpa menarik daftarnya
+
+🟢 **BARU** — endpoint tambahan; `GET /shift/selisih` **tidak berubah** sedikit
+pun, jadi kode ponsel yang ada tetap benar.
+
+**Kenapa ada.** Pemilik repo membuka Operasional Cabang di web dan menemukan 26
+selisih kas menunggu keputusannya, yang tertua ditutup dua belas hari
+sebelumnya. Keluhannya: *"selisih tidak ada notif harus di putuskan."*
+Jawaban lama kita untuk "apakah owner perlu notifikasi?" ada di changelog ini
+sendiri — *"Ya, `GET /shift/selisih?status=menunggu` adalah sumber badge-nya…
+di-poll tiap 60 detik saat halaman Operasional terbuka"* — dan justru
+kalimat terakhir itu celahnya: lencananya hanya hidup di dalam halaman yang
+seharusnya ia ingatkan.
+
+```
+GET /api/shift/selisih/ringkas        [owner/admin]  → 200
+{ "menunggu": 19, "terlambat": 1,
+  "tertua_ditutup_pada": "2026-08-29T05:20:57.937Z", "terpotong": false }
+```
+
+- `menunggu` — hasil saringan **penuh**, tidak dipotong 50 seperti daftarnya.
+  Ini yang benar untuk sebuah lencana: angka yang berhenti bertambah di 50
+  mengatakan "tinggal 50" pada antrean yang lebih panjang.
+- `terlambat` — bagian dari `menunggu` yang ditutup lebih lama dari
+  **3 hari** (`SELISIH_TERLAMBAT_HARI` di `@kakarut/shared`).
+- `tertua_ditutup_pada` — `null` bila antreannya kosong.
+- `terpotong` — `true` bila kuerinya menyentuh langit-langit 200 shift tertutup
+  terbaru, sehingga `menunggu` pun bisa **kurang** dari sebenarnya.
+
+**Untuk ponsel — tidak wajib, tapi dua hal patut ditimbang.**
+
+1. `selisihMenungguProvider` (`shift_repository.dart`) hari ini menarik
+   **seluruh daftar** hanya untuk menghitung panjangnya. Balasan ringkas ini
+   96 byte melawan 4.581 byte pada data uji yang sama — beban servernya
+   identik, yang dihemat jaringannya, dan nominal kas tiap shift tak perlu
+   ikut ke layar yang cuma butuh angka.
+2. Provider itu juga menelan semua galat jadi `0`
+   (`catch (_) { return 0; }`), sehingga jaringan putus atau 403 terbaca
+   sebagai "tak ada yang menunggu keputusan". Itu justru aturan yang sudah
+   ditegakkan repo ponsel sendiri lewat `badgeAsync` — *"lencana gagal ≠
+   lencana nol"*. Layak diperbaiki saat endpoint ini dipakai.
+
+Sisi web putaran ini: lencana di nav "Operasional Cabang" (sebelumnya
+satu-satunya butir nav manajemen tanpa lencana, padahal ponsel sudah punya) +
+kartu di Beranda yang menyebut berapa yang sudah lewat 3 hari.
+
+---
+
 ## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing
 
 ⚪️ **INFO** — status tetap **401** pada kedua kelas, dan ponsel sudah

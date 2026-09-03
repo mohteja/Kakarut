@@ -8,6 +8,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
   formatRupiahAscii as rupiah,
+  type RingkasSelisihDto,
+  selisihTerlambat,
   type SelisihKasRow,
   type Shift,
   type ShiftDetail,
@@ -445,6 +447,81 @@ export function statusSelisih(
   return Math.abs(selisih) < EPS_KAS ? "pas" : "menunggu";
 }
 
+/**
+ * ANTREAN SELISIH KAS — satu perhitungan, dipakai daftarnya DAN ringkasnya.
+ *
+ * Diekstrak dari handler `GET /selisih` saat `GET /selisih/ringkas` lahir.
+ * Bukan kerapian: aturan "menunggu" TIDAK BISA ditulis sebagai `count(*)` di
+ * SQL, dan dua tempat yang menurunkannya sendiri-sendiri adalah dua tempat
+ * yang akan berselisih pendapat soal shift yang sama.
+ *
+ * Sebabnya "pas" dan "menunggu" tak terpisahkan di SQL: keduanya berkolom
+ * `selisih_status` NULL selama belum ada keputusan; yang membedakan SELISIHNYA
+ * — dan selisih itu dihitung ulang dari penjualan shift tiap kali dibaca,
+ * bukan disimpan. Dulu "pas" difilter sebagai `IS NULL`, jadi shift yang
+ * selisihnya berubah SESUDAH ditutup (penjualan bertanggal mundur dari sinkron
+ * offline) tetap duduk di keranjang "tak perlu ditinjau" — kekurangan kasnya
+ * tak pernah sampai ke owner. Maka keduanya diambil bersama lalu dipisah di
+ * sini memakai `statusSelisih`, aturan yang sama dengan layar shift;
+ * `disetujui`/`ditolak` tetap difilter langsung, sebab keputusan yang sudah
+ * diambil memang tersimpan.
+ *
+ * `langitLangit` = kuerinya sendiri menyentuh [AMBIL_SELISIH]. Itu sebab
+ * pemotongan KEDUA, dan ia tak terlihat dari panjang hasil: penyaringan
+ * terjadi sesudah query, jadi baris yang lolos saring bisa tertinggal di luar
+ * ambilan dan tak pernah sampai untuk dihitung. Pemanggilnya wajib
+ * mengatakannya — daftarnya lewat header, ringkasnya lewat `terpotong`.
+ *
+ * BIAYA: satu `rekapWindow` per baris, dan `rekapWindow` sendiri 2+ kueri.
+ * Karena itu ringkasnya TIDAK lebih murah dari daftarnya di sisi server —
+ * yang dihemat jaringan dan nominal kas yang tak perlu ikut ke tiap halaman.
+ */
+async function antreanSelisih(
+  companyId: string,
+  status: "pas" | "menunggu" | "disetujui" | "ditolak",
+  branchId?: string,
+): Promise<{ baris: SelisihKasRow[]; langitLangit: boolean }> {
+  const perluHitung = status === "pas" || status === "menunggu";
+  const rows = await baseSelect()
+    .where(
+      and(
+        eq(shifts.companyId, companyId),
+        isNotNull(shifts.closedAt),
+        branchId ? eq(shifts.branchId, branchId) : undefined,
+        perluHitung
+          ? or(isNull(shifts.selisihStatus), eq(shifts.selisihStatus, "menunggu"))
+          : eq(shifts.selisihStatus, status),
+      ),
+    )
+    .orderBy(desc(shifts.closedAt), desc(shifts.id))
+    // `+ 1` pada kedua cabang: satu baris lebih itulah yang membedakan "tepat
+    // sejumlah batas" dari "lebih banyak dari batas".
+    .limit((perluHitung ? AMBIL_SELISIH : BATAS_SELISIH) + 1);
+  const semua: SelisihKasRow[] = await Promise.all(
+    rows.map(async (r) => {
+      const rekap = await rekapWindow(db, r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
+      const kas = r.modalAwal + rekap.penjualan_tunai;
+      return {
+        id: r.id,
+        branch_nama: r.branch_nama ?? "",
+        ditutup_oleh: r.closer,
+        ditutup_pada: r.closedAt ? r.closedAt.toISOString() : null,
+        kas_sistem: kas,
+        uang_fisik: r.uangFisik ?? 0,
+        selisih: (r.uangFisik ?? 0) - kas,
+        // keterangan selisih lebih berguna daripada catatan umum, tapi
+        // klien lama hanya mengisi `catatan` — pakai yang ada.
+        catatan: r.selisihAlasan ?? r.catatan,
+        status_selisih: statusSelisih(r.closedAt, r.selisihStatus, (r.uangFisik ?? 0) - kas)!,
+      };
+    }),
+  );
+  return {
+    baris: perluHitung ? semua.filter((x) => x.status_selisih === status) : semua,
+    langitLangit: perluHitung && rows.length > AMBIL_SELISIH,
+  };
+}
+
 async function toDto(r: ShiftJoinRow, role?: string | null): Promise<Shift> {
   const rekap = await rekapWindow(db, r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
   const kasAsli = r.modalAwal + rekap.penjualan_tunai;
@@ -693,93 +770,52 @@ export const shiftRoutes = new Hono<AppEnv>()
     async (c) => {
       const auth = c.get("auth");
       const q = c.req.valid("query");
-      /*
-       * "pas" dan "menunggu" TAK BISA dipisahkan di SQL.
-       *
-       * Keduanya sama-sama berkolom `selisih_status` NULL bila belum ada
-       * keputusan; yang membedakan adalah SELISIHNYA — dan selisih itu
-       * dihitung ulang dari penjualan shift tiap kali dibaca, bukan disimpan.
-       * Dulu "pas" difilter sebagai `IS NULL`, jadi shift yang selisihnya
-       * berubah SESUDAH ditutup (penjualan bertanggal mundur dari sinkron
-       * offline) tetap duduk di keranjang "tak perlu ditinjau" — kekurangan
-       * kasnya tak pernah sampai ke owner.
-       *
-       * Jadi kedua status itu diambil bersama dari SQL lalu dipisah di sini
-       * memakai `statusSelisih`, aturan yang sama dengan yang dipakai layar
-       * shift. `disetujui`/`ditolak` tetap difilter langsung — keputusan yang
-       * sudah diambil memang tersimpan.
-       */
-      const perluHitung = q.status === "pas" || q.status === "menunggu";
-      const rows = await baseSelect()
-        .where(
-          and(
-            eq(shifts.companyId, auth.company_id!),
-            isNotNull(shifts.closedAt),
-            q.branch_id ? eq(shifts.branchId, q.branch_id) : undefined,
-            q.status === "pas" || q.status === "menunggu"
-              ? or(isNull(shifts.selisihStatus), eq(shifts.selisihStatus, "menunggu"))
-              : eq(shifts.selisihStatus, q.status),
-          ),
-        )
-        .orderBy(desc(shifts.closedAt), desc(shifts.id))
-        // Ambil lebih banyak saat statusnya harus dihitung: penyaringan terjadi
-        // SESUDAH query, jadi memotong di 50 lebih dulu bisa membuang baris
-        // yang justru diminta. Dipangkas kembali ke BATAS_SELISIH di bawah.
-        //
-        // `+ 1` pada kedua cabang: satu baris lebih itulah yang membedakan
-        // "tepat sejumlah batas" dari "lebih banyak dari batas".
-        .limit((perluHitung ? AMBIL_SELISIH : BATAS_SELISIH) + 1);
-      const semua: SelisihKasRow[] = await Promise.all(
-        rows.map(async (r) => {
-          const rekap = await rekapWindow(db, r.companyId, r.branchId, r.id, r.openedAt, r.closedAt);
-          const kas = r.modalAwal + rekap.penjualan_tunai;
-          return {
-            id: r.id,
-            branch_nama: r.branch_nama ?? "",
-            ditutup_oleh: r.closer,
-            ditutup_pada: r.closedAt ? r.closedAt.toISOString() : null,
-            kas_sistem: kas,
-            uang_fisik: r.uangFisik ?? 0,
-            selisih: (r.uangFisik ?? 0) - kas,
-            // keterangan selisih lebih berguna daripada catatan umum, tapi
-            // klien lama hanya mengisi `catatan` — pakai yang ada.
-            catatan: r.selisihAlasan ?? r.catatan,
-            // Aturan yang SAMA dengan layar shift — dua tempat yang menurunkan
-            // status ini dengan cara berbeda adalah dua tempat yang akan
-            // berselisih pendapat soal shift yang sama.
-            status_selisih: statusSelisih(
-              r.closedAt,
-              r.selisihStatus,
-              (r.uangFisik ?? 0) - kas,
-            )!,
-          };
-        }),
+      const { baris, langitLangit } = await antreanSelisih(
+        auth.company_id!,
+        q.status,
+        q.branch_id,
       );
-      /**
-       * INI ANTREAN PUTUSAN, bukan sekadar daftar — dan antrean yang memotong
-       * diam-diam mengatakan hal yang tidak benar: "sudah tak ada lagi yang
-       * menunggu keputusanmu."
-       *
-       * Dua sebab pemotongan, dan KEDUANYA harus dikatakan:
-       *
-       * 1. hasil penyaringan lebih panjang dari `BATAS_SELISIH`; atau
-       * 2. kuerinya sendiri sudah menyentuh langit-langit `AMBIL_SELISIH` —
-       *    penyaringan terjadi SESUDAH query, jadi baris yang lolos saring
-       *    bisa saja tertinggal di luar `AMBIL_SELISIH` dan tak pernah
-       *    sampai ke sini untuk dihitung.
-       *
-       * Sebab kedua tak terlihat dari panjang `hasil`, jadi ia tak bisa
-       * diserahkan ke `potongLarik` sendirian.
-       */
-      const disaring = perluHitung
-        ? semua.filter((x) => x.status_selisih === q.status)
-        : semua;
-      if (perluHitung && rows.length > AMBIL_SELISIH) {
+      if (langitLangit) {
         c.header(HEADER_TERPOTONG, String(BATAS_SELISIH));
       }
-      return c.json(potongLarik(c, disaring, BATAS_SELISIH));
+      return c.json(potongLarik(c, baris, BATAS_SELISIH));
     },
   )
+  /**
+   * RINGKASAN antrean putusan — supaya antrean ini bisa DIKETAHUI tanpa
+   * membukanya.
+   *
+   * Sampai 2026-09-03 satu-satunya sumbernya daftar penuh di atas, dan daftar
+   * itu hanya ditarik oleh halaman Operasional Cabang sendiri. Akibatnya persis
+   * yang dilaporkan pemilik repo: 26 selisih menunggu, yang tertua 12 hari,
+   * tanpa satu pun tanda di layar mana pun kecuali halaman yang seharusnya
+   * mengingatkannya. Keputusan lamanya tercatat di
+   * `docs/mobile/CHANGELOG-API.md` — "notifikasi owner" dilingkupi sebagai
+   * badge yang di-poll "saat halaman Operasional terbuka".
+   *
+   * Memakai fungsi hitung yang SAMA dengan daftarnya, bukan `count(*)` sendiri.
+   * Aturan "menunggu" tak bisa ditulis di SQL (lihat `antreanSelisih`), dan dua
+   * tempat yang menurunkannya sendiri-sendiri adalah dua tempat yang akan
+   * berselisih pendapat soal shift yang sama.
+   */
+  .get("/selisih/ringkas", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const { baris, langitLangit } = await antreanSelisih(auth.company_id!, "menunggu");
+    const sekarang = Date.now();
+    const waktuTutup = baris
+      .map((b) => (b.ditutup_pada ? Date.parse(b.ditutup_pada) : null))
+      .filter((t): t is number => t !== null && Number.isFinite(t));
+    return c.json({
+      // Panjang hasil SARINGAN PENUH, bukan yang sudah dipotong `BATAS_SELISIH`
+      // — lencana yang berhenti bertambah di 50 mengatakan "tinggal 50" pada
+      // antrean yang lebih panjang.
+      menunggu: baris.length,
+      terlambat: baris.filter((b) => selisihTerlambat(b.ditutup_pada, sekarang)).length,
+      tertua_ditutup_pada:
+        waktuTutup.length > 0 ? new Date(Math.min(...waktuTutup)).toISOString() : null,
+      terpotong: langitLangit,
+    } satisfies RingkasSelisihDto);
+  })
   // detail satu shift = ringkasan + daftar transaksinya (kasir terkunci cabang)
   .get("/:id", async (c) => {
     const auth = c.get("auth");
