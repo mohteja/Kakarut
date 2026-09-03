@@ -270,7 +270,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > (`/api/bahan/:id`). Badan request, query string, dan header `Authorization`
 > **tidak** disimpan. Retensi 30 hari / 50.000 baris terbaru.
 
-- `GET /api/admin/error-log` — query: `hari` (1–90, default 7), `status` (`4xx`|`5xx`; selain itu = semua), `q` (cari pada pesan/pola jalur) — res: `ErrorLogDto` (`{ hari, total, total_5xx, total_4xx, jumlah_kelompok, rows: ErrorLogKelompokRow[] }`; ringkasan dihitung atas seluruh rentang, tak ikut tersaring)
+- `GET /api/admin/error-log` — query: `hari` (1–90, default 7), `status` (`4xx`|`5xx`; selain itu = semua), `q` (cari pada pesan/pola jalur) — res: `ErrorLogDto` (`{ hari, total, total_5xx, total_4xx, jumlah_kelompok, rows: ErrorLogKelompokRow[] }`; **keempat** angka ringkasan — `total`, `total_5xx`, `total_4xx`, `jumlah_kelompok` — dihitung atas seluruh rentang dan TIDAK ikut tersaring; `rows` berlangit-langit **200 kelompok** dan pemotongannya diumumkan lewat header `X-Kakarut-Terpotong`)
 - `GET /api/admin/error-log/:sidik` — query: `hari` — res: `ErrorLogDetailDto` (`{ kelompok, kejadian: ErrorLogKejadianRow[] }`, maks 50 kejadian terbaru; `stack` hanya terisi untuk 5xx) — error: **404** sidik tak ada pada rentang itu
 - `DELETE /api/admin/error-log` — res: `{ ok, dihapus }` — buang SEMUA baris
 - `POST /api/admin/error-log/pangkas` — res: `{ ok, dihapus }` — jalankan retensi sekarang (biasanya lewat penjadwal tiap 6 jam)
@@ -1848,7 +1848,16 @@ export interface ErrorLogDto {
   total_5xx: number;
   /** kejadian 4xx — penolakan (validasi/izin/tak ditemukan/rate limit) */
   total_4xx: number;
-  /** jumlah kelompok berbeda pada hasil yang disaring */
+  /**
+   * Jumlah kelompok BERBEDA dalam rentang `hari` — dihitung SQL atas populasi
+   * penuh, sengaja TANPA saringan status/pencarian, sejajar dengan ketiga
+   * medan `total*` di atasnya.
+   *
+   * Sampai 2026-09-03 ia diturunkan dari `rows.length`, jadi ia ikut menyusut
+   * saat tab disaring DAN tercekik di langit-langit daftar (200) tanpa satu
+   * penanda pun. `rows` sendiri tetap berlangit-langit; pemotongannya diumumkan
+   * lewat header `X-Kakarut-Terpotong`, bukan lewat medan ini.
+   */
   jumlah_kelompok: number;
   rows: ErrorLogKelompokRow[];
 }

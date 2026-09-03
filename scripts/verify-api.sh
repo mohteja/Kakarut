@@ -6150,6 +6150,33 @@ cek "saring 4xx → ada isinya" "V == 1" \
 cek "pencarian q= menyaring" "V == 1" \
   "$(api "$SA" GET "/admin/error-log?hari=1&q=bahan" | jq '. as $r | (($r.rows|length) > 0) and (([$r.rows[]|select((.pesan|ascii_downcase|contains("bahan")) or (.jalur_pola|contains("bahan")))]|length) == ($r.rows|length)) | if . then 1 else 0 end')"
 
+# KARTU "MASALAH BERBEDA" MENGHITUNG MASALAH, BUKAN BARIS YANG MUAT DI LAYAR.
+#
+# Ketiga kartu ringkasan sengaja dihitung atas SELURUH rentang — komentar di
+# atas kuerinya menuliskannya: "supaya angka pada kartu tak ikut berubah saat
+# tab disaring". Kartu keempat dulu `jumlah_kelompok: rows.length`, jadi ia
+# melanggar aturan yang ditulis untuk ketiga saudaranya DAN tercekik di
+# `LIMIT_KELOMPOK` tanpa satu penanda pun. Ditemukan 2026-09-03 saat pemilik
+# repo bertanya soal panel ini.
+#
+# PREMISNYA DIBUKTIKAN LEBIH DULU: saringan harus benar-benar MENGUBAH jumlah
+# baris. Tanpa itu "angkanya sama" benar secara hampa — kedua panggilan
+# kebetulan memulangkan populasi yang sama.
+# Dibandingkan terhadap 5xx, BUKAN 4xx: seksi ini sudah memaku "saring 5xx →
+# kosong (belum ada bug server)" di atas, jadi `4xx` dan `semua` memulangkan
+# populasi yang SAMA — premis "saringan mengubah jumlah baris" akan benar
+# secara hampa di sana, dan asersi di bawahnya ikut hampa.
+L142_SEMUA=$(api "$SA" GET "/admin/error-log?hari=1&status=semua")
+L142_5XX=$(api "$SA" GET "/admin/error-log?hari=1&status=5xx")
+cek "premis §142: saringan status memang mengubah jumlah BARIS yang tampil" "V == 1" \
+  "$(jq -n --argjson a "$L142_SEMUA" --argjson b "$L142_5XX" '((($a.rows|length) > 0) and (($b.rows|length) == 0))|if . then 1 else 0 end')"
+cek "§142 jumlah_kelompok TIDAK ikut menyusut saat tab disaring" "V == 1" \
+  "$(jq -n --argjson a "$L142_SEMUA" --argjson b "$L142_5XX" '(($a.jumlah_kelompok == $b.jumlah_kelompok) and ($a.jumlah_kelompok > 0))|if . then 1 else 0 end')"
+cek "§142 …dan ia menghitung SELURUH kelompok, bukan cuma yang ditampilkan" "V == 1" \
+  "$(jq -n --argjson a "$L142_SEMUA" '($a.jumlah_kelompok >= ($a.rows|length))|if . then 1 else 0 end')"
+cek "PASANGAN §142: pencarian pun tak menggeser kartunya" "V == 1" \
+  "$(jq -n --argjson a "$L142_SEMUA" --argjson b "$(api "$SA" GET "/admin/error-log?hari=1&q=bahan")" '($a.jumlah_kelompok == $b.jumlah_kelompok)|if . then 1 else 0 end')"
+
 # Detail kelompok: kronologi mentah + identitas pelapor.
 SIDIK142=$(echo "$LOG142" | jq -r '[.rows[]|select(.jalur_pola=="/api/bahan/:id/supplier")][0].sidik')
 DET142=$(api "$SA" GET "/admin/error-log/$SIDIK142?hari=1")

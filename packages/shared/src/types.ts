@@ -237,7 +237,16 @@ export interface ErrorLogDto {
   total_5xx: number;
   /** kejadian 4xx — penolakan (validasi/izin/tak ditemukan/rate limit) */
   total_4xx: number;
-  /** jumlah kelompok berbeda pada hasil yang disaring */
+  /**
+   * Jumlah kelompok BERBEDA dalam rentang `hari` — dihitung SQL atas populasi
+   * penuh, sengaja TANPA saringan status/pencarian, sejajar dengan ketiga
+   * medan `total*` di atasnya.
+   *
+   * Sampai 2026-09-03 ia diturunkan dari `rows.length`, jadi ia ikut menyusut
+   * saat tab disaring DAN tercekik di langit-langit daftar (200) tanpa satu
+   * penanda pun. `rows` sendiri tetap berlangit-langit; pemotongannya diumumkan
+   * lewat header `X-Kakarut-Terpotong`, bukan lewat medan ini.
+   */
   jumlah_kelompok: number;
   rows: ErrorLogKelompokRow[];
 }

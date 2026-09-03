@@ -5,6 +5,7 @@ import type { ErrorLogDetailDto, ErrorLogDto, ErrorLogKelompokRow } from "@kakar
 import { db } from "../../db/client";
 import { companies, errorLogs, users } from "../../db/schema";
 import { pangkasErrorLog } from "../../lib/error-log";
+import { potongLarik } from "../../lib/potong";
 import type { AppEnv } from "../../middleware/auth";
 
 /**
@@ -49,6 +50,16 @@ async function ambilKelompok(sejak: Date, saring?: "4xx" | "5xx", cari?: string)
     kondisi.push(sql`(${errorLogs.pesan} ILIKE ${pola} OR ${errorLogs.jalurPola} ILIKE ${pola})`);
   }
 
+  // Diambil SATU LEBIH BANYAK dari yang akan ditampilkan: `potongLarik`
+  // menandai pemotongan dengan membandingkan `rows.length` terhadap batasnya,
+  // jadi mengambil tepat sebanyak batas membuat penandanya tak pernah menyala.
+  //
+  // KOMENTAR INI DI ATAS RANTAI, BUKAN DI SEBELAH `.limit()`, dan letaknya
+  // disengaja: pemindai `daftar-tanpa-langit-langit` kehilangan jejak `.limit`
+  // bila ada komentar menyela di tengah rantai kuerinya, lalu menuduh kueri
+  // yang sebenarnya berbatas ini sebagai bacaan tanpa langit-langit. Batas
+  // yang diketahui dari pemindainya — dipindahkan ke sini, bukan dibungkam
+  // dengan menambah DASAR.
   const rows = await db
     .select({
       sidik: errorLogs.sidik,
@@ -66,7 +77,7 @@ async function ambilKelompok(sejak: Date, saring?: "4xx" | "5xx", cari?: string)
     .where(and(...kondisi))
     .groupBy(errorLogs.sidik)
     .orderBy(desc(sql`max(${errorLogs.waktu})`), errorLogs.sidik)
-    .limit(LIMIT_KELOMPOK);
+    .limit(LIMIT_KELOMPOK + 1);
 
   return rows.map(
     (r): ErrorLogKelompokRow => ({
@@ -99,22 +110,38 @@ export const adminErrorLogRoutes = new Hono<AppEnv>()
 
     // Ringkasan dihitung atas SELURUH rentang (tanpa saringan status/pencarian)
     // supaya angka pada kartu tak ikut berubah saat tab disaring.
+    //
+    // `jumlah_kelompok` IKUT DI SINI, dan dulu tidak — ia diturunkan dari
+    // `rows.length`, yang salah dua kali sekaligus:
+    //
+    //   · ia ikut menyusut saat tab disaring, justru melanggar aturan yang
+    //     ditulis di atas untuk ketiga saudaranya;
+    //   · ia tercekik di `LIMIT_KELOMPOK` tanpa satu penanda pun — begitu
+    //     kelompoknya melewati 200, kartu "Masalah berbeda" berhenti bertambah
+    //     dan tetap terlihat seperti angka sebenarnya.
+    //
+    // Biayanya nol kueri tambahan: satu kolom agregat pada pemindaian yang
+    // memang sudah berjalan.
     const [ringkas] = await db
       .select({
         total: sql<number>`count(*)::int`,
         total_5xx: sql<number>`count(*) filter (where ${errorLogs.status} >= 500)::int`,
         total_4xx: sql<number>`count(*) filter (where ${errorLogs.status} between 400 and 499)::int`,
+        jumlah_kelompok: sql<number>`count(distinct ${errorLogs.sidik})::int`,
       })
       .from(errorLogs)
       .where(gte(errorLogs.waktu, sejak));
 
-    const rows = await ambilKelompok(sejak, saring, cari);
+    // Daftarnya sendiri TETAP berlangit-langit — dan sekarang mengaku lewat
+    // `X-Kakarut-Terpotong`, rumah yang sama dengan delapan pintu lain.
+    const kelompok = await ambilKelompok(sejak, saring, cari);
+    const rows = potongLarik(c, kelompok, LIMIT_KELOMPOK);
     const dto: ErrorLogDto = {
       hari,
       total: ringkas?.total ?? 0,
       total_5xx: ringkas?.total_5xx ?? 0,
       total_4xx: ringkas?.total_4xx ?? 0,
-      jumlah_kelompok: rows.length,
+      jumlah_kelompok: ringkas?.jumlah_kelompok ?? 0,
       rows,
     };
     return c.json(dto);

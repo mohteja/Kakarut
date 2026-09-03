@@ -50,6 +50,82 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Panel galat: ponsel mengaku siapa dirinya, dan "Masalah berbeda" berhenti berbohong (312 vs 200) — server + web + ponsel — 2026-09-03
+
+- **Kenapa vena ini ada**: lanjutan langsung dari entri di bawah. Pemilik repo
+  bertanya *"cek bagian mobile — apakah sudah punya galat log di superadmin?"*
+
+- **Jawabannya TIDAK, dan itu keputusan yang sudah tertulis.** Akun super admin
+  bahkan ditolak masuk ke aplikasi ponsel (`auth_controller.dart:118`, *"Akun
+  super admin tidak didukung di aplikasi. Gunakan web."*); nol berkas layar
+  super admin di `lib/`; nol tembakan `/admin/*` (8 kecocokan `grep` semuanya
+  kalimat antarmuka "owner/admin", bukan jalur). Keputusannya terdaftar di
+  `docs/mobile/PROMPT-AUTH-ONBOARDING.md` ("Yang TIDAK perlu dibangun di
+  mobile") dan di fikstur `kunci-belum-dibaca.txt` — *"bukan 'belum',
+  melainkan bukan untuk perangkat itu"* — dengan ratchet yang menegakkannya.
+  **Tidak dibalik.** Pemilik memilih dua temuan lain dari pemeriksaan yang sama.
+
+- **Temuan 1 — ponsel tak pernah menyebut dirinya (ponsel).** `BaseOptions`
+  hanya menyetel `Content-Type`; sapuan seluruh repo menemukan nol penyetelan
+  `User-Agent`. Yang sampai ke server bawaan `dart:io` — `Dart/3.12 (dart:io)`,
+  sama untuk tiap versi, tiap perangkat, tiap sistem. Kolom yang baru dirender
+  di panel karena itu cuma bisa menjawab "ponsel atau web" dan berhenti di situ.
+  Kini `Kakarut/<versi> (<os>; <versi os>)`, tanpa dependensi baru: `dart:io`
+  memberi platformnya, dan versinya konstanta yang **dijaga tak boleh hanyut**
+  dari `pubspec.yaml`.
+
+- **Temuan 2 — "Masalah berbeda" salah DUA kali, dan diukur (server+web).**
+  `jumlah_kelompok: rows.length`, sementara `rows` dipotong `LIMIT_KELOMPOK`
+  DAN disaring. Diukur lewat HTTP pada DB hasil gerbang:
+
+  | saringan | `jumlah_kelompok` | baris tampil |
+  |---|---|---|
+  | `semua` | **312** | 200 |
+  | `4xx`   | **312** | 200 |
+  | `5xx`   | **312** | 2 |
+
+  Sebelum perbaikan angka itu akan terbaca **200 / 200 / 2** — kartu melaporkan
+  200 masalah untuk 312 yang sebenarnya ada, lalu **anjlok ke 2** begitu tab
+  "Galat server" ditekan. Ketiga kartu lain sengaja tak ikut tersaring;
+  komentar di atas kuerinya sendiri menuliskannya, dan kartu keempat melanggar
+  aturan itu sepuluh baris di bawahnya. Kini dihitung `count(distinct sidik)`
+  di kueri ringkasan yang sama — nol pemindaian tambahan. Header
+  `x-kakarut-terpotong: 200` terkirim dan dirender: pemotongannya nyata pada DB
+  itu, bukan hipotesis.
+
+- **GERBANG LAMA MENGARAHKAN SELURUH BENTUK PERBAIKANNYA**, dan ini bagian yang
+  paling layak dicatat. Lima penjaga menuntut berturut-turut, tiap tuntutan
+  benar: (1) `pemotongan-terungkap` menolak panggilan `potongLarik` bersarang
+  yang argumennya tak terbaca → panggilannya dirapikan; (2) penjaga yang sama
+  menuntut layarnya MEMBACA header → `ErrorLogPage` memasang `bacaTerpotong`;
+  (3) `potong-berpenanda` menandai entri adjudikasi lama jadi kuburan →
+  diperbarui, dan alasan lamanya ternyata KELIRU ("tak ada angka yang mengecil
+  karena potongan" — padahal kartu itu justru mengecil); (4)
+  `daftar-tanpa-langit-langit` menuduh kueri berbatas sebagai tanpa-batas; (5)
+  `changelog-stempel-rilis` dari putaran sebelumnya menagih entri tak berstempel.
+
+- **Batas pemindai yang ditemukan sambil lalu**: `daftar-tanpa-langit-langit`
+  kehilangan jejak `.limit()` bila ada komentar menyela di TENGAH rantai kueri,
+  lalu menuduh kueri berbatas. Diuji dua arah (komentar di dalam rantai →
+  merah; dipindah ke atas rantai → hijau). Tidak dibungkam dengan menaikkan
+  DASAR; letak komentarnya dipindah dan sebabnya ditulis di tempat itu supaya
+  tak dikembalikan orang berikutnya. Pemindainya sendiri belum diperbaiki —
+  batas yang diketahui, dicatat di sini.
+
+- **Bukti merah**: `jumlah_kelompok` dikembalikan ke `rows.length` → 1 merah;
+  `LIMIT_KELOMPOK + 1` → `LIMIT_KELOMPOK` → 2 merah (penjaga baru + registri
+  pintu); semua dipulihkan byte-per-byte. Ponsel: uji di-commit merah dulu,
+  **tapi merahnya BUKAN yang direncanakan** — CI #29/#30 gagal di `analyze`
+  karena `library;` kutaruh sesudah impor, jadi tak satu uji pun sempat
+  berjalan. Merah karena kompilasi, bukan karena perilaku; kedua kalinya bentuk
+  ini muncul di repo ini, dan ditulis apa adanya alih-alih diklaim sebagai
+  bukti yang bukan.
+
+- **Gerbang**: typecheck · npm test 229 berkas / 2.774 · build · verify-api
+  **3.453**/0 (naik 4: lengan §142 baru) · audit:invarian 27/27 · Playwright 22.
+
+---
+
 ## 1.744 penolakan 401 di panel galat: satu sesi mati = ~14 baris, dan pemalsuan tanda tangan tenggelam di antaranya — server + web + ponsel — 2026-09-03
 
 - **Kenapa vena ini ada**: BUKAN dari antrean — pemilik repo membuka panel Log

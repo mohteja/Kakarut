@@ -197,10 +197,10 @@ describe("aturan rumah: rute yang memotong wajib mengumumkannya, dan layar wajib
   it("PREMIS: sapuannya benar-benar menemukan rute yang memotong", () => {
     // Nol berarti pemindainya rusak (atau `potongLarik` berganti nama), bukan
     // repo yang bersih — bentuk kegagalan yang sudah menggigit repo ini.
-    expect(jalur.length).toBeGreaterThanOrEqual(8);
+    expect(jalur.length).toBeGreaterThanOrEqual(9);
   });
 
-  it("DIPAKU: tujuh pintu yang dibayar 2026-08-31 memang mengumumkan potongannya", () => {
+  it("DIPAKU: pintu-pintu yang sudah dibayar memang mengumumkan potongannya", () => {
     // Menghapus entri dari daftar adjudikasi `potong-berpenanda` saja tak
     // menahan apa pun — begitu `potongLarik` dicabut dari salah satu rute ini,
     // situsnya kembali "senyap" dan yang merah cuma pesan yang menyuruh
@@ -214,6 +214,13 @@ describe("aturan rumah: rute yang memotong wajib mengumumkannya, dan layar wajib
       "GET /perlengkapan/opname/riwayat",
       "GET /perlengkapan/beli",
       "GET /perlengkapan/kiriman",
+      // Ditambahkan 2026-09-03. Bukan bagian dari tujuh yang dibayar
+      // 2026-08-31: panel log galat memotong daftarnya di 200 sejak awal, tapi
+      // penandanya tak pernah ada — dan kartu "Masalah berbeda" malah
+      // menghitung larik yang sudah terpotong itu, jadi angkanya berhenti
+      // bertambah diam-diam. Ditemukan saat pemilik repo bertanya soal panel
+      // ini, bukan oleh sapuan.
+      "GET /admin/error-log",
     ]) {
       expect(jalur, `${w} berhenti memanggil potongLarik`).toContain(w);
     }

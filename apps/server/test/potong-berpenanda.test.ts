@@ -69,14 +69,19 @@ const daftar: Record<string, Record<string, Alasan>> = {
     },
   },
   "modules/admin-error-log/routes.ts": {
-    LIMIT_KELOMPOK: {
+    "LIMIT_KELOMPOK + 1": {
       kelas: "sah",
       jumlah: 1,
       teks:
-        "Panel diagnostik super admin: N kelompok galat TERBARU, diurut per " +
-        "kejadian terakhir. Yang dicari orang di layar ini galat yang sedang " +
-        "terjadi, bukan arsip lengkap — dan tiap kelompok membawa jumlah " +
-        "kejadiannya sendiri, jadi tak ada angka yang mengecil karena potongan.",
+        "SUDAH TIDAK SENYAP sejak 2026-09-03 — pemindai ini yang tak bisa " +
+        "melihatnya. Pemotongannya diumumkan `potongLarik(c, kelompok, " +
+        "LIMIT_KELOMPOK)` di HANDLER-nya, satu hop dari situs `.limit()` ini, " +
+        "jadi header `X-Kakarut-Terpotong` memang terkirim dan `ErrorLogPage` " +
+        "merendernya. Sebelumnya entri ini berbunyi 'tiap kelompok membawa " +
+        "jumlah kejadiannya sendiri, jadi tak ada angka yang mengecil karena " +
+        "potongan' — dan itu ternyata keliru: kartu 'Masalah berbeda' justru " +
+        "dihitung dari larik yang sudah dipotong, jadi ia berhenti bertambah " +
+        "diam-diam di 200. Kini ia dihitung SQL atas populasi penuh.",
     },
     LIMIT_KEJADIAN: {
       kelas: "sah",

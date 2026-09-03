@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import type { ErrorLogDetailDto, ErrorLogDto, ErrorLogKelompokRow } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, SpinnerAtauGalat } from "../../components/ui";
-import { api } from "../../lib/api";
+import { api, bacaTerpotong } from "../../lib/api";
 
 /**
  * LOG GALAT PLATFORM (super admin). Daftarnya berisi KELOMPOK, bukan baris
@@ -93,6 +93,11 @@ export function ErrorLogPage() {
   }, [cari]);
 
   const kunci = ["admin-error-log", hari, saring, cariTunda] as const;
+  // Daftar kelompok berlangit-langit 200 di server. Tanpa membaca headernya,
+  // panel yang penuh terlihat persis sama dengan panel yang lengkap — dan ini
+  // panel diagnosis, tempat "tak ada lagi" dan "tak ditampilkan lagi" adalah
+  // dua kesimpulan yang berlawanan.
+  const [terpotong, setTerpotong] = useState<number | null>(null);
   const { data, isFetching, error: gagalMuat } = useQuery({
     queryKey: kunci,
     queryFn: () =>
@@ -100,6 +105,7 @@ export function ErrorLogPage() {
         `/admin/error-log?hari=${hari}${saring === "semua" ? "" : `&status=${saring}`}${
           cariTunda ? `&q=${encodeURIComponent(cariTunda)}` : ""
         }`,
+        { bacaHeader: bacaTerpotong(setTerpotong) },
       ),
     placeholderData: (prev) => prev,
     refetchInterval: 30_000,
@@ -195,6 +201,15 @@ export function ErrorLogPage() {
                   onToggle={() => setDibuka(dibuka === k.sidik ? null : k.sidik)}
                 />
               ))}
+            </div>
+          )}
+
+          {terpotong !== null && (
+            <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              Menampilkan <b>{terpotong} kelompok terakhir</b>. Masih ada yang{" "}
+              <b>lebih lama</b> dan tidak ikut ditampilkan di sini — persempit rentang harinya
+              atau pakai kotak cari. Kartu <b>Masalah berbeda</b> di atas tetap menghitung
+              semuanya.
             </div>
           )}
 
