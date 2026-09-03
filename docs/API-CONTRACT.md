@@ -667,7 +667,11 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   - **Kolam median hanya memuat lot yang harganya pernah dilihat manusia** (`productions.harga_tebakan = false`): harga diisi di faktur, dilaporkan lewat endpoint ini, atau direalisasi di `POST /{mod}/tahap`. Faktur yang dibuat **tanpa** `total_harga` memakai tebakan `qty × harga acuan saat itu`; bila tebakan ikut dihitung, harga acuan menyeret dirinya sendiri (acuan → tebakan → median → acuan) dan HPP seluruh menu hanyut naik tanpa ada yang mengubah harga jual.
 - `POST /api/pembelian/laporan-harga/:fakturId/dampak` — **[gate grup: owner/admin ATAU `tim` di Central Kitchen — TANPA penyempitan tambahan]**, **beli saja** (produksi → **400**) — req: `{ items: [{id:uuid, total_harga:number(≥0)}] (min1) }` — res: `DampakLaporanHarga` `{ food_cost_maks, bahan: [{ingredient_id, nama, satuan, acuan_lama, acuan_baru, jumlah_menu_terdampak}], menu_lewat_ambang: [{menu_id, nama, food_cost_lama, food_cost_baru}] }` — error: **400**, **404**. Pratinjau **tanpa menulis apa pun**: memakai fungsi hitung yang sama dengan endpoint di atas, jadi angkanya identik dengan hasil bila disimpan. POST (bukan GET) karena dampak bergantung pada angka yang sedang diketik user. `menu_lewat_ambang` hanya memuat menu aktif yang **menyeberang** ambang food cost (bukan yang sudah di atas ambang sejak awal).
 - `POST /api/{mod}` — req `TambahStokBody`: `{ branch_id?:uuid, ingredient_id:uuid, qty?:number(>0), batch:bool=false, total_harga?:number(≥0)|null, catatan? }` (refine: `batch` ATAU `qty` wajib) — res: **201** row production + `{ bahan }` — error: **400**, **404**
-- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran }` (tiap row memuat `harga_tebakan` (bool — `total_harga` masih tebakan, belum pernah dilihat manusia: estimasi RAB / belanja otomatis / hasil skala saat realisasi melebihi rencana; baris bertanda ini dikecualikan dari median harga acuan), `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang; juga `diterima_oleh` (nama penerima, dari `confirmed_by`) + `diterima_pada` (`confirmed_at`) — untuk barang beralamat cabang keduanya HANYA bisa terisi lewat tombol Terima di `/api/penerimaan`, jadi kosongnya berarti barang itu memang belum diterima siapa pun). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
+- `GET /api/{mod}` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?`, `page?` (default 1), `per_page?` (default 20, maks 200) — res: `{ rows, total, page, per_page, total_pengeluaran, ringkas }` (tiap row memuat `harga_tebakan` (bool — `total_harga` masih tebakan, belum pernah dilihat manusia: estimasi RAB / belanja otomatis / hasil skala saat realisasi melebihi rencana; baris bertanda ini dikecualikan dari median harga acuan), `rencana_id` + `permintaan_nomor` (PM-xxxx) bila faktur lahir dari permintaan Tambah Stok dari Menu; juga `exp_date` (tanggal kedaluwarsa lot — terisi saat baris masuk stok; NULL utk transfer stok/kirim-hasil karena lot asal tak diketahui) dan `masa_simpan_hari` master bahan; juga `produksi_di` + `divisi_produksi` bahan — dasar badge divisi Kitchen/Bar pada faktur produksi cabang; juga `diterima_oleh` (nama penerima, dari `confirmed_by`) + `diterima_pada` (`confirmed_at`) — untuk barang beralamat cabang keduanya HANYA bisa terisi lewat tombol Terima di `/api/penerimaan`, jadi kosongnya berarti barang itu memang belum diterima siapa pun). **Role `kitchen`/`bar`: daftar otomatis DISARING per divisi** — baris resep produksi-cabang milik divisi lain tidak dikembalikan (bar tak melihat pekerjaan kitchen dan sebaliknya; baris lain seperti kiriman/bahan CK tetap tampil). Owner/admin melihat semuanya.
+  - **`ringkas: RingkasPengadaan`** — `{ harus_dikerjakan, selesai, ditolak, belum_sampai }`, tiap satu `{ faktur: int, bahan: int }`. Dihitung SERVER atas populasi yang sama dengan `total` (perusahaan, cabang, tipe, rentang tanggal, saringan divisi), **bukan** atas `rows`. Sumber ubin ringkasan di atas tabel riwayat.
+    - Klasifikasinya per FAKTUR (dikelompokkan lebih dulu), sejajar dengan lencana nav yang juga menghitung faktur: **harus dikerjakan** = punya baris ber-status `rencana`/`dikerjakan`/`menunggu`; **selesai** = tak punya baris begitu dan bukan faktur yang seluruhnya `ditolak`; **ditolak** = seluruh barisnya `ditolak`. Ketiganya saling lepas, jadi `harus + selesai + ditolak == total`.
+    - **`belum_sampai`** = bagian dari `selesai` yang barangnya belum sampai: baris `menunggu` beralamat cabang (belum berangkat atau sedang di jalan), atau baris `dikonfirmasi` ber-`untuk_branch_id` (hasil produksi yang sudah masuk stok CK tapi belum di-`kirim-hasil`). Keduanya berbunyi "beres" di papan sementara barangnya tak bisa dipakai siapa pun.
+    - Kenapa server, bukan klien: daftarnya berhalaman 20 dan diurutkan "belum selesai dulu". Terukur 2026-09-03 — `/produksi` bertotal **61** faktur, halaman pertamanya memuat **20** faktur yang **kedua puluhnya** belum selesai. Ringkasan yang dijumlahkan dari `rows` karena itu akan selalu berbunyi "0 selesai" sampai halaman terakhir.
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
 - `DELETE /api/{mod}/faktur/:key` — soft delete → Tempat Sampah (tanpa password) — res: `{ ok, jumlah_baris }` — error: **404**
 
@@ -3765,6 +3769,31 @@ export interface SelisihKasRow {
  * berarti menarik seluruh baris beserta nominal kasnya ke SETIAP halaman —
  * dan angkanya tetap tercekik `BATAS_SELISIH`.
  */
+/** Satu pasang angka ringkasan: berapa FAKTUR, dan berapa BAHAN di dalamnya. */
+export interface PasanganHitung {
+  faktur: number;
+  bahan: number;
+}
+
+/**
+ * Ringkasan antrean pengadaan atas SELURUH populasi tersaring — bukan halaman
+ * yang sedang tampil.
+ *
+ * Kenapa itu ditekankan: daftarnya berhalaman 20 dan servernya mengurutkan
+ * faktur yang BELUM selesai lebih dulu. Terukur 2026-09-03 pada DB gerbang,
+ * `/produksi` dengan `total` 61: halaman pertama memuat 20 faktur dan
+ * KEDUA PULUHNYA belum selesai. Ringkasan yang dihitung dari halaman berjalan
+ * karena itu tak sekadar meleset — ia akan selalu berbunyi "0 selesai" sampai
+ * orangnya menelusuri ke halaman terakhir.
+ */
+export interface RingkasPengadaan {
+  harus_dikerjakan: PasanganHitung;
+  selesai: PasanganHitung;
+  ditolak: PasanganHitung;
+  /** Bagian dari `selesai` yang barangnya belum sampai — lihat `barisBelumSampai`. */
+  belum_sampai: PasanganHitung;
+}
+
 export interface RingkasSelisihDto {
   /**
    * Jumlah yang menunggu keputusan, HASIL SARINGAN PENUH — tidak dipotong

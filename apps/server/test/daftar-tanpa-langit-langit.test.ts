@@ -98,7 +98,23 @@ const AGREGAT = /\b(count|sum|avg)\s*\(/i;
  * langit-langit atas tabel yang tumbuh — beri `.limit()`, atau naikkan DASAR
  * dengan alasan di pesan commit.
  */
-const DASAR = 63;
+const DASAR = 64;
+/*
+ * 63 → 64 pada 2026-09-03, dan naiknya sadar.
+ *
+ * Situs barunya subkueri AGREGAT di `produksi/routes.ts` yang memberi makan
+ * medan `ringkas` (`GET /produksi` & `/pembelian`): ia mengelompokkan
+ * `productions` per faktur lalu MENGHITUNGNYA — tak satu baris pun sampai ke
+ * balasan, jadi bahaya yang dijaga ratchet ini (balasan membesar seumur warung
+ * buka) tak berlaku padanya.
+ *
+ * Pemindainya tak melihat itu karena medan pertama subkueri `bool_or(...)`,
+ * di luar pola `AGREGAT` yang hanya mengenal count/sum/avg. Polanya SENGAJA
+ * tak dilebarkan ke `bool_or|bool_and`: `penjualan/routes.ts:161` memakai
+ * `bool_and` di dalam subkueri skalar pada select yang MEMANG daftar baris,
+ * dan melebarkan polanya akan membungkam situs itu juga. Menaikkan DASAR
+ * dengan alasan tertulis lebih jujur daripada menumpulkan detektornya.
+ */
 
 export function situs(kode?: { nama: string; isi: string }[]): string[] {
   const berkas =

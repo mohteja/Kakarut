@@ -2150,6 +2150,31 @@ export interface SelisihKasRow {
  * berarti menarik seluruh baris beserta nominal kasnya ke SETIAP halaman —
  * dan angkanya tetap tercekik `BATAS_SELISIH`.
  */
+/** Satu pasang angka ringkasan: berapa FAKTUR, dan berapa BAHAN di dalamnya. */
+export interface PasanganHitung {
+  faktur: number;
+  bahan: number;
+}
+
+/**
+ * Ringkasan antrean pengadaan atas SELURUH populasi tersaring — bukan halaman
+ * yang sedang tampil.
+ *
+ * Kenapa itu ditekankan: daftarnya berhalaman 20 dan servernya mengurutkan
+ * faktur yang BELUM selesai lebih dulu. Terukur 2026-09-03 pada DB gerbang,
+ * `/produksi` dengan `total` 61: halaman pertama memuat 20 faktur dan
+ * KEDUA PULUHNYA belum selesai. Ringkasan yang dihitung dari halaman berjalan
+ * karena itu tak sekadar meleset — ia akan selalu berbunyi "0 selesai" sampai
+ * orangnya menelusuri ke halaman terakhir.
+ */
+export interface RingkasPengadaan {
+  harus_dikerjakan: PasanganHitung;
+  selesai: PasanganHitung;
+  ditolak: PasanganHitung;
+  /** Bagian dari `selesai` yang barangnya belum sampai — lihat `barisBelumSampai`. */
+  belum_sampai: PasanganHitung;
+}
+
 export interface RingkasSelisihDto {
   /**
    * Jumlah yang menunggu keputusan, HASIL SARINGAN PENUH — tidak dipotong

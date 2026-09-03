@@ -6,11 +6,10 @@ import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
 import { formatAngka, formatTanggal, hariIniWIB } from "../lib/format";
+import type { KonfirmasiStatus } from "@kakarut/shared";
+import { barisBelumSelesai } from "@kakarut/shared";
 
-/** Status faktur pengadaan yang BELUM selesai (belum masuk stok / belum dibatalkan). */
-const BELUM_SELESAI = new Set(["rencana", "dikerjakan", "menunggu"]);
-
-type ProdRow = { faktur_id: string; status: string };
+type ProdRow = { faktur_id: string; status: KonfirmasiStatus };
 type PenRow = { status: string };
 
 /**
@@ -101,7 +100,9 @@ export function TimBerandaPage() {
   const jumlahKritis = kritis.length;
   const jumlahDatang = (pen?.rows ?? []).filter((r) => r.status === "menunggu").length;
   const fakturBelum = (rows: ProdRow[] | undefined) =>
-    new Set((rows ?? []).filter((r) => BELUM_SELESAI.has(r.status)).map((r) => r.faktur_id)).size;
+    // Aturannya di `@kakarut/shared`; berkas ini dulu menyimpan salinan
+    // byte-per-byte dari `Layout.tsx`.
+    new Set((rows ?? []).filter((r) => barisBelumSelesai(r.status)).map((r) => r.faktur_id)).size;
   const produksiBelum = fakturBelum(prod?.rows);
   const beliBelum = fakturBelum(beli?.rows);
 

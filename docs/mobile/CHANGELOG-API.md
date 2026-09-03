@@ -25,6 +25,54 @@ tanpa akses repo server.
 
 ---
 
+## `GET /produksi` & `/pembelian` memulangkan `ringkas` — antrean pengadaan tanpa menghitung sendiri
+
+🟢 **BARU** — medan tambahan pada balasan yang sudah ada; `rows`, `total`,
+`page`, `per_page`, `total_pengeluaran` **tidak berubah** sedikit pun.
+
+**Kenapa ada.** Riwayat pengadaan di web berubah dari daftar kartu jadi TABEL,
+dengan ubin ringkasan "harus dikerjakan / sudah selesai" di atasnya. Angkanya
+tak boleh dihitung klien: daftar ini berhalaman 20 dan server mengurutkan
+faktur yang **belum selesai lebih dulu**. Terukur pada DB uji — `/produksi`
+bertotal **61 faktur**, halaman pertamanya memuat **20** faktur dan **kedua
+puluhnya** belum selesai. Ringkasan yang dijumlahkan dari `rows` karena itu tak
+sekadar meleset; ia akan selalu berbunyi "0 selesai" sampai halaman terakhir.
+
+```
+GET /api/produksi?branch_id=all&per_page=20&page=1   → 200
+{ ..., "total": 61,
+  "ringkas": {
+    "harus_dikerjakan": { "faktur": 36, "bahan": 73 },
+    "selesai":          { "faktur": 25, "bahan": 33 },
+    "ditolak":          { "faktur":  0, "bahan":  0 },
+    "belum_sampai":     { "faktur":  6, "bahan": 20 } } }
+```
+
+- Dihitung atas populasi **yang sama dengan `total`** (perusahaan, cabang,
+  tipe, rentang tanggal, saringan divisi) — bukan atas `rows`.
+- Klasifikasinya **per FAKTUR**, sejajar dengan lencana yang sudah ada:
+  *harus dikerjakan* = punya baris `rencana`/`dikerjakan`/`menunggu`;
+  *selesai* = tak punya baris begitu dan bukan faktur yang seluruhnya ditolak;
+  *ditolak* = seluruh barisnya ditolak. Ketiganya saling lepas:
+  `harus + selesai + ditolak == total`.
+- **`belum_sampai`** bagian dari `selesai` yang barangnya belum sampai — baris
+  `menunggu` beralamat cabang, atau `dikonfirmasi` ber-`untuk_branch_id` (hasil
+  produksi yang masuk stok CK tapi belum di-`kirim-hasil`). Keduanya berbunyi
+  "beres" sementara barangnya tak bisa dipakai siapa pun.
+
+**Untuk ponsel — tidak wajib.** Tapi bila layar pengadaan di ponsel kelak
+menampilkan angka antrean, medan ini yang benar untuk dipakai; menghitungnya
+dari halaman yang sedang dimuat akan salah dengan cara yang sama.
+
+**Catatan aturan bersama.** `TAHAP_BELUM_SELESAI` (`rencana`, `dikerjakan`,
+`menunggu`) kini tinggal di `@kakarut/shared` dan dipakai server maupun web.
+Perhatikan `menunggu`: label produksi untuk tahap itu berbunyi "✅ Selesai —
+masuk stok", tapi itu **aspirasi, bukan keadaan** — baris CK-lokal
+di-auto-konfirmasi dalam transaksi yang sama, jadi baris yang benar-benar duduk
+di `menunggu` hampir selalu work-order yang belum sampai ke cabang.
+
+---
+
 ## `GET /shift/selisih/ringkas` — jumlah antrean putusan tanpa menarik daftarnya
 
 🟢 **BARU** — endpoint tambahan; `GET /shift/selisih` **tidak berubah** sedikit

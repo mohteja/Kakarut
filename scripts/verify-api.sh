@@ -16905,6 +16905,55 @@ cek "§288 sesudah diputuskan: menunggu berkurang TEPAT satu" "V == 1" \
 cek "§288 shift itu tak lagi ada di daftar menunggu" "V == 0" \
   "$(api "$OWNER" GET "/shift/selisih?status=menunggu" | jq --arg i "$SID288" '[.[]|select(.id==$i)]|length')"
 
+echo
+echo "── §289 ringkasan pengadaan menghitung POPULASI, bukan halaman ──"
+# Riwayat pengadaan kini tabel, dengan ubin "harus dikerjakan / sudah selesai"
+# di atasnya. Angkanya WAJIB dari server: daftarnya berhalaman 20 dan server
+# mengurutkan faktur yang belum selesai lebih dulu, jadi ringkasan yang
+# dijumlahkan klien dari baris yang tampil akan berbunyi "0 selesai" di halaman
+# pertama mana pun. Terukur 2026-09-03: /produksi bertotal 61 faktur, halaman
+# pertamanya 20 faktur dan KEDUA PULUHNYA belum selesai.
+R289=$(api "$OWNER" GET "/produksi?branch_id=all&per_page=20&page=1")
+cek "§289 PREMIS: ada faktur produksi (kalau nol, seluruh seksi ini hampa)" "V == 1" \
+  "$(echo "$R289" | jq '(.total > 0)|if . then 1 else 0 end')"
+cek "§289 PREMIS: lebih dari satu halaman — halaman ≠ populasi" "V == 1" \
+  "$(echo "$R289" | jq '(.total > (.rows|length))|if . then 1 else 0 end')"
+cek "§289 harus + selesai + ditolak == total (produksi)" "V == 1" \
+  "$(echo "$R289" | jq '((.ringkas.harus_dikerjakan.faktur + .ringkas.selesai.faktur + .ringkas.ditolak.faktur) == .total)|if . then 1 else 0 end')"
+B289=$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=20&page=1")
+cek "§289 harus + selesai + ditolak == total (beli)" "V == 1" \
+  "$(echo "$B289" | jq '((.ringkas.harus_dikerjakan.faktur + .ringkas.selesai.faktur + .ringkas.ditolak.faktur) == .total)|if . then 1 else 0 end')"
+# Angka BAHAN dipulangkan berdampingan dengan angka faktur — satu faktur bisa
+# berisi beberapa bahan, jadi keduanya berbeda dan keduanya berguna.
+cek "§289 bahan >= faktur pada yang harus dikerjakan" "V == 1" \
+  "$(echo "$R289" | jq '(.ringkas.harus_dikerjakan.bahan >= .ringkas.harus_dikerjakan.faktur)|if . then 1 else 0 end')"
+# RINGKASAN TAK IKUT BERGANTI HALAMAN — inti seluruh seksi ini.
+R289P2=$(api "$OWNER" GET "/produksi?branch_id=all&per_page=20&page=2")
+cek "§289 halaman 2 memuat faktur yang BERBEDA (premis lengan berikutnya)" "V == 1" \
+  "$(jq -n --argjson a "$R289" --argjson b "$R289P2" '(([$a.rows[].faktur_id]|unique) != ([$b.rows[].faktur_id]|unique))|if . then 1 else 0 end')"
+cek "§289 ringkas IDENTIK di halaman 1 dan 2" "V == 1" \
+  "$(jq -n --argjson a "$R289" --argjson b "$R289P2" '($a.ringkas == $b.ringkas)|if . then 1 else 0 end')"
+# ANGKANYA BERGERAK saat pekerjaannya benar-benar dikerjakan. Faktur baru
+# CK-lokal (tanpa tujuan cabang) → `menunggu` meng-auto-konfirmasi, jadi ia
+# berpindah dari "harus dikerjakan" ke "selesai" dalam dua langkah.
+H289=$(echo "$R289" | jq '.ringkas.harus_dikerjakan.faktur')
+S289=$(echo "$R289" | jq '.ringkas.selesai.faktur')
+FK289=$(api "$OWNER" POST /produksi/faktur "{\"items\":[{\"ingredient_id\":\"$URATB_ID\",\"mode\":\"batch\",\"jumlah\":1}]}")
+FK289_ID=$(echo "$FK289" | jq -r .faktur_id)
+cek "§289 faktur baru → harus dikerjakan +1" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=all&per_page=20&page=1" | jq --argjson h "$H289" '(.ringkas.harus_dikerjakan.faktur == ($h + 1))|if . then 1 else 0 end')"
+api "$OWNER" POST "/produksi/tahap/$FK289_ID" '{"ke":"dikerjakan"}' > /dev/null
+cek "§289 masih 'harus dikerjakan' saat baru dikerjakan (belum selesai)" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=all&per_page=20&page=1" | jq --argjson h "$H289" '(.ringkas.harus_dikerjakan.faktur == ($h + 1))|if . then 1 else 0 end')"
+api "$OWNER" POST "/produksi/tahap/$FK289_ID" '{"ke":"menunggu"}' > /dev/null
+cek "§289 selesai → pindah ke 'sudah selesai' (+1), harus kembali semula" "V == 1" \
+  "$(api "$OWNER" GET "/produksi?branch_id=all&per_page=20&page=1" | jq --argjson h "$H289" --argjson x "$S289" '((.ringkas.harus_dikerjakan.faktur == $h) and (.ringkas.selesai.faktur == ($x + 1)))|if . then 1 else 0 end')"
+# Saringan rentang menyempitkan ringkasan DAN total bersama-sama — ringkasan
+# yang cakupannya diam-diam berbeda dari judulnya persis yang dijaga di sini.
+KOSONG289=$(api "$OWNER" GET "/produksi?branch_id=all&dari=1990-01-01&sampai=1990-01-02")
+cek "§289 rentang tanpa data → total 0 DAN ringkas nol semua" "V == 1" \
+  "$(echo "$KOSONG289" | jq '((.total == 0) and (.ringkas.harus_dikerjakan.faktur == 0) and (.ringkas.selesai.faktur == 0))|if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

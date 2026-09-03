@@ -1,13 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import type { JenisPengadaan, KonfirmasiStatus, StokRowDto } from "@kakarut/shared";
-import { angkaDari, teksAngka } from "@kakarut/shared";
+import type {
+  JenisPengadaan,
+  KonfirmasiStatus,
+  RingkasPengadaan,
+  StatusFaktur,
+  StokRowDto,
+} from "@kakarut/shared";
+import {
+  angkaDari,
+  belumSelesai,
+  statusFaktur,
+  teksAngka,
+  URUTAN_TAHAP,
+} from "@kakarut/shared";
 import {
   Card,
   ErrorText,
   Modal,
   PageTitle,
+  StatCard,
   Spinner,
   btnPrimary,
   btnSecondary,
@@ -18,6 +31,7 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
+import { TabelResponsif, type KolomTabel } from "../../components/TabelResponsif";
 import { ApiError, api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import { uuidV4 } from "../../lib/idempoten";
@@ -25,8 +39,21 @@ import { useKirimanMenggantung } from "../../lib/menggantung";
 
 interface StokMasukPage {
   rows: StokMasukRow[];
+  /** Jumlah FAKTUR atas seluruh populasi tersaring — bukan panjang `rows`. */
   total: number;
+  page: number;
+  per_page: number;
   total_pengeluaran: number;
+  /**
+   * Ringkasan antrean, dihitung SERVER atas populasi yang sama dengan `total`.
+   *
+   * Wajib dari server, dan itu terukur: daftarnya berhalaman 20 dan server
+   * mengurutkan faktur yang belum selesai lebih dulu, jadi halaman pertama
+   * `/produksi` (total 61 faktur) memuat 20 faktur yang KEDUA PULUHNYA belum
+   * selesai. Ringkasan yang dijumlahkan dari `rows` karena itu akan selalu
+   * berbunyi "0 selesai" sampai orangnya menelusuri ke halaman terakhir.
+   */
+  ringkas: RingkasPengadaan;
 }
 import { DokumenBelanjaModal } from "./DokumenBelanjaModal";
 import { DokumenKirimModal } from "./DokumenKirimModal";
@@ -43,6 +70,14 @@ export interface StokMasukRow {
   /** satuan beli/kemasan (mis. "dus"); 1 satuan_beli = isi satuan */
   satuan_beli?: string | null;
   qty: number;
+  /**
+   * Teks qty siap-pakai dari server (`qtyTeks`), sudah memperhitungkan satuan
+   * beli & isi. Server mengirimnya sejak lama (`docs/API-CONTRACT.md`), tapi
+   * tipe ini tak pernah mendeklarasikannya dan layarnya merakit ulang
+   * `formatAngka(qty) + satuan` sendiri — medan ini ada persis untuk mencegah
+   * itu. Opsional karena baris lama di cache bisa belum membawanya.
+   */
+  qty_teks?: string | null;
   /**
    * BERAPA KALI RESEP DIJALANKAN (`qty ÷ isi`) — null untuk bahan beli atau
    * bahan tanpa ukuran batch. `qty` menjawab "jadinya berapa"; ini menjawab
@@ -155,12 +190,14 @@ export interface FakturGroup {
 }
 
 /**
- * Status satu FAKTUR (bukan baris). Setelah "terima sebagian", satu faktur
- * bisa punya baris diterima + baris ditolak sekaligus → status "sebagian".
- * Setelah "maju sebagian": ada baris selesai + baris yang masih dikerjakan
- * → status "selesai_sebagian" (masih ada item yang belum).
+ * `StatusFaktur`, `statusFaktur`, `belumSelesai` dan `URUTAN_TAHAP` kini
+ * berumah di `@kakarut/shared` (`pengadaan.ts`) — server memakainya juga untuk
+ * agregat `ringkas`, dan aturan yang menentukan angka di layar tak boleh punya
+ * dua salinan. Diekspor ulang di sini supaya enam berkas yang sudah mengimpor
+ * dari halaman ini tak perlu disentuh.
  */
-export type StatusFaktur = KonfirmasiStatus | "sebagian" | "selesai_sebagian";
+export type { StatusFaktur };
+export { belumSelesai, statusFaktur, URUTAN_TAHAP };
 
 const BADGE_SEBAGIAN = { label: "📦 Diterima sebagian", cls: "bg-green-100 text-green-800" };
 const BADGE_SELESAI_SEBAGIAN = {
@@ -168,50 +205,11 @@ const BADGE_SELESAI_SEBAGIAN = {
   cls: "bg-lime-100 text-lime-800",
 };
 
-/** Urutan pipeline — dipakai aturan "tahap hanya bisa maju" & pilihan dropdown. */
-export const URUTAN_TAHAP: Record<KonfirmasiStatus, number> = {
-  rencana: 0,
-  dikerjakan: 1,
-  menunggu: 2,
-  dikonfirmasi: 3,
-  ditolak: 3,
-};
-
-/**
- * Status faktur diturunkan dari status baris-barisnya. Setelah "maju sebagian"
- * baris-baris bisa berbeda tahap → tampilkan tahap PALING AWAL yang belum
- * selesai (di situlah sisa tugas berada).
- */
-export function statusFaktur(rows: { status: KonfirmasiStatus }[]): StatusFaktur {
-  const set = new Set(rows.map((r) => r.status));
-  if (set.size === 1) return rows[0].status;
-  // ada item yang sudah selesai (dikirim/diterima) TAPI masih ada yang belum
-  // → "selesai sebagian"
-  const adaBelum = set.has("rencana") || set.has("dikerjakan");
-  const adaSelesai = set.has("menunggu") || set.has("dikonfirmasi");
-  if (adaBelum && adaSelesai) return "selesai_sebagian";
-  for (const s of ["rencana", "dikerjakan", "menunggu"] as const) {
-    if (set.has(s)) return s;
-  }
-  // campuran baris selesai: ada yang diterima & ditolak
-  return "sebagian";
-}
-
 /** Badge faktur (peduli "sebagian"), pilih peta sesuai jalur. */
 export function badgeFaktur(tipe: JenisPengadaan, status: StatusFaktur) {
   if (status === "sebagian") return BADGE_SEBAGIAN;
   if (status === "selesai_sebagian") return BADGE_SELESAI_SEBAGIAN;
   return (tipe === "produksi" ? STATUS_PRODUKSI : STATUS_BELI)[status];
-}
-
-/** Faktur yang belum selesai (masih dalam pipeline) belum menambah saldo stok. */
-export function belumSelesai(status: StatusFaktur) {
-  return (
-    status === "rencana" ||
-    status === "dikerjakan" ||
-    status === "menunggu" ||
-    status === "selesai_sebagian"
-  );
 }
 
 /** Badge tahap pipeline produksi. Produksi tak ber-RAB (bahan sudah dibeli di
@@ -281,6 +279,412 @@ const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: 
  * tombol tambah → faktur multi-item → simpan (menunggu) → "Konfirmasi Ada"
  * → stok terhitung.
  */
+
+/**
+ * SINYAL SATU FAKTUR — sepuluh turunan yang dulu dihitung di dalam `grup.map`.
+ *
+ * Diekstrak saat riwayatnya jadi tabel (2026-09-03), dan bukan demi kerapian:
+ * tabel desktop, kartu HP (`TabelResponsif` merender keduanya dari kolom yang
+ * sama), dan modal detail harus membaca sinyal yang SAMA. Sepuluh `const` yang
+ * tertanam di dalam `.map` tak bisa dipakai bertiga, dan tak bisa diuji sama
+ * sekali.
+ *
+ * Isinya dipindah apa adanya — termasuk urutan penimpaan badge, yang berarti:
+ * `menggantung` menang atas semuanya, sebab faktur berbunyi "Dikirim" yang
+ * barangnya tak pernah sampai adalah satu-satunya keadaan di sini yang bisa
+ * merugikan diam-diam berminggu-minggu.
+ */
+export interface SinyalFaktur {
+  /** baris faktur ini berbeda tahap (hasil "maju sebagian") */
+  campuran: boolean;
+  /** berapa baris yang masih menuntut pekerjaan */
+  sisaTugas: number;
+  siapKirim: boolean;
+  siapKirimHasil: boolean;
+  adaTerkirim: boolean;
+  bisaLapor: boolean;
+  laporanSelesai: boolean;
+  /** faktur berbunyi "Dikirim" tapi kirimannya tak pernah muncul di Penerimaan */
+  menggantung: boolean;
+  badge: { label: string; cls: string };
+  tujuanBadge: { label: string; cls: string } | null;
+  pelaksanaHeader: string | null;
+  opsiTahap: { ke: TahapTujuan; label: string }[];
+}
+
+export function sinyalFaktur(
+  g: FakturGroup,
+  tipe: JenisPengadaan,
+  opsi: { dariKantor: boolean; fakturBermasalah: Set<string> },
+): SinyalFaktur {
+  const { dariKantor, fakturBermasalah } = opsi;
+  // faktur campuran tahap (hasil "maju sebagian") → tampilkan pill
+  // tahap per baris + jumlah sisa tugas
+  const campuran = new Set(g.rows.map((r) => r.status)).size > 1;
+  const sisaTugas = g.rows.filter((r) => belumSelesai(r.status)).length;
+  const tahapTerawal = Math.min(...g.rows.map((r) => URUTAN_TAHAP[r.status]));
+  const adaTujuan = g.rows.some((r) => r.tujuan_branch_id != null);
+  // Work-order CK: konfirmasi lewat Penerimaan cabang (bukan di CK) →
+  // buang opsi "Konfirmasi Ada" dari dropdown; pakai tombol Kirim.
+  const isWorkOrderFaktur = tipe === "produksi" && adaTujuan;
+  const opsiTahap = AKSI_TAHAP[tipe]
+    .filter(
+      (a) => URUTAN_TAHAP[a.ke] > tahapTerawal && !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
+    )
+    // belanja bertujuan cabang: "menunggu" = barang tiba/kumpul di CK
+    .map((a) =>
+      tipe === "beli" && adaTujuan && a.ke === "menunggu"
+        ? { ...a, label: "📦 Tiba di CK (semua barang di CK)" }
+        : a,
+    );
+  // Barang bertujuan cabang yang SIAP DIKIRIM dari CK: produksi
+  // selesai / belanja tiba di CK — tombol Kirim + dokumen kirim.
+  const siapKirim =
+    g.fakturId != null &&
+    g.rows.some(
+      (r) =>
+        r.status === "menunggu" &&
+        r.tujuan_branch_id != null &&
+        r.branch_id !== r.tujuan_branch_id,
+    );
+  // HASIL PRODUKSI dari permintaan yang sudah masuk stok CK & belum
+  // dikirim ke cabang peminta -> pengingat + tombol Kirim hasil
+  const siapKirimHasil =
+    tipe === "produksi" &&
+    g.fakturId != null &&
+    g.rows.some((r) => r.status === "dikonfirmasi" && r.untuk_cabang);
+  // barang DALAM PERJALANAN (sudah dikirim, menunggu diterima cabang)
+  const adaTerkirim = g.rows.some(
+    (r) =>
+      r.status === "menunggu" &&
+      r.tujuan_branch_id != null &&
+      r.branch_id === r.tujuan_branch_id,
+  );
+  // LAPORAN HARGA (jalur beli): tersedia begitu ada baris yang
+  // tiba/diterima. Faktur SELESAI = sudah diterima penuh & semua
+  // barisnya berharga final (Laporan Harga dibuat).
+  const bisaLapor =
+    tipe === "beli" &&
+    g.fakturId != null &&
+    g.rows.some((r) => r.status === "menunggu" || r.status === "dikonfirmasi");
+  const barisAktif = g.rows.filter((r) => r.status !== "ditolak");
+  const laporanSelesai =
+    tipe === "beli" &&
+    g.status === "dikonfirmasi" &&
+    barisAktif.length > 0 &&
+    barisAktif.every((r) => r.laporan_harga_at);
+  // badge lebih jujur utk belanja yang barangnya kumpul di CK, dan utk
+  // KIRIMAN (transfer stok) yang tahapnya soal pengiriman, bukan produksi
+  const badgeDasar = g.kiriman
+    ? g.status === "dikonfirmasi"
+      ? { label: "✅ Diterima cabang", cls: "bg-green-100 text-green-800" }
+      : g.status === "menunggu" && siapKirim
+        ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
+        : g.status === "menunggu"
+          ? { label: "🚚 Dalam pengiriman", cls: "bg-blue-100 text-blue-800" }
+          : badgeFaktur(tipe, g.status)
+    : tipe === "beli" && g.status === "menunggu" && siapKirim
+      ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
+      : badgeFaktur(tipe, g.status);
+  // KIRIMAN MENGGANTUNG: faktur ini berbunyi "Dikirim" tapi barangnya
+  // tak pernah bisa diterima siapa pun, jadi stok cabang tak pernah
+  // bertambah. Status normal ("Dikirim") justru MENYESATKAN di sini —
+  // orang menganggapnya beres dan baru sadar saat stok tak cocok
+  // berminggu-minggu kemudian. Karena itu ia MENIMPA badge lain.
+  const menggantung = g.fakturId != null && fakturBermasalah.has(g.fakturId);
+  const badge = menggantung
+    ? { label: "⚠️ Tidak sampai — stok tidak masuk", cls: "bg-red-100 text-red-800" }
+    : badgeDasar;
+  // pelaksana/vendor utk header — SEMBUNYIKAN bila namanya sama dgn
+  // pembuat faktur (sudah tampil di kolom Orang) agar tak muncul dobel.
+  // Kiriman menampilkan asal stok, bukan orang.
+  const pelaksanaNama = g.kiriman
+    ? null
+    : (g.dikerjakanOleh ?? g.supplier ?? (tipe === "produksi" ? "Produksi sendiri" : null));
+  const pelaksanaHeader = g.kiriman
+    ? `🚚 Dari stok ${g.cabang ?? "CK"}`
+    : pelaksanaNama && pelaksanaNama !== g.dibuatOleh
+      ? `🔧 ${pelaksanaNama}`
+      : null;
+  // TUJUAN pembelian/produksi: cabang tujuan (ungu 📦), untuk-cabang
+  // permintaan (ungu 🎯), atau lokasi pembukuan/CK saat dari Kantor (teal 🏢).
+  const tujuanBadge = g.tujuanCabang
+    ? { label: `📦 ${g.tujuanCabang}`, cls: "bg-purple-100 text-purple-800" }
+    : g.untukCabang
+      ? { label: `🎯 untuk ${g.untukCabang}`, cls: "bg-purple-100 text-purple-800" }
+      : dariKantor && g.cabang
+        ? { label: `🏢 ${g.cabang}`, cls: "bg-teal-100 text-teal-800" }
+        : null;
+  return {
+    campuran,
+    sisaTugas,
+    siapKirim,
+    siapKirimHasil,
+    adaTerkirim,
+    bisaLapor,
+    laporanSelesai,
+    menggantung,
+    badge,
+    tujuanBadge,
+    pelaksanaHeader,
+    opsiTahap,
+  };
+}
+
+/** Yang dibutuhkan sel-sel kolom di luar barisnya sendiri. */
+export interface OpsiKolomPengadaan {
+  dariKantor: boolean;
+  fakturBermasalah: Set<string>;
+  kirimSedang: boolean;
+  kirimHasilSedang: boolean;
+  onUbahTahap: (g: FakturGroup, ke: TahapTujuan) => void;
+  onKirim: (g: FakturGroup) => void;
+  onKirimHasil: (g: FakturGroup) => void;
+}
+
+/**
+ * Kolom riwayat pengadaan — dibangun fungsi tersendiri, meniru
+ * `kolomDaftarResep()`, supaya urutannya bisa DIPAKU penjaga dan tak ikut
+ * membengkakkan komponen halamannya.
+ *
+ * Peka `tipe`: kolom Divisi hanya untuk produksi (Kitchen/Bar), kolom Nilai
+ * hanya untuk beli (produksi sengaja tak menampilkan uang — bahannya sudah
+ * dibeli di Beli Bahan Baku).
+ */
+export function kolomPengadaan(
+  tipe: JenisPengadaan,
+  opsi: OpsiKolomPengadaan,
+): KolomTabel<FakturGroup>[] {
+  const sinyal = (g: FakturGroup) =>
+    sinyalFaktur(g, tipe, {
+      dariKantor: opsi.dariKantor,
+      fakturBermasalah: opsi.fakturBermasalah,
+    });
+  return [
+    {
+      judul: "Dokumen",
+      hp: "judul",
+      kelasJudul: "w-52",
+      sel: (g) => (
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          <span className="font-bold text-stone-800">
+            {g.kiriman ? "🚚" : tipe === "produksi" ? "🏭" : "🛒"}
+          </span>
+          {g.nomor && (
+            <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
+              {g.nomor}
+            </span>
+          )}
+          <span
+            className={`rounded-md px-1.5 py-0.5 text-xs font-semibold ${
+              g.dariPermintaan ? "bg-indigo-100 text-indigo-800" : "bg-stone-100 text-stone-600"
+            }`}
+          >
+            {g.dariPermintaan ? `📋 ${g.permintaanNomor ?? "Permintaan"}` : "✍️ Langsung"}
+          </span>
+          {g.noFaktur && (
+            <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">
+              {g.noFaktur}
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      // Judulnya sengaja "Dibuat", bukan "Tanggal": saringan rentang di atas
+      // bekerja pada `prod_date`, sementara yang tampil di sini `waktu`.
+      // Kolom bernama "Tanggal" akan menjanjikan keduanya sama.
+      judul: "Dibuat",
+      kelasJudul: "w-32",
+      sel: (g) => (
+        <span className="whitespace-nowrap text-stone-600">
+          {formatTanggalRingkas(g.waktu)}
+          <span className="text-stone-400"> · {formatWaktu(g.waktu)}</span>
+        </span>
+      ),
+    },
+    {
+      judul: "Bahan",
+      sel: (g) => {
+        const s = sinyal(g);
+        const utama = g.rows[0];
+        return (
+          <div className="min-w-0">
+            <div className="truncate font-semibold text-stone-800">{utama.bahan}</div>
+            <div className="text-xs text-stone-500">
+              {/* `qty_teks` datang dari server dan sudah memperhitungkan
+                  satuan beli/isi — dirakit ulang di klien selama ini. */}
+              {utama.qty_teks ?? `${formatAngka(utama.qty)} ${utama.satuan}`}
+              {g.rows.length > 1 && <> · +{g.rows.length - 1} bahan lainnya</>}
+              {s.campuran && s.sisaTugas > 0 && (
+                <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
+                  📌 sisa tugas: {s.sisaTugas}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      judul: "Tahap",
+      kelasJudul: "w-56",
+      hp: "sub",
+      sel: (g) => {
+        const s = sinyal(g);
+        return (
+          <div className="space-y-1">
+            <span
+              className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${s.badge.cls}`}
+            >
+              {s.badge.label}
+            </span>
+            {/* Peringatan kiriman menggantung tetap KALIMAT, bukan sekadar
+                warna baris: warna saja tak bisa dibaca oleh siapa pun yang tak
+                tahu artinya, dan yang perlu diketahui adalah APA yang harus
+                dilakukan. */}
+            {s.menggantung && (
+              <div className="text-xs text-red-800">
+                <b>Barang tidak sampai ke cabang.</b> Bereskan di menu{" "}
+                <b>Penerimaan Barang</b>.
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      judul: "Lokasi",
+      kelasJudul: "w-44",
+      sel: (g) => {
+        const s = sinyal(g);
+        return (
+          <div className="space-y-0.5">
+            {s.tujuanBadge && (
+              <span
+                className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${s.tujuanBadge.cls}`}
+              >
+                {s.tujuanBadge.label}
+              </span>
+            )}
+            {s.pelaksanaHeader && (
+              <div className="text-xs text-stone-500">{s.pelaksanaHeader}</div>
+            )}
+          </div>
+        );
+      },
+    },
+    ...(tipe === "produksi"
+      ? ([
+          {
+            judul: "Divisi",
+            kelasJudul: "w-24",
+            sel: (g) =>
+              g.kiriman || g.divisi.length === 0 ? (
+                <span className="text-stone-300">—</span>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {g.divisi.map((d) => (
+                    <span
+                      key={d}
+                      className={`rounded-md px-1.5 py-0.5 text-xs font-bold ${
+                        d === "bar" ? "bg-cyan-100 text-cyan-800" : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {d === "bar" ? "🍹 Bar" : "🍳 Kitchen"}
+                    </span>
+                  ))}
+                </div>
+              ),
+          },
+        ] as KolomTabel<FakturGroup>[])
+      : ([
+          {
+            judul: "Nilai",
+            kanan: true,
+            kelasJudul: "w-36",
+            sel: (g) => (
+              <div>
+                <div className="font-bold text-stone-800">{formatRupiah(g.totalHarga)}</div>
+                {g.danaCair > 0 && (
+                  <div className="text-xs text-emerald-700">
+                    💸 cair {formatRupiah(g.danaCair)}
+                  </div>
+                )}
+              </div>
+            ),
+          },
+        ] as KolomTabel<FakturGroup>[])),
+    {
+      judul: "Orang",
+      kelasJudul: "w-48",
+      sel: (g) => (
+        <div className="text-xs">
+          {g.dibuatOleh && <div className="text-stone-500">dibuat oleh {g.dibuatOleh}</div>}
+          {/* jejak penerimaan: barang beralamat cabang hanya bisa sah lewat
+              tombol Terima, jadi nama ini juga buktinya */}
+          {g.diterimaOleh && (
+            <div className="text-emerald-700">
+              📥 {g.diterimaOleh}
+              {g.diterimaPada ? ` · ${formatWaktu(g.diterimaPada)}` : ""}
+            </div>
+          )}
+          {!g.dibuatOleh && !g.diterimaOleh && <span className="text-stone-300">—</span>}
+        </div>
+      ),
+    },
+    {
+      judul: "Aksi",
+      hp: "aksi",
+      kelasJudul: "w-56",
+      kelasSel: "whitespace-nowrap text-right",
+      sel: (g) => {
+        const s = sinyal(g);
+        return (
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            {s.siapKirim && (
+              <button
+                onClick={() => opsi.onKirim(g)}
+                disabled={opsi.kirimSedang}
+                className="whitespace-nowrap rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-500 disabled:opacity-60"
+              >
+                🚚 Kirim
+              </button>
+            )}
+            {s.siapKirimHasil && (
+              <button
+                onClick={() => opsi.onKirimHasil(g)}
+                disabled={opsi.kirimHasilSedang}
+                className="whitespace-nowrap rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-purple-500 disabled:opacity-60"
+              >
+                🚚 Kirim hasil
+              </button>
+            )}
+            {g.fakturId && belumSelesai(g.status) && s.opsiTahap.length > 0 && (
+              <select
+                value=""
+                onChange={(e) => {
+                  const ke = e.target.value as TahapTujuan | "";
+                  if (ke) opsi.onUbahTahap(g, ke);
+                }}
+                aria-label="Ubah tahap faktur"
+                className="cursor-pointer rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-orange-500"
+              >
+                <option value="">➡ Ubah Tahap</option>
+                {s.opsiTahap.map((a) => (
+                  <option key={a.ke} value={a.ke}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+}
+
 export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
   const { auth } = useAuth();
@@ -363,6 +767,10 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   });
   const log = data?.rows;
   const total = data?.total ?? 0;
+  // Saringan yang aktif DISEBUT di label ubinnya: ringkasan yang diam-diam ikut
+  // menyempit saat rentang tanggal terisi akan terbaca sebagai keadaan seluruh
+  // dapur. Aturan yang sama sudah dipegang kartu ringkasan halaman Stok.
+  const labelRentang = dari || sampai ? " (rentang)" : "";
   const totalPages = Math.max(1, Math.ceil(total / perPage));
 
   function gantiFilter(fn: () => void) {
@@ -651,6 +1059,54 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         )}
       </Card>
 
+      {/*
+        RINGKASAN — angkanya dari SERVER (`data.ringkas`), bukan dijumlahkan
+        dari `grup`. Terukur 2026-09-03: `/produksi` bertotal 61 faktur, dan
+        halaman pertamanya memuat 20 faktur yang KEDUA PULUHNYA belum selesai
+        (server memang mengurutkan yang belum selesai lebih dulu). Ringkasan
+        dari baris yang tampil karena itu akan selalu berbunyi "0 selesai".
+
+        TIDAK dirender saat bacaannya gagal: "0 harus dikerjakan" jauh lebih
+        percaya diri daripada tabel kosong di bawahnya, dan salah. Aturan yang
+        sama sudah dipegang kartu ringkasan halaman Stok.
+      */}
+      {!daftarGagal && data?.ringkas && total > 0 && (
+        <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard
+            besar
+            label={`Harus dikerjakan${labelRentang}`}
+            value={`${formatAngka(data.ringkas.harus_dikerjakan.faktur)} faktur`}
+            sub={`${formatAngka(data.ringkas.harus_dikerjakan.bahan)} bahan`}
+            warna="text-orange-600"
+          />
+          <StatCard
+            besar
+            label={`Sudah selesai${labelRentang}`}
+            value={`${formatAngka(data.ringkas.selesai.faktur)} faktur`}
+            sub={`${formatAngka(data.ringkas.selesai.bahan)} bahan`}
+            warna="text-green-700"
+          />
+          {data.ringkas.belum_sampai.faktur > 0 && (
+            <StatCard
+              besar
+              label="Selesai tapi belum sampai"
+              value={`${formatAngka(data.ringkas.belum_sampai.faktur)} faktur`}
+              sub="sudah jadi/diterima di CK, barangnya belum sampai ke cabang"
+              warna="text-purple-700"
+            />
+          )}
+          {data.ringkas.ditolak.faktur > 0 && (
+            <StatCard
+              besar
+              label="Ditolak"
+              value={`${formatAngka(data.ringkas.ditolak.faktur)} faktur`}
+              sub={`${formatAngka(data.ringkas.ditolak.bahan)} bahan`}
+              warna="text-red-600"
+            />
+          )}
+        </div>
+      )}
+
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-stone-700">
           Riwayat {tipe === "produksi" ? "Produksi" : "Pembelian"}{" "}
@@ -673,384 +1129,59 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
 
       {isLoading ? (
         <Spinner />
-      ) : grup.length === 0 ? (
-        <Card className="p-8 text-center text-sm text-stone-400">
-          {dari || sampai
-            ? `Tidak ada ${jenisKata} pada rentang tanggal ini.`
-            : `Belum ada ${jenisKata}.`}
-        </Card>
       ) : (
-        <div className="space-y-3">
-          {grup.map((g) => {
-            // faktur campuran tahap (hasil "maju sebagian") → tampilkan pill
-            // tahap per baris + jumlah sisa tugas
-            const campuran = new Set(g.rows.map((r) => r.status)).size > 1;
-            const sisaTugas = g.rows.filter((r) => belumSelesai(r.status)).length;
-            const tahapTerawal = Math.min(...g.rows.map((r) => URUTAN_TAHAP[r.status]));
-            const adaTujuan = g.rows.some((r) => r.tujuan_branch_id != null);
-            // Work-order CK: konfirmasi lewat Penerimaan cabang (bukan di CK) →
-            // buang opsi "Konfirmasi Ada" dari dropdown; pakai tombol Kirim.
-            const isWorkOrderFaktur = tipe === "produksi" && adaTujuan;
-            const opsiTahap = AKSI_TAHAP[tipe]
-              .filter(
-                (a) =>
-                  URUTAN_TAHAP[a.ke] > tahapTerawal &&
-                  !(isWorkOrderFaktur && a.ke === "dikonfirmasi"),
-              )
-              // belanja bertujuan cabang: "menunggu" = barang tiba/kumpul di CK
-              .map((a) =>
-                tipe === "beli" && adaTujuan && a.ke === "menunggu"
-                  ? { ...a, label: "📦 Tiba di CK (semua barang di CK)" }
-                  : a,
-              );
-            // Barang bertujuan cabang yang SIAP DIKIRIM dari CK: produksi
-            // selesai / belanja tiba di CK — tombol Kirim + dokumen kirim.
-            const siapKirim =
-              g.fakturId != null &&
-              g.rows.some(
-                (r) =>
-                  r.status === "menunggu" &&
-                  r.tujuan_branch_id != null &&
-                  r.branch_id !== r.tujuan_branch_id,
-              );
-            // HASIL PRODUKSI dari permintaan yang sudah masuk stok CK & belum
-            // dikirim ke cabang peminta -> pengingat + tombol Kirim hasil
-            const siapKirimHasil =
-              tipe === "produksi" &&
-              g.fakturId != null &&
-              g.rows.some((r) => r.status === "dikonfirmasi" && r.untuk_cabang);
-            // barang DALAM PERJALANAN (sudah dikirim, menunggu diterima cabang)
-            const adaTerkirim = g.rows.some(
-              (r) =>
-                r.status === "menunggu" &&
-                r.tujuan_branch_id != null &&
-                r.branch_id === r.tujuan_branch_id,
-            );
-            // LAPORAN HARGA (jalur beli): tersedia begitu ada baris yang
-            // tiba/diterima. Faktur SELESAI = sudah diterima penuh & semua
-            // barisnya berharga final (Laporan Harga dibuat).
-            const bisaLapor =
-              tipe === "beli" &&
-              g.fakturId != null &&
-              g.rows.some((r) => r.status === "menunggu" || r.status === "dikonfirmasi");
-            const barisAktif = g.rows.filter((r) => r.status !== "ditolak");
-            const laporanSelesai =
-              tipe === "beli" &&
-              g.status === "dikonfirmasi" &&
-              barisAktif.length > 0 &&
-              barisAktif.every((r) => r.laporan_harga_at);
-            // badge lebih jujur utk belanja yang barangnya kumpul di CK, dan utk
-            // KIRIMAN (transfer stok) yang tahapnya soal pengiriman, bukan produksi
-            const badge = g.kiriman
-              ? g.status === "dikonfirmasi"
-                ? { label: "✅ Diterima cabang", cls: "bg-green-100 text-green-800" }
-                : g.status === "menunggu" && siapKirim
-                  ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
-                  : g.status === "menunggu"
-                    ? { label: "🚚 Dalam pengiriman", cls: "bg-blue-100 text-blue-800" }
-                    : badgeFaktur(tipe, g.status)
-              : tipe === "beli" && g.status === "menunggu" && siapKirim
-                ? { label: "📦 Di CK — siap kirim ke cabang", cls: "bg-purple-100 text-purple-800" }
-                : badgeFaktur(tipe, g.status);
-            // KIRIMAN MENGGANTUNG: faktur ini berbunyi "Dikirim" tapi barangnya
-            // tak pernah bisa diterima siapa pun, jadi stok cabang tak pernah
-            // bertambah. Status normal ("Dikirim") justru MENYESATKAN di sini —
-            // orang menganggapnya beres dan baru sadar saat stok tak cocok
-            // berminggu-minggu kemudian. Karena itu ia MENIMPA badge lain.
-            const menggantung = g.fakturId != null && fakturBermasalah.has(g.fakturId);
-            // faktur beli yang laporan harganya sudah lengkap → "Selesai"
-            const badgeTampil = menggantung
-              ? { label: "⚠️ Tidak sampai — stok tidak masuk", cls: "bg-red-100 text-red-800" }
-              : laporanSelesai
-                ? { label: "✅ Selesai", cls: "bg-emerald-100 text-emerald-800" }
-                : badge;
-            // kartu ringkas ala transaksi marketplace: tampilkan 1 barang
-            // pertama + jumlah bahan lainnya; rincian lengkap via klik kartu
-            const utama = g.rows[0];
-            // pelaksana/vendor utk header — SEMBUNYIKAN bila namanya sama dgn
-            // pembuat faktur (sudah tampil di footer "dibuat oleh") agar tak
-            // muncul dobel. Kiriman menampilkan asal stok, bukan orang.
-            const pelaksanaNama = g.kiriman
-              ? null
-              : g.dikerjakanOleh ?? g.supplier ?? (tipe === "produksi" ? "Produksi sendiri" : null);
-            const pelaksanaHeader = g.kiriman
-              ? `🚚 Dari stok ${g.cabang ?? "CK"}`
-              : pelaksanaNama && pelaksanaNama !== g.dibuatOleh
-                ? `🔧 ${pelaksanaNama}`
-                : null;
-            // TUJUAN pembelian/produksi → badge di kanan, DI BAWAH badge tahap:
-            // cabang tujuan (ungu 📦), untuk-cabang permintaan (ungu 🎯), atau
-            // lokasi pembukuan/CK saat dari Kantor (teal 🏢).
-            const tujuanBadge = g.tujuanCabang
-              ? { label: `📦 ${g.tujuanCabang}`, cls: "bg-purple-100 text-purple-800" }
-              : g.untukCabang
-                ? { label: `🎯 untuk ${g.untukCabang}`, cls: "bg-purple-100 text-purple-800" }
-                : dariKantor && g.cabang
-                  ? { label: `🏢 ${g.cabang}`, cls: "bg-teal-100 text-teal-800" }
-                  : null;
-            return (
-            <Card
-              key={g.key}
-              onClick={() => setDetail(g)}
-              className={`cursor-pointer overflow-hidden transition hover:border-orange-300 hover:shadow-sm ${belumSelesai(g.status) ? "border-yellow-300" : ""}`}
-            >
-              {/* Header ala transaksi marketplace: jenis + tanggal di kiri,
-                  STATUS di pojok kanan atas kotak. */}
-              <div className="flex items-start justify-between gap-2 border-b border-stone-100 px-3 py-2.5 sm:px-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <span className="font-bold text-stone-800">
-                      {g.kiriman ? "🚚 Kiriman" : tipe === "produksi" ? "🏭 Produksi" : "🛒 Pembelian"}
-                    </span>
-                    {/* divisi pelaksana produksi cabang — owner langsung tahu
-                        kartu ini pekerjaan Kitchen atau Bar */}
-                    {tipe === "produksi" &&
-                      !g.kiriman &&
-                      g.divisi.map((d) => (
-                        <span
-                          key={d}
-                          className={`rounded-md px-1.5 py-0.5 text-xs font-bold ${
-                            d === "bar"
-                              ? "bg-cyan-100 text-cyan-800"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
-                        >
-                          {d === "bar" ? "🍹 Bar" : "🍳 Kitchen"}
-                        </span>
-                      ))}
-                    {/* nomor dokumen otomatis — identitas utama faktur */}
-                    {g.nomor && (
-                      <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
-                        {g.nomor}
-                      </span>
-                    )}
-                    {/* asal faktur: nomor permintaan (PM-xxxx) vs input langsung */}
-                    <span
-                      className={`rounded-md px-1.5 py-0.5 text-xs font-semibold ${
-                        g.dariPermintaan
-                          ? "bg-indigo-100 text-indigo-800"
-                          : "bg-stone-100 text-stone-600"
-                      }`}
-                    >
-                      {g.dariPermintaan
-                        ? `\ud83d\udccb ${g.permintaanNomor ?? "Permintaan"}`
-                        : "\u270d\ufe0f Langsung"}
-                    </span>
-                    <span className="text-sm text-stone-500">
-                      {formatTanggalRingkas(g.waktu)} · {formatWaktu(g.waktu)}
-                    </span>
-                    {g.noFaktur && (
-                      <span className="rounded bg-stone-100 px-1.5 py-0.5 font-mono text-xs">
-                        {g.noFaktur}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone-500">
-                    {/* pelaksana/vendor — hanya bila menambah info (beda dari
-                        pembuat di footer); kiriman menampilkan asal stok */}
-                    {pelaksanaHeader && (
-                      <span className="font-medium text-stone-600">{pelaksanaHeader}</span>
-                    )}
-                    {g.danaCair > 0 && (
-                      <span
-                        className="whitespace-nowrap font-semibold text-emerald-700"
-                        title="Total dana yang sudah cair untuk faktur ini"
-                      >
-                        💸 cair {formatRupiah(g.danaCair)}
-                      </span>
-                    )}
-                    {/* catatan manual saja — ringkasan "Rencana dari menu: …"
-                        digantikan badge nomor permintaan di header */}
-                    {g.catatan && !g.dariPermintaan && <span>· {g.catatan}</span>}
-                  </div>
-                </div>
-                {/* pojok kanan atas: badge tahap, lalu badge TUJUAN di bawahnya */}
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span
-                    className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${badgeTampil.cls}`}
-                  >
-                    {badgeTampil.label}
-                  </span>
-                  {tujuanBadge && (
-                    <span
-                      className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${tujuanBadge.cls}`}
-                    >
-                      {tujuanBadge.label}
-                    </span>
-                  )}
-                </div>
-              </div>
+        <>
+          {/*
+            KARTU → TABEL (2026-09-03, atas permintaan pemilik repo). Yang
+            berubah susunannya, bukan kemampuannya: sepuluh sinyal turunan tiap
+            faktur kini datang dari `sinyalFaktur`, dan `TabelResponsif` sendiri
+            yang menumpuknya kembali jadi kartu di layar kecil.
 
-              {/* Barang faktur ini tak pernah sampai. Badge saja tidak cukup:
-                  orang perlu tahu APA yang harus dilakukan, dan tempatnya bukan
-                  di sini melainkan di layar Penerimaan. */}
-              {menggantung && (
-                <div className="border-b border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800 sm:px-4">
-                  <b>Barang tidak sampai ke cabang.</b> Faktur ini tercatat
-                  &ldquo;Dikirim&rdquo;, tapi kirimannya tak pernah muncul di layar Penerimaan
-                  sehingga <b>stok cabang tidak bertambah</b>. Bereskan di menu{" "}
-                  <b>Penerimaan Barang</b>.
-                </div>
-              )}
-
-              {/* Isi ringkas: cukup 1 barang + jumlah bahan lainnya — rincian
-                  lengkap tetap tersedia dgn mengetuk kartu */}
-              <div className="flex items-center justify-between gap-3 border-b border-stone-100 px-3 py-2.5 sm:px-4">
-                <div className="min-w-0">
-                  <div className="truncate font-semibold text-stone-800">{utama.bahan}</div>
-                  <div className="text-xs text-stone-500">
-                    {formatAngka(utama.qty)} {utama.satuan}
-                    {g.rows.length > 1 && <> · +{g.rows.length - 1} bahan lainnya</>}
-                    {campuran && sisaTugas > 0 && (
-                      <span className="ml-1.5 whitespace-nowrap rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
-                        📌 sisa tugas: {sisaTugas}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span className="shrink-0 text-xs text-stone-400">detail ›</span>
-              </div>
-
-              {/* Footer: total transaksi di kiri, tombol aksi BESAR di kanan
-                  (di bawah status) */}
-              <div className="flex flex-wrap items-end justify-between gap-3 px-3 py-2.5 sm:px-4">
-                <div>
-                  {/* Produksi tak menampilkan biaya/RAB (bahan sudah dibeli di
-                      Beli Bahan Baku) — cukup jumlah bahan yang diproduksi. */}
-                  {tipe === "beli" ? (
-                    <>
-                      <div className="text-xs text-stone-500">
-                        Total transaksi{g.rows.length > 1 ? ` (${g.rows.length} bahan)` : ""}:
-                      </div>
-                      <div className="text-lg font-bold text-stone-800">
-                        {formatRupiah(g.totalHarga)}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-lg font-bold text-stone-800">
-                      {g.rows.length} bahan diproduksi
-                    </div>
-                  )}
-                  {/* pembuat faktur cukup di footer — header tetap ringkas */}
-                  {g.dibuatOleh && (
-                    <div className="text-xs text-stone-400">dibuat oleh {g.dibuatOleh}</div>
-                  )}
-                  {/* jejak penerimaan: barang beralamat cabang hanya bisa sah
-                      lewat tombol Terima, jadi nama ini juga buktinya */}
-                  {g.diterimaOleh && (
-                    <div className="text-xs text-emerald-700">
-                      📥 diterima oleh {g.diterimaOleh}
-                      {g.diterimaPada ? ` · ${formatWaktu(g.diterimaPada)}` : ""}
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Dokumen belanja/RAB: tersedia di SEMUA tahap (kecuali
-                      baris yang semuanya ditolak) — sejak RAB agar finance bisa
-                      meninjau anggaran, jadi pegangan pembelanja saat diproses,
-                      lalu arsip setelah masuk stok. Bisa dicetak & diunduh. */}
-                  {tipe === "beli" && g.rows.some((r) => r.status !== "ditolak") && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDokumen(g.key);
-                      }}
-                      className="whitespace-nowrap rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm font-semibold text-stone-700 hover:border-orange-400 hover:text-orange-700"
-                    >
-                      📄{" "}
-                      {g.rows.every((r) => r.status === "rencana" || r.status === "ditolak")
-                        ? "Dokumen RAB"
-                        : "Dokumen belanja"}
-                    </button>
-                  )}
-                  {/* LAPORAN HARGA: catat harga riil setelah barang diterima →
-                      faktur jadi "Selesai". Tombol utama pd faktur beli yang
-                      sudah tiba/diterima. */}
-                  {bisaLapor && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setLaporHarga(g.key);
-                      }}
-                      className={`whitespace-nowrap rounded-lg border px-3 py-2.5 text-sm font-semibold ${
-                        laporanSelesai
-                          ? "border-stone-300 bg-white text-stone-600 hover:border-emerald-400 hover:text-emerald-700"
-                          : "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                      }`}
-                    >
-                      💰 {laporanSelesai ? "Ubah Laporan Harga" : "Laporan Harga"}
-                    </button>
-                  )}
-                  {/* dokumen kirim (surat jalan) barang dalam perjalanan */}
-                  {adaTerkirim && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDokumenKirim(g.key);
-                      }}
-                      className="whitespace-nowrap rounded-lg border border-purple-300 bg-white px-3 py-2.5 text-sm font-semibold text-purple-700 hover:border-purple-500"
-                    >
-                      📄 Dokumen kirim
-                    </button>
-                  )}
-                  {siapKirim && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Kirim ke ${g.tujuanCabang ?? "cabang tujuan"}? Barang akan menunggu diterima cabang.`))
-                          kirim.mutate(g.fakturId!);
-                      }}
-                      disabled={kirim.isPending}
-                      className="whitespace-nowrap rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
-                    >
-                      🚚 Kirim ke cabang
-                    </button>
-                  )}
-                  {/* hasil produksi dari permintaan: sudah di stok CK — kirim
-                      ke cabang peminta (buat faktur kiriman transfer) */}
-                  {siapKirimHasil && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setModalKirimHasil(g);
-                      }}
-                      disabled={kirimHasil.isPending}
-                      className="whitespace-nowrap rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-purple-500 disabled:opacity-60"
-                    >
-                      🚚 Kirim hasil ke {g.untukCabang}
-                    </button>
-                  )}
-                  {g.fakturId && belumSelesai(g.status) && opsiTahap.length > 0 && (
-                    <select
-                      value=""
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        const ke = e.target.value as TahapTujuan | "";
-                        if (ke) bukaUbahTahap(g, ke);
-                      }}
-                      aria-label="Ubah tahap faktur"
-                      className="cursor-pointer rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-orange-500"
-                    >
-                      <option value="">➡ Ubah Tahap</option>
-                      {opsiTahap.map((a) => (
-                        <option key={a.ke} value={a.ke}>
-                          {a.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              </div>
-            </Card>
-            );
-          })}
+            `galat` diteruskan, bukan dibiarkan jatuh jadi daftar kosong —
+            "GAGAL MEMUAT ≠ TIDAK ADA" dipegang komponennya, dan sapuan
+            `gagal-muat-bukan-kosong` menuntutnya.
+          */}
+          <TabelResponsif
+            data={grup}
+            kunci={(g) => g.key}
+            galat={daftarGagal}
+            minLebar="min-w-[72rem]"
+            onKlikBaris={(g) => setDetail(g)}
+            kelasBaris={(g) =>
+              g.fakturId && fakturBermasalah.has(g.fakturId)
+                ? "bg-red-50 hover:bg-red-100"
+                : belumSelesai(g.status)
+                  ? "bg-amber-50/50 hover:bg-amber-100/50"
+                  : "hover:bg-stone-50"
+            }
+            kosong={
+              dari || sampai
+                ? `Tidak ada ${jenisKata} pada rentang tanggal ini.`
+                : `Belum ada ${jenisKata}.`
+            }
+            kolom={kolomPengadaan(tipe, {
+              dariKantor,
+              fakturBermasalah,
+              kirimSedang: kirim.isPending,
+              kirimHasilSedang: kirimHasil.isPending,
+              onUbahTahap: bukaUbahTahap,
+              onKirim: (g) => {
+                if (
+                  confirm(
+                    `Kirim ke ${g.tujuanCabang ?? "cabang tujuan"}? Barang akan menunggu diterima cabang.`,
+                  )
+                )
+                  kirim.mutate(g.fakturId!);
+              },
+              onKirimHasil: (g) => setModalKirimHasil(g),
+            })}
+          />
           {adaBelumKonfirmasi && (
-            <div className="text-xs text-stone-400">
+            <div className="mt-2 text-xs text-stone-400">
               Faktur yang belum selesai belum menambah saldo stok.
             </div>
           )}
-        </div>
+        </>
       )}
 
       {/* Pagination + aturan baris di BAWAH daftar */}
@@ -1127,6 +1258,23 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             setDetail(null);
             bukaUbahTahap(g, ke);
           }}
+          {...(() => {
+            // Ketiga aksi ini pindah dari baris ke sini. Kelayakannya dinilai
+            // `sinyalFaktur` yang SAMA dengan yang dipakai tabelnya — dua
+            // penilaian terpisah akan menampilkan tombol yang berbeda untuk
+            // faktur yang sama.
+            const s = sinyalFaktur(detail, tipe, { dariKantor, fakturBermasalah });
+            return {
+              onDokumen:
+                tipe === "beli" && detail.rows.some((r) => r.status !== "ditolak")
+                  ? () => setDokumen(detail.key)
+                  : undefined,
+              onLaporanHarga: s.bisaLapor
+                ? { buka: () => setLaporHarga(detail.key), sudahSelesai: s.laporanSelesai }
+                : undefined,
+              onDokumenKirim: s.adaTerkirim ? () => setDokumenKirim(detail.key) : undefined,
+            };
+          })()}
         />
       )}
       {dokumen &&

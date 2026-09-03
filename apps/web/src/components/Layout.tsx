@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import type { RingkasSelisihDto } from "@kakarut/shared";
+import type { KonfirmasiStatus, RingkasSelisihDto } from "@kakarut/shared";
+import { barisBelumSelesai } from "@kakarut/shared";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -137,19 +138,26 @@ export function Layout() {
   const qsPengadaan = `${scopePengadaan}${scopePengadaan ? "&" : "?"}per_page=500`;
   const { data: prodNav, error: prodGagal } = useQuery({
     queryKey: ["produksi-nav", scopePengadaan],
-    queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/produksi${qsPengadaan}`),
+    queryFn: () => api<{ rows: { faktur_id: string; status: KonfirmasiStatus }[] }>(`/produksi${qsPengadaan}`),
     enabled: lihatPengadaan,
     refetchInterval: 60_000,
   });
   const { data: beliNav, error: beliGagal } = useQuery({
     queryKey: ["pembelian-nav", scopePengadaan],
-    queryFn: () => api<{ rows: { faktur_id: string; status: string }[] }>(`/pembelian${qsPengadaan}`),
+    queryFn: () => api<{ rows: { faktur_id: string; status: KonfirmasiStatus }[] }>(`/pembelian${qsPengadaan}`),
     enabled: lihatBeli,
     refetchInterval: 60_000,
   });
-  const BELUM_SELESAI = new Set(["rencana", "dikerjakan", "menunggu"]);
-  const hitungBelum = (rows?: { faktur_id: string; status: string }[]) =>
-    new Set((rows ?? []).filter((r) => BELUM_SELESAI.has(r.status)).map((r) => r.faktur_id)).size;
+  /*
+    Aturannya di `@kakarut/shared` (`barisBelumSelesai`), bukan di sini. Sampai
+    2026-09-03 himpunan ini ditulis TIGA kali — di berkas ini, di
+    `TimBerandaPage.tsx` byte-per-byte sama, dan di `TambahStokPage`. Bentuk
+    `new Set(...).size` DIPERTAHANKAN: ia menghitung FAKTUR, bukan baris, dan
+    sapuan `kueri-web.ts` mengenali pembantu satu-lompatan yang berakhir
+    `.size` — mengubahnya jadi bentuk lain membutakan penjaga itu.
+  */
+  const hitungBelum = (rows?: { faktur_id: string; status: KonfirmasiStatus }[]) =>
+    new Set((rows ?? []).filter((r) => barisBelumSelesai(r.status)).map((r) => r.faktur_id)).size;
   const produksiBelum = hitungBelum(prodNav?.rows);
   const beliBelum = hitungBelum(beliNav?.rows);
   // Faktur BELI PERLENGKAPAN yang masih aktif (menunggu dibeli / diproses) →

@@ -50,6 +50,122 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Riwayat pengadaan jadi TABEL, dan ringkasannya menghitung populasi — bukan halaman — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo meminta dua hal atas halaman Produksi
+  Bahan Baku — *"riwayat produksi ini ingin di ubah menjadi tabel"* dan *"buat
+  summarynya di atas produksi yang harus di kerjakan dan sudah selesai"*.
+
+- **Pengukuran yang menentukan seluruh bentuk pekerjaannya**, diambil sebelum
+  satu baris pun ditulis:
+
+  | | |
+  |---|---|
+  | `GET /produksi` `total` (faktur) | **61** |
+  | faktur di halaman 1 (`per_page` bawaan 20) | **20** |
+  | di antaranya BELUM selesai | **20 — kedua puluhnya** |
+
+  Server memang mengurutkan faktur yang belum selesai lebih dulu
+  (`routes.ts:2648`). Jadi ringkasan yang dijumlahkan klien dari baris yang
+  tampil tak sekadar meleset: ia akan **selalu** berbunyi "0 selesai" sampai
+  orangnya menelusuri ke halaman terakhir. Itu yang membuat putaran ini
+  menyentuh server, dan alasannya ditulis lebih dulu supaya tak terlihat
+  sebagai pelebaran ruang lingkup.
+
+- **Angka sesudahnya, diukur lewat HTTP dan disilangkan dengan SQL tangan**:
+
+  | | produksi | beli |
+  |---|---|---|
+  | total | 61 | 103 |
+  | harus dikerjakan | **36** faktur / 73 bahan | **44** / 55 |
+  | sudah selesai | **25** / 33 | **58** / 71 |
+  | ditolak | 0 / 0 | **1** / 3 |
+  | selesai tapi BELUM SAMPAI | **6** / 20 | 5 / 5 |
+  | `harus + selesai + ditolak == total` | ✔ 61 | ✔ 103 |
+
+  Jalur beli **cocok persis** dengan hitungan `GROUP BY` tangan atas basis data
+  (44 / 58 / 1 dan 55 / 71 / 3); jalur produksi berbeda dari hitungan tangan
+  hanya karena rutenya memang mengecualikan faktur transfer (`TF-`) dan
+  mengurung per perusahaan.
+
+- **Aturan "belum selesai" sudah ditulis TIGA kali sebelum putaran ini** —
+  `Layout.tsx:150` (lencana nav), `TimBerandaPage.tsx:11` (salinan
+  byte-per-byte), dan `TambahStokPage.belumSelesai()`. Ringkasan baru akan jadi
+  salinan keempat. Kanonisnya pindah ke `@kakarut/shared/pengadaan.ts`, kedua
+  salinan lain dibuang, dan servernya memakai himpunan yang sama.
+
+- **KOREKSI atas dugaan awal saya, dan ia mengubah angkanya.** Saya sempat
+  menyimpulkan "selesai" butuh dua rumus, sebab label produksi untuk tahap
+  `menunggu` berbunyi *"✅ Selesai — masuk stok"* sementara label beli untuk
+  tahap yang sama berbunyi *"🚚 Dikirim"*. Label produksi itu **aspirasi, bukan
+  keadaan**: `POST /tahap` meng-auto-konfirmasi baris CK-lokal di dalam
+  transaksi yang sama (`routes.ts:1276-1297`), jadi baris yang benar-benar
+  DUDUK di `menunggu` hampir selalu work-order beralamat yang belum sampai.
+  Servernya sendiri sudah memakai satu predikat untuk kedua jalur. Satu aturan,
+  bukan dua — dan uji murni memakukannya supaya tak "diperbaiki" balik oleh
+  siapa pun yang membaca labelnya saja.
+
+- **Ubin keempat yang tak diminta, dan yang paling berharga**: *"selesai tapi
+  belum sampai"* — **6 faktur / 20 bahan** pada jalur produksi. Tiga keadaan
+  bersembunyi di balik status "selesai" yang tak akan disebut selesai oleh
+  pemiliknya: hasil `untuk_cabang` yang sudah masuk stok CK tapi belum
+  di-`kirim-hasil`, barang yang sudah dikirim tapi belum diterima cabang, dan
+  kiriman menggantung. Semuanya stok yang tak bisa dipakai siapa pun sementara
+  papan menyatakan pekerjaannya beres. Predikatnya disalin dari
+  `stok/service.ts` (`qtyDiJalan`), bukan dikarang.
+
+- **Populasi kartu → kolom.** Kartu lama merender **28 hal** (dihitung satu per
+  satu dari sumbernya). Yang jadi kolom: dokumen+asal faktur, waktu, bahan+qty
+  +sisa tugas, tahap+peringatan, lokasi/tujuan+pelaksana, divisi (produksi) /
+  nilai+dana cair (beli), dibuat/diterima oleh, aksi. Yang **pindah ke modal
+  detail** beserta rumah barunya: Dokumen RAB/belanja, Laporan Harga, Dokumen
+  kirim — tombol yang dibuang dari baris tanpa tempat lain adalah kemampuan
+  yang hilang diam-diam. Yang **tetap di baris**: Ubah Tahap dan Kirim —
+  kiriman yang menunggu di CK adalah stok yang tak bisa dipakai siapa pun, dan
+  dua klik untuk itu terlalu mahal.
+
+- **Sepuluh sinyal turunan diekstrak lebih dulu**, sebelum satu kolom pun
+  ditulis: `sinyalFaktur()`. Tabel desktop, kartu HP (`TabelResponsif` merender
+  keduanya dari kolom yang sama), dan modal detail kini membaca sinyal yang
+  SAMA — sepuluh `const` yang tertanam di dalam `.map` tak bisa dipakai bertiga
+  maupun diuji. Modal detail memakainya juga untuk menilai kelayakan ketiga
+  tombol yang pindah; dua penilaian terpisah akan menampilkan tombol berbeda
+  untuk faktur yang sama.
+
+- **`qty_teks` yang selama ini diabaikan**: server mengirimnya (dan
+  `docs/API-CONTRACT.md` mencantumkannya), tapi `StokMasukRow` tak pernah
+  mendeklarasikannya dan layarnya merakit ulang `formatAngka(qty) + satuan`
+  sendiri — medan itu ada persis untuk mencegah itu. Kolom Bahan kini
+  memakainya.
+
+- **Detektor DIBUKTIKAN bisa menuduh — EMPAT kali, dipulihkan byte-per-byte**:
+  `menunggu` dipindah ke sisi selesai → uji murni merah · satu kolom diganti
+  namanya → penjaga urutan merah · `galat` dicabut dari tabel → penjaga merah ·
+  **PERAMBAN**: ubin dialihkan menghitung `grup`, dibangun ulang, server
+  dinyalakan ulang → spek "ubin tak berubah saat pindah halaman" merah karena
+  angkanya berbeda dari agregat server.
+
+- **Gerbangnya sendiri menemukan LIMA hal**, dan tiap satunya penjaga yang
+  bekerja: (1) lima ekspresi `sql<number>` di subkueri baru tak bercast — tiba
+  sebagai string saat dijalankan; (2) ratchet `daftar-tanpa-langit-langit`
+  63 → 64, dinaikkan **beralasan** dan pemindainya SENGAJA tak ditumpulkan
+  (melebarkan polanya ke `bool_or|bool_and` akan membungkam
+  `penjualan/routes.ts:161` yang memang daftar baris); (3) registri
+  `kueri-terkurung-tenant` 4 → 5 situs beralasan; (4) fikstur kontrak ponsel
+  basi; (5) `jangkar-iris` menolak jangkar `indexOf` uji baru saya karena
+  jalurnya dirakit template dan tak bisa ia telusuri — jalurnya ditulis literal.
+
+- **Batas yang jujur**: `StokMasukPage`/`StokMasukRow` masih dideklarasikan
+  LOKAL di halamannya, bukan di `packages/shared`. Hanya `RingkasPengadaan` +
+  `PasanganHitung` yang dipindah (medan barunya), sebab memindahkan seluruh
+  DTO baris berarti ~40 kunci kontrak baru sekaligus — putaran tersendiri, masuk
+  antrean. Dan e2e-nya menyentuh jalur owner saja; peran kitchen/bar yang juga
+  membuka `/produksi` belum punya spek.
+
+- **Gerbang**: typecheck · `npm test` 232 berkas / **2.806** uji (+1 berkas,
+  +18 uji) · build · `verify-api.sh` **3.477 lolos, 0 gagal** (dari 3.466,
+  §289 +11 lengan) · `audit:invarian` 27/27 · Playwright **28 spek** (dari 25).
+
 ## Antrean putusan selisih kas: 26 menunggu, yang tertua 12 hari, dan nol tanda di luar halamannya sendiri — web + server — 2026-09-03
 
 - **Kenapa vena ini ada**: pemilik repo membuka Operasional Cabang, melihat
@@ -9926,6 +10042,12 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
+- [ ] **`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman** — dideklarasikan
+      di `TambahStokPage.tsx`, bukan `packages/shared`, sehingga Lampiran A &
+      fikstur ponsel tak pernah melihatnya dan medan yang server kirim bisa
+      hilang dari tipenya diam-diam (`qty_teks` sudah membuktikannya: dikirim
+      sejak lama, tak pernah dideklarasikan, dirakit ulang di klien). ~40 kunci
+      kontrak sekaligus — putaran tersendiri
 - [ ] **`rekapWindow` ditembakkan sekali PER BARIS** — `GET /shift/selisih`
       (dan kini `/selisih/ringkas`) memanggilnya untuk tiap shift kandidat, dan
       ia sendiri 2+ kueri. Terukur 2026-09-03: ~30 ms pada 39 kandidat, tumbuh

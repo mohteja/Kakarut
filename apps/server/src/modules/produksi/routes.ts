@@ -33,6 +33,7 @@ import {
   type DampakMenu,
   type AuthUser,
   type JenisPengadaan,
+  type RingkasPengadaan,
 } from "@kakarut/shared";
 import { acuanDariLot } from "../../lib/harga-stats";
 import { wajibKelipatanKemasan } from "../../lib/kemasan";
@@ -2628,13 +2629,68 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
 
       const keyExpr = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
 
-      const [ringkas] = await db
+      /*
+       * RINGKASAN ANTREAN — dihitung SERVER, atas populasi yang sama dengan
+       * `total`, dan itu bukan kemewahan.
+       *
+       * Daftarnya berhalaman 20 dan diurutkan "belum selesai dulu". Terukur
+       * 2026-09-03 pada DB gerbang: `/produksi` bertotal 61 faktur, halaman
+       * pertamanya memuat 20 faktur dan KEDUA PULUHNYA belum selesai. Ringkasan
+       * yang dijumlahkan klien dari baris yang sedang tampil karena itu tak
+       * sekadar meleset — ia akan selalu berbunyi "0 selesai" sampai orangnya
+       * menelusuri ke halaman terakhir.
+       *
+       * Diklasifikasi per FAKTUR (dikelompokkan lebih dulu), bukan per baris:
+       * satu faktur bisa punya baris beda tahap sesudah "maju sebagian", dan
+       * lencana nav di sebelahnya juga menghitung faktur
+       * (`new Set(...).map(faktur_id).size`). Aturan mana yang "belum selesai"
+       * datang dari `@kakarut/shared` — satu rumah, dipakai server dan web.
+       *
+       * `total` ikut pindah ke kueri ini (`COUNT(*)` atas kelompok, dulu
+       * `COUNT(DISTINCT key)`): nilainya sama, tapi kini mustahil ringkasannya
+       * bicara soal populasi yang berbeda dari judulnya.
+       */
+      const belumSelesaiSql = sql`${productions.status} IN ('rencana', 'dikerjakan', 'menunggu')`;
+      // "Selesai tapi belum sampai": berbunyi beres di papan sementara barangnya
+      // tak bisa dipakai siapa pun. Predikatnya disalin dari `stok/service.ts`
+      // (`qtyDiJalan`), bukan dikarang di sini.
+      const belumSampaiSql = sql`(
+        (${productions.status} = 'menunggu' AND ${productions.tujuanBranchId} IS NOT NULL)
+        OR (${productions.status} = 'dikonfirmasi' AND ${productions.untukBranchId} IS NOT NULL)
+      )`;
+      const perFaktur = db
         .select({
-          total: sql<number>`COUNT(DISTINCT ${keyExpr})::int`,
-          total_pengeluaran: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)::float8`,
+          ada_belum: sql<boolean>`bool_or(${belumSelesaiSql})`.as("ada_belum"),
+          semua_tolak: sql<boolean>`bool_and(${productions.status} = 'ditolak')`.as("semua_tolak"),
+          ada_belum_sampai: sql<boolean>`bool_or(${belumSampaiSql})`.as("ada_belum_sampai"),
+          n_belum: sql<number>`count(*) FILTER (WHERE ${belumSelesaiSql})::int`.as("n_belum"),
+          n_selesai: sql<number>`count(*) FILTER (WHERE ${productions.status} = 'dikonfirmasi')::int`.as("n_selesai"),
+          n_tolak: sql<number>`count(*) FILTER (WHERE ${productions.status} = 'ditolak')::int`.as("n_tolak"),
+          n_belum_sampai: sql<number>`count(*) FILTER (WHERE ${belumSampaiSql})::int`.as("n_belum_sampai"),
+          pengeluaran: sql<number>`COALESCE(SUM(${productions.totalHarga}) FILTER (WHERE ${productions.status} = 'dikonfirmasi'), 0)::float8`.as("pengeluaran"),
         })
         .from(productions)
-        .where(and(...conds));
+        .where(and(...conds))
+        .groupBy(keyExpr)
+        .as("per_faktur");
+
+      const [ringkas] = await db
+        .select({
+          total: sql<number>`COUNT(*)::int`,
+          total_pengeluaran: sql<number>`COALESCE(SUM(${perFaktur.pengeluaran}), 0)::float8`,
+          harus_faktur: sql<number>`COUNT(*) FILTER (WHERE ${perFaktur.ada_belum})::int`,
+          // "selesai" = TIDAK ada baris yang tersisa DAN bukan faktur yang
+          // seluruhnya ditolak. Bukan "punya baris dikonfirmasi" — faktur yang
+          // baru maju sebagian punya keduanya, dan akan terhitung dua kali.
+          selesai_faktur: sql<number>`COUNT(*) FILTER (WHERE NOT ${perFaktur.ada_belum} AND NOT ${perFaktur.semua_tolak})::int`,
+          ditolak_faktur: sql<number>`COUNT(*) FILTER (WHERE ${perFaktur.semua_tolak})::int`,
+          belum_sampai_faktur: sql<number>`COUNT(*) FILTER (WHERE ${perFaktur.ada_belum_sampai})::int`,
+          harus_bahan: sql<number>`COALESCE(SUM(${perFaktur.n_belum}), 0)::int`,
+          selesai_bahan: sql<number>`COALESCE(SUM(${perFaktur.n_selesai}), 0)::int`,
+          ditolak_bahan: sql<number>`COALESCE(SUM(${perFaktur.n_tolak}), 0)::int`,
+          belum_sampai_bahan: sql<number>`COALESCE(SUM(${perFaktur.n_belum_sampai}), 0)::int`,
+        })
+        .from(perFaktur);
       const total = ringkas?.total ?? 0;
 
       // faktur untuk halaman ini: yang belum selesai (ada baris yang masih di
@@ -2859,6 +2915,18 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         page,
         per_page: perPage,
         total_pengeluaran: Number(ringkas?.total_pengeluaran ?? 0),
+        ringkas: {
+          harus_dikerjakan: {
+            faktur: ringkas?.harus_faktur ?? 0,
+            bahan: ringkas?.harus_bahan ?? 0,
+          },
+          selesai: { faktur: ringkas?.selesai_faktur ?? 0, bahan: ringkas?.selesai_bahan ?? 0 },
+          ditolak: { faktur: ringkas?.ditolak_faktur ?? 0, bahan: ringkas?.ditolak_bahan ?? 0 },
+          belum_sampai: {
+            faktur: ringkas?.belum_sampai_faktur ?? 0,
+            bahan: ringkas?.belum_sampai_bahan ?? 0,
+          },
+        } satisfies RingkasPengadaan,
       });
     })
     /** Ubah metadata faktur (butuh password). Tak mengubah qty/harga → stok tetap. */
