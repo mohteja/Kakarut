@@ -17188,6 +17188,98 @@ cek "§292 tenant LAIN tak melihat rencana tenant ini" "V == 1" \
   "$(LAIN=$(api "$UJI260" GET "/rekomendasi/permintaan?per_page=200" 2>/dev/null);
      echo "$LAIN" | jq -e --arg r "$RID292" 'if type=="object" and has("rows") then ([.rows[].rencana_id]|index($r)|not) else true end' >/dev/null 2>&1 && echo 1 || echo 0)"
 
+echo
+echo "── §293 Garis waktu bahan: resep, harga sendiri, dan harga PENYUSUN ──"
+# Layar Resep menyodorkan "Rp 60.570 → Rp 50.350" tanpa apa pun yang
+# menerangkan dari mana angka kiri datang. Yang paling sering menggesernya
+# bukan orang yang membuka layar itu melainkan satu bahan penyusun yang
+# harganya berubah di tempat lain.
+#
+# YANG DIUJI DI SINI adalah tiga hal yang tak bergejala saat rusak:
+#   1. simpan yang TAK mengubah apa pun tidak menulis baris (riwayat yang
+#      penuh baris kosong sama tak bergunanya dengan riwayat yang bolong);
+#   2. perubahan harga satu bahan penyusun MENDARAT di garis waktu resepnya,
+#      dengan biaya per batch yang benar — dihitung tangan, bukan dari kode;
+#   3. pintu yang menggeser harga tanpa menyentuh resep (laporan harga nota)
+#      ikut mendarat di sana.
+BR293=$(api "$OWNER" POST /bahan '{"nama":"Tepung Jejak 293","harga_beli":10,"isi":1,"satuan":"gr","pengadaan":"beli","track_stok":true}' | jq -r .id)
+BP293=$(api "$OWNER" POST /bahan '{"nama":"Adonan Jejak 293","harga_beli":0,"isi":10,"satuan":"pcs","pengadaan":"produksi","track_stok":true}' | jq -r .id)
+cek "§293 PREMIS: kedua bahan uji lahir" "V == 1" \
+  "$([ -n "$BR293" ] && [ "$BR293" != "null" ] && [ -n "$BP293" ] && [ "$BP293" != "null" ] && echo 1 || echo 0)"
+
+jejak293() { api "$OWNER" GET "/bahan/$1/riwayat-resep"; }
+# jumlah baris berjenis $2 di garis waktu bahan $1
+n293() { jejak293 "$1" | jq --arg j "$2" '[.rows[]|select(.jenis==$j)]|length'; }
+
+cek "§293 bahan baru langsung punya baris 'buat' (dari mana harganya berasal)" "V == 1" \
+  "$(jejak293 "$BR293" | jq '([.rows[]|select(.jenis=="buat")]|length)==1|if . then 1 else 0 end')"
+cek "§293 balasannya berkunci rows/terpotong (bukan larik telanjang)" "V == 1" \
+  "$(jejak293 "$BR293" | jq '(has("rows") and has("terpotong"))|if . then 1 else 0 end')"
+
+# Resep pertama: 200 gr × Rp 10/gr = biaya batch Rp 2.000 (dihitung tangan).
+api "$OWNER" PUT "/bahan/$BP293/resep" "{\"komponen\":[{\"ingredient_id\":\"$BR293\",\"qty\":200}],\"atur\":{\"isi\":10,\"overhead_x\":1}}" > /dev/null
+cek "§293 resep pertama tercatat: biaya batch 0 → 2.000" "V == 1" \
+  "$(jejak293 "$BP293" | jq '[.rows[]|select(.jenis=="resep")][0]|(.biaya_lama==0 and .biaya_baru==2000)|if . then 1 else 0 end')"
+cek "§293 detailnya menyebut bahan yang ditambah" "V == 1" \
+  "$(jejak293 "$BP293" | jq '[.rows[]|select(.jenis=="resep")][0].detail|test("Tepung Jejak 293")|if . then 1 else 0 end')"
+
+# SIMPAN ULANG YANG IDENTIK — inti asersi ini. Layar Resep mengirim SELURUH
+# formulir tiap kali Simpan ditekan (ganti foto pun mengirim komponennya), jadi
+# tanpa penyaring "benar-benar bergerak" riwayat setahun berisi ratusan baris
+# yang tak menerangkan apa pun.
+RESEP293A=$(n293 "$BP293" resep)
+api "$OWNER" PUT "/bahan/$BP293/resep" "{\"komponen\":[{\"ingredient_id\":\"$BR293\",\"qty\":200}],\"atur\":{\"isi\":10,\"overhead_x\":1}}" > /dev/null
+cek "§293 simpan ULANG yang identik TIDAK menambah baris riwayat" "V == $RESEP293A" "$(n293 "$BP293" resep)"
+
+# Takaran 200 → 250 ⇒ biaya batch 2.000 → 2.500 (hitungan tangan).
+api "$OWNER" PUT "/bahan/$BP293/resep" "{\"komponen\":[{\"ingredient_id\":\"$BR293\",\"qty\":250}],\"atur\":{\"isi\":10,\"overhead_x\":1}}" > /dev/null
+cek "§293 takaran berubah → tepat SATU baris resep baru" "V == $((RESEP293A + 1))" "$(n293 "$BP293" resep)"
+cek "§293 biaya batch bergerak 2.000 → 2.500, dan detailnya menyebut takarannya" "V == 1" \
+  "$(jejak293 "$BP293" | jq '[.rows[]|select(.jenis=="resep")][0]|(.biaya_lama==2000 and .biaya_baru==2500 and (.detail|test("200 → 250")))|if . then 1 else 0 end')"
+
+# FAN-OUT — yang membedakan garis waktu ini dari sekadar log tulis. Harga
+# penyusun 10 → 12/gr; tak ada yang menyentuh resepnya, tapi biaya batch
+# bergerak 2.500 → 3.000 (250 × 12).
+api "$OWNER" POST "/bahan/$BR293/harga" '{"harga_per_unit":12}' > /dev/null
+cek "§293 harga penyusun berubah → mendarat di garis waktu RESEPNYA" "V == 1" \
+  "$(jejak293 "$BP293" | jq '.rows[0]|(.jenis=="harga_bahan" and .biaya_lama==2500 and .biaya_baru==3000)|if . then 1 else 0 end')"
+cek "§293 detailnya menyebut takaran per batch (kenapa +Rp 2 jadi +Rp 500)" "V == 1" \
+  "$(jejak293 "$BP293" | jq '.rows[0].detail|test("250 gr/batch")|if . then 1 else 0 end')"
+cek "§293 bahan penyusunnya sendiri juga dapat baris harga_sendiri" "V == 1" \
+  "$(jejak293 "$BR293" | jq '.rows[0]|(.jenis=="harga_sendiri" and .harga_lama==10 and .harga_baru==12)|if . then 1 else 0 end')"
+
+# Simpan bahan TANPA menggeser harga: penyaringnya harus diam.
+SEND293=$(n293 "$BR293" harga_sendiri)
+api "$OWNER" PUT "/bahan/$BR293" '{"nama":"Tepung Jejak 293","harga_beli":12}' > /dev/null
+cek "§293 simpan bahan tanpa perubahan harga TIDAK menambah baris" "V == $SEND293" "$(n293 "$BR293" harga_sendiri)"
+
+# LAPORAN HARGA NOTA — pintu yang menggeser HPP tanpa seorang pun merasa
+# mengubah harga. Satu lot dilaporkan 10 gr / Rp 150 ⇒ acuan = median = 15/gr
+# ⇒ biaya batch 250 × 15 = 3.750.
+F293=$(api "$OWNER" POST /pembelian/faktur "{\"items\":[{\"ingredient_id\":\"$BR293\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":120}]}" | jq -r .faktur_id)
+api "$OWNER" POST "/pembelian/tahap/$F293" '{"ke":"dikerjakan"}' > /dev/null
+api "$OWNER" POST "/pembelian/tahap/$F293" '{"ke":"menunggu"}' > /dev/null
+ROW293=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r --arg f "$F293" '[.rows[]|select(.faktur_id==$f)][0].id')
+api "$OWNER" POST "/pembelian/laporan-harga/$F293" "{\"items\":[{\"id\":\"$ROW293\",\"total_harga\":150}]}" > /dev/null
+cek "§293 laporan harga nota menggeser acuan ke 15/gr" "V == 15" \
+  "$(api "$OWNER" GET /bahan | jq --arg id "$BR293" '[.[]|select(.id==$id)][0].harga_beli|round')"
+cek "§293 …dan akibatnya mendarat di garis waktu resep, bersebab laporan_harga" "V == 1" \
+  "$(jejak293 "$BP293" | jq '.rows[0]|(.jenis=="harga_bahan" and .sebab=="laporan_harga" and .biaya_lama==3000 and .biaya_baru==3750)|if . then 1 else 0 end')"
+
+# URUTAN: terbaru dulu, tanpa pengecualian — dipakai panel web apa adanya.
+cek "§293 rows terurut menurun menurut created_at" "V == 1" \
+  "$(jejak293 "$BP293" | jq '[.rows[].created_at] as $t | ([range(1;($t|length))]|map(select($t[.] > $t[.-1]))|length)==0|if . then 1 else 0 end')"
+
+# HAK LIHAT: keputusan pemilik — owner/admin saja.
+# `$REISS105`, BUKAN `$KASIR`: §105 mengganti password kasir dan menaikkan
+# `token_version`, jadi `$KASIR` sudah mati sejak titik itu. Asersi ini akan
+# "lolos" dengan token mati — 401 juga bukan 200 — dan lolosnya tak menyatakan
+# apa pun tentang penjaga peran yang sedang diuji.
+cek "§293 kasir tak boleh membaca riwayat resep → bukan 200" "V == 1" \
+  "$([ "$(status_code "$REISS105" GET "/bahan/$BP293/riwayat-resep")" != "200" ] && echo 1 || echo 0)"
+cek "§293 tenant LAIN → bukan 200 (bahan itu bukan miliknya)" "V == 1" \
+  "$([ "$(status_code "$UJI260" GET "/bahan/$BP293/riwayat-resep")" != "200" ] && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

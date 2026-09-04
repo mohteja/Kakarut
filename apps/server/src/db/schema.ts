@@ -2646,3 +2646,60 @@ export const menuPriceLogs = pgTable(
     index("menu_price_logs_company_menu_idx").on(t.companyId, t.menuId, t.createdAt),
   ],
 );
+
+/**
+ * GARIS WAKTU SATU BAHAN — resepnya, dan harganya.
+ *
+ * Lahir dari pertanyaan yang tak bisa dijawab layar Resep: kotak persetujuan
+ * harga berbunyi "Rp 60.570 → Rp 50.350", dan tak ada satu pun tempat di
+ * Kakarut yang bisa menerangkan dari mana Rp 60.570 datang atau kapan biaya
+ * resepnya bergeser ke Rp 50.350. `ingredient_components` ditulis
+ * hapus-lalu-sisip tiap simpan (`bahan/routes.ts`), jadi resep kemarin lenyap
+ * tanpa bekas; dan `riwayatHargaBahan` yang sudah ada hanya membaca faktur
+ * BELI — untuk bahan produksi isinya selalu kosong.
+ *
+ * SATU TABEL, BUKAN DUA, dan `ingredient_id` selalu berarti hal yang sama:
+ * "garis waktu SIAPA baris ini". Itu yang membuat pembacaannya satu kueri
+ * tanpa join — termasuk untuk kejadian yang ASALNYA bahan lain. Saat harga
+ * TEPUNG bergerak, penulisnya menyebar satu baris `harga_bahan` ke tiap resep
+ * yang memakai tepung, dengan biaya per batch yang sudah dihitung ulang. Yang
+ * dibayar: satu baris per resep pemakai (terukur di basis gerbang: rata-rata
+ * 1,47 resep per bahan mentah, maksimum 4). Yang didapat: layar resep tak
+ * perlu menebak-nebak resep mana yang terdampak saat merender.
+ *
+ * `detail` berupa TEKS SIAP TAMPIL mengikuti `faktur_logs`, bukan keadaan
+ * mentah seperti `permintaan-stok.ts` — sebab isinya menyebut NAMA bahan pada
+ * saat kejadian. Menyimpan id lalu merangkai kalimatnya saat render membuat
+ * bahan yang kelak diubah namanya menulis ulang masa lalunya sendiri.
+ */
+export const ingredientLogs = pgTable(
+  "ingredient_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** pemilik garis waktu — BUKAN selalu bahan yang berubah (lihat `harga_bahan`) */
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    /** "buat" | "resep" | "harga_sendiri" | "harga_bahan" */
+    jenis: text("jenis").notNull(),
+    /** "buat" | "manual" | "impor" | "resep" | "laporan_harga" — dari pintu mana */
+    sebab: text("sebab").notNull(),
+    /** kalimat siap tampil, mis. "Tepung: Rp 12.000 → Rp 12.500 (200 gr/batch)" */
+    detail: text("detail").notNull(),
+    /** harga_beli TERSIMPAN bahan pemilik garis waktu; null = tak ikut berubah */
+    hargaLama: numeric("harga_lama", { precision: 14, scale: 2, mode: "number" }),
+    hargaBaru: numeric("harga_baru", { precision: 14, scale: 2, mode: "number" }),
+    /** biaya bahan per batch HASIL HITUNG resep; null bila bahan ini tak berresep */
+    biayaLama: numeric("biaya_lama", { precision: 14, scale: 2, mode: "number" }),
+    biayaBaru: numeric("biaya_baru", { precision: 14, scale: 2, mode: "number" }),
+    /** pelaku; null bila akunnya sudah dihapus atau perubahannya dari sistem */
+    olehUserId: uuid("oleh_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("ingredient_logs_company_bahan_idx").on(t.companyId, t.ingredientId, t.createdAt),
+  ],
+);

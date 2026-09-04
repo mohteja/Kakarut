@@ -104,6 +104,44 @@ describe("ketikan tak hilang tanpa ditanya", () => {
   });
 });
 
+describe("konfirmasi simpan HIDUP di mode yang benar", () => {
+  /*
+   * Regresi yang lahir dari keputusan "sesudah simpan, kembali terkunci" —
+   * dan lolos dari SELURUH gerbang putaran itu.
+   *
+   * Penanda "✓ Tersimpan" berdiri di dalam blok `sedangUbah`, berdampingan
+   * dengan tombol Simpan. Begitu simpan yang berhasil memanggil
+   * `setMode("lihat")`, `sedangUbah` menjadi false pada render yang SAMA
+   * dengan yang membuat penandanya layak tampil — jadi ia dilepas sebelum
+   * pernah sekali pun terlihat. Yang menyimpan resep karena itu tak mendapat
+   * konfirmasi apa pun: panelnya cuma terkunci, dan diamnya tak bisa
+   * dibedakan dari simpan yang gagal tanpa suara.
+   *
+   * Tak ada uji statis yang bisa menemukannya — keduanya benar dibaca
+   * terpisah. Yang menemukannya lengan peramban putaran riwayat resep.
+   * Penjaga di bawah menjaga BENTUK perbaikannya supaya ia tak berbalik.
+   */
+  it("penandanya berada di blok mode BACA, bukan di blok `sedangUbah`", () => {
+    const tanda = HAL.indexOf("✓ Tersimpan");
+    expect(tanda).toBeGreaterThan(0);
+    // Blok baca dikenali dari tombol Edit yang cuma ada di sana.
+    const bacaMulai = HAL.indexOf("✏️ Edit resep");
+    const ubahMulai = HAL.indexOf('onClick={() => simpan.mutate()}');
+    expect(bacaMulai).toBeGreaterThan(0);
+    expect(ubahMulai).toBeGreaterThan(bacaMulai);
+    expect(tanda, "penanda tersimpan kembali ke blok mode ubah").toBeLessThan(ubahMulai);
+  });
+
+  it("penandanya terikat resep yang BENAR-BENAR disimpan", () => {
+    // `simpan.isSuccess` telanjang bertahan sampai mutasi berikutnya, jadi
+    // tanda hijaunya akan menempel di panel resep LAIN yang diklik sesudahnya.
+    expect(HAL).toContain("terakhirSimpan === dipilih.id");
+    expect(HAL).toContain("setTerakhirSimpan(selectedId)");
+    // …dan padam saat mode ubah dibuka lagi.
+    expect(HAL).toMatch(/setTerakhirSimpan\(null\);\s*\n\s*setMode\("ubah"\)/);
+  });
+});
+
 describe("lengan peramban ADA — yang cuma peramban bisa menjawab", () => {
   it("terkunci saat dibuka, Edit membukanya, Batal bertanya", () => {
     expect(E2E).toContain("await expect(takaran).toBeDisabled();");

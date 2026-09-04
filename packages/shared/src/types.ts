@@ -648,6 +648,55 @@ export interface MenuPriceLogRow {
   created_at: string;
 }
 
+/**
+ * Jenis kejadian di garis waktu sebuah bahan (`GET /bahan/:id/riwayat-resep`).
+ *
+ * `harga_bahan` adalah yang membedakan garis waktu ini dari sekadar log tulis:
+ * ia mencatat kejadian yang ASALNYA bahan LAIN — salah satu bahan penyusun
+ * resep ini bergerak harganya, jadi biaya per batch resep ini ikut bergeser
+ * tanpa seorang pun menyentuh resepnya. Itu pertanyaan yang paling sering
+ * ditanyakan tentang layar Resep, dan sebelum tabel ini tak ada satu pun
+ * tempat yang bisa menjawabnya.
+ */
+export type JenisJejakBahan = "buat" | "resep" | "harga_sendiri" | "harga_bahan";
+
+/** Lewat pintu mana perubahannya masuk. */
+export type SebabJejakBahan = "buat" | "manual" | "impor" | "resep" | "laporan_harga";
+
+/** Satu baris riwayat resep & harga sebuah bahan. */
+export interface JejakBahanRow {
+  id: string;
+  jenis: JenisJejakBahan;
+  sebab: SebabJejakBahan;
+  /** kalimat siap tampil, mis. "Tepung: Rp 12.000 → Rp 12.500 (200 gr/batch)" */
+  detail: string;
+  /** harga_beli TERSIMPAN bahan ini; null bila kejadiannya tak menggesernya */
+  harga_lama: number | null;
+  harga_baru: number | null;
+  /** biaya bahan per batch HASIL HITUNG resep; null bila tak relevan */
+  biaya_lama: number | null;
+  biaya_baru: number | null;
+  /** nama pelaku; null bila akunnya sudah dihapus atau perubahannya dari sistem */
+  oleh: string | null;
+  created_at: string;
+}
+
+/**
+ * Balasan `GET /bahan/:id/riwayat-resep`.
+ *
+ * OBJEK, bukan larik telanjang — berbeda dari `riwayat-harga` di sebelahnya,
+ * dan bedanya bukan selera. Larik telanjang di sana dipertahankan karena build
+ * ponsel lama membacanya `as List`, dan penanda pemotongannya karena itu harus
+ * menumpang header. Pintu ini baru: belum ada klien yang perlu dijaga, jadi
+ * "daftarnya dipotong" ditulis sebagai medan yang tak bisa hilang di proxy
+ * mana pun.
+ */
+export interface JejakBahanDto {
+  rows: JejakBahanRow[];
+  /** true = masih ada yang lebih lama dari yang dikirim */
+  terpotong: boolean;
+}
+
 /** Ringkasan hasil POST /menu/terapkan-saran. */
 export interface TerapkanSaranHasil {
   diperbarui: number;

@@ -25,6 +25,60 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan
+
+🟢 **BARU** — pintu baru, tak ada yang berubah bentuknya. Aman diabaikan
+sampai layar Resep ponsel memang mau menampilkan riwayat.
+
+```
+GET /api/bahan/<id>/riwayat-resep          [owner/admin]
+  → 200 { "rows": JejakBahanRow[], "terpotong": false }
+```
+
+`JejakBahanRow` = `{ id, jenis, sebab, detail, harga_lama, harga_baru,
+biaya_lama, biaya_baru, oleh, created_at }`. `detail` sudah berupa **kalimat
+siap tampil** (mis. `"Tepung: Rp 12.000 → Rp 12.500 (250 gr/batch)"`), jadi
+klien tak perlu merangkainya sendiri — itu disengaja: kalimatnya menyebut nama
+bahan **pada saat kejadian**, dan merangkainya saat render membuat bahan yang
+kelak diubah namanya menulis ulang masa lalunya sendiri.
+
+**Empat `jenis`:**
+
+| `jenis` | artinya | medan yang terisi |
+| --- | --- | --- |
+| `buat` | baris pembuka bahan ini | `harga_baru` (dan `harga_lama` null) |
+| `resep` | komponen / takaran / `isi` / `overhead_x` diubah | `biaya_lama`, `biaya_baru` |
+| `harga_sendiri` | `harga_beli` TERSIMPAN bahan ini bergeser | `harga_lama`, `harga_baru` |
+| `harga_bahan` | salah satu bahan PENYUSUN resep ini berubah harga **di tempat lain** | `biaya_lama`, `biaya_baru` |
+
+`harga_bahan` adalah alasan pintu ini ada. Biaya per batch sebuah resep
+bergerak tanpa siapa pun menyentuh resepnya — laporan harga nota menyegarkan
+harga acuan ke median riwayat pembelian, impor CSV daftar harga supplier
+menimpanya, atau seseorang menyuntingnya di halaman Bahan. Sebelum ini tak ada
+satu pun tempat yang bisa menjawab "kenapa harga resep saya berubah".
+
+**`sebab`** menyebut pintunya: `"buat"` | `"manual"` | `"impor"` | `"resep"` |
+`"laporan_harga"`.
+
+**`terpotong` medan, bukan header.** Berbeda dari `GET /bahan/:id/pembelian`
+dan `GET /menu/:id/riwayat-harga` di sebelahnya, yang memakai
+`X-Kakarut-Terpotong` justru karena build ponsel lama membaca balasannya
+`as List`. Pintu ini belum punya klien yang harus dijaga, jadi penandanya
+ditulis sebagai medan yang tak bisa hilang di proxy mana pun. Batasnya **50
+baris terbaru**, angka yang sama dengan kedua riwayat di sebelahnya.
+
+**Riwayat mulai dikumpulkan sejak fitur ini tayang.** Tak ada isian surut, dan
+itu bukan kelalaian: `ingredient_components` ditulis hapus-lalu-sisip, jadi
+resep sebelum tanggal tayang memang tak tersimpan di mana pun. Layar yang
+menampilkannya wajib mengatakan ini — daftar kosong yang diam terbaca sebagai
+"resep ini tak pernah disentuh siapa pun".
+
+**Simpan yang tak menggeser apa pun tidak menambah baris.** `PUT
+/bahan/:id/resep` mengirim seluruh formulir tiap kali Simpan ditekan (ganti
+foto pun ikut mengirim komponennya), jadi tanpa penyaring itu riwayat setahun
+berisi ratusan baris yang tak menerangkan apa-apa.
+
+
 ## 🔴 `GET /rekomendasi/permintaan` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`
 
 🔴 **WAJIB** — dan ini satu-satunya entri yang benar-benar MEMATAHKAN kode yang

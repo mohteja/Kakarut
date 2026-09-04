@@ -110,10 +110,22 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
 
   it("daftar FK `SET NULL` tak bertambah tanpa ditinjau", () => {
     /*
-     * 18 FK `ON DELETE SET NULL` di seluruh schema, dan tiap satu adalah medan
+     * 19 FK `ON DELETE SET NULL` di seluruh schema, dan tiap satu adalah medan
      * yang bisa berubah jadi null tanpa kode mana pun memintanya. Yang baru
      * wajib ditimbang: apakah ada yang membaca medan itu sebagai BUKTI, bukan
      * sekadar sebagai tautan?
+     *
+     * KE-19 (2026-09-04): `ingredient_logs.oleh_user_id`. DITIMBANG DAN AMAN,
+     * dengan alasan yang bisa diperiksa: peristiwanya dibuktikan oleh BARISNYA
+     * SENDIRI — `detail` (teks, tak bisa dinihilkan siapa pun) plus
+     * `harga_lama/harga_baru/biaya_lama/biaya_baru`. `oleh_user_id` hanya
+     * ATRIBUSI, dan satu-satunya pembacanya (`GET /bahan/:id/riwayat-resep`
+     * → `RiwayatResepPanel`) merender nullnya dengan MENGHILANGKAN nama
+     * pelakunya, bukan dengan mengubah arti barisnya. Karyawan yang dihapus
+     * karena itu menghilangkan "siapa", tak pernah "apakah terjadi" — persis
+     * pemisahan yang `pernah_jadi_penjualan` ada untuk menegakkan. Bentuknya
+     * juga sama persis dengan `menu_price_logs.oleh_user_id` yang sudah
+     * berdiri di daftar ini.
      */
     const jumlah = (SCHEMA.match(/onDelete:\s*"set null"/g) ?? []).length;
     expect(
@@ -121,7 +133,7 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
       "jumlah FK ON DELETE SET NULL berubah. Untuk yang baru: adakah kode yang " +
         "membacanya sebagai BUKTI sebuah peristiwa? Kalau ya, faktanya harus " +
         "disimpan terpisah — lihat `pernah_jadi_penjualan`",
-    ).toBe(18);
+    ).toBe(19);
   });
 
   it("PASANGAN: pemindainya membaca berkas yang benar & tak hijau karena kosong", () => {

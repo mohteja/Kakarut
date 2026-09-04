@@ -320,6 +320,13 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   - **`atur` ditulis dalam TRANSAKSI YANG SAMA dengan komponennya.** Biaya per satuan bahan produksi lahir dari pasangan `(biaya resep ÷ isi) × overhead_x`, dan pembilang/penyebutnya tersimpan di tabel berbeda. Mengirim komponen lewat endpoint ini lalu takarannya lewat `PUT /api/bahan/:id` adalah DUA permintaan: bila yang kedua gagal, resep baru sudah mendarat dengan `isi` lama, dan HPP setiap menu yang memakai bahan itu ikut keliru sampai ada yang menyimpan ulang. Kirim keduanya di sini supaya keduanya berbagi satu nasib.
   - Hanya tiga nilai itu yang pindah, karena hanya ketiganya yang bisa membuat model biaya bertentangan dengan dirinya sendiri. Field master lain (satuan, stok minimum, lead time, foto) dan cara masak (`PUT /api/bahan/:id/langkah`) tetap lewat endpointnya masing-masing — kegagalannya menyisakan tampilan yang basi, bukan angka yang salah.
   - `atur` opsional; tanpa field itu perilakunya persis seperti sebelumnya.
+- `GET /api/bahan/:id/riwayat-resep` — **[owner/admin]** — res: `JejakBahanDto` = `{ rows: JejakBahanRow[] (terbaru dulu, maks 50), terpotong: bool }` — error: **404** — GARIS WAKTU satu bahan: perubahan resepnya DAN perubahan harga yang menggerakkan biayanya.
+  - `jenis` = `"buat"` (baris pembuka; `harga_lama` null) | `"resep"` (komponen/takaran/`isi`/`overhead_x` diubah — membawa `biaya_lama`/`biaya_baru`, yaitu biaya bahan per batch hasil hitung) | `"harga_sendiri"` (`harga_beli` TERSIMPAN bahan ini bergeser — membawa `harga_lama`/`harga_baru`) | `"harga_bahan"` (salah satu bahan PENYUSUN resep ini berubah harga di tempat lain — membawa `biaya_lama`/`biaya_baru` yang sudah dihitung ulang).
+  - `sebab` = dari pintu mana: `"buat"` | `"manual"` (`PUT /api/bahan/:id`, `POST /api/bahan/:id/harga`) | `"impor"` (`POST /api/bahan/import`) | `"resep"` (`PUT /api/bahan/:id/resep`) | `"laporan_harga"` (`POST /api/{pembelian,produksi}/laporan-harga/:fakturId`).
+  - **Baris `harga_bahan` disebar saat MENULIS, bukan dirakit saat membaca.** Susunan resep hari ini bukan jawaban dari "resep apa saja yang memakai bahan X tiga bulan lalu", jadi merakitnya saat membaca akan menulis ulang masa lalu tiap kali resepnya diubah. Satu tingkat saja: bahan penyusun langsung.
+  - **Simpan yang tak menggeser apa pun tidak menambah baris.** `PUT /api/bahan/:id/resep` mengirim seluruh formulir tiap kali tombol Simpan ditekan (ganti foto pun ikut mengirim komponennya); tanpa penyaring itu riwayatnya penuh baris yang tak menerangkan apa-apa.
+  - **`terpotong` medan, bukan header** — berbeda dari `GET /api/bahan/:id/pembelian` dan `GET /api/menu/:id/riwayat-harga` di sebelahnya, yang memakai `X-Kakarut-Terpotong` karena build ponsel lama membaca balasannya `as List`. Pintu ini baru dan belum punya klien yang harus dijaga.
+  - **Riwayat mulai dikumpulkan sejak fitur ini tayang.** Tak ada isian surut: `ingredient_components` ditulis hapus-lalu-sisip, jadi resep sebelum tanggal itu memang tak tersimpan di mana pun.
 - `GET /api/bahan/:id/langkah` — [any] — res: `BahanLangkahRow[]` (LANGKAH CARA MASAK urut, tiap langkah `{id, teks, foto_url|null}`; `[]` bila belum diatur/bahan non-produksi) — error: **404** — semua pelaksana produksi (kitchen/bar/tim) boleh baca, lintas divisi
 - `PUT /api/bahan/:id/langkah` — [owner/admin] — req: `{ langkah: [{teks: string(1..1000), foto_url?|null (max500)}] (max 30) = [] }` — **urutan array = urutan langkah** (replace-whole-list; kirim `[]` utk mengosongkan) — res: `BahanLangkahRow[]` terbaru — error: **400** bahan non-produksi/teks invalid, **404**, **409** (pengadaan berubah konkuren)
 - `DELETE /api/bahan/:id` — [owner/admin] — soft delete (= **arsipkan**; hilang dari semua daftar aktif, muncul di `GET /bahan?arsip=1`) — res: `{ ok: true }` — error: **404**, **409** masih dipakai menu aktif atau resep aktif lain
@@ -2285,6 +2292,55 @@ export interface MenuPriceLogRow {
   /** nama pengubah; null bila akunnya sudah dihapus */
   oleh: string | null;
   created_at: string;
+}
+
+/**
+ * Jenis kejadian di garis waktu sebuah bahan (`GET /bahan/:id/riwayat-resep`).
+ *
+ * `harga_bahan` adalah yang membedakan garis waktu ini dari sekadar log tulis:
+ * ia mencatat kejadian yang ASALNYA bahan LAIN — salah satu bahan penyusun
+ * resep ini bergerak harganya, jadi biaya per batch resep ini ikut bergeser
+ * tanpa seorang pun menyentuh resepnya. Itu pertanyaan yang paling sering
+ * ditanyakan tentang layar Resep, dan sebelum tabel ini tak ada satu pun
+ * tempat yang bisa menjawabnya.
+ */
+export type JenisJejakBahan = "buat" | "resep" | "harga_sendiri" | "harga_bahan";
+
+/** Lewat pintu mana perubahannya masuk. */
+export type SebabJejakBahan = "buat" | "manual" | "impor" | "resep" | "laporan_harga";
+
+/** Satu baris riwayat resep & harga sebuah bahan. */
+export interface JejakBahanRow {
+  id: string;
+  jenis: JenisJejakBahan;
+  sebab: SebabJejakBahan;
+  /** kalimat siap tampil, mis. "Tepung: Rp 12.000 → Rp 12.500 (200 gr/batch)" */
+  detail: string;
+  /** harga_beli TERSIMPAN bahan ini; null bila kejadiannya tak menggesernya */
+  harga_lama: number | null;
+  harga_baru: number | null;
+  /** biaya bahan per batch HASIL HITUNG resep; null bila tak relevan */
+  biaya_lama: number | null;
+  biaya_baru: number | null;
+  /** nama pelaku; null bila akunnya sudah dihapus atau perubahannya dari sistem */
+  oleh: string | null;
+  created_at: string;
+}
+
+/**
+ * Balasan `GET /bahan/:id/riwayat-resep`.
+ *
+ * OBJEK, bukan larik telanjang — berbeda dari `riwayat-harga` di sebelahnya,
+ * dan bedanya bukan selera. Larik telanjang di sana dipertahankan karena build
+ * ponsel lama membacanya `as List`, dan penanda pemotongannya karena itu harus
+ * menumpang header. Pintu ini baru: belum ada klien yang perlu dijaga, jadi
+ * "daftarnya dipotong" ditulis sebagai medan yang tak bisa hilang di proxy
+ * mana pun.
+ */
+export interface JejakBahanDto {
+  rows: JejakBahanRow[];
+  /** true = masih ada yang lebih lama dari yang dikirim */
+  terpotong: boolean;
 }
 
 /** Ringkasan hasil POST /menu/terapkan-saran. */

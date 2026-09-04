@@ -76,6 +76,11 @@ const BELUM_TAYANG = new Set([
   // lewat merge `48532a3` / CI #493, dan ponselnya lewat `f429dba` / CI #37.
   // Stempelnya dipasang pada commit yang SAMA dengan penghapusan baris ini;
   // memisahkannya adalah cara berkas ini pernah salah selama empat hari.
+  //
+  // BELUM DI-MERGE (2026-09-04): pintu riwayat resep & harga. Aturan pemilik
+  // berlaku — tak ada yang tayang sampai ia meminta rilis. Stempelnya dipasang
+  // DAN baris ini dihapus pada commit yang sama dengan merge-nya.
+  "## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

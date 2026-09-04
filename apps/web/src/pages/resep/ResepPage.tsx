@@ -30,6 +30,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
+import { RiwayatResepPanel } from "./RiwayatResepPanel";
 
 /** Baris editor resep (bahan mentah per 1 batch bahan jadi). */
 interface ResepDraft {
@@ -258,6 +259,17 @@ export function ResepPage() {
    */
   const [mode, setMode] = useState<"lihat" | "ubah">("lihat");
   const sedangUbah = bolehUbah && mode === "ubah";
+  /**
+   * Resep MANA yang barusan tersimpan — bukan sekadar `simpan.isSuccess`.
+   *
+   * Penandanya kini hidup di blok mode BACA (lihat komentar di tempat ia
+   * dirender), dan mode baca-lah keadaan diam halaman ini. `isSuccess` sendiri
+   * bertahan sampai mutasi berikutnya, jadi memakainya apa adanya akan
+   * memasang "✓ Tersimpan" pada panel resep LAIN yang diklik sesudahnya —
+   * tanda keberhasilan yang salah tempat, dan tak seorang pun punya cara tahu
+   * ia salah.
+   */
+  const [terakhirSimpan, setTerakhirSimpan] = useState<string | null>(null);
   /*
    * Potret draf saat mode ubah DIBUKA — bukan saat draf disemai.
    *
@@ -333,8 +345,15 @@ export function ResepPage() {
   const adaPerubahan = () =>
     cadanganDraf.current !== null && cadanganDraf.current !== potretDraf();
 
+  /*
+    Penanda "✓ Tersimpan" dipadamkan saat mode ubah dibuka lagi DAN saat
+    berpindah resep. Tanpa itu, tanda hijau dari simpanan sebelumnya menempel
+    di panel resep LAIN yang belum pernah disimpan siapa pun — dan tanda
+    keberhasilan yang salah tempat lebih buruk daripada tak ada tanda.
+  */
   const mulaiUbah = () => {
     cadanganDraf.current = potretDraf();
+    setTerakhirSimpan(null);
     setMode("ubah");
   };
 
@@ -650,6 +669,11 @@ export function ResepPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bahan-resep", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["bahan-langkah", selectedId] });
+      // Simpan inilah yang MELAHIRKAN baris riwayatnya. Tanpa penyegaran ini
+      // panel di bawah memajang daftar tanpa perubahan yang barusan disimpan —
+      // tepat pada detik seseorang paling mungkin melihatnya, dan diamnya
+      // terbaca sebagai "simpanan saya tak tercatat".
+      queryClient.invalidateQueries({ queryKey: ["riwayat-resep", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["resep-ringkas"] });
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
       queryClient.invalidateQueries({ queryKey: ["menu"] }); // HPP bisa berubah
@@ -662,6 +686,7 @@ export function ResepPage() {
        * yang baru saja tersimpan.
        */
       cadanganDraf.current = null;
+      setTerakhirSimpan(selectedId);
       setMode("lihat");
     },
     onError: () => {
@@ -674,6 +699,11 @@ export function ResepPage() {
       aturTersemai.current = null;
       queryClient.invalidateQueries({ queryKey: ["bahan-resep", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["bahan-langkah", selectedId] });
+      // Rantai yang gagal di tengah tetap bisa meninggalkan baris riwayat:
+      // `PUT /bahan/:id/resep` sudah menulisnya sebelum panggilan berikutnya
+      // gagal. Riwayat yang tak ikut disegarkan di jalur ini akan menyangkal
+      // perubahan yang BENAR-BENAR tersimpan.
+      queryClient.invalidateQueries({ queryKey: ["riwayat-resep", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
     },
   });
@@ -1609,6 +1639,25 @@ export function ResepPage() {
                       <button type="button" onClick={mulaiUbah} className={btnPrimary}>
                         ✏️ Edit resep
                       </button>
+                      {/*
+                        "✓ Tersimpan" DI SINI, di blok mode BACA — dan itu
+                        perbaikan, bukan pemindahan selera.
+
+                        Penandanya dulu berdiri di dalam blok `sedangUbah` di
+                        bawah, berdampingan dengan tombol Simpan. Sejak simpan
+                        yang berhasil MENGUNCI kembali panelnya, `sedangUbah`
+                        menjadi false pada detik yang sama `simpan.isSuccess`
+                        menjadi true — jadi blok itu dilepas sebelum penandanya
+                        sempat dirender sekali pun. Yang menyimpan resep tak
+                        mendapat konfirmasi apa pun; panelnya cuma terkunci,
+                        dan diamnya tak bisa dibedakan dari simpan yang gagal.
+
+                        Ditemukan lengan peramban putaran riwayat resep, bukan
+                        oleh pembacaan kode: keduanya benar dibaca terpisah.
+                      */}
+                      {terakhirSimpan === dipilih.id && !simpan.isPending && (
+                        <span className="text-sm font-medium text-green-600">✓ Tersimpan</span>
+                      )}
                       <span className="text-xs text-stone-400">
                         Resep dikunci supaya tak berubah karena klik yang tak disengaja.
                       </span>
@@ -1631,9 +1680,6 @@ export function ResepPage() {
                       >
                         Batal
                       </button>
-                      {simpan.isSuccess && !simpan.isPending && (
-                        <span className="text-sm font-medium text-green-600">✓ Tersimpan</span>
-                      )}
                       <span className="flex-1" />
                       <button
                         type="button"
@@ -1654,6 +1700,14 @@ export function ResepPage() {
                   )}
                   <ErrorText error={simpan.error} />
                   <ErrorText error={arsipkan.error} />
+                  {/*
+                    DI LUAR `sedangUbah` dengan sengaja: riwayat yang cuma
+                    muncul saat mengedit tak bisa dipakai memutuskan apakah
+                    perlu mengedit — dan itu justru pemakaian utamanya (kotak
+                    persetujuan harga di atas tak menerangkan dari mana harga
+                    tersimpannya datang).
+                  */}
+                  <RiwayatResepPanel ingredientId={dipilih.id} bolehLihat={bolehUbah} />
                 </>
               )}
             </div>

@@ -221,6 +221,34 @@ describe("tiap kueri terkurung perusahaannya", () => {
     expect(kelas(k[1], isi), "situs kedua meminjam lingkup situs pertama").toBe("F");
   });
 
+  it("DETEKTOR TERBUKTI: PENCATAT tak bisa memutihkan kueri di sebelahnya", () => {
+    /*
+     * Bentuk yang benar-benar terjadi 2026-09-04. `catatHargaBahan(db,
+     * auth.company_id!, …, [{ ingredientId: id, … }])` punya bentuk yang sama
+     * persis dengan sebuah verifikasi — callee Identifier, argumen memuat
+     * tenant DAN nama kunci saringnya — tapi ia MENULIS jejak, tak pernah
+     * menolak apa pun. Tanpa daftar `PENCATAT`, kehadirannya menurunkan
+     * `modules/bahan/routes.ts` dari 9 situs kelas F ke 6, dan tiga kueri yang
+     * selama ini menagih adjudikasi berhenti menagihnya — tanpa satu pun dari
+     * ketiganya berubah.
+     */
+    const pencatat = `
+      async function h(c) {
+        await catatHargaBahan(db, auth.company_id!, auth.sub, "manual", [{ ingredientId: id }]);
+        const r = await db.delete(t).where(eq(t.ingredientId, id));
+      }
+    `;
+    const kp = semuaKueri([{ nama: "modules/palsu/routes.ts", isi: pencatat }]);
+    expect(kp).toHaveLength(1);
+    expect(kelas(kp[0], pencatat), "pencatat memutihkan kueri di sebelahnya").toBe("F");
+
+    // PASANGANNYA: verifikasi sungguhan dengan bentuk yang sama TETAP diakui —
+    // kalau tidak, "F" di atas cuma berarti detektornya berhenti melihat.
+    const verif = pencatat.replace("catatHargaBahan(db, auth.company_id!, auth.sub, \"manual\", [{ ingredientId: id }])", "pastikanBahan(id, auth.company_id!)");
+    const kv = semuaKueri([{ nama: "modules/palsu/routes.ts", isi: verif }]);
+    expect(kelas(kv[0], verif)).toBe("C");
+  });
+
   it("tiap kueri kelas F sudah dipilah tangan", () => {
     const perBerkas = new Map<string, number>();
     for (const k of f) perBerkas.set(k.berkas, (perBerkas.get(k.berkas) ?? 0) + 1);

@@ -199,3 +199,63 @@ test("perubahan yang belum disimpan tak hilang tanpa ditanya", async ({ page, re
   await expect(takaran).toBeDisabled();
   await expect(takaran).toHaveValue(semula);
 });
+
+/**
+ * RIWAYAT RESEP & HARGA — ada di KEDUA mode, dan simpan menambahnya.
+ *
+ * Dua hal yang tak bisa dijawab pembacaan kode, dan keduanya inti fiturnya:
+ *
+ * 1. **Panelnya ada saat halaman TERKUNCI.** Permintaan pemiliknya eksplisit
+ *    ("di edit ataupun readonly"), dan alasannya bukan kelengkapan: riwayat
+ *    dipakai untuk memutuskan APAKAH perlu mengedit — terutama saat kotak
+ *    persetujuan harga di atasnya menawarkan menggeser HPP beberapa menu
+ *    sekaligus. Riwayat yang cuma muncul sesudah menekan Edit datang
+ *    terlambat.
+ * 2. **Daftarnya segar sesudah Simpan.** Baris riwayatnya LAHIR dari simpan
+ *    itu. Tanpa `invalidateQueries(["riwayat-resep", …])` panelnya memajang
+ *    daftar tanpa perubahan yang barusan disimpan, tepat pada detik seseorang
+ *    paling mungkin melihatnya — dan diamnya terbaca sebagai "simpanan saya
+ *    tak tercatat". Cache react-query tak bisa diperiksa dari kode; hanya
+ *    peramban yang bisa mengatakan apakah daftarnya benar-benar berubah.
+ */
+test("riwayat resep tampil di mode BACA, dan Simpan menambah barisnya", async ({
+  page,
+  request,
+}) => {
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  const takaran = await bukaResepBerbahan(page, request);
+
+  // INTI 1: panelnya ada sebelum tombol Edit pernah disentuh.
+  const kepala = page.getByRole("button", { name: /Riwayat resep & harga/ });
+  await expect(kepala, "panel riwayat tak ada di mode baca").toBeVisible();
+  await expect(page.getByRole("button", { name: /Edit resep/ })).toBeVisible();
+
+  // PREMIS: panelnya terbuka dan benar-benar memuat sesuatu — entah daftar,
+  // entah kalimat "belum ada". Menghitung baris pada panel yang masih memutar
+  // spinner akan mengukur nol dan menyebutnya jawaban.
+  const baris = page.locator("li").filter({ hasText: /Dibuat|Resep|Harga/ });
+  await expect
+    .poll(async () => await baris.count(), { timeout: 10_000 })
+    .toBeGreaterThan(0);
+  const sebelum = await baris.count();
+
+  // INTI 2: ubah takaran ke nilai yang PASTI berbeda, simpan, dan daftarnya
+  // harus bertambah tanpa muat ulang halaman.
+  await page.getByRole("button", { name: /Edit resep/ }).click();
+  await expect(kepala, "panel riwayat hilang saat mode ubah").toBeVisible();
+  await expect(takaran).toBeEnabled();
+  const semula = await takaran.inputValue();
+  await takaran.fill(semula === "7" ? "8" : "7");
+  await page.getByRole("button", { name: "Simpan Resep" }).click();
+
+  await expect(page.getByText("✓ Tersimpan")).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(async () => await baris.count(), {
+      timeout: 15_000,
+      message: "riwayat tak bertambah sesudah simpan — panelnya tak disegarkan",
+    })
+    .toBe(sebelum + 1);
+
+  // Isinya menyebut perubahan yang barusan dilakukan, bukan sekadar bertambah.
+  await expect(baris.first()).toContainText(`${semula} → `);
+});

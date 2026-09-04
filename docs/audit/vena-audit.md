@@ -50,6 +50,198 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Resep & harga punya GARIS WAKTU — dan penjaga yang saya putihkan sendiri tanpa sadar — web + server — 2026-09-04
+
+- **Diminta pemilik repo**: *"di resep di edit ataupun readonly ingin ada
+  riwayat perubahan resep dan perubahan harga resep walaupun yang berubah
+  harganya hanya 1 bahan"*.
+
+- **Asalnya satu pertanyaan yang tak terjawab di layar itu.** Satu putaran
+  sebelumnya pemilik bertanya soal kotak persetujuan harga: *"kalo yang di
+  centang ini apa ya?"* Kotak itu berbunyi "Rp 60.570 → Rp 50.350 — mengubah
+  HPP 7 menu", dan **tak ada satu pun tempat di Kakarut yang bisa menerangkan
+  dari mana Rp 60.570 datang atau kapan biaya resepnya bergeser ke Rp 50.350**.
+  Fitur ini jawaban atas pertanyaan itu, bukan penambahan yang berdiri sendiri.
+
+- **Keadaan sebelumnya, diukur:** `ingredient_components` ditulis
+  **hapus-lalu-sisip** tiap simpan (`bahan/routes.ts`), jadi takaran kemarin
+  lenyap tanpa bekas di seluruh basis data. `riwayatHargaBahan` yang sudah ada
+  hanya membaca faktur **beli** (`productions.tipe='beli'`), jadi untuk bahan
+  **produksi** — persis yang punya resep — isinya selalu kosong.
+
+- **Populasi (basis gerbang, SQL):** 230 bahan aktif (59 produksi / 171 beli),
+  17 resep berkomponen, 22 baris komponen, rata-rata **1,29** komponen per
+  resep (maks 2), 15 bahan mentah dipakai resep. **Fan-out** yang menentukan
+  biaya rancangan ini: rata-rata **1,47** resep per bahan mentah, **maksimum
+  4** — dan **1** resep bertingkat (komponen yang sendiri berjenis produksi),
+  jadi batas "satu tingkat" yang pemilik pilih benar-benar terlewati fikstur,
+  bukan cuma diklaim.
+
+- **Sapuan situs tulis:** 14 `.update/.insert(ingredients)` di `src/`, **11**
+  menyentuh `harga_beli`/`isi` — 9 di `modules/` (6 update + 3 insert, dua
+  berkas) dan 2 di `seed/`. Kesembilan lewat SATU pintu, `catatHargaBahan`.
+
+- **DETEKTOR PERTAMA SAYA BUTA, DAN ITU KETAHUAN SEBELUM DIPAKAI.** Sapuan
+  versi satu memakai jendela teks yang hanya melihat KE DEPAN dari
+  `.update(ingredients)`. Ia melaporkan 10 situs; yang benar 11. Yang hilang
+  `PUT /bahan/:id/resep`, tempat objeknya dirakit ke variabel `setAtur`
+  **sebelum** `.update` dipanggil — dan itu justru situs terpenting seluruh
+  putaran ini (jalur centang persetujuan harga). Jendela simetris menemukannya.
+  Pelajarannya masuk ke penjaga: `jejak-harga-bahan.test.ts` tidak memakai
+  jendela byte sama sekali, melainkan fungsi pembungkus TERLUAR dari pohon AST.
+
+- **Rancangannya: satu tabel, dan `ingredient_id` selalu berarti hal yang
+  sama** — "garis waktu SIAPA baris ini". Itu yang membuat pembacaannya satu
+  kueri tanpa join, termasuk untuk kejadian yang ASALNYA bahan lain: saat harga
+  sebuah bahan bergerak, penulisnya **menyebar** satu baris `harga_bahan` ke
+  tiap resep pemakainya, dengan biaya per batch yang sudah dihitung ulang.
+  Merakitnya saat MEMBACA ditolak, dan alasannya bisa diperiksa: susunan resep
+  hari ini bukan jawaban dari "resep apa saja yang memakai bahan X tiga bulan
+  lalu", jadi riwayatnya akan menulis ulang masa lalunya sendiri tiap kali
+  resepnya diubah.
+
+- **`catatHargaBahan` TAK BERGANTUNG URUTAN PANGGIL.** Ia menghitung ulang
+  biaya batch dari basis data, tapi harga bahan yang SEDANG berubah diambil
+  dari argumennya, bukan dari baris DB. Versi yang membaca dari DB bekerja
+  sempurna di lima situs dan diam-diam mencatat "Rp 0 → Rp 0" di situs yang
+  memanggilnya sebelum `UPDATE`-nya jalan — tanpa satu pun galat. Dijaga
+  penjaga statis, dan bukti merah H memerahkannya.
+
+- **Simpan yang TAK menggeser apa pun tidak menulis baris**, dan ini bukan
+  kerapian. Layar Resep mengirim SELURUH formulir tiap kali Simpan ditekan
+  (mengganti satu foto ikut mengirim komponen, takaran, dan overhead yang sama
+  persis). Tanpa penyaring itu, riwayat setahun berisi ratusan baris yang tak
+  menerangkan apa-apa dan perubahan takaran yang sungguhan tenggelam di
+  antaranya. Diuji lewat HTTP (§293), bukan dibaca dari kode.
+
+### Empat hal yang ditemukan penjaga, bukan oleh saya
+
+1. **PENJAGA TENANT SAYA PUTIHKAN SENDIRI — 9 situs kelas F jadi 6.**
+   `kueri-terkurung-tenant` mengelompokkan kueri yang pengurungan tenantnya
+   tak terbaca mekanis; `modules/bahan/routes.ts` terdaftar **9** situs yang
+   sudah dipilah tangan. Sesudah putaran ini: **6**, tanpa satu pun dari
+   ketiga kueri itu berubah. Sebabnya `catatHargaBahan(db, auth.company_id!, …,
+   [{ ingredientId: id, … }])` punya bentuk yang SAMA PERSIS dengan sebuah
+   verifikasi menurut `indukTerverifikasi` — callee Identifier, argumen memuat
+   tenant DAN nama kunci saringnya — padahal ia MENULIS jejak dan tak pernah
+   menolak apa pun. Komentar `indukTerverifikasi` sendiri sudah memperingatkan
+   kelas ini ("satu kueri ber-`and(...)` di mana pun dalam badan fungsi akan
+   memaafkan setiap kueri lain"); yang membuatnya terlihat bukan penalaran
+   melainkan **angka yang turun di gerbang**. Diperbaiki dengan daftar
+   `PENCATAT`, dan diberi bukti merahnya sendiri: pencatat sintetis → tetap
+   `F`, verifikasi sintetis berbentuk sama → tetap `C`.
+
+   Kalau saya cuma menurunkan angka terdaftar dari 9 ke 6 — yang paling mudah
+   dilakukan dan terlihat "hijau" — tiga kueri yang selama ini menagih
+   adjudikasi akan berhenti menagihnya, selamanya.
+
+2. **§293 saya menembak dengan TOKEN MATI.** `verify-api-token.test.ts`
+   menolak pemakaian `$KASIR` sesudah §105 (ganti password menaikkan
+   `token_version`). Asersi saya "kasir tak boleh membaca riwayat → bukan 200"
+   akan **lolos** dengan token mati — 401 juga bukan 200 — dan lolosnya tak
+   menyatakan apa pun tentang penjaga peran yang sedang diuji. Diganti
+   `$REISS105`.
+
+3. **Periksa-lalu-tulis tanpa penahan di `POST /laporan-harga/:fakturId`.**
+   Untuk menulis "dari berapa", saya menambahkan SELECT harga lama sebelum
+   UPDATE-nya — dan `lomba-tulis` langsung menuduhnya KLAIM_BUTA. Nyata: dua
+   laporan harga atas bahan yang sama bisa sama-sama membaca Rp 10, lalu
+   masing-masing menulis mediannya sendiri; yang kalah tertimpa, dan jejaknya
+   menyebut angka yang tak pernah jadi harga tersimpan. Ditutup `FOR UPDATE`
+   pada SELECT itu — barisnya toh akan di-UPDATE beberapa baris di bawah, jadi
+   kuncinya cuma diambil lebih awal.
+
+4. **`1e-9` telanjang, di berkas yang komentarnya sudah menyebut nama kelas
+   itu.** `packages/shared/src/ketersediaan.ts` menuliskan panjang-panjang
+   kenapa `EPS_QTY = 1e-6` dan bahwa konstanta toleransi telanjang "sudah tiga
+   kali jadi bug di repo ini". Perbandingan takaran saya mengetik `1e-9` — dan
+   `1e-9` LEBIH KECIL daripada derau float pada besaran yang dipakai praktik
+   (ULP `qty/isi` terukur 3,7e-9 pada qty 10⁸), jadi ia akan melaporkan
+   "takarannya berubah" untuk takaran yang tak seorang pun sentuh. Diekstrak
+   jadi `qtySama()` di `ketersediaan.ts`, memakai `EPS_QTY` yang sudah beralasan.
+
+### Dan satu regresi PUTARAN LALU yang baru ketahuan sekarang
+
+**"✓ Tersimpan" tak pernah bisa muncul sejak `15f7bfe`.** Putaran sebelumnya
+memutuskan (atas permintaan pemilik) bahwa simpan yang berhasil MENGUNCI
+kembali panel resep. Penanda hijau "✓ Tersimpan" berdiri di dalam blok
+`sedangUbah`, berdampingan dengan tombol Simpan — jadi begitu `onSuccess`
+memanggil `setMode("lihat")`, blok itu dilepas pada render yang SAMA dengan
+yang membuat penandanya layak tampil. Ia tak pernah terlihat sekali pun.
+
+Akibatnya bukan kosmetik: yang menyimpan resep tak mendapat konfirmasi apa
+pun — panelnya cuma terkunci, dan diamnya **tak bisa dibedakan dari simpan
+yang gagal tanpa suara**. Gerbang penuh putaran itu hijau seluruhnya; kedua
+potongan kodenya memang benar dibaca terpisah.
+
+Yang menemukannya lengan peramban putaran INI, yang menunggu "✓ Tersimpan"
+sebagai penanda bahwa simpanannya selesai sebelum menghitung baris riwayat.
+Perbaikannya: penandanya pindah ke blok mode BACA dan diikat ke resep yang
+BENAR-BENAR disimpan (`terakhirSimpan === dipilih.id`) — `simpan.isSuccess`
+telanjang bertahan sampai mutasi berikutnya, jadi tanda hijaunya akan menempel
+di panel resep LAIN yang diklik sesudahnya. Dijaga `resep-baca-dulu.test.ts`
+(letak penanda relatif terhadap kedua blok, plus ikatan idnya).
+
+Kelasnya layak dicatat: **dua perubahan yang masing-masing benar, yang saling
+meniadakan hanya pada urutan render**. Tak ada uji statis yang bisa
+menemukannya, dan itulah harga yang dibayar untuk punya lengan peramban.
+
+### Keputusan yang ditulis, bukan dibiarkan ditebak
+
+- **Angka jejak yang TAK MUAT ditulis `null`, bukan dilempar.** `biayaBatch`
+  bisa meluap secara aritmetika (takaran s/d `BATAS_QTY_RESEP` ≈10⁸ × harga s/d
+  `BATAS_UANG` ≈10¹² = 10²⁰, jauh di atas `numeric(14,2)`). Melempar salah, dan
+  salahnya bukan di jalur resep melainkan di **penyebaran**: satu laporan harga
+  nota menyentuh belasan bahan, dan satu resep patologis akan menggagalkan
+  seluruh nota — nota yang isinya benar, ditolak karena baris CATATAN-nya tak
+  muat. Jejak tak boleh punya kuasa membatalkan peristiwa yang dicatatnya.
+  Menjepit ke batas juga salah: ia menulis angka yang SALAH dan terbaca benar.
+- **owner/admin saja** (keputusan pemilik), sejalan dengan layar yang
+  memuatnya: angka biaya di halaman Resep memang sudah ditahan dari
+  tim/kitchen/bar, dan riwayat yang menyebut rupiah di tiap barisnya akan
+  membuka kembali persis yang ditutup di sana. Dijaga `requireRole` DAN
+  `bolehLihat` di panelnya — dua pagar, karena yang satu di server dan yang
+  lain menahan permintaan yang tak perlu dikirim.
+- **`terpotong` MEDAN, bukan header.** Kedua riwayat di sebelahnya
+  (`/bahan/:id/pembelian`, `/menu/:id/riwayat-harga`) memakai
+  `X-Kakarut-Terpotong` justru karena build ponsel lama membaca balasannya
+  `as List`. Pintu ini belum punya klien yang harus dijaga.
+- **`beli_perlengkapan` tak punya garis waktu di sini**, dan itu batas yang
+  sama seperti putaran tabel Permintaan Stok: `supplies` tabel yang berbeda,
+  dan resep tak pernah memakainya.
+- **Riwayat mulai dari nol saat tayang.** Tak ada isian surut dan tak mungkin
+  ada: resep sebelum tanggal itu tak tersimpan di mana pun. Panelnya
+  MENGATAKAN ini — daftar kosong yang diam terbaca sebagai "resep ini tak
+  pernah disentuh siapa pun".
+
+### Bukti merah
+
+| | mutasi | memerahkan |
+| --- | --- | --- |
+| E | pencatat dicabut dari `PUT /bahan/:id` | penjaga statis "tiap pintu menulis jejak" |
+| F | `kompLama` dipindah ke bawah `delete(ingredientComponents)` | "resep lama dibaca sebelum dihapus" |
+| G | laporan harga menulis `ingredientLogs` langsung | "hanya jejak.ts yang menyisipkan" + penjaga pintu |
+| H | fan-out membaca harga baru dari baris DB | "harga baru dari argumen, bukan DB" |
+| I | pencatat sintetis di sebelah kueri tak terkurung | kelas F → C (daftar `PENCATAT`) |
+
+Kelimanya dipulihkan **byte-per-byte** (`cmp`), dan harness-nya menolak mutasi
+yang jangkarnya cocok ≠ 1 kali — pelajaran putaran yang lalu, tempat
+`str.replace("", x, 1)` menyisipkan di posisi 0 dan merusak berkasnya.
+
+### Cakupan yang DIAKUI tak penuh
+
+- Penjaga statis memakai jendela sebesar **handler**, jadi dua tulisan dalam
+  satu handler yang hanya SATU dicatat tetap lolos. Yang menutupnya §293
+  verify-api, yang menghitung baris jejak yang benar-benar lahir dari tiap
+  pintu lewat HTTP sungguhan — termasuk pintu laporan harga nota, yang pada
+  jalan alami fikstur **tak pernah menyebar** (keempat bahan yang harganya
+  disegarkan di sana kebetulan tak dipakai resep mana pun; diperiksa SQL, bukan
+  diasumsikan). §293 karena itu membangun rantainya sendiri: bahan → resep →
+  nota → laporan harga, dan menuntut biaya batch 3.000 → 3.750 yang dihitung
+  tangan.
+- Sapuan situs tulis dibatasi `src/modules/`; dua situs `seed/` sengaja di
+  luar — fikstur, bukan peristiwa yang perlu diriwayatkan.
+
 ## Resep dibuka TERKUNCI — dan "boleh mengubah" dipisahkan dari "sedang mengubah" — web — 2026-09-04
 
 - **Diminta pemilik repo**: *"resep ketika di klik ingin read only saja, dan

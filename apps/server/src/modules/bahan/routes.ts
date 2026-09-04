@@ -16,8 +16,12 @@ import {
   type BahanResepRow,
   type BahanSupplierDto,
   type RakLokasi,
+  type JejakBahanDto,
+  type JejakBahanRow,
+  type JenisJejakBahan,
   type RiwayatHargaDto,
   type RiwayatHargaLot,
+  type SebabJejakBahan,
   type UserRole,
 } from "@kakarut/shared";
 import { kunciAntrean } from "../../lib/kunci";
@@ -28,6 +32,7 @@ import {
   companies,
   dokumenNomor,
   ingredientComponents,
+  ingredientLogs,
   ingredientProduksiBranches,
   ingredientSteps,
   ingredientSuppliers,
@@ -38,12 +43,27 @@ import {
   storageLocationIngredients,
   storageLocations,
   suppliers,
+  users,
 } from "../../db/schema";
 import { statistikHargaLots, hargaPerSatuanLot, lotStatistik, BATAS_LOT_RIWAYAT } from "../../lib/harga-stats";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { saldoBahanPerCabang } from "../stok/service";
 import { kanonikKategori, kategoriKanonikMap } from "../kategori-bahan/service";
 import { resolveKodeBahan, resolveKodeBahanBatch } from "./kode";
+import {
+  biayaBatch,
+  catatHargaBahan,
+  catatResepBahan,
+  kalimatResep,
+  type KomponenJejak,
+} from "./jejak";
+
+/**
+ * Berapa langkah riwayat yang dikirim sekali baca — angka `BATAS_RIWAYAT_HARGA`
+ * di `menu/routes.ts`, disamakan dengan sengaja: dua layar riwayat yang
+ * memotong pada angka berbeda membuat "50 terakhir" berarti dua hal.
+ */
+const BATAS_RIWAYAT_JEJAK = 50;
 
 const BahanBody = z.object({
   slug: z.string().trim().min(1).optional(),
@@ -632,6 +652,11 @@ export const bahanRoutes = new Hono<AppEnv>()
         id: ingredients.id,
         isActive: ingredients.isActive,
         pengadaan: ingredients.pengadaan,
+        // Dibaca HANYA untuk jejak: baris arsip yang dipulihkan membawa harga
+        // lamanya, dan tanpa kedua kolom ini jejaknya cuma bisa berkata
+        // "harganya jadi sekian" tanpa pernah menyebut dari berapa.
+        hargaBeli: ingredients.hargaBeli,
+        isi: ingredients.isi,
       })
       .from(ingredients)
       .where(
@@ -694,6 +719,17 @@ export const bahanRoutes = new Hono<AppEnv>()
         .where(and(eq(ingredients.id, existing.id), eq(ingredients.companyId, auth.company_id!)))
         .returning();
       await simpanCabangProdusen(row.id, produsenIds);
+      await catatHargaBahan(db, auth.company_id!, auth.sub, "buat", [
+        {
+          ingredientId: row.id,
+          nama: row.nama,
+          satuan: row.satuan,
+          hargaLama: existing.hargaBeli,
+          hargaBaru: row.hargaBeli,
+          isiLama: existing.isi,
+          isiBaru: row.isi,
+        },
+      ]);
       return c.json(saringBahan(auth.role, toDto(row, undefined, [], produsenIds)), 200);
     }
     const kode = await resolveKodeBahan(db, auth.company_id!, body.kode, body.nama);
@@ -746,6 +782,17 @@ export const bahanRoutes = new Hono<AppEnv>()
       "ingredients_company_slug_uq",
     );
     await simpanCabangProdusen(row.id, produsenIds);
+    await catatHargaBahan(db, auth.company_id!, auth.sub, "buat", [
+      {
+        ingredientId: row.id,
+        nama: row.nama,
+        satuan: row.satuan,
+        hargaLama: null,
+        hargaBaru: row.hargaBeli,
+        isiLama: null,
+        isiBaru: row.isi,
+      },
+    ]);
     return c.json(saringBahan(auth.role, toDto(row, undefined, [], produsenIds)), 201);
   })
   /**
@@ -824,6 +871,21 @@ export const bahanRoutes = new Hono<AppEnv>()
         )
         .returning();
     });
+    await catatHargaBahan(
+      db,
+      companyId,
+      auth.sub,
+      "buat",
+      rows.map((r) => ({
+        ingredientId: r.id,
+        nama: r.nama,
+        satuan: r.satuan,
+        hargaLama: null,
+        hargaBaru: r.hargaBeli,
+        isiLama: null,
+        isiBaru: r.isi,
+      })),
+    );
     return c.json(
       { jumlah: rows.length, bahan: rows.map((r) => saringBahan(auth.role, toDto(r))) },
       201,
@@ -861,11 +923,18 @@ export const bahanRoutes = new Hono<AppEnv>()
         kode: ingredients.kode,
         slug: ingredients.slug,
         isActive: ingredients.isActive,
+        // Ikut dibaca supaya jejak impor tahu "dari berapa". Kueri ini sudah
+        // menyisir seluruh bahan perusahaan sekali; dua kolom tambahan di
+        // sini menggantikan satu SELECT per baris CSV di gelung di bawah.
+        hargaBeli: ingredients.hargaBeli,
+        isi: ingredients.isi,
       })
       .from(ingredients)
       .where(eq(ingredients.companyId, companyId));
     const byKode = new Map<string, string>();
     const bySlug = new Map<string, string>();
+    /** id → harga & isi SEBELUM impor; dipakai `terapkanKeBarisAda` menulis jejak. */
+    const lamaById = new Map(existing.map((e) => [e.id, { hargaBeli: e.hargaBeli, isi: e.isi }]));
     const byKodeMati = new Map<string, string>();
     const bySlugMati = new Map<string, string>();
     const slugDipakai = new Set<string>();
@@ -930,8 +999,9 @@ export const bahanRoutes = new Hono<AppEnv>()
       id: string,
       b: (typeof items)[number],
       pulih: boolean,
+      lama: { hargaBeli: number; isi: number } | undefined,
     ): Promise<void> => {
-      await db
+      const [row] = await db
         .update(ingredients)
         .set({
           nama: b.nama,
@@ -956,12 +1026,29 @@ export const bahanRoutes = new Hono<AppEnv>()
           ...(pulih && { isActive: true }),
           updatedAt: new Date(),
         })
-        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, companyId)));
+        .where(and(eq(ingredients.id, id), eq(ingredients.companyId, companyId)))
+        .returning();
+      // Jejak ditulis DI SINI, bukan di kedua pemanggil: gelung perbarui dan
+      // jalur balapan 23505 sama-sama lewat sini, dan menaruhnya di pemanggil
+      // membuat baris CSV yang kalah balapan diperbarui tanpa jejak.
+      if (row && lama) {
+        await catatHargaBahan(db, companyId, auth.sub, "impor", [
+          {
+            ingredientId: row.id,
+            nama: row.nama,
+            satuan: row.satuan,
+            hargaLama: lama.hargaBeli,
+            hargaBaru: row.hargaBeli,
+            isiLama: lama.isi,
+            isiBaru: row.isi,
+          },
+        ]);
+      }
     };
 
     for (const u of updateBaris) {
       try {
-        await terapkanKeBarisAda(u.id, u.item, u.pulih);
+        await terapkanKeBarisAda(u.id, u.item, u.pulih, lamaById.get(u.id));
         if (u.pulih) dipulihkan++;
         else diperbarui++;
       } catch (e) {
@@ -974,7 +1061,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         // Bahan BARU: di sinilah default dipakai — tak ada nilai lama untuk
         // dibiarkan. Ditulis eksplisit karena `BahanImportRowBody` sengaja
         // tak lagi memasangnya lewat `.default()`.
-        await db.insert(ingredients).values({
+        const [baru] = await db.insert(ingredients).values({
           companyId,
           slug,
           kode: kodes[i],
@@ -994,7 +1081,18 @@ export const bahanRoutes = new Hono<AppEnv>()
           isPackaging: b.kemasan ?? false,
           isComplement: b.complement ?? false,
           catatan: b.catatan ?? null,
-        });
+        }).returning();
+        await catatHargaBahan(db, companyId, auth.sub, "impor", [
+          {
+            ingredientId: baru.id,
+            nama: baru.nama,
+            satuan: baru.satuan,
+            hargaLama: null,
+            hargaBaru: baru.hargaBeli,
+            isiLama: null,
+            isiBaru: baru.isi,
+          },
+        ]);
         ditambah++;
       } catch (e) {
         /*
@@ -1025,7 +1123,12 @@ export const bahanRoutes = new Hono<AppEnv>()
          */
         if (bentrokUnikPada(e, "ingredients_company_slug_uq")) {
           const [kini] = await db
-            .select({ id: ingredients.id, isActive: ingredients.isActive })
+            .select({
+              id: ingredients.id,
+              isActive: ingredients.isActive,
+              hargaBeli: ingredients.hargaBeli,
+              isi: ingredients.isi,
+            })
             .from(ingredients)
             .where(and(eq(ingredients.companyId, companyId), eq(ingredients.slug, slug)));
           if (kini) {
@@ -1034,7 +1137,10 @@ export const bahanRoutes = new Hono<AppEnv>()
               continue;
             }
             try {
-              await terapkanKeBarisAda(kini.id, b, !kini.isActive);
+              await terapkanKeBarisAda(kini.id, b, !kini.isActive, {
+                hargaBeli: kini.hargaBeli,
+                isi: kini.isi,
+              });
               if (kini.isActive) diperbarui++;
               else dipulihkan++;
               continue;
@@ -1062,6 +1168,10 @@ export const bahanRoutes = new Hono<AppEnv>()
       const [lama] = await db
         .select({
           isi: ingredients.isi,
+          // Dibaca untuk jejak. `isi` sudah ada di sini karena penjaga
+          // "produksi berjalan" di bawah membutuhkannya; `hargaBeli` ikut
+          // supaya jejaknya tak perlu SELECT kedua ke baris yang sama.
+          hargaBeli: ingredients.hargaBeli,
           pengadaan: ingredients.pengadaan,
           produksiDi: ingredients.produksiDi,
           divisiProduksi: ingredients.divisiProduksi,
@@ -1209,6 +1319,17 @@ export const bahanRoutes = new Hono<AppEnv>()
             .where(eq(ingredientProduksiBranches.ingredientId, row.id))
         ).map((r) => r.branchId);
       }
+      await catatHargaBahan(db, auth.company_id!, auth.sub, "manual", [
+        {
+          ingredientId: row.id,
+          nama: row.nama,
+          satuan: row.satuan,
+          hargaLama: lama.hargaBeli,
+          hargaBaru: row.hargaBeli,
+          isiLama: lama.isi,
+          isiBaru: row.isi,
+        },
+      ]);
       const sup = await infoSupplier(auth.company_id!, [row.id]);
       return c.json(saringBahan(auth.role, toDto(row, sup.get(row.id), [], produsenIds)));
     },
@@ -1443,6 +1564,17 @@ export const bahanRoutes = new Hono<AppEnv>()
         .set({ hargaBeli, updatedAt: new Date() })
         .where(and(eq(ingredients.id, ing.id), eq(ingredients.companyId, auth.company_id!)))
         .returning();
+      await catatHargaBahan(db, auth.company_id!, auth.sub, "manual", [
+        {
+          ingredientId: row.id,
+          nama: row.nama,
+          satuan: row.satuan,
+          hargaLama: ing.hargaBeli,
+          hargaBaru: row.hargaBeli,
+          isiLama: ing.isi,
+          isiBaru: row.isi,
+        },
+      ]);
       return c.json(await riwayatHargaBahan(auth.company_id!, row));
     },
   )
@@ -1466,6 +1598,66 @@ export const bahanRoutes = new Hono<AppEnv>()
     const peta: Record<string, number> = {};
     for (const r of rows) peta[r.ingredientId] = r.jumlah;
     return c.json(peta);
+  })
+  /**
+   * RIWAYAT RESEP & HARGA satu bahan — garis waktu `ingredient_logs`.
+   *
+   * owner/admin saja, keputusan pemilik dan sejalan dengan halaman yang
+   * merendernya: angka biaya di layar Resep memang sudah ditahan dari
+   * tim/kitchen/bar (`bolehLihatBiaya`), dan riwayat yang menyebut rupiah di
+   * tiap barisnya akan membuka kembali persis yang ditutup di sana.
+   *
+   * SATU kueri tanpa join ke resep, sebab `ingredient_id` sudah berarti
+   * "garis waktu siapa" — termasuk untuk baris `harga_bahan`, yang disebar
+   * penulisnya ke tiap resep pemakai pada saat kejadian. Merakitnya saat
+   * membaca berarti menjawab "resep apa saja yang memakai bahan X pada 3 bulan
+   * lalu", dan susunan resep hari ini bukan jawaban dari pertanyaan itu.
+   */
+  .get("/:id/riwayat-resep", requireRole("owner", "admin"), async (c) => {
+    const auth = c.get("auth");
+    const id = c.req.param("id");
+    const [induk] = await db
+      .select({ id: ingredients.id })
+      .from(ingredients)
+      .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
+    if (!induk) throw new HTTPException(404, { message: "Bahan tidak ditemukan" });
+    const rows = await db
+      .select({
+        id: ingredientLogs.id,
+        jenis: ingredientLogs.jenis,
+        sebab: ingredientLogs.sebab,
+        detail: ingredientLogs.detail,
+        harga_lama: ingredientLogs.hargaLama,
+        harga_baru: ingredientLogs.hargaBaru,
+        biaya_lama: ingredientLogs.biayaLama,
+        biaya_baru: ingredientLogs.biayaBaru,
+        oleh: users.nama,
+        created_at: ingredientLogs.createdAt,
+      })
+      .from(ingredientLogs)
+      .leftJoin(users, eq(users.id, ingredientLogs.olehUserId))
+      .where(
+        and(
+          eq(ingredientLogs.companyId, auth.company_id!),
+          eq(ingredientLogs.ingredientId, id),
+        ),
+      )
+      // Pemutus seri `id`: satu simpan resep menulis DUA baris dalam satu
+      // transaksi, jadi `created_at` keduanya identik sampai mikrodetik.
+      // Tanpa pemutus, urutan keduanya ditentukan rencana kueri — dan bisa
+      // bertukar antar muat ulang di layar yang sama.
+      .orderBy(desc(ingredientLogs.createdAt), desc(ingredientLogs.id))
+      // `+ 1`: satu baris lebih untuk membedakan "tepat 50" dari "lebih".
+      .limit(BATAS_RIWAYAT_JEJAK + 1);
+    const terpotong = rows.length > BATAS_RIWAYAT_JEJAK;
+    const hasil: JejakBahanRow[] = rows.slice(0, BATAS_RIWAYAT_JEJAK).map((r) => ({
+      ...r,
+      jenis: r.jenis as JenisJejakBahan,
+      sebab: r.sebab as SebabJejakBahan,
+      created_at: r.created_at.toISOString(),
+    }));
+    const dto: JejakBahanDto = { rows: hasil, terpotong };
+    return c.json(dto);
   })
   /**
    * RESEP PRODUKSI (BOM) bahan jadi: kebutuhan bahan mentah per 1 batch (isi).
@@ -1598,7 +1790,19 @@ export const bahanRoutes = new Hono<AppEnv>()
         // resep yatim tertulis utk bahan non-produksi. FOR UPDATE menahan
         // flip paralel sampai transaksi ini selesai.
         const [indukTx] = await tx
-          .select({ pengadaan: ingredients.pengadaan })
+          .select({
+            pengadaan: ingredients.pengadaan,
+            // Lima kolom berikut dibaca untuk JEJAK, dan sengaja di sini:
+            // baris ini sudah dikunci `FOR UPDATE`, jadi nilai yang terbaca
+            // dijamin nilai yang benar-benar akan ditimpa. Membacanya di luar
+            // transaksi menyisakan jendela untuk simpan paralel, dan jejaknya
+            // akan berkata "dari Rp X" untuk X yang tak pernah ada.
+            nama: ingredients.nama,
+            satuan: ingredients.satuan,
+            isi: ingredients.isi,
+            overheadX: ingredients.overheadX,
+            hargaBeli: ingredients.hargaBeli,
+          })
           .from(ingredients)
           .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)))
           .for("update");
@@ -1648,6 +1852,51 @@ export const bahanRoutes = new Hono<AppEnv>()
               "Resep tidak bisa diubah saat masih ada produksi berjalan — selesaikan produksinya dulu",
           });
         }
+        /*
+         * Resep LAMA dibaca sebelum dihapus — satu-satunya kesempatan.
+         * `ingredient_components` ditulis hapus-lalu-sisip, jadi begitu baris
+         * di bawah berjalan tak ada lagi tempat di seluruh basis data yang
+         * tahu takaran kemarin. Itu persis alasan tabel jejak ini lahir.
+         */
+        const kompLama = await tx
+          .select({
+            inputId: ingredientComponents.inputIngredientId,
+            qty: ingredientComponents.qty,
+            nama: ingredients.nama,
+            satuan: ingredients.satuan,
+            hargaBeli: ingredients.hargaBeli,
+            isi: ingredients.isi,
+          })
+          .from(ingredientComponents)
+          .innerJoin(ingredients, eq(ingredients.id, ingredientComponents.inputIngredientId))
+          // Pengurungan ditulis di sini, bukan disimpulkan dari `id` yang
+          // sudah lolos di atas: kueri yang pengurungannya harus dicari di
+          // baris lain adalah kueri yang tinjauan berikutnya akan salah baca.
+          .where(
+            and(
+              eq(ingredients.companyId, auth.company_id!),
+              eq(ingredientComponents.ingredientId, id),
+            ),
+          );
+        const infoInput =
+          inputIds.length > 0
+            ? await tx
+                .select({
+                  id: ingredients.id,
+                  nama: ingredients.nama,
+                  satuan: ingredients.satuan,
+                  hargaBeli: ingredients.hargaBeli,
+                  isi: ingredients.isi,
+                })
+                .from(ingredients)
+                .where(
+                  and(
+                    eq(ingredients.companyId, auth.company_id!),
+                    inArray(ingredients.id, inputIds),
+                  ),
+                )
+            : [];
+        const infoById = new Map(infoInput.map((i) => [i.id, i]));
         await tx.delete(ingredientComponents).where(eq(ingredientComponents.ingredientId, id));
         if (inputIds.length > 0) {
           await tx.insert(ingredientComponents).values(
@@ -1673,6 +1922,61 @@ export const bahanRoutes = new Hono<AppEnv>()
             .set({ ...setAtur, updatedAt: new Date() })
             .where(and(eq(ingredients.id, id), eq(ingredients.companyId, auth.company_id!)));
         }
+        /*
+         * JEJAK — di dalam transaksi yang sama, karena alasan yang sama dengan
+         * takaran batch di atas: jejak yang selamat dari tulisan yang
+         * dibatalkan menceritakan perubahan yang tak pernah terjadi.
+         *
+         * DUA baris, bukan satu, dan pemisahannya disengaja. Baris `resep`
+         * membawa BIAYA batch (bergerak karena takarannya berubah); baris
+         * `harga_sendiri` dari `catatHargaBahan` membawa HARGA TERSIMPAN
+         * (bergerak hanya bila persetujuan harga dicentang). Keduanya angka
+         * yang berbeda, dan layar Resep memang menampilkannya berdampingan —
+         * memampatkannya jadi satu baris membuat "biaya turun" dan "harga
+         * diturunkan" tak bisa lagi dibedakan. `catatHargaBahan` juga yang
+         * menyebarkan akibatnya ke resep yang memakai bahan INI.
+         */
+        const kompBaru: KomponenJejak[] = [...qtyByInput].map(([inputId, qty]) => ({
+          inputId,
+          qty,
+          nama: infoById.get(inputId)?.nama ?? "",
+          satuan: infoById.get(inputId)?.satuan ?? "",
+        }));
+        const ubahResep = kalimatResep(kompLama, kompBaru, {
+          isiLama: indukTx.isi,
+          isiBaru: atur?.isi ?? indukTx.isi,
+          overheadLama: indukTx.overheadX,
+          overheadBaru: atur?.overhead_x ?? indukTx.overheadX,
+        });
+        if (ubahResep) {
+          await catatResepBahan(tx, {
+            companyId: auth.company_id!,
+            ingredientId: id,
+            detail: ubahResep,
+            biayaLama: biayaBatch(kompLama),
+            biayaBaru: biayaBatch(
+              [...qtyByInput].map(([inputId, qty]) => ({
+                qty,
+                hargaBeli: infoById.get(inputId)?.hargaBeli ?? 0,
+                isi: infoById.get(inputId)?.isi ?? 1,
+              })),
+            ),
+            hargaLama: null,
+            hargaBaru: null,
+            olehUserId: auth.sub,
+          });
+        }
+        await catatHargaBahan(tx, auth.company_id!, auth.sub, "resep", [
+          {
+            ingredientId: id,
+            nama: indukTx.nama,
+            satuan: indukTx.satuan,
+            hargaLama: indukTx.hargaBeli,
+            hargaBaru: atur?.harga_beli ?? indukTx.hargaBeli,
+            isiLama: indukTx.isi,
+            isiBaru: atur?.isi ?? indukTx.isi,
+          },
+        ]);
       });
       return c.json({ ok: true, jumlah: inputIds.length });
     },
