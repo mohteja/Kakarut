@@ -272,6 +272,52 @@ mana yang sebenarnya terpengaruh. Tiap spec tetap melempar kalimatnya sendiri.
   `re.sub` menyentuh 865 situs sekaligus. Diperiksa dengan `diff`: **tepat 18
   baris berubah**.
 
+### Ekor putaran ini: gerbang KESEGARAN bukan gerbang KEPUTUSAN
+
+Sesudah kedua repo di-push dan kedua PR ditulis, CI ponsel run #38 (commit
+fikstur putaran garis waktu, `4333bc9`) terbaca **MERAH**: `643 tests passed,
+1 failed`. Yang jatuh `kunci_kontrak_server_test.dart` — INTI — dengan dua
+nama: **`biaya_lama` dan `biaya_baru`**.
+
+Keduanya milik `JejakBahanRow`. Dari dua belas kunci DTO itu, **sepuluh** sudah
+terhitung "disentuh" lewat DTO lain — `harga_lama`/`harga_baru`/`sebab`/`oleh`/
+`created_at` dibaca `MenuPriceLogRow`, sisanya nama umum (`id` 66 kali di lib/,
+`rows` 12, `jenis` 9, `terpotong` 3, `detail` 2). Berkas keputusannya berkunci
+NAMA MEDAN, bukan pasangan `Dto|medan`. Yang tersisa dua, dan keduanya nama
+BARU sebab konsepnya baru: biaya per batch sebelum dan sesudah — justru inti
+pintunya.
+
+**Kenapa gerbang penuh di sini hijau seluruhnya.**
+`kunci-satu-kontrak.test.ts` menjangkau repo ponsel saat repo itu ada, tapi
+yang ia tagih hanya **kesegaran fikstur**: fikstur sama dengan keluaran
+pembangkit → hijau. Saya memang meregenerasi fiksturnya, jadi ia hijau. Yang
+menagih **keputusannya** ada di repo sebelah, dan repo sebelah hanya diuji CI-nya
+sendiri. Celah waktunya sempit dan mahal: kunci baru lolos gerbang penuh,
+ter-commit, ter-push, lalu memerahkan CI ponsel **sesudah** PR-nya ditulis.
+
+Kelasnya: **gerbang yang memeriksa alat ukur, bukan yang diukur.** Kesegaran
+fikstur adalah prasyarat keputusan, bukan penggantinya — dan selama keduanya
+tinggal di repo berbeda, yang hijau di sini tak menyatakan apa pun tentang yang
+di sana.
+
+Sudah terjadi **tiga kali** (CI ponsel #32, #33, #38), dan dua kali pertamanya
+sudah tercatat di ledger ini dengan kalimat "saya tak memeriksanya sebelum
+mendorong commit berikutnya" — diagnosis yang menyalahkan kebiasaan, padahal
+penyebabnya struktural. Ditutup dengan memindahkan **cermin asersinya** ke
+`kunci-satu-kontrak.test.ts`: bila repo ponsel ada, tiap kunci yang lib/-nya tak
+sentuh wajib sudah tercatat di `kunci-belum-dibaca.txt`. Bukti merah U: kedua
+baris keputusan dicabut → penjaga menyebut `biaya_baru`, `biaya_lama` persis
+seperti CI ponsel; dipulihkan byte-per-byte (`cmp`). Premisnya ikut dipaku
+(>100 berkas Dart, >500 kunci disentuh, `'nama'` terbaca) supaya sapuan yang
+rusak berbunyi, bukan lolos hampa. Bila repo ponsel tak ter-checkout — CI repo
+ini — ia melewati, bukan merah, sama seperti asersi kesegaran di sebelahnya.
+
+Yang tak ditutup, dan diakui: cermin ini hanya jalan **di mesin yang memuat
+kedua repo**. Di CI repo server ia diam. Itu memang tempat perubahan kontrak
+ditulis, jadi ia menjaga satu-satunya titik waktu yang penting — tapi seseorang
+yang mengubah `types.ts` tanpa repo ponsel di sebelahnya tetap tak akan diberi
+tahu.
+
 ## Resep & harga punya GARIS WAKTU — dan penjaga yang saya putihkan sendiri tanpa sadar — web + server — 2026-09-04
 
 - **Diminta pemilik repo**: *"di resep di edit ataupun readonly ingin ada
