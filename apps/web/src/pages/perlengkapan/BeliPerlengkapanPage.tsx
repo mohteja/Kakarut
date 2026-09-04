@@ -24,7 +24,7 @@ import { kolomBeliPerlengkapan } from "./kolom-beli-perlengkapan";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggalJam } from "../../lib/format";
 import { AreaCetak } from "../../components/AreaCetak";
 
 /**
@@ -365,7 +365,11 @@ export function BeliPerlengkapanPage() {
                   <span className="text-xs font-medium text-stone-600">🔧 {g.diprosesOleh}</span>
                 )}
                 <span className="ml-auto text-xs text-stone-400">
-                  {formatWaktu(g.waktu)}
+                  {/* Bertanggal — tabelnya (kolom-beli-perlengkapan) sudah
+                      sejak lahir; kartunya, bentuk BAWAAN, sempat tidak.
+                      Dua bentuk di halaman yang sama tak boleh menjawab beda
+                      soal faktur yang sama. */}
+                  {formatTanggalJam(g.waktu)}
                   {g.oleh ? ` · ${g.oleh}` : ""}
                 </span>
               </div>
@@ -571,7 +575,7 @@ function DetailBeliPerlengkapanModal({
           </dd>
           <dt className="text-stone-400">Waktu</dt>
           <dd className="col-span-2">
-            {formatWaktu(g.waktu)}
+            {formatTanggalJam(g.waktu)}
             {g.oleh ? ` · ${g.oleh}` : ""}
           </dd>
           {g.diprosesOleh && (
@@ -695,7 +699,9 @@ function DokumenRabPerlengkapanModal({
         <div className="text-base font-bold">📄 Dokumen RAB — Beli Perlengkapan</div>
         <div className={`text-xs ${cetak ? "" : "text-stone-500"}`}>
           {faktur.nomor && <span className="font-mono">{faktur.nomor} · </span>}
-          {formatWaktu(faktur.waktu)}
+          {/* Kepala dokumen yang DICETAK — kertas RAB tanpa tanggal tak bisa
+              diarsipkan, dan "18.42" saja tak menjawab RAB yang mana. */}
+          {formatTanggalJam(faktur.waktu)}
           {faktur.oleh && <> · dibuat {faktur.oleh}</>}
           {faktur.catatan && <> · 📝 {faktur.catatan}</>}
         </div>

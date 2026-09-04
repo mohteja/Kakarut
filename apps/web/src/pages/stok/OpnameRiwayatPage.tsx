@@ -20,7 +20,7 @@ import { ErrorText, Spinner, SpinnerAtauGalat } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api, bacaTerpotong } from "../../lib/api";
-import { formatAngka, formatWaktu } from "../../lib/format";
+import { formatAngka, formatTanggalJam } from "../../lib/format";
 import { kolomOpnameBahan, kolomOpnamePerlengkapan } from "./kolom-opname";
 
 type JenisOpname = "bahan" | "perlengkapan";
@@ -166,7 +166,10 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
                   </span>
                 )}
                 <span>
-                  {formatWaktu(data.waktu)} · {data.oleh ?? "—"}
+                  {/* Lembar detail sesi LAMA — jam tanpa tanggal di sini
+                      tak menunjuk ke hari mana pun. Tabelnya sudah bertanggal
+                      sejak putaran lalu; lembar detailnya sempat tertinggal. */}
+                  {formatTanggalJam(data.waktu)} · {data.oleh ?? "—"}
                   {data.catatan && ` · ${data.catatan}`}
                 </span>
               </div>

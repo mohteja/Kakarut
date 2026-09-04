@@ -22,7 +22,7 @@ import {
 import { SakelarTampilan, useTampilan } from "../../components/SakelarTampilan";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggalJam } from "../../lib/format";
 import {
   IKON_JALUR,
   kolomPermintaan,
@@ -420,7 +420,10 @@ export function PermintaanStokPage() {
                       sebagai medan "Catatan", di tempat yang memang berruang.
                     */}
                     <div className="mt-0.5 text-xs text-stone-500">
-                      {formatWaktu(r.waktu)}
+                      {/* Bertanggal — tabelnya (kolom-permintaan) sudah;
+                          kartunya sempat tidak. Belahan yang sama dengan
+                          Beli Perlengkapan, ditutup bersamaan. */}
+                      {formatTanggalJam(r.waktu)}
                     </div>
                   </div>
                   <span

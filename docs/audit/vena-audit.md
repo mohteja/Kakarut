@@ -50,6 +50,111 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Daftar lintas-hari yang cuma menyebut JAM — lima berkas, satu pemformat, satu ratchet — web — 2026-09-04
+
+Ekor langsung dari putaran riwayat SO. Pemilik memilih "SO dulu, sisanya
+dilaporkan"; sesudah laporan pilahannya: **"semua lintas-hari sekalian"**.
+
+### Populasi, diukur
+
+**64 panggilan `formatWaktu` di 32 berkas.** 21 berkas sudah menyebut tanggal di
+suatu tempat. Dari 11 sisanya, yang **benar-benar daftar lintas-hari** ada di 5
+berkas; 5 lainnya terkurung hari dan **dibuktikan**, bukan diandaikan:
+
+| berkas | kenapa jam-saja BENAR |
+| --- | --- |
+| `kasir/RiwayatPage` | `tanggal` state + `<input type="date">` — daftar sehari |
+| `absen/AbsenPage` | `GET /absensi` bawaannya `tanggalDi(hari ini)`; "Masuk pukul …" konfirmasi sesaat |
+| `pengaturan/MejaPage`, `MejaStatusPanel` | keadaan meja hari ini |
+| `kasir/ReceiptModal` | kertasnya bertanggal — ia **memanggil** `waktuKertasWIB` (diperiksa: 1 panggilan, bukan cuma impor) |
+
+Yang paling mendorong putaran ini: **`BeliPerlengkapanPage` — tabelnya
+bertanggal, kartunya (bentuk BAWAAN) tidak**, dan itu dari putaran saya sendiri
+(`b130755`). Tanggalnya tinggal di `kolom-beli-perlengkapan.tsx`, berkas lain,
+jadi berkas halamannya sendiri tak punya satu pun pemformat tanggal.
+`PermintaanStokPage` punya belahan yang persis sama (`kolom-permintaan.tsx`
+bertanggal, kartunya tidak).
+
+### Yang dibangun
+
+- **`formatTanggalJam`** — "4 Sep 2026 · 18.42", dirakit dari dua pemformat yang
+  sudah ada (bukan `Intl` baru): bentuk tanggal & jam tetap satu sumber.
+- **Sepuluh situs, lima berkas** → `formatTanggalJam`: kartu + detail + **kepala
+  dokumen RAB yang DICETAK** di Beli Perlengkapan (kertas tanpa tanggal tak bisa
+  diarsipkan); kartu Permintaan Stok; kedua kolom Tempat Sampah; kolom Waktu
+  buku supplier; daftar sesi opname di tab Stok Perlengkapan; kepala lembar
+  detail opname bahan. Disunting **per situs**, dan `git diff --stat` menunjukkan
+  tepat `format.ts` + 6 berkas sumber.
+- **Ratchet `waktu-tanpa-tanggal.test.ts`** — tiap berkas yang memakai
+  `formatWaktu` tanpa satu pun pemformat tanggal wajib ada di `DIPUTUSKAN`
+  dengan alasannya; dua arah (entri basi merah); PASANGAN memaku kelima berkas
+  + tiga situs BP; penggolongnya dibuktikan pada masukan sintetis.
+- **Dua lengan peramban** yang bentuknya BEDA dari tabel SO: kartu BP (bentuk
+  bawaan, konteks peramban baru = localStorage kosong, dipastikan lewat tombol
+  "🗂 Kartu"), dan modal riwayat opname di tab Stok Perlengkapan (dua klik dari
+  `/stok`; tab-nya `useState`, jadi diklik, bukan `?tab=`). Harapannya dihitung
+  dari `waktu` server.
+
+### Yang DIUKUR lalu TIDAK dibangun
+
+- **Kepala lembar detail opname PERLENGKAPAN** tak menampilkan waktu sama
+  sekali — dan `OpnamePerlengkapanDetail` memang **tak membawa `waktu`/`oleh`**.
+  Menambahkannya berarti DTO + service + kontrak + fikstur ponsel; di luar
+  putaran web-saja ini. Dicatat, tak diam-diam dilewati.
+- **Lengan kedua sempat direncanakan Tempat Sampah, lalu Kartu Supplier** —
+  keduanya dibatalkan sesudah diukur: sampah cuma 1 baris dan itu lahir dari
+  e2e gerbang (penjualan yang dihapus spec lain), buku supplier 1 baris pada 1
+  dari 8 supplier berstempel jam verify-api. Premis yang bergantung urutan spec
+  lain adalah persis kelas cacat yang tiga kali menggigit lengan resep. Dipilih
+  daftar opname perlengkapan: 7 sesi dari seed, 2 di cabang bawaan.
+- `kolom-beli-perlengkapan.tsx:64` dan `kolom-permintaan.tsx:201` **tak
+  disentuh**: sudah bertanggal, dengan gaya dua-warna yang string
+  `formatTanggalJam` tak bisa tiru.
+
+### Perangkap lingkungan: kontainer didaur ulang di tengah putaran
+
+`uptime` 5 menit; Postgres, server, dan proses latar hilang; suntingan pohon
+kerja selamat (disk). Postgres dihidupkan lewat jalur resmi repo
+(`scripts/dev-db.sh`, `pg_ctl` atas `/tmp/kakarut-pgdata` yang selamat), bukan
+perintah karangan. Gejala pertamanya token login KOSONG — mudah disalahbaca
+sebagai kuota `/auth/login` habis; yang membedakan: `curl -i` memulangkan HTTP
+000 dan soket Postgres ditolak, bukan 429.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut | penjaga yang harus menuduh |
+| --- | --- | --- |
+| EE | satu situs kartu BP kembali `formatWaktu` | PASANGAN — "kembali memanggil formatWaktu" |
+| FF | entri `MejaPage` dicabut dari `DIPUTUSKAN` | INTI, menyebut namanya |
+| GG | entri PALSU `TempatSampahPage` ditambah | RATCHET — entri basi |
+| HH | `formatTanggalJam` memulangkan jam saja, **di peramban** | kedua lengan, menyebut `"4 Sep 2026"` untuk `BP-0014` dan `OP-0008` |
+
+HH yang paling berarti: ia membuktikan kedua lengan menangkap regresi pada
+PEMFORMATNYA, bukan sekadar bentuk kode di situs pemanggil.
+
+### Cakupan yang DIAKUI tak penuh
+
+- Ratchet-nya **per berkas** — satu berkas bisa punya satu situs bertanggal dan
+  satu daftar lintas-hari tanpa tanggal, dan ia tak akan melihatnya. Kasus nyata
+  yang melahirkannya justru tertangkap karena tanggalnya tinggal di berkas lain.
+- **Fikstur gerbang tetap satu hari** — yang dibuktikan: tanggalnya dirender dan
+  cocok dengan `waktu` server; bukan bahwa dua hari berbeda terbedakan.
+- Lembar detail opname perlengkapan tetap tanpa waktu (lihat di atas).
+
+### Gerbang penuh ke-45
+
+DB nol → seed → verify-api → regen jejak → vitest → invarian → reset batas laju
+→ Playwright:
+
+| | hasil |
+| --- | --- |
+| verify-api | **3.546 lolos / 0 gagal** |
+| vitest | **241 berkas / 2.997 uji** (+1 berkas, +5 uji — tepat ratchet-nya) |
+| invarian | **27 sehat / 0 dilanggar** |
+| Playwright | **48 lolos / 0 gagal** (46 + 2 lengan putaran ini) |
+
+Hijau di jalan pertama — tak ada yang di-push sebelum itu.
+
 ## Riwayat SO tak pernah menyebut TANGGAL — dan penjaga yang menganggap `error` ADA sama dengan `error` DIPAKAI — web — 2026-09-04
 
 Diminta pemilik: *"riwayat SO bahan baku dan perlengkapan belum ada tanggal
