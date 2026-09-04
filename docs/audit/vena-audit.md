@@ -50,6 +50,231 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Riwayat SO tak pernah menyebut TANGGAL — dan penjaga yang menganggap `error` ADA sama dengan `error` DIPAKAI — web — 2026-09-04
+
+Diminta pemilik: *"riwayat SO bahan baku dan perlengkapan belum ada tanggal
+hari — juga ingin di buat tabel saja dengan kolom status"*. Bagian pertama
+CACAT, bukan selera.
+
+### Keadaan sebelumnya, diukur
+
+`OpnameRiwayatPage` merender `formatWaktu(s.waktu)` telanjang di kedua tab, dan
+`formatWaktu` di web memulangkan **jam dan menit saja**:
+
+```ts
+export function formatWaktu(iso: string): string {
+  return new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit", … }).format(…);
+}
+```
+
+Setiap sesi dari setiap hari karena itu terbaca sama — di halaman yang justru
+ada untuk menelusuri opname LAMA, dan yang sudah memasang spanduk *"yang lebih
+lama tidak ikut ditampilkan"*. Nol `formatTanggal*` di seluruh berkas.
+
+Tangkapan `error-context.md` dari lengan peramban pertama merekamnya apa
+adanya, sebelum satu baris pun diperbaiki:
+
+> `button "OP-0008 18.42 Owner Basooopa · 1 selisih Menunggu ACC"`
+
+**Aplikasi ponsel tidak punya cacat ini.** `formatWaktu` di
+`kakarut-mobile/lib/core/format.dart` memulangkan `dd/MM HH.mm`. Satu nama
+fungsi, dua klien, dua jawaban — dan yang diam hanya web. Kelas yang sama
+dengan aturan status faktur putaran lalu, hanya lebih tua.
+
+Populasi basis gerbang: 24 sesi opname bahan + 7 sesi opname perlengkapan
+(`supply_mutations` ber-`session_id`, tipe `koreksi`); lewat HTTP — yang
+terkurung cabang — 18 dan 2. Status terukur: bahan 11 menunggu / 6 disetujui /
+1 cocok; perlengkapan 1 menunggu / 1 ditolak.
+
+### Yang DIUKUR lalu TIDAK diubah
+
+Tiga hal diperiksa dan sengaja dibiarkan, supaya tak terbaca sebagai kelalaian:
+
+1. **Urutannya sudah benar.** Pemilik meminta "terbaru di atas"; kedua rute
+   sudah `desc` (`max(created_at)` di sisi bahan, `MIN(waktu)` di sisi
+   perlengkapan) dan dibuktikan lewat HTTP, bukan dibaca dari kode saja.
+2. **Dua bentuk kawat untuk medan yang sama.** `waktu` sisi bahan dikirim apa
+   adanya dari Postgres (`2026-09-04 11:42:19.803239+00`), sisi perlengkapan
+   sudah di-`toISOString()` (`2026-09-04T11:42:32.890Z`). Keduanya terurai
+   di V8 MAUPUN di `DateTime.tryParse` Dart (yang menerima spasi sebagai
+   pengganti `T`, dan offset dua-digit tanpa menit), jadi tak ada yang rusak
+   hari ini. Diseragamkan berarti memutus kontrak yang dibaca ponsel, tanpa
+   satu pun kegagalan yang menuntutnya.
+3. **`MIN(status)` di `riwayatOpnamePerlengkapan`** memulangkan status sesi
+   lewat urutan ABJAD (`disetujui` < `ditolak` < `menunggu`). Ia benar hari ini
+   **karena konstruksi**, bukan karena kebetulan: `setStatusOpnamePerlengkapan`
+   selalu mengubah SELURUH baris sesi, jadi status campur dalam satu sesi tak
+   bisa lahir. Yang rapuh bukan jawabannya melainkan alasannya — invarian itu
+   tak tertulis di mana pun.
+
+### Bukti merah yang GAGAL, dan apa yang ia buka
+
+Langkah "buktikan detektornya bisa menuduh" kali ini **tidak lolos**, dan itu
+temuan terpenting putaran ini.
+
+Saya mencabut penanganan galat sisi bahan — `<SpinnerAtauGalat>` dibuang,
+bacaan yang gagal jatuh ke tabel kosong ber-*"Belum ada riwayat opname bahan
+baku"* — lalu menjalankan seluruh sapuan `gagal-muat-bukan-kosong`. **Semuanya
+tetap hijau.**
+
+Sebabnya satu baris di `test/util/kueri-web.ts`:
+
+```ts
+if (k === "error" || k === "isError" || k === "isLoadingError") punyaGalat = true;
+…
+kelas: punyaGalat ? "GALAT" : …
+```
+
+Sebuah situs dinyatakan "sudah menangani galat" begitu `error:` muncul di
+DESTRUCTURING-nya. Apakah galat itu sampai ke mata tak pernah ditanyakan.
+
+Kelasnya persis yang baru saja ditutup di `kunci-satu-kontrak` beberapa jam
+sebelumnya: **gerbang yang memeriksa BAHANNYA ADA, bukan bahannya DIPAKAI.**
+Dua kali dalam satu hari, di dua gerbang yang tak saling kenal.
+
+Diukur sebelum diperbaiki: **93 situs** `useQuery` mengambil `error`, dan
+**nol** di antaranya membuangnya. Jadi yang dipasang RATCHET, bukan perbaikan —
+tak ada yang sedang salah, dan yang dijaga adalah bahwa besok pun tak ada.
+Batasnya ditulis: ia menuntut nama itu DISEBUT LAGI, bukan sampai ke JSX.
+Menuntut JSX akan menuduh palsu bentuk `if (error) return <p>Gagal</p>`, yang
+menangani galatnya dengan benar tanpa pernah menaruh namanya di dalam JSX.
+
+### Yang dibangun
+
+- **Tabel menggantikan kartu** (keputusan pemilik: "tabel saja"), lewat
+  `TabelResponsif` — jadi di layar sempit tiap baris tetap jadi kartu, dan
+  daftar yang bisa diklik tak berubah jadi daftar yang cuma bisa dipandang.
+- **Tanggal dan Jam di kolom sendiri-sendiri** (keputusan pemilik), lewat SATU
+  `selTanggal`/`selJam` yang dipakai kedua tab — dua salinan yang lahir kembar
+  lalu menjawab beda adalah bentuk yang sudah dua kali dibayar repo ini.
+- **Saringan status + pencarian**, keduanya hidup di **URL**: halaman ini
+  sering dimuat ulang sesudah ACC/tolak, dan saringan yang hilang saat refresh
+  membuat daftar yang tadinya TERSARING tiba-tiba terbaca sebagai daftar penuh.
+- Kepala kolom sisi perlengkapan berbunyi **"Selisih"**, bukan "Item": sisi itu
+  hanya mencatat baris berselisih, jadi angkanya menjawab pertanyaan yang
+  berbeda dari angka di tab sebelah.
+- Judul halaman jadi `<h1>`, bukan `<div>` tebal — tetangganya (Produksi,
+  Pembelian) memakai heading, dan pembaca layar tak punya cara lain menemukan
+  judul halaman ini.
+
+### Keputusan yang ditulis: pencarian yang MENGAKU cuma menjangkau sebagian
+
+Penyaringan dikerjakan **di klien**, atas potongan yang sudah dimuat (server
+memotong di 200 sesi bahan / 100 perlengkapan). Itu pilihan sadar — rutenya
+belum berhalaman, dan menambah parameter pencarian ke server berarti memutus
+kontrak yang dibaca ponsel.
+
+Tapi konsekuensinya dikatakan, bukan didiamkan: pada perusahaan yang riwayatnya
+melewati plafon, *"tidak ditemukan"* berarti *"tidak ada di 200 sesi
+terakhir"* — BUKAN *"tidak pernah ada"*. Dua kalimat itu menuntun ke keputusan
+yang berlawanan, dan yang kedua yang biasa disimpulkan orang. Spanduk
+pemotongan karena itu berubah bunyi begitu saringannya aktif.
+
+Keadaan kosongnya juga dibedakan: *"Tak ada sesi yang cocok dengan saringan
+ini"* ≠ *"Belum ada riwayat opname"*. Yang kedua adalah pernyataan tentang basis
+data, dan ia salah saat daftarnya sedang disaring.
+
+### Perangkap lingkungan yang memakan tiga jalan e2e
+
+Lengan peramban merah tiga kali berturut-turut dengan "element(s) not found",
+dan penyebabnya bukan produknya: **server men-cache `index.html` saat boot**.
+Disk sudah `index-74JzS0EZ.js`, yang tersaji masih `index-be7PRacq.js`, jadi
+peramban memuat aplikasi LAMA — kartu, bukan tabel. Itulah sebabnya skrip
+gerbang selalu build → **restart** → e2e, dan menjalankan e2e tanpa restart
+menguji bundel yang bukan yang baru saja diubah.
+
+Yang mendiagnosisnya `error-context.md`, bukan tebakan: ia merekam markup kartu
+lama apa adanya. Kebiasaan yang sama menyelamatkan putaran sebelumnya dari
+salah-diagnosis kuota login.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut | penjaga yang harus menuduh |
+| --- | --- | --- |
+| V | penanganan galat sisi bahan | **TAK ADA** — kebutaan yang membuka ratchet baru |
+| W | `selTanggal` kembali pakai `formatWaktu` | "kolom Tanggal membawa TANGGAL" (2 uji) |
+| X | kolom Status dicabut dari tab perlengkapan | "kedua tab punya Tanggal/Jam/Status" |
+| Y | spanduk berhenti mengaku pencariannya terpotong | "daftar terpotong mengaku" |
+| Z | satu `error:` diambil lalu dibuang | ratchet detektor baru — menyebut namanya |
+| AA | badge dapat keadaan kelima | "tiap keadaan bisa dicapai dari saringan" |
+| BB | `selTanggal` dicabut, **di peramban** | kedua lengan, menyebut `"4 Sep 2026"` |
+
+BB yang paling berarti: ia membuktikan lengan itu menangkap cacat yang PEMILIK
+laporkan, bukan sekadar bentuk kode yang saya sukai.
+
+### Ekor: penyaring yang ADA tapi hampir tak pernah menyaring
+
+Gerbang ke-42 hijau di tiga tahap dan merah di SATU lengan peramban —
+`resep-tampilan.spec.ts:262`, dengan sebab yang sama persis seperti dua putaran
+lalu: *"Resep tidak bisa diubah saat masih ada produksi berjalan"*. Perbaikan
+premis yang saya tulis putaran itu **tidak menahan**.
+
+Sebabnya bukan pemotongan (diukur: `/produksi?per_page=200` memulangkan 22
+baris / 15 faktur — jauh di bawah plafon). Sebabnya **cakupan cabang**:
+
+| | melihat produksi berjalan |
+| --- | --- |
+| penjaga 409 di `PUT /bahan/:id/resep` | **tanpa syarat cabang sama sekali** |
+| `GET /produksi` yang dipakai premis | **terkurung cabang** |
+
+Terukur lewat HTTP: tanpa `branch_id=all` premis melihat **10** bahan terkunci;
+dengan `branch_id=all` ia melihat **19** — persis angka SQL. Bahan yang dipilih
+gerbang ke-42 punya **6 produksi `rencana` di Central Kitchen**, dan ia termasuk
+sembilan yang tersembunyi.
+
+Jadi penyaring itu ADA, dijaga penjaga statis, dan **hampir tak pernah
+menyaring** — sebagian besar produksi memang terjadi di Central Kitchen, bukan
+di cabang bawaan. Penjaganya menuntut helper-nya *menyebut* `/produksi`; ia tak
+punya cara menanyakan apakah yang disebut itu menjawab pertanyaan yang SAMA
+dengan yang ditanyakan server.
+
+Dan begitu cakupan cabangnya benar, lengan yang sama merah LAGI — kali ini
+dengan sebab ketiga:
+
+> `Expected substring: "2000 → "` · `Received: "…daging uji66 2.000 → 7 gr…"`
+
+`inputValue()` memulangkan angka MENTAH; panelnya merender lewat `formatAngka`,
+yang mengelompokkan ribuan ala id-ID. Premisnya membandingkan keduanya
+LANGSUNG — hijau hanya selama takaran resep yang terpilih di bawah 1.000.
+Perbaikan `branch_id=all` menggeser pilihannya ke resep bertakaran 2.000, dan
+cacat yang sudah ada sejak lengan itu ditulis pun terbuka. Ditutup dengan
+memformat sisi harapannya memakai aturan yang sama, plus penjaga statis yang
+menolak perbandingan mentah kembali (bukti merah DD).
+
+Tiga kali berturut-turut premis lengan ini patah karena hal yang sama: **ia
+mengandaikan sesuatu tentang subjek yang tak pernah ia nyatakan** — mula-mula
+"resep pertama" (urutan Postgres), lalu "tak sedang diproduksi" (cabang yang
+salah), kini "takarannya kecil" (format yang tak sama). Tiap kali, subjeknya
+bergeser dan andaian yang tak tertulis itu jadi salah.
+
+**Itu kelas yang sama dengan dua temuan lain hari ini** — `kunci-satu-kontrak`
+yang menagih kesegaran bukan keputusan, dan `gagal-muat-bukan-kosong` yang
+menerima `error:` yang tak pernah dipakai. Tiga kali dalam satu hari, di tiga
+gerbang yang tak saling kenal: **penjaga yang memeriksa BAHANNYA ADA, bukan
+bahannya MENJAWAB.**
+
+Ditutup dua arah: premisnya memakai `branch_id=all` (mencerminkan kueri server),
+dan ia kini **berbunyi bila daftar produksinya terpotong** — plafon yang
+terlampaui membuat penyaringnya diam-diam kurang, dan diam adalah persis cara
+cacat ini bertahan dua putaran. Penjaga statisnya menuntut kedua hal itu; bukti
+merah CC: `branch_id=all` dicabut → penjaga menuduh dengan kalimatnya sendiri.
+
+### Cakupan yang DIAKUI tak penuh
+
+- **Fikstur gerbang hanya SATU HARI.** Seluruh sesi opname di basis uji lahir
+  di tanggal yang sama, jadi tak satu pun lengan di sini membuktikan bahwa dua
+  sesi dari HARI BERBEDA bisa dibedakan — yang dibuktikan cuma bahwa tanggalnya
+  dirender dan cocok dengan `waktu` dari server. Cacat aslinya hanya kelihatan
+  pada data lintas-hari, dan basis uji ini tak punya.
+- **~70 situs `formatWaktu` lain di web belum dipilah.** Sebagian memang benar
+  jam-saja (daftar sehari, mis. pesanan hari ini); sebagian daftar lintas-hari
+  seperti riwayat SO. Pemilik memilih "SO dulu, sisanya dilaporkan", jadi
+  daftarnya dilaporkan dan tak disentuh. Belum ada penjaga yang mencegah daftar
+  lintas-hari BARU lahir jam-saja.
+- **Ratchet `error` tak menuntut galatnya sampai ke mata**, hanya bahwa namanya
+  dipakai. Sebuah `const _ = sesiGagal;` akan memuaskannya. Itu batas yang
+  disengaja (lihat di atas), bukan yang terlewat.
+
 ## Beli Perlengkapan dapat bentuk TABEL — dan dua klien yang sudah menjawab beda soal faktur yang sama — web + server + ponsel — 2026-09-04
 
 - **Diminta pemilik repo**: *"beli perlengkapan ingin ada tabel seperti

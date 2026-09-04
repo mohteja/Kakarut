@@ -176,6 +176,35 @@ describe("lengan peramban ADA — yang cuma peramban bisa menjawab", () => {
   it("premisnya membuang resep yang produksinya BERJALAN", () => {
     // Cermin penjaga server, bukan tebakan: himpunan status yang sama.
     expect(E2E).toContain("/api/produksi?per_page=200");
+    /*
+     * `branch_id=all` — penjaga 409 di `PUT /bahan/:id/resep` menanyakan
+     * `productions` TANPA syarat cabang, sementara `GET /produksi` terkurung
+     * cabang. Versi pertama penyaring ini lupa `all`, jadi ia melihat 10 bahan
+     * terkunci dari 19 yang sebenarnya — penyaring yang ADA tapi hampir tak
+     * pernah menyaring, dan gerbang berikutnya mendarat lagi di resep terkunci.
+     */
+    expect(
+      E2E,
+      "penyaring produksi berjalan kembali terkurung cabang — server tidak",
+    ).toContain("branch_id=all");
+    // …dan pemotongan senyap daftar produksi harus BERBUNYI, bukan menyaring
+    // separuh lalu gagal di tempat lain dengan sebab yang menyesatkan.
+    expect(E2E).toContain("melewati per_page=200");
+    /*
+     * Nilai takaran DIFORMAT sebelum dibandingkan dengan teks panel.
+     * `inputValue()` memulangkan angka MENTAH ("2000"); panelnya merender lewat
+     * `formatAngka`, yang mengelompokkan ribuan ala id-ID ("2.000").
+     * Membandingkan keduanya langsung hanya hijau selama takaran resep yang
+     * terpilih di bawah 1.000 — dan pilihan itu bergeser tiap kali fikstur atau
+     * penyaring premisnya berubah.
+     */
+    expect(
+      E2E,
+      "nilai takaran dibandingkan MENTAH dengan teks panel yang terformat",
+    ).toContain('new Intl.NumberFormat("id-ID"');
+    expect(E2E, "perbandingan mentah `${semula} → ` kembali").not.toContain(
+      "toContainText(`${semula} → `)",
+    );
     expect(E2E).toContain('b.status === "rencana" || b.status === "dikerjakan"');
     expect(E2E).toContain("!terkunci.has(k)");
   });

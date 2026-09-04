@@ -153,12 +153,37 @@ async function bukaResepBerbahan(page: Page, request: APIRequestContext) {
   expect(r.ok(), `GET /bahan/resep-ringkas (${r.status()})`).toBeTruthy();
   const ringkas = (await r.json()) as Record<string, number>;
 
-  // Bahan yang produksinya masih berjalan → resepnya TERKUNCI di server.
-  const prod = await request.get(`${BASE}/api/produksi?per_page=200`, { headers: kepala });
+  /*
+   * Bahan yang produksinya masih berjalan → resepnya TERKUNCI di server.
+   *
+   * `branch_id=all`, dan itu BUKAN kehati-hatian berlebih: penjaga 409 di
+   * `PUT /bahan/:id/resep` menanyakan `productions` TANPA syarat cabang sama
+   * sekali, sementara `GET /produksi` terkurung cabang. Tanpa `all`, premis ini
+   * melihat 10 bahan terkunci padahal server melihat 19 — dan sembilan
+   * selisihnya justru yang berproduksi di Central Kitchen, tempat sebagian
+   * besar produksi memang terjadi. Versi pertama penyaring ini (putaran lalu)
+   * ditulis tanpa `all`, jadi ia menyaring hal yang nyaris tak pernah cocok
+   * dan gerbang berikutnya mendarat lagi di resep yang terkunci.
+   */
+  const prod = await request.get(`${BASE}/api/produksi?per_page=200&branch_id=all`, {
+    headers: kepala,
+  });
   expect(prod.ok(), `GET /produksi (${prod.status()})`).toBeTruthy();
-  const { rows } = (await prod.json()) as {
+  const { rows, total } = (await prod.json()) as {
     rows: { ingredient_id?: string; status: string }[];
+    total: number;
   };
+  /*
+   * Daftar yang DIPOTONG membuat penyaring ini diam-diam kurang: bahan yang
+   * terkunci di faktur ke-201 tak pernah terlihat, dan premisnya memilihnya
+   * dengan yakin. Kalau plafonnya kelak terlampaui, ia harus BERBUNYI — bukan
+   * menyaring separuh lalu gagal di tempat lain dengan sebab yang menyesatkan.
+   */
+  expect(
+    total,
+    `PREMIS: ${total} faktur produksi melewati per_page=200 — penyaring "produksi berjalan" ` +
+      `jadi tak lengkap; naikkan plafonnya atau telusuri halamannya`,
+  ).toBeLessThanOrEqual(200);
   const terkunci = new Set(
     rows
       .filter((b) => b.status === "rencana" || b.status === "dikerjakan")
@@ -297,6 +322,17 @@ test("riwayat resep tampil di mode BACA, dan Simpan menambah barisnya", async ({
     })
     .toBe(sebelum + 1);
 
-  // Isinya menyebut perubahan yang barusan dilakukan, bukan sekadar bertambah.
-  await expect(baris.first()).toContainText(`${semula} → `);
+  /*
+   * Isinya menyebut perubahan yang barusan dilakukan, bukan sekadar bertambah.
+   *
+   * NILAINYA DIFORMAT DULU, dan itu bukan kerapian: `inputValue()` memulangkan
+   * angka MENTAH ("2000") sementara panelnya merender lewat `formatAngka`, yang
+   * mengelompokkan ribuan ala id-ID ("2.000"). Membandingkan keduanya langsung
+   * hanya hijau selama takaran resep yang terpilih di bawah 1.000 — dan itu
+   * persis kenapa lengan ini baru merah sekarang: perbaikan cakupan cabang di
+   * `bukaResepBerbahan` menggeser pilihannya ke resep bertakaran 2.000.
+   */
+  const tampil = (v: string) =>
+    new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 }).format(Number(v));
+  await expect(baris.first()).toContainText(`${tampil(semula)} → `);
 });
