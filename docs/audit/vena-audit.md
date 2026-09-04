@@ -50,6 +50,92 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Resep dibuka TERKUNCI — dan "boleh mengubah" dipisahkan dari "sedang mengubah" — web — 2026-09-04
+
+- **Diminta pemilik repo**: *"resep ketika di klik ingin read only saja, dan
+  ingin ada tombol edit untuk admin dan owner"*.
+
+- **Keadaan sebelumnya**: panel detail resep langsung bisa diketik begitu
+  resepnya diklik. Satu klik nyasar di medan takaran cukup mengubah HPP
+  **setiap menu** yang memakai bahan itu — dan tak ada satu pun langkah sadar
+  di antara "membuka resep untuk melihat" dan "mengubah angkanya".
+
+- **Peran yang diminta SUDAH ADA**: `bolehUbah = role === "owner" || "admin"`
+  (`ResepPage.tsx:242`), persis dua peran yang pemilik sebut. Yang belum ada
+  tahap bacanya. Jadi putaran ini bukan menambah izin, melainkan **memisahkan
+  dua hal yang selama ini satu bendera**.
+
+- **DAN BENDERA ITU MENJAGA DUA HAL YANG BERBEDA** — ini bagian yang paling
+  mudah salah, dan yang dijaga penjaganya. `bolehUbah` menjaga afordansi
+  mengetik, TAPI JUGA kelihatan-tidaknya angka manajemen: kolom uang di daftar
+  (`kolomDaftarResep`), harga per satuan di tiap baris bahan, total bahan baku
+  sebelum overhead. Mengganti semuanya jadi `sedangUbah` akan membuat mode baca
+  ikut **menyembunyikan harga dari owner yang cuma ingin melihat** — mode baca
+  yang menyembunyikan justru yang ingin dilihat adalah mode baca yang orang
+  lewati. Yang berpindah ke `sedangUbah` hanya 12 `disabled` + tiga afordansi
+  (tambah bahan, hapus baris, peringatan takaran tak terbaca); yang menjaga
+  angka tetap `bolehUbah`.
+
+- **Dua cabang baca-saja SUDAH ADA dan tinggal dipakai ulang**: cara masak dan
+  unggah foto sudah punya render alternatif untuk peran `tim`
+  (`{bolehUbah ? <editor> : <tampilan>}`). Keduanya cukup diubah jadi
+  `sedangUbah ?` — owner/admin dalam mode baca kini memakai tampilan yang sama
+  persis dengan yang selama ini dilihat tim. **Nol markup baru** untuk dua
+  bagian terbesar panelnya.
+
+- **Keputusan pemilik, ditanyakan lebih dulu**: (a) keluar dari mode ubah
+  dengan ketikan yang belum disimpan → **konfirmasi dulu**; (b) sesudah Simpan
+  berhasil → **kembali ke tampilan baca**.
+
+  Konfirmasinya hanya muncul bila drafnya **memang berubah** — potretnya
+  diambil saat Edit ditekan, bukan saat draf disemai. Bedanya nyata: draf bisa
+  saja sudah berbeda dari server karena pembulatan saat disemai, dan bertanya
+  "buang perubahan?" kepada orang yang tak mengubah apa pun adalah cara
+  tercepat membuat konfirmasi itu ditekan tanpa dibaca.
+
+- **PINTU SAMPING ikut dijaga.** Tombol Batal bukan satu-satunya jalan keluar
+  dari mode ubah — mengklik resep lain juga. `bukaDetail` karena itu lewat
+  penjaga yang sama; tanpa itu ketikan hilang lewat pintu yang tak dijaga
+  sementara pintu depan dijaga rapi. Ini pola yang sama dengan cacat
+  "perbaikan cuma kena setengah layar" dua entri di atas, dan kali ini dicari
+  sebelum dikirim, bukan sesudah.
+
+- **Kesalahan premis di lengan e2e, ditemukan oleh merahnya sendiri.** Versi
+  pertama mengklik baris pertama tabel resep — dan gagal, sebab resep teratas
+  kebetulan **belum punya satu bahan pun**, jadi tak ada medan takaran untuk
+  diperiksa terkunci. Merahnya benar tapi menuduh fiturnya, padahal yang salah
+  pilihan fiksturnya. Diperbaiki dengan menurunkan premisnya dari server:
+  `/bahan/resep-ringkas` memulangkan peta `id → jumlah bahan`, dan yang dipakai
+  id pertama yang jumlahnya > 0.
+
+- **Batas irisan penjaga yang hampir menipu**: `butaKomentar` **mengosongkan**
+  komentar tanpa memendekkan berkasnya (posisi baris lain harus tetap), jadi
+  irisan `indexOf + 200` yang saya tulis pertama tak sampai ke `setMode` yang
+  cuma dua baris di bawahnya — terhalang blok penjelasan enam baris yang sudah
+  jadi spasi. Angka yang pas-pasan lolos hari ini lalu diam-diam berhenti
+  melihat apa pun begitu komentarnya tumbuh. Diperlebar, dan alasannya ditulis
+  di tempatnya.
+
+- **Empat bukti merah**, tiap satu dipulihkan byte-per-byte:
+
+  | | mutasi | gagal di |
+  | --- | --- | --- |
+  | A | bawaannya `"ubah"` (klik langsung bisa diketik) | bendera & bawaan |
+  | B | `sedangUbah` lupa memeriksa `bolehUbah` | bendera & bawaan |
+  | C | pintu samping tak dijaga | PINTU SAMPING |
+  | D | sesudah simpan tetap terbuka | terkunci lagi sesudah simpan |
+
+  B layak disebut: tanpa `bolehUbah`, peran non-manajemen bisa membuka mode
+  ubah lewat keadaan lokal — dan seluruh medan yang tadinya `disabled` karena
+  peran jadi bisa diketik. Server tetap menolaknya, tapi layar yang menawarkan
+  tombol yang selalu ditolak adalah layar yang berbohong.
+
+- **Gerbang penuh**: verify-api **3.517/0** (nol perubahan server), npm test
+  **237 berkas / 2.894 uji**, invarian **27/27**, Playwright **40 lolos**
+  (dari 38). Tanpa rilis.
+
+---
+
 ## RILIS 2026-09-04 — tiga putaran tayang, dan satu alarm palsu yang saya bunyikan sendiri — web + ponsel — 2026-09-04
 
 - **Diminta pemilik**: *"rilis"*. Aturan berdirinya ("jangan dulu rilis apapun

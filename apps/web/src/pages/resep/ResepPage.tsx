@@ -239,7 +239,35 @@ export function ResepPage() {
   const queryClient = useQueryClient();
   const { auth } = useAuth();
   const role = auth?.user.role;
+  /**
+   * BOLEH mengubah (peran) — TERPISAH dari SEDANG mengubah (mode layar).
+   *
+   * `bolehUbah` juga menjaga hal yang bukan penyuntingan: kolom uang di daftar,
+   * harga per satuan di baris bahan, tab Arsip. Itu soal "boleh melihat angka
+   * manajemen", bukan "boleh mengetik" — jadi keduanya tak boleh dipadatkan
+   * jadi satu bendera.
+   */
   const bolehUbah = role === "owner" || role === "admin";
+  /*
+   * KLIK RESEP = BACA SAJA, atas permintaan pemilik repo (2026-09-04).
+   *
+   * Sebelumnya panel detail langsung bisa diketik begitu resepnya diklik, jadi
+   * satu klik nyasar di medan takaran sudah cukup mengubah HPP tanpa niat.
+   * Sekarang keadaan DIAM halaman ini selalu terkunci; mengetik menuntut satu
+   * tindakan sadar lebih dulu.
+   */
+  const [mode, setMode] = useState<"lihat" | "ubah">("lihat");
+  const sedangUbah = bolehUbah && mode === "ubah";
+  /*
+   * Potret draf saat mode ubah DIBUKA — bukan saat draf disemai.
+   *
+   * Yang ingin diketahui bukan "draf ini beda dari server?" melainkan "ada yang
+   * diketik SEJAK menekan Edit?". Keduanya berbeda: draf bisa saja sudah
+   * berbeda dari server karena pembulatan saat disemai, dan bertanya "buang
+   * perubahan?" pada orang yang tak mengubah apa pun adalah cara tercepat
+   * membuat konfirmasi itu diabaikan.
+   */
+  const cadanganDraf = useRef<string | null>(null);
   // daftar cabang toko aktif — pilihan "cabang produsen" saat produksi di cabang
   const { cabang } = useBranch();
   const cabangStore = cabang.filter((b) => b.is_active && b.tipe === "store");
@@ -300,7 +328,70 @@ export function ResepPage() {
   // tautan "📖 resep" di faktur produksi langsung membuka detail.
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("bahan");
-  const bukaDetail = (id: string | null) => setSearchParams(id ? { bahan: id } : {});
+  /** Potret draf sekarang — pembanding untuk "ada yang diketik?". */
+  const potretDraf = () => JSON.stringify({ resep, langkah, atur, foto });
+  const adaPerubahan = () =>
+    cadanganDraf.current !== null && cadanganDraf.current !== potretDraf();
+
+  const mulaiUbah = () => {
+    cadanganDraf.current = potretDraf();
+    setMode("ubah");
+  };
+
+  /** Kembali ke tampilan baca, draf dipulihkan ke keadaan saat Edit ditekan. */
+  const kunciLagi = () => {
+    const potret = cadanganDraf.current;
+    if (potret) {
+      const d = JSON.parse(potret) as {
+        resep: ResepDraft[];
+        langkah: LangkahDraft[];
+        atur: PengaturanBatch | null;
+        foto: { hasil: string | null; packing: string | null };
+      };
+      setResep(d.resep);
+      setLangkah(d.langkah);
+      setAtur(d.atur);
+      setFoto(d.foto);
+    }
+    cadanganDraf.current = null;
+    setMode("lihat");
+  };
+
+  /**
+   * Keluar dari mode ubah — BERTANYA DULU bila memang ada yang diketik.
+   *
+   * Ditanyakan ke pemilik repo dan ia memilih konfirmasi: yang sudah mengetik
+   * takaran sepuluh bahan tak boleh kehilangannya karena satu klik nyasar.
+   * Tapi hanya bila drafnya BENAR-BENAR berubah — konfirmasi yang muncul juga
+   * saat tak ada yang diubah adalah konfirmasi yang orang belajar menekan
+   * "OK" tanpa membaca.
+   */
+  const batalUbah = () => {
+    if (
+      adaPerubahan() &&
+      !confirm("Ada perubahan yang belum disimpan. Buang perubahan itu?")
+    )
+      return;
+    kunciLagi();
+  };
+
+  /*
+   * Pindah resep saat sedang mengubah lewat penjaga yang SAMA — kalau tidak,
+   * ketikan hilang lewat pintu samping (klik baris lain) sementara pintu depan
+   * (tombol Batal) menjaganya.
+   */
+  const bukaDetail = (id: string | null) => {
+    if (mode === "ubah") {
+      if (
+        adaPerubahan() &&
+        !confirm("Ada perubahan yang belum disimpan. Buang perubahan itu?")
+      )
+        return;
+      cadanganDraf.current = null;
+      setMode("lihat");
+    }
+    setSearchParams(id ? { bahan: id } : {});
+  };
   const dipilih = produksi.find((b) => b.id === selectedId) ?? null;
 
   // Katalog menu — hanya untuk memberi tahu BERAPA menu yang HPP-nya ikut
@@ -563,6 +654,15 @@ export function ResepPage() {
       queryClient.invalidateQueries({ queryKey: ["bahan"] });
       queryClient.invalidateQueries({ queryKey: ["menu"] }); // HPP bisa berubah
       queryClient.invalidateQueries({ queryKey: ["stok"] });
+      /*
+       * KEMBALI KE TAMPILAN BACA — pilihan pemilik repo. Simpan = selesai,
+       * jadi keadaan diam halaman ini selalu terkunci dan tak ada resep yang
+       * tertinggal terbuka sesudah orangnya beranjak. `cadanganDraf`
+       * dikosongkan tanpa memulihkan apa pun: yang di layar sekarang justru
+       * yang baru saja tersimpan.
+       */
+      cadanganDraf.current = null;
+      setMode("lihat");
     },
     onError: () => {
       // Sebagian rantai bisa saja sudah tersimpan sebelum yang gagal — refresh.
@@ -944,7 +1044,7 @@ export function ResepPage() {
                             }}
                             placeholder="— pilih bahan —"
                             className="flex-1"
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                           />
                           <input
                             /* Takaran resep: pecahan adalah normal ("0,5" kg)
@@ -962,7 +1062,7 @@ export function ResepPage() {
                             }}
                             placeholder="qty"
                             className="w-24 shrink-0 rounded-lg border border-stone-300 px-2 py-2 text-sm focus:border-orange-500 focus:outline-none"
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                             required
                           />
                           <span className="w-12 shrink-0 text-xs text-stone-500">
@@ -983,7 +1083,7 @@ export function ResepPage() {
                             </>
                           )}
                           <span className="w-6 shrink-0 text-center">
-                            {bolehUbah && (
+                            {sedangUbah && (
                               <button
                                 type="button"
                                 onClick={() => setResep(resep.filter((_, j) => j !== i))}
@@ -1018,7 +1118,7 @@ export function ResepPage() {
                     </div>
                   )}
 
-                  {bolehUbah && (
+                  {sedangUbah && (
                     <button
                       type="button"
                       onClick={() => setResep([...resep, { ingredient_id: "", qty: "" }])}
@@ -1050,14 +1150,14 @@ export function ResepPage() {
                               value={atur.isi}
                               onChange={(e) => setAtur({ ...atur, isi: e.target.value })}
                               className={inputClass}
-                              disabled={!bolehUbah}
+                              disabled={!sedangUbah}
                               aria-label="Isi per batch"
                             />
                             <SatuanSelect
                               value={atur.satuan}
                               onChange={(v) => setAtur({ ...atur, satuan: v })}
                               selectClassName={`${inputClass} max-w-28`}
-                              disabled={!bolehUbah}
+                              disabled={!sedangUbah}
                               aria-label="Satuan batch"
                             />
                           </div>
@@ -1072,7 +1172,7 @@ export function ResepPage() {
                             value={atur.overhead}
                             onChange={(e) => setAtur({ ...atur, overhead: e.target.value })}
                             className={inputClass}
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                             aria-label="Overhead biaya"
                           />
                           <p className="mt-1 text-xs text-stone-500">
@@ -1090,7 +1190,7 @@ export function ResepPage() {
                             value={atur.stokMin}
                             onChange={(e) => setAtur({ ...atur, stokMin: e.target.value })}
                             className={inputClass}
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                             aria-label="Stok minimum Central Kitchen"
                           />
                         </div>
@@ -1106,7 +1206,7 @@ export function ResepPage() {
                               setAtur({ ...atur, stokMinToko: e.target.value })
                             }
                             className={inputClass}
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                             aria-label="Stok minimum toko"
                           />
                           <p className="mt-1 text-xs text-stone-500">
@@ -1123,7 +1223,7 @@ export function ResepPage() {
                             value={atur.masaSimpan}
                             onChange={(e) => setAtur({ ...atur, masaSimpan: e.target.value })}
                             className={inputClass}
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                             aria-label="Masa simpan hasil produksi (hari)"
                           />
                           <p className="mt-1 text-xs text-stone-500">
@@ -1141,7 +1241,7 @@ export function ResepPage() {
                             value={atur.leadTime}
                             onChange={(e) => setAtur({ ...atur, leadTime: e.target.value })}
                             className={inputClass}
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                             aria-label="Lama produksi / lead time (hari)"
                           />
                           <p className="mt-1 text-xs text-stone-500">
@@ -1162,7 +1262,7 @@ export function ResepPage() {
                               })
                             }
                             className={inputClass}
-                            disabled={!bolehUbah}
+                            disabled={!sedangUbah}
                             aria-label="Lokasi produksi"
                           >
                             <option value="ck">Central Kitchen (dikirim ke cabang)</option>
@@ -1186,7 +1286,7 @@ export function ResepPage() {
                                   })
                                 }
                                 className={inputClass}
-                                disabled={!bolehUbah}
+                                disabled={!sedangUbah}
                                 aria-label="Divisi produksi"
                               >
                                 <option value="kitchen">Kitchen (dapur)</option>
@@ -1216,7 +1316,7 @@ export function ResepPage() {
                                     <input
                                       type="checkbox"
                                       checked={atur.produksiBranchIds.includes(b.id)}
-                                      disabled={!bolehUbah}
+                                      disabled={!sedangUbah}
                                       onChange={(e) =>
                                         setAtur({
                                           ...atur,
@@ -1300,7 +1400,7 @@ export function ResepPage() {
                     <div className="mb-2 text-sm font-semibold text-stone-700">
                       👨‍🍳 Cara Masak
                     </div>
-                    {bolehUbah ? (
+                    {sedangUbah ? (
                       <>
                         <div className="space-y-3">
                           {langkah.map((l, i) => (
@@ -1444,7 +1544,7 @@ export function ResepPage() {
                           <label className="mb-1 block text-xs font-medium text-stone-500">
                             {label}
                           </label>
-                          {bolehUbah ? (
+                          {sedangUbah ? (
                             <ImageUpload
                               value={foto[kunci]}
                               /*
@@ -1490,7 +1590,7 @@ export function ResepPage() {
                     </div>
                   </div>
 
-                  {bolehUbah && qtyTerbuang.length > 0 && (
+                  {sedangUbah && qtyTerbuang.length > 0 && (
                     <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
                       Takaran pada <b>{qtyTerbuang.join(", ")}</b> belum terbaca sebagai angka
                       lebih dari 0 — tulis seperti <b>0,25</b> atau <b>100</b>. Tanpa itu
@@ -1498,7 +1598,23 @@ export function ResepPage() {
                       kurang hitung.
                     </div>
                   )}
-                  {bolehUbah && (
+                  {/*
+                    TOMBOL EDIT — hanya owner/admin, dan hanya saat terkunci.
+                    Peran lain tak pernah melihatnya: bagi mereka halaman ini
+                    memang cuma baca, dan tombol yang selalu menolak lebih buruk
+                    daripada tombol yang tak ada.
+                  */}
+                  {bolehUbah && !sedangUbah && (
+                    <div className="mt-4 flex items-center gap-3">
+                      <button type="button" onClick={mulaiUbah} className={btnPrimary}>
+                        ✏️ Edit resep
+                      </button>
+                      <span className="text-xs text-stone-400">
+                        Resep dikunci supaya tak berubah karena klik yang tak disengaja.
+                      </span>
+                    </div>
+                  )}
+                  {sedangUbah && (
                     <div className="mt-4 flex items-center gap-3">
                       <button
                         onClick={() => simpan.mutate()}
@@ -1506,6 +1622,14 @@ export function ResepPage() {
                         className={btnPrimary}
                       >
                         Simpan Resep
+                      </button>
+                      <button
+                        type="button"
+                        onClick={batalUbah}
+                        disabled={simpan.isPending}
+                        className={btnSecondary}
+                      >
+                        Batal
                       </button>
                       {simpan.isSuccess && !simpan.isPending && (
                         <span className="text-sm font-medium text-green-600">✓ Tersimpan</span>

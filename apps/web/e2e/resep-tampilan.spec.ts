@@ -23,8 +23,8 @@
  * (IP + email) tiap 5 menit dan suite ini duduk persis di langit-langit itu.
  * Alasan lengkapnya ada di `mutasi-gagal-terlihat.spec.ts`.
  */
-import { expect, test } from "@playwright/test";
-import { masukLewatSesi, OWNER_EMAIL, OWNER_PASS } from "./util";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { BASE, masukLewatSesi, OWNER_EMAIL, OWNER_PASS, sesiApi } from "./util";
 
 const IKON = "🔳 Ikon";
 const DAFTAR = "☰ Daftar";
@@ -101,4 +101,101 @@ test("resep: bentuk daftar bertahan sesudah muat ulang, dan barisnya membuka res
   await page.getByRole("button", { name: IKON }).click();
   await page.reload();
   await expect(page.getByRole("button", { name: IKON })).toHaveAttribute("aria-pressed", "true");
+});
+
+
+/*
+ * RESEP DIBUKA TERKUNCI, DAN EDIT ADALAH TINDAKAN SADAR.
+ *
+ * Diminta pemilik repo: *"resep ketika di klik ingin read only saja, dan ingin
+ * ada tombol edit untuk admin dan owner"*. Sebelumnya panel detail langsung
+ * bisa diketik begitu resepnya diklik — satu klik nyasar di medan takaran
+ * sudah cukup mengubah HPP seluruh menu yang memakai bahan itu.
+ *
+ * Kenapa lengan PERAMBAN, bukan penjaga statis: yang dijanjikan bukan
+ * "sumbernya menyebut `sedangUbah`" melainkan "medannya benar-benar tak bisa
+ * diketik saat halaman dibuka". Atribut `disabled` yang terpasang di JSX tapi
+ * tertimpa di tempat lain tetap lolos pembacaan sumber; ia tak lolos ini.
+ */
+
+/**
+ * Buka resep yang BENAR-BENAR PUNYA BAHAN, id-nya dari server.
+ *
+ * Versi pertama lengan ini mengklik baris pertama tabel dan gagal di premisnya
+ * — resep teratas kebetulan belum punya satu bahan pun, jadi tak ada medan
+ * takaran untuk diperiksa terkunci. Merahnya benar tapi menuduh fiturnya,
+ * padahal yang salah pilihan fiksturnya. `/bahan/resep-ringkas` memulangkan
+ * peta `id → jumlah bahan`; yang dipakai id pertama yang jumlahnya > 0.
+ */
+async function bukaResepBerbahan(page: Page, request: APIRequestContext) {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const r = await request.get(`${BASE}/api/bahan/resep-ringkas`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(r.ok(), `GET /bahan/resep-ringkas (${r.status()})`).toBeTruthy();
+  const ringkas = (await r.json()) as Record<string, number>;
+  const id = Object.keys(ringkas).find((k) => (ringkas[k] ?? 0) > 0);
+  expect(id, "PREMIS: butuh satu resep yang punya bahan").toBeTruthy();
+  await page.goto(`/resep?bahan=${id}`);
+  const takaran = page.getByPlaceholder("qty").first();
+  await expect(takaran, "PREMIS: panel resepnya terbuka & punya baris bahan").toBeVisible({
+    timeout: 10_000,
+  });
+  return takaran;
+}
+
+test("resep dibuka TERKUNCI, dan tombol Edit yang membukanya", async ({ page, request }) => {
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  const takaran = await bukaResepBerbahan(page, request);
+
+  // INTI 1: keadaan diam halaman ini TERKUNCI, dan tombol simpan tak ada.
+  await expect(takaran).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Simpan Resep" })).toHaveCount(0);
+  const tombolEdit = page.getByRole("button", { name: /Edit resep/ });
+  await expect(tombolEdit).toBeVisible();
+
+  // INTI 2: Edit membukanya — medannya bisa diketik, Simpan & Batal muncul.
+  await tombolEdit.click();
+  await expect(takaran).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Simpan Resep" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Batal" })).toBeVisible();
+  await expect(tombolEdit).toHaveCount(0);
+
+  /*
+   * INTI 3: Batal TANPA mengetik apa pun tidak bertanya — konfirmasi yang
+   * muncul juga saat tak ada yang diubah adalah konfirmasi yang orang belajar
+   * menekan "OK" tanpa membaca. Dialog apa pun di sini = merah.
+   */
+  page.on("dialog", (d) => {
+    throw new Error(`Batal bertanya padahal tak ada yang diketik: "${d.message()}"`);
+  });
+  await page.getByRole("button", { name: "Batal" }).click();
+  await expect(takaran).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Edit resep/ })).toBeVisible();
+});
+
+test("perubahan yang belum disimpan tak hilang tanpa ditanya", async ({ page, request }) => {
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  const takaran = await bukaResepBerbahan(page, request);
+  await page.getByRole("button", { name: /Edit resep/ }).click();
+  await expect(takaran).toBeEnabled();
+  const semula = await takaran.inputValue();
+  await takaran.fill("123,45");
+
+  // Batal SESUDAH mengetik → wajib bertanya, dan menolak = tetap di mode ubah.
+  let ditanya = 0;
+  page.once("dialog", (d) => {
+    ditanya += 1;
+    void d.dismiss();
+  });
+  await page.getByRole("button", { name: "Batal" }).click();
+  expect(ditanya, "Batal membuang ketikan tanpa bertanya").toBe(1);
+  await expect(takaran).toBeEnabled();
+  await expect(takaran).toHaveValue("123,45");
+
+  // Menerima → draf dipulihkan ke nilai saat Edit ditekan, panel terkunci lagi.
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Batal" }).click();
+  await expect(takaran).toBeDisabled();
+  await expect(takaran).toHaveValue(semula);
 });
