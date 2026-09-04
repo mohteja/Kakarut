@@ -167,12 +167,29 @@ export function kolomPermintaan(opsi: OpsiKolomPermintaan): KolomTabel<Permintaa
               </span>
             )}
           </div>
-          {/* Ringkasan menu ("50× BASOAC, 30× PYO") IKUT — ia satu-satunya
-              petunjuk APA yang diminta, dan tabel tanpanya memaksa orang
-              membuka fakturnya untuk tahu. */}
-          {r.catatan && (
-            <div className="truncate pt-0.5 text-xs text-stone-500">{r.catatan}</div>
-          )}
+          {/*
+            `catatan` ("Rencana dari menu: 10× PBA., 10× PBB., 10× PBC., …")
+            SENGAJA TIDAK DIRENDER DI SINI — dibuang atas keputusan pemilik
+            repo, 2026-09-04, dengan dua alasan yang keduanya benar.
+
+            ISINYA kurang informatif: ia daftar KODE menu mentah yang bisa
+            memuat puluhan entri, dan tak seorang pun membaca tabel untuk
+            memindainya. Yang mau tahu isi permintaannya membuka fakturnya.
+
+            BENTUKNYA merusak seluruh baris, dan di sinilah saya keliru:
+            `truncate` (`white-space: nowrap` + `overflow: hidden`) TIDAK
+            memotong apa pun di dalam sel `<table>` ber-layout otomatis. Lebar
+            kolom di sana dihitung dari lebar-konten-minimum isinya, dan teks
+            `nowrap` lebar minimumnya adalah PANJANG PENUHNYA — jadi `w-52`
+            pada `<th>` cuma usulan, dan kolomnya melar sepanjang catatannya.
+            Terlihat di layar pemilik: kolom ISI terpotong di tepi kanan
+            ("Diteri cabar…", "Sele…") dan kolom Nilai/Orang/Aksi terdorong
+            keluar layar sama sekali.
+
+            Kalau kelak ada yang mau memasukkannya lagi: `truncate` saja tak
+            cukup — tabelnya perlu `tetap` (`table-layout: fixed`, seperti
+            `MenuListPage`), atau teksnya diberi `max-w-*` yang eksplisit.
+          */}
         </div>
       ),
     },

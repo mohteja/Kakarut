@@ -410,9 +410,17 @@ export function PermintaanStokPage() {
                         </span>
                       )}
                     </div>
+                    {/*
+                      `catatan` ikut dibuang dari KARTU, bukan cuma dari tabel
+                      (keputusan pemilik repo, 2026-09-04). Bentuk kartu adalah
+                      BAWAANNYA — membuangnya di tabel saja berarti orang tetap
+                      melihat dinding kode yang sama persis saat membuka
+                      halamannya, dan dua bentuk jadi berselisih soal medan yang
+                      sama. Isinya tetap ada di halaman dokumen fakturnya,
+                      sebagai medan "Catatan", di tempat yang memang berruang.
+                    */}
                     <div className="mt-0.5 text-xs text-stone-500">
                       {formatWaktu(r.waktu)}
-                      {r.catatan && ` · ${r.catatan}`}
                     </div>
                   </div>
                   <span

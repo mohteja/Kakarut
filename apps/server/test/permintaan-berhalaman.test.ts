@@ -315,6 +315,33 @@ describe("web: sakelar, ubin, dan tautan yang menunjuk fakturnya", () => {
     expect(HAL).not.toMatch(/\? "🏭"/);
   });
 
+  it("ringkasan menu (`catatan`) TAK dirender di daftar — dua bentuk", () => {
+    /*
+     * Dibuang atas keputusan pemilik repo 2026-09-04, dan dijaga di sini
+     * karena dua sebabnya berbeda dan keduanya mudah dilupakan.
+     *
+     * ISINYA: "Rencana dari menu: 10× PBA., 10× PBB., 10× PBC., …" — daftar
+     * kode menu mentah yang bisa memuat puluhan entri. Tak seorang pun
+     * memindai tabel untuk membacanya.
+     *
+     * BENTUKNYA: `truncate` TIDAK memotong apa pun di sel `<table>`
+     * ber-layout otomatis — lebar kolom di sana dihitung dari lebar-konten
+     * -minimum, dan teks `nowrap` lebar minimumnya adalah panjang penuhnya.
+     * Akibatnya terlihat di layar pemilik: kolom Isi terpotong di tepi kanan
+     * dan Nilai/Orang/Aksi terdorong keluar layar. Terukur sesudah dibuang:
+     * kolom Dokumen 95px, tabel utuh 1.052px, kedelapan kolom muat.
+     *
+     * Isinya tetap hidup di halaman dokumen fakturnya sebagai medan
+     * "Catatan" — tempat yang memang berruang. Jadi yang dijaga di sini
+     * BUKAN "catatan tak boleh ada di mana pun", melainkan "ia tak dirender
+     * di DAFTAR", dan asersi terakhir memakukan bahwa rumahnya masih ada.
+     */
+    expect(HAL, "kartu merender catatan lagi").not.toContain("r.catatan");
+    expect(KOLOM, "tabel merender catatan lagi").not.toContain("r.catatan");
+    const DOK = baca("../../web/src/pages/produksi/FakturDetailPage.tsx");
+    expect(DOK, "rumahnya di halaman dokumen ikut hilang").toContain('k: "Catatan"');
+  });
+
   it("label tahap per jalur satu rumah, dipakai kartu DAN tabel", () => {
     // Sempat ada dua terner byte-identik (`Bagian` dan kolom tabel). Dua
     // salinan aturan label = kartu dan tabel bisa menyebut tahap yang sama
