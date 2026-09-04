@@ -25,6 +25,104 @@ tanpa akses repo server.
 
 ---
 
+## 🔴 `GET /rekomendasi/permintaan` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`
+
+🔴 **WAJIB** — dan ini satu-satunya entri yang benar-benar MEMATAHKAN kode yang
+sudah ada. `operasional_repository.dart` menulis `as List` pada balasannya;
+sesudah perubahan ini balasannya `Map`, jadi layar Permintaan Stok melempar
+saat runtime — bukan saat kompilasi.
+
+**Sudah dikerjakan di repo ponsel pada putaran yang sama** (cabang `claude`):
+`getPermintaan()` membaca `.rows`, model `PermintaanStokDaftar` ditambahkan,
+dan kedua lencana Beranda/Kasir beralih ke `ringkas.berjalan`. Entri ini tetap
+🔴 supaya urutan rilisnya tak salah dibaca — lihat "Urutan rilis" di bawah.
+
+```
+GET /api/rekomendasi/permintaan?page=1&per_page=20
+  → 200 { "rows": PermintaanStokRow[], "total": 24, "page": 1,
+          "per_page": 20,
+          "ringkas": { "berjalan": 17, "selesai": 7, "selesai_ada_ditolak": 0 } }
+```
+
+**Bentuk tiap entri `rows[]` TIDAK berubah** — tak ada medan yang hilang, tak
+ada yang berganti nama. Yang berubah hanya pembungkusnya.
+
+**Kenapa.** Rutenya menarik SELURUH riwayat permintaan perusahaan ke satu
+balasan — tak ada `page`/`per_page` sama sekali — lalu klien mengurut dan
+mengiris sendiri. Terukur 2026-09-03 di basis data uji: **24 permintaan =
+11.790 byte**, dan tak ada cara memintanya lebih kecil; ia tumbuh seumur usaha
+buka. Pengurutan "yang belum selesai dulu" juga hidup di klien, jadi tiap klien
+memutuskannya sendiri.
+
+**`per_page` bawaan 20, maksimum 200.** Klien yang tak punya kendali halaman
+WAJIB mengirim `per_page` besar dan mengaku bila masih kurang — daftar yang
+diam-diam berhenti di 20 membuat orang mengira permintaan lamanya sudah tak
+ada. Aplikasi ini memakai `per_page=200` + baris "Menampilkan N dari M".
+
+**`ringkas` dihitung SERVER atas SELURUH populasi**, bukan atas `rows`. Jangan
+menjumlahkannya sendiri dari halaman yang tampil: daftarnya menaruh yang belum
+selesai lebih dulu, jadi hitungan sendiri akan berbunyi "0 selesai" selamanya.
+Ketiganya partisi — `berjalan + selesai + selesai_ada_ditolak == total`.
+
+**Sekalian diperbaiki di ponsel:** lencana "permintaan berjalan" di Beranda dan
+Kasir dulu menyaring `rows` sendiri, dan penyaringnya hanya melihat
+`kirim`/`produksi`/`beli`/`beli_produksi` — permintaan yang sisa pekerjaannya
+ada di `produksi_cabang` atau `beli_perlengkapan` **tidak terhitung**.
+Keduanya kini memakai `ringkas.berjalan`.
+
+**Urutan rilis — ini bagian yang penting.** Server dan aplikasi harus tayang
+BERSAMAAN. APK lama + server baru = layar Permintaan Stok gagal; APK baru +
+server lama = `rows` kosong. Keduanya masih di cabang kerja masing-masing dan
+belum dirilis.
+
+---
+
+## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya
+
+🟢 **BARU** — tak ada yang berubah pada rute lama. `GET /produksi` dan
+`GET /pembelian` tetap sama persis: query, bentuk baris, `ringkas`, semuanya.
+Rute ini tambahan, dan mobile boleh mengabaikannya sampai memang butuh.
+
+```
+GET /api/produksi/faktur/<uuid>    → 200 { "rows": StokMasukRow[] }
+GET /api/pembelian/faktur/<uuid>   → 200 { "rows": StokMasukRow[] }
+                                   → 404 { "error": "Faktur tidak ditemukan" }
+```
+
+**Kenapa ada.** Detail satu faktur sampai sekarang hanya bisa dirakit dari
+baris-baris yang sudah dimuat halaman riwayat. Itu memaksa siapa pun yang ingin
+membuka SATU faktur untuk menyisir daftarnya lebih dulu: `GET /produksi`
+berhalaman 20 dan **tak punya saringan `faktur_id` sama sekali** (parameternya
+cuma `branch_id`, `dari`, `sampai`, `tanggal`, `page`, `per_page`). Terukur
+2026-09-03 di basis data uji: **62 faktur, 4 halaman @ ~43.880 byte** —
+sementara rute ini memulangkan **9.729 byte** untuk faktur yang dituju.
+
+**`rows` bentuknya IDENTIK dengan `GET /{mod}`** — bukan "mirip". Kueri,
+join, dan pengayaannya (rak simpan, `qty_teks`, batch) satu fungsi yang sama di
+server, dan itu dipaku uji. Jadi kode pengelompokan faktur yang sudah ada di
+klien bisa dipakai apa adanya atas balasan ini; tak ada DTO baru, tak ada kunci
+kontrak baru.
+
+**Gerbangnya juga sama, dan ini yang penting kalau layar ini dibawa ke ponsel:**
+perusahaan, `deleted_at`, tipe, saringan divisi untuk role `kitchen`/`bar`, dan
+penyaring faktur transfer. Cabangnya diambil dari **token**, bukan query —
+tidak ada `?branch_id=` di rute ini. Untuk role terikat cabang (`cashier`,
+`tim`) barisnya harus menyentuh cabangnya (`branch_id`, `dari_branch_id`, atau
+`asal_branch_id` — dua yang terakhir supaya faktur yang sudah dikirim tak
+hilang dari mata CK); untuk owner/admin cabangnya tidak menyempit.
+
+**Satu `404` untuk tiga sebab** — tak ada, bukan milik perusahaan ini, atau di
+luar jangkauan peran/cabang ini. `fakturId` yang bukan uuid juga `404`, bukan
+`400`. Jangan bercabang pada bedanya: tak ada bedanya, dan itu disengaja
+(membedakannya memberi tahu penebak URL bahwa fakturnya ada).
+
+**Yang perlu dikerjakan di aplikasi ponsel:** tidak ada, kecuali memang mau
+punya layar "buka satu faktur dari nomornya". Kalau iya, rute ini
+menggantikan pola "tarik daftar lalu cari di klien" yang tak bisa benar untuk
+faktur di halaman ke-4.
+
+---
+
 ## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)
 
 🟡 **PERLU DICEK** — status **tidak berubah** (tetap `401` pada keempat
@@ -90,6 +188,8 @@ tetap membalas `200 { ok: true }` yang identik untuk alamat dikenal maupun
 tidak. Pintu itu tak berpassword sama sekali; membocorkan keterdaftaran di sana
 berarti memberikannya cuma-cuma, tanpa batas laju per akun yang menahan.
 
+**Sudah di-merge ke production.**
+
 ---
 
 ## `GET /produksi` & `/pembelian` memulangkan `ringkas` — antrean pengadaan tanpa menghitung sendiri
@@ -137,6 +237,8 @@ Perhatikan `menunggu`: label produksi untuk tahap itu berbunyi "✅ Selesai —
 masuk stok", tapi itu **aspirasi, bukan keadaan** — baris CK-lokal
 di-auto-konfirmasi dalam transaksi yang sama, jadi baris yang benar-benar duduk
 di `menunggu` hampir selalu work-order yang belum sampai ke cabang.
+
+**Sudah di-merge ke production.**
 
 ---
 
@@ -186,6 +288,8 @@ Sisi web putaran ini: lencana di nav "Operasional Cabang" (sebelumnya
 satu-satunya butir nav manajemen tanpa lencana, padahal ponsel sudah punya) +
 kartu di Beranda yang menyebut berapa yang sudah lewat 3 hari.
 
+**Sudah di-merge ke production.**
+
 ---
 
 ## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing
@@ -212,6 +316,8 @@ Kelas "tak ada header `Authorization`" tak berubah: `"Perlu login (token tidak
 ada)"`. Bila suatu saat ponsel ingin membedakan keduanya (mis. mengucapkan
 "sesi Anda habis" vs "token tak dikenali"), medannya sudah tersedia — tapi
 tidak ada kewajiban. Dipaku §287 `verify-api.sh`.
+
+**Sudah di-merge ke production.**
 
 ## `GET /laporan` membawa `omzet_sebelum_refund`
 

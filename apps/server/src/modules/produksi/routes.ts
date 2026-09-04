@@ -1372,6 +1372,279 @@ async function tahapSeluruhFaktur(k: KonteksTahap) {
 
 
 function buatRuteTambahStok(tipe: JenisPengadaan) {
+  /**
+   * KUNCI KELOMPOK satu faktur. Baris lama tanpa `faktur_id` berdiri sendiri
+   * sebagai kelompok berisi satu — karena itu `COALESCE`, bukan kolomnya saja.
+   */
+  const keyExpr = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
+
+  /**
+   * GERBANG YANG TAK BERGANTUNG PADA QUERY — divisi & bukan-transfer.
+   *
+   * Keduanya diturunkan dari PERAN dan perusahaan saja, jadi berlaku sama
+   * untuk daftar maupun halaman detail satu faktur. Dibuat fungsi supaya
+   * keduanya mustahil berbeda: rute per-id yang gerbangnya lebih longgar
+   * daripada daftarnya adalah pintu samping — peran `bar` membaca faktur
+   * divisi `kitchen` hanya dengan menebak URL. Menyalinnya ke dua tempat
+   * berarti mengandalkan orang untuk menyalin dengan benar setiap kali salah
+   * satunya berubah.
+   *
+   * Cabang TIDAK ikut di sini: daftar menghormati pemilih cabang, halaman
+   * detail tidak (tautannya tak boleh mati karena pemilih cabang penerimanya
+   * sedang di tempat lain). Perbedaan itu disengaja, jadi ia tinggal di
+   * pemanggilnya masing-masing — bukan disembunyikan di dalam fungsi ini.
+   */
+  function gerbangPengadaan(auth: AuthUser) {
+    const condDivisi =
+      auth.role === "kitchen" || auth.role === "bar"
+        ? [
+            notInArray(
+              productions.ingredientId,
+              db
+                .select({ id: ingredients.id })
+                .from(ingredients)
+                .where(
+                  and(
+                    eq(ingredients.companyId, auth.company_id!),
+                    eq(ingredients.produksiDi, "cabang"),
+                    ne(ingredients.divisiProduksi, auth.role),
+                  ),
+                ),
+            ),
+          ]
+        : [];
+    // Faktur TRANSFER STOK (nomor TF-) menumpang bentuk baris `productions`
+    // yang sama, tapi itu pemindahan stok jadi — bukan pekerjaan produksi.
+    const condBukanTransfer = [
+      notExists(
+        db
+          .select({ ada: sql`1` })
+          .from(dokumenNomor)
+          .where(
+            and(
+              eq(dokumenNomor.companyId, productions.companyId),
+              eq(dokumenNomor.refId, productions.fakturId),
+              eq(dokumenNomor.jenis, "transfer"),
+            ),
+          ),
+      ),
+    ];
+    return { condDivisi, condBukanTransfer };
+  }
+
+  /**
+   * BARIS SATU/BEBERAPA FAKTUR, LENGKAP DENGAN PENGAYAANNYA — satu rumah.
+   *
+   * Dipakai daftar (`GET /`) DAN halaman detail (`GET /faktur/:fakturId`).
+   * Kalau keduanya menulis `select`-nya sendiri, halaman detail menerima
+   * bentuk yang sedikit berbeda dari daftarnya — dan `FakturGroup` yang
+   * dirakit klien dari keduanya berhenti setara, tanpa satu asersi pun
+   * berubah warna. Yang ikut di sini bukan cuma kolomnya: rak default per
+   * cabang penyimpanan, `qty_teks`, dan `batch_teks` semuanya ditulis SERVER,
+   * dan klien yang menyusunnya sendiri pernah memasangkan `qty` dengan
+   * `satuan_beli` ("900 kg" untuk 900 gr).
+   *
+   * `syarat` dioper masuk, tidak dibangun di sini: pemanggilnya yang tahu
+   * cabang mana yang berlaku (daftar menghormati pemilih cabang; detail
+   * membuka faktur mana pun yang boleh dilihat peran itu).
+   */
+  async function ambilBarisFaktur(
+    companyId: string,
+    keys: string[],
+    syarat: { condCabang: SQL[]; condDivisi: SQL[]; condBukanTransfer: SQL[] },
+  ) {
+  const select = {
+    id: productions.id,
+    ingredient_id: productions.ingredientId,
+    bahan: ingredients.nama,
+    isi: ingredients.isi,
+    /**
+     * SATUAN TAMPILAN BARIS INI. `qty` di bawah SELALU dinyatakan dalam
+     * `satuan` (satuan kerja/resep) — lihat pembuatan baris:
+     * `qty = mode === "batch" ? jumlah * isi : jumlah`. Jadi pasangan yang
+     * benar untuk ditampilkan adalah `qty` + `satuan`.
+     */
+    satuan: ingredients.satuan,
+    /**
+     * Satuan BELI/kemasan (mis. "kg"), hanya untuk input pembelian &
+     * dokumen belanja. JANGAN dipasangkan langsung dengan `qty` — itu
+     * membuat 900 gr terbaca "900 kg". Konversinya: qty ÷ isi.
+     */
+    satuan_beli: ingredients.satuanBeli,
+    /** jumlah dalam `satuan` (satuan kerja), bukan dalam `satuan_beli` */
+    qty: productions.qty,
+    total_harga: productions.totalHarga,
+    /**
+     * ASAL-USUL input, BUKAN satuan: true = user mengetiknya dalam kemasan
+     * (`mode:"batch"`) lalu server mengalikannya dengan `isi`. Menampilkan
+     * kata "batch" sebagai satuan `qty` salah — qty-nya sudah terlanjur
+     * dikonversi ke satuan kerja.
+     */
+    is_batch: productions.isBatch,
+    catatan: productions.catatan,
+    waktu: productions.waktu,
+    prod_date: productions.prodDate,
+    // exp lot (terisi saat masuk stok) + masa simpan master (default form Tiba)
+    exp_date: productions.expDate,
+    masa_simpan_hari: ingredients.masaSimpanHari,
+    /** "produksi" | "beli" — penentu apakah baris ini punya batch resep */
+    pengadaan: ingredients.pengadaan,
+    // lokasi + divisi produksi resep (badge Kitchen/Bar utk produksi cabang)
+    produksi_di: ingredients.produksiDi,
+    divisi_produksi: ingredients.divisiProduksi,
+    faktur_id: productions.fakturId,
+    no_faktur: productions.noFaktur,
+    // nomor dokumen otomatis (PB-/PR-) — sama untuk semua baris satu faktur
+    nomor: dokumenNomor.nomorTeks,
+    status: productions.status,
+    supplier: suppliers.nama,
+    tempat: storageLocations.nama,
+    storage_location_id: productions.storageLocationId,
+    // laporan harga riil (jalur beli) sudah dibuat utk baris ini? → status "Selesai"
+    laporan_harga_at: productions.laporanHargaAt,
+    /**
+     * true = `total_harga` baris ini TEBAKAN, belum pernah dilihat manusia
+     * (estimasi RAB, belanja otomatis, atau hasil skala saat realisasi qty
+     * melebihi rencana). Baris bertanda ini DIKECUALIKAN dari kolam median
+     * harga acuan — tanpa itu acuan menyeret dirinya sendiri naik.
+     */
+    harga_tebakan: productions.hargaTebakan,
+    supplier_id: productions.supplierId,
+    dibuat_oleh: pembuat.nama,
+    diubah_oleh: pengubah.nama,
+    // jejak penerimaan: siapa yang menekan Terima, dan kapan
+    diterima_oleh: penerima.nama,
+    diterima_pada: productions.confirmedAt,
+    updated_at: productions.updatedAt,
+    worker_id: productions.workerId,
+    dikerjakan_oleh: pekerja.nama,
+    qty_dipesan: productions.qtyDipesan,
+    alasan_tolak: productions.alasanTolak,
+    // cabang baris + cabang tujuan work-order (utk tampilan Kantor & kirim)
+    branch_id: productions.branchId,
+    cabang: cabangProd.nama,
+    tujuan_branch_id: productions.tujuanBranchId,
+    tujuan_cabang: tujuanProd.nama,
+    // transfer stok antar-cabang (kirim dari stok CK / kirim hasil):
+    // kartu tampil sebagai "Kiriman", bukan produksi baru
+    asal_branch_id: productions.asalBranchId,
+    // asal permintaan (badge "Permintaan" vs "Langsung")
+    rencana_id: productions.rencanaId,
+    // nomor dokumen permintaan (PM-xxxx) — badge identitas asal faktur
+    permintaan_nomor: dokPermintaan.nomorTeks,
+    // "diproduksi UNTUK cabang" — pengingat kirim hasil setelah selesai
+    untuk_branch_id: productions.untukBranchId,
+    untuk_cabang: untukProd.nama,
+    // supplier UTAMA bahan baris ini (info "beli di mana" saat diproses)
+    supplier_bahan: supBahan.nama,
+    supplier_bahan_alamat: supBahan.alamat,
+    supplier_bahan_telepon: supBahan.telepon,
+    // total dana EFEKTIF faktur ini: cair + tambahan − kembali (sama di tiap baris)
+    dana_cair: sql<number>`COALESCE((SELECT SUM(CASE WHEN fd.tipe = 'kembali' THEN -fd.nominal ELSE fd.nominal END)::float8 FROM faktur_dana fd WHERE fd.faktur_id = ${productions.fakturId}), 0)`,
+  };
+  const rows =
+    keys.length === 0
+      ? []
+      : await db
+          .select(select)
+          .from(productions)
+          .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
+          .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
+          .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
+          .leftJoin(pembuat, eq(productions.userId, pembuat.id))
+          .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
+          .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
+          .leftJoin(penerima, eq(productions.confirmedBy, penerima.id))
+          .leftJoin(cabangProd, eq(productions.branchId, cabangProd.id))
+          .leftJoin(tujuanProd, eq(productions.tujuanBranchId, tujuanProd.id))
+          .leftJoin(untukProd, eq(productions.untukBranchId, untukProd.id))
+          .leftJoin(
+            dokumenNomor,
+            and(
+              eq(dokumenNomor.companyId, productions.companyId),
+              eq(dokumenNomor.refId, productions.fakturId),
+            ),
+          )
+          .leftJoin(
+            dokPermintaan,
+            and(
+              eq(dokPermintaan.companyId, productions.companyId),
+              eq(dokPermintaan.refId, productions.rencanaId),
+            ),
+          )
+          // maks SATU baris utama per bahan (partial unique index) → join 1:≤1
+          .leftJoin(
+            isupUtama,
+            and(
+              eq(isupUtama.ingredientId, productions.ingredientId),
+              eq(isupUtama.isUtama, true),
+            ),
+          )
+          .leftJoin(supBahan, eq(isupUtama.supplierId, supBahan.id))
+          .where(
+            and(
+              eq(productions.companyId, companyId),
+              ...syarat.condCabang,
+              ...syarat.condDivisi,
+              ...syarat.condBukanTransfer,
+              eq(productions.tipe, tipe),
+              isNull(productions.deletedAt),
+              inArray(keyExpr, keys),
+            ),
+          )
+          .orderBy(asc(productions.waktu), asc(productions.id));
+
+  // RAK DEFAULT bahan di cabang penyimpanan (tujuan ?? cabang baris) untuk
+  // pratinjau "akan disimpan di rak X" saat barang tiba/disimpan. Diambil
+  // dari Tempat Penyimpanan (storage_location_ingredients) per cabang.
+  const ingUnik = [...new Set(rows.map((r) => r.ingredient_id))];
+  const rakByKey = new Map<string, { id: string; nama: string }>();
+  if (ingUnik.length > 0) {
+    const asg = await db
+      .select({
+        ingredientId: storageLocationIngredients.ingredientId,
+        branchId: storageLocations.branchId,
+        rakId: storageLocations.id,
+        rakNama: storageLocations.nama,
+      })
+      .from(storageLocationIngredients)
+      .innerJoin(
+        storageLocations,
+        eq(storageLocations.id, storageLocationIngredients.storageLocationId),
+      )
+      .where(
+        and(
+          eq(storageLocationIngredients.companyId, companyId),
+          inArray(storageLocationIngredients.ingredientId, ingUnik),
+        ),
+      );
+    for (const a of asg)
+      rakByKey.set(`${a.ingredientId}|${a.branchId}`, { id: a.rakId, nama: a.rakNama });
+  }
+  const rowsRak = rows.map((r) => {
+    const destBranch = r.tujuan_branch_id ?? r.branch_id;
+    const rak = destBranch ? rakByKey.get(`${r.ingredient_id}|${destBranch}`) : undefined;
+    // Teks kuantitas ditulis SERVER. Klien yang menyusunnya sendiri pernah
+    // memasangkan `qty` dengan `satuan_beli` ("900 kg" untuk 900 gr) dan
+    // dengan kata "batch"; `qty_teks` menghapus ruang tebakan itu.
+    const t = qtyTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, satuanBeli: r.satuan_beli });
+    // Berapa kali resep dijalankan. `qty` menjawab "berapa banyak jadinya",
+    // `batch` menjawab "berapa kali masak" — itu yang dikerjakan orang di
+    // dapur, dan sebelumnya tak pernah dikirim ke klien mana pun.
+    const b = batchTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, pengadaan: r.pengadaan });
+    return {
+      ...r,
+      qty_teks: t.teks,
+      qty_setara: t.setara,
+      batch: b.batch,
+      batch_teks: b.teks,
+      default_storage_location_id: rak?.id ?? null,
+      default_tempat: rak?.nama ?? null,
+    };
+  });
+    return rowsRak;
+  }
+
   return new Hono<AppEnv>()
     .post("/faktur", zValidator("json", FakturBody), async (c) => {
       const auth = c.get("auth");
@@ -2126,6 +2399,72 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       return c.json(hasilKirim);
     })
     /** Buku dana satu faktur: entri pencairan/tambahan/kembali + total efektif. */
+    /**
+     * SATU FAKTUR, untuk halaman dokumennya sendiri (`/produksi/:fakturId`).
+     *
+     * KENAPA RUTE SENDIRI, dan bukan menyaring daftar di klien. `GET /` tak
+     * punya saringan `faktur_id` sama sekali dan berhalaman 20. Terukur pada
+     * DB gerbang 2026-09-03: 62 faktur, 20 per halaman — halaman detail yang
+     * harus menemukan fakturnya sendiri menyisir sampai EMPAT permintaan
+     * @ ~44 KB, dan angka itu tumbuh terus seiring riwayatnya. Membuka tautan
+     * yang dikirim rekan kerja tak boleh berarti mengunduh seluruh riwayat.
+     *
+     * GERBANGNYA SAMA PERSIS DENGAN DAFTARNYA — dan itu bukan kehati-hatian
+     * berlebih, itu syaratnya. Rute per-id yang lebih longgar daripada
+     * daftarnya adalah pintu samping: peran `bar` bisa membaca faktur divisi
+     * `kitchen` hanya dengan menebak URL, dan menebak UUID memang sulit tapi
+     * URL beredar di grup WhatsApp. Karena itu `condDivisi` &
+     * `condBukanTransfer` ikut, lewat `ambilBarisFaktur` yang sama.
+     *
+     * BEDANYA CUMA CABANG, dan sengaja: peran manajemen membuka faktur cabang
+     * mana pun (seperti `?branch_id=all`), sebab tautan tak boleh mati hanya
+     * karena pemilih cabang penerimanya sedang di tempat lain. Peran yang
+     * TERIKAT cabang tetap terkunci — `condCabang` mereka identik dengan yang
+     * dipakai daftar.
+     */
+    .get("/faktur/:fakturId", async (c) => {
+      const auth = c.get("auth");
+      const fakturId = c.req.param("fakturId");
+      if (!/^[0-9a-f-]{36}$/i.test(fakturId)) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      /*
+       * CABANG DARI TOKEN, BUKAN DARI URL — dan itu disengaja.
+       *
+       * `resolveBranchId(c)` membaca `?branch_id=`; rute ini tak boleh. Untuk
+       * peran manajemen cabangnya memang TIDAK menyempit (tautan tak boleh
+       * mati hanya karena pemilih cabang penerimanya sedang di tempat lain),
+       * dan untuk peran terikat cabangnya sudah ditentukan tokennya. Rute yang
+       * memanggil `resolveBranchId` tanpa benar-benar memakai querynya cuma
+       * menyalakan penjaga `cabang-ikut-di-url` untuk bahaya yang tak ada.
+       *
+       * Peran terikat TANPA cabang di token tak melihat apa pun — bukan
+       * "semua cabang". Itu bedanya dengan `&&` yang diam-diam melebar.
+       */
+      const branchId = terikatCabang(auth.role) ? (auth.branch_id ?? "-") : null;
+      const condCabang = branchId
+        ? [
+            or(
+              eq(productions.branchId, branchId),
+              eq(productions.dariBranchId, branchId),
+              eq(productions.asalBranchId, branchId),
+            )!,
+          ]
+        : [];
+      const { condDivisi, condBukanTransfer } = gerbangPengadaan(auth);
+      const rows = await ambilBarisFaktur(auth.company_id!, [fakturId], {
+        condCabang,
+        condDivisi,
+        condBukanTransfer,
+      });
+      // NOL baris = tak ada / bukan milik perusahaan ini / di luar jangkauan
+      // peran ini. Ketiganya dijawab 404 yang sama: membedakannya berarti
+      // memberi tahu penebak URL bahwa fakturnya ADA, cuma bukan miliknya.
+      if (rows.length === 0) {
+        throw new HTTPException(404, { message: "Faktur tidak ditemukan" });
+      }
+      return c.json({ rows });
+    })
     .get("/dana/:fakturId", async (c) => {
       const auth = c.get("auth");
       const fakturId = c.req.param("fakturId");
@@ -2587,47 +2926,15 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
       // resep cabang yang berdivisi. Berlaku juga utk hitungan badge nav.
       // Dipakai di ketiga query (ringkas, kunci halaman, baris) agar faktur
       // campuran divisi pun hanya menampilkan baris divisinya sendiri.
-      const condDivisi =
-        auth.role === "kitchen" || auth.role === "bar"
-          ? [
-              notInArray(
-                productions.ingredientId,
-                db
-                  .select({ id: ingredients.id })
-                  .from(ingredients)
-                  .where(
-                    and(
-                      eq(ingredients.companyId, auth.company_id!),
-                      eq(ingredients.produksiDi, "cabang"),
-                      ne(ingredients.divisiProduksi, auth.role),
-                    ),
-                  ),
-              ),
-            ]
-          : [];
+      const { condDivisi, condBukanTransfer } = gerbangPengadaan(auth);
       conds.push(...condDivisi);
 
       // Faktur TRANSFER STOK (nomor TF-) menumpang bentuk baris `productions`
       // yang sama, tapi itu pemindahan stok jadi — bukan pekerjaan produksi.
       // Disaring di sini agar tidak mengotori daftar/badge Produksi; jalurnya
       // sendiri ada di menu Transfer Stok & Penerimaan Barang.
-      const condBukanTransfer = [
-        notExists(
-          db
-            .select({ ada: sql`1` })
-            .from(dokumenNomor)
-            .where(
-              and(
-                eq(dokumenNomor.companyId, productions.companyId),
-                eq(dokumenNomor.refId, productions.fakturId),
-                eq(dokumenNomor.jenis, "transfer"),
-              ),
-            ),
-        ),
-      ];
       conds.push(...condBukanTransfer);
 
-      const keyExpr = sql<string>`COALESCE(${productions.fakturId}::text, ${productions.id}::text)`;
 
       /*
        * RINGKASAN ANTREAN — dihitung SERVER, atas populasi yang sama dengan
@@ -2719,194 +3026,10 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
         .offset(offset);
       const keys = keyRows.map((r) => r.key);
 
-      const select = {
-        id: productions.id,
-        ingredient_id: productions.ingredientId,
-        bahan: ingredients.nama,
-        isi: ingredients.isi,
-        /**
-         * SATUAN TAMPILAN BARIS INI. `qty` di bawah SELALU dinyatakan dalam
-         * `satuan` (satuan kerja/resep) — lihat pembuatan baris:
-         * `qty = mode === "batch" ? jumlah * isi : jumlah`. Jadi pasangan yang
-         * benar untuk ditampilkan adalah `qty` + `satuan`.
-         */
-        satuan: ingredients.satuan,
-        /**
-         * Satuan BELI/kemasan (mis. "kg"), hanya untuk input pembelian &
-         * dokumen belanja. JANGAN dipasangkan langsung dengan `qty` — itu
-         * membuat 900 gr terbaca "900 kg". Konversinya: qty ÷ isi.
-         */
-        satuan_beli: ingredients.satuanBeli,
-        /** jumlah dalam `satuan` (satuan kerja), bukan dalam `satuan_beli` */
-        qty: productions.qty,
-        total_harga: productions.totalHarga,
-        /**
-         * ASAL-USUL input, BUKAN satuan: true = user mengetiknya dalam kemasan
-         * (`mode:"batch"`) lalu server mengalikannya dengan `isi`. Menampilkan
-         * kata "batch" sebagai satuan `qty` salah — qty-nya sudah terlanjur
-         * dikonversi ke satuan kerja.
-         */
-        is_batch: productions.isBatch,
-        catatan: productions.catatan,
-        waktu: productions.waktu,
-        prod_date: productions.prodDate,
-        // exp lot (terisi saat masuk stok) + masa simpan master (default form Tiba)
-        exp_date: productions.expDate,
-        masa_simpan_hari: ingredients.masaSimpanHari,
-        /** "produksi" | "beli" — penentu apakah baris ini punya batch resep */
-        pengadaan: ingredients.pengadaan,
-        // lokasi + divisi produksi resep (badge Kitchen/Bar utk produksi cabang)
-        produksi_di: ingredients.produksiDi,
-        divisi_produksi: ingredients.divisiProduksi,
-        faktur_id: productions.fakturId,
-        no_faktur: productions.noFaktur,
-        // nomor dokumen otomatis (PB-/PR-) — sama untuk semua baris satu faktur
-        nomor: dokumenNomor.nomorTeks,
-        status: productions.status,
-        supplier: suppliers.nama,
-        tempat: storageLocations.nama,
-        storage_location_id: productions.storageLocationId,
-        // laporan harga riil (jalur beli) sudah dibuat utk baris ini? → status "Selesai"
-        laporan_harga_at: productions.laporanHargaAt,
-        /**
-         * true = `total_harga` baris ini TEBAKAN, belum pernah dilihat manusia
-         * (estimasi RAB, belanja otomatis, atau hasil skala saat realisasi qty
-         * melebihi rencana). Baris bertanda ini DIKECUALIKAN dari kolam median
-         * harga acuan — tanpa itu acuan menyeret dirinya sendiri naik.
-         */
-        harga_tebakan: productions.hargaTebakan,
-        supplier_id: productions.supplierId,
-        dibuat_oleh: pembuat.nama,
-        diubah_oleh: pengubah.nama,
-        // jejak penerimaan: siapa yang menekan Terima, dan kapan
-        diterima_oleh: penerima.nama,
-        diterima_pada: productions.confirmedAt,
-        updated_at: productions.updatedAt,
-        worker_id: productions.workerId,
-        dikerjakan_oleh: pekerja.nama,
-        qty_dipesan: productions.qtyDipesan,
-        alasan_tolak: productions.alasanTolak,
-        // cabang baris + cabang tujuan work-order (utk tampilan Kantor & kirim)
-        branch_id: productions.branchId,
-        cabang: cabangProd.nama,
-        tujuan_branch_id: productions.tujuanBranchId,
-        tujuan_cabang: tujuanProd.nama,
-        // transfer stok antar-cabang (kirim dari stok CK / kirim hasil):
-        // kartu tampil sebagai "Kiriman", bukan produksi baru
-        asal_branch_id: productions.asalBranchId,
-        // asal permintaan (badge "Permintaan" vs "Langsung")
-        rencana_id: productions.rencanaId,
-        // nomor dokumen permintaan (PM-xxxx) — badge identitas asal faktur
-        permintaan_nomor: dokPermintaan.nomorTeks,
-        // "diproduksi UNTUK cabang" — pengingat kirim hasil setelah selesai
-        untuk_branch_id: productions.untukBranchId,
-        untuk_cabang: untukProd.nama,
-        // supplier UTAMA bahan baris ini (info "beli di mana" saat diproses)
-        supplier_bahan: supBahan.nama,
-        supplier_bahan_alamat: supBahan.alamat,
-        supplier_bahan_telepon: supBahan.telepon,
-        // total dana EFEKTIF faktur ini: cair + tambahan − kembali (sama di tiap baris)
-        dana_cair: sql<number>`COALESCE((SELECT SUM(CASE WHEN fd.tipe = 'kembali' THEN -fd.nominal ELSE fd.nominal END)::float8 FROM faktur_dana fd WHERE fd.faktur_id = ${productions.fakturId}), 0)`,
-      };
-      const rows =
-        keys.length === 0
-          ? []
-          : await db
-              .select(select)
-              .from(productions)
-              .innerJoin(ingredients, eq(productions.ingredientId, ingredients.id))
-              .leftJoin(suppliers, eq(productions.supplierId, suppliers.id))
-              .leftJoin(storageLocations, eq(productions.storageLocationId, storageLocations.id))
-              .leftJoin(pembuat, eq(productions.userId, pembuat.id))
-              .leftJoin(pengubah, eq(productions.updatedBy, pengubah.id))
-              .leftJoin(pekerja, eq(productions.workerId, pekerja.id))
-              .leftJoin(penerima, eq(productions.confirmedBy, penerima.id))
-              .leftJoin(cabangProd, eq(productions.branchId, cabangProd.id))
-              .leftJoin(tujuanProd, eq(productions.tujuanBranchId, tujuanProd.id))
-              .leftJoin(untukProd, eq(productions.untukBranchId, untukProd.id))
-              .leftJoin(
-                dokumenNomor,
-                and(
-                  eq(dokumenNomor.companyId, productions.companyId),
-                  eq(dokumenNomor.refId, productions.fakturId),
-                ),
-              )
-              .leftJoin(
-                dokPermintaan,
-                and(
-                  eq(dokPermintaan.companyId, productions.companyId),
-                  eq(dokPermintaan.refId, productions.rencanaId),
-                ),
-              )
-              // maks SATU baris utama per bahan (partial unique index) → join 1:≤1
-              .leftJoin(
-                isupUtama,
-                and(
-                  eq(isupUtama.ingredientId, productions.ingredientId),
-                  eq(isupUtama.isUtama, true),
-                ),
-              )
-              .leftJoin(supBahan, eq(isupUtama.supplierId, supBahan.id))
-              .where(
-                and(
-                  eq(productions.companyId, auth.company_id!),
-                  ...condCabang,
-                  ...condDivisi,
-                  ...condBukanTransfer,
-                  eq(productions.tipe, tipe),
-                  isNull(productions.deletedAt),
-                  inArray(keyExpr, keys),
-                ),
-              )
-              .orderBy(asc(productions.waktu), asc(productions.id));
-
-      // RAK DEFAULT bahan di cabang penyimpanan (tujuan ?? cabang baris) untuk
-      // pratinjau "akan disimpan di rak X" saat barang tiba/disimpan. Diambil
-      // dari Tempat Penyimpanan (storage_location_ingredients) per cabang.
-      const ingUnik = [...new Set(rows.map((r) => r.ingredient_id))];
-      const rakByKey = new Map<string, { id: string; nama: string }>();
-      if (ingUnik.length > 0) {
-        const asg = await db
-          .select({
-            ingredientId: storageLocationIngredients.ingredientId,
-            branchId: storageLocations.branchId,
-            rakId: storageLocations.id,
-            rakNama: storageLocations.nama,
-          })
-          .from(storageLocationIngredients)
-          .innerJoin(
-            storageLocations,
-            eq(storageLocations.id, storageLocationIngredients.storageLocationId),
-          )
-          .where(
-            and(
-              eq(storageLocationIngredients.companyId, auth.company_id!),
-              inArray(storageLocationIngredients.ingredientId, ingUnik),
-            ),
-          );
-        for (const a of asg)
-          rakByKey.set(`${a.ingredientId}|${a.branchId}`, { id: a.rakId, nama: a.rakNama });
-      }
-      const rowsRak = rows.map((r) => {
-        const destBranch = r.tujuan_branch_id ?? r.branch_id;
-        const rak = destBranch ? rakByKey.get(`${r.ingredient_id}|${destBranch}`) : undefined;
-        // Teks kuantitas ditulis SERVER. Klien yang menyusunnya sendiri pernah
-        // memasangkan `qty` dengan `satuan_beli` ("900 kg" untuk 900 gr) dan
-        // dengan kata "batch"; `qty_teks` menghapus ruang tebakan itu.
-        const t = qtyTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, satuanBeli: r.satuan_beli });
-        // Berapa kali resep dijalankan. `qty` menjawab "berapa banyak jadinya",
-        // `batch` menjawab "berapa kali masak" — itu yang dikerjakan orang di
-        // dapur, dan sebelumnya tak pernah dikirim ke klien mana pun.
-        const b = batchTeks({ qty: r.qty, satuan: r.satuan, isi: r.isi, pengadaan: r.pengadaan });
-        return {
-          ...r,
-          qty_teks: t.teks,
-          qty_setara: t.setara,
-          batch: b.batch,
-          batch_teks: b.teks,
-          default_storage_location_id: rak?.id ?? null,
-          default_tempat: rak?.nama ?? null,
-        };
+      const rowsRak = await ambilBarisFaktur(auth.company_id!, keys, {
+        condCabang,
+        condDivisi,
+        condBukanTransfer,
       });
 
       return c.json({

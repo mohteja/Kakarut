@@ -29,6 +29,23 @@ const HAL = readFileSync(
   fileURLToPath(new URL("../../web/src/pages/kasir/KasirPage.tsx", import.meta.url)),
   "utf8",
 );
+/*
+ * `StokBadge` PINDAH RUMAH 2026-09-03, dan penjaga ini merah karenanya —
+ * bukan hampa, dan itu perbedaan yang penting.
+ *
+ * Kartu menu kasir diekstrak jadi `components/KartuMenuKasir.tsx` supaya
+ * halaman Menu & HPP bisa memakai kartu yang SAMA sebagai pratinjau foto
+ * (pratinjau yang cuma mirip akan menyimpang justru pada potongan fotonya).
+ * `StokBadge` ikut, sebab ia bagian kartu itu.
+ *
+ * Klaim penjaga ini tak berubah sedikit pun — yang berubah alamatnya. Kalau
+ * berkas ini dibiarkan menunjuk `KasirPage`, asersinya akan gagal ATAU, lebih
+ * buruk, kelak lolos atas berkas yang tak lagi memuat badge-nya sama sekali.
+ */
+const KARTU = readFileSync(
+  fileURLToPath(new URL("../../web/src/components/KartuMenuKasir.tsx", import.meta.url)),
+  "utf8",
+);
 
 describe("galatnya diambil, bukan dibuang", () => {
   it("`/menu/ketersediaan` punya nama galatnya sendiri", () => {
@@ -78,8 +95,12 @@ describe("perilaku menjual TIDAK berubah — ini keterangan, bukan gerbang", () 
   it("`StokBadge` tetap diam untuk menu yang MEMANG tak melacak stok", () => {
     // Kalau penjaganya sampai membuat badge muncul untuk `porsi == null`,
     // tiap menu tanpa resep berlacak stok akan tampak bermasalah.
-    expect(HAL).toContain("const porsi = stok?.porsi;");
-    expect(HAL).toContain("if (porsi == null) return null;");
+    expect(KARTU).toContain("const porsi = stok?.porsi;");
+    expect(KARTU).toContain("if (porsi == null) return null;");
+    // …dan KasirPage memang tak lagi mendefinisikannya sendiri: dua rumah
+    // untuk satu badge berarti yang satu diperbaiki dan yang lain tidak.
+    expect(HAL).not.toContain("function StokBadge(");
+    expect(HAL).toContain("StokBadge");
   });
 
   it("peringatan keranjang tetap memakai ambang aslinya", () => {

@@ -12,13 +12,27 @@
  * kalimat kegagalan di layar, dan tombol simpannya tetap ada.
  */
 import { expect, test } from "@playwright/test";
-import { BASE, login, OWNER_EMAIL, OWNER_PASS } from "./util";
+import { BASE, login, OWNER_EMAIL, OWNER_PASS, sesiApi } from "./util";
 
+/*
+ * SESINYA LEWAT `sesiApi`, BUKAN `POST /auth/login` SENDIRI — dan itu bukan
+ * kerapian.
+ *
+ * `/auth/login` dibatasi 10 percobaan per 5 menit per (IP + email). Berkas ini
+ * dulu menembaknya langsung, jadi ia memakai DUA jatah: satu di sini, satu
+ * lagi lewat `login()` di layarnya. Sepuluh berkas spek memakai akun owner
+ * yang sama, jadi suite ini duduk PERSIS di langit-langitnya — dan begitu spek
+ * ke-sepuluh lahir (2026-09-03, `menu-tampilan-ikon.spec.ts`), jatahnya habis
+ * dan berkas INI yang merah.
+ *
+ * Cara ia merah juga buruk: `(await masuk.json()).token` tak pernah memeriksa
+ * `masuk.ok()`, jadi 429 berubah jadi `TypeError: Cannot read properties of
+ * undefined (reading 'length')` di baris yang sama sekali tak menyebut kuota.
+ * `sesiApi` menyimpan sesinya per email DAN melempar kalimat yang menyebut
+ * sebabnya ("KUOTA LOGIN HABIS … INI BUKAN BUG KODE").
+ */
 async function adaSaldoTersimpan(request: import("@playwright/test").APIRequestContext) {
-  const masuk = await request.post(`${BASE}/api/auth/login`, {
-    data: { email: OWNER_EMAIL, password: OWNER_PASS },
-  });
-  const token = (await masuk.json()).token as string;
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
   const h = { Authorization: `Bearer ${token}` };
   const cek = await request.get(`${BASE}/api/stok/awal`, { headers: h });
   const t = (await cek.json()) as { items: unknown[] };

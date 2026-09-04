@@ -672,6 +672,11 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
     - Klasifikasinya per FAKTUR (dikelompokkan lebih dulu), sejajar dengan lencana nav yang juga menghitung faktur: **harus dikerjakan** = punya baris ber-status `rencana`/`dikerjakan`/`menunggu`; **selesai** = tak punya baris begitu dan bukan faktur yang seluruhnya `ditolak`; **ditolak** = seluruh barisnya `ditolak`. Ketiganya saling lepas, jadi `harus + selesai + ditolak == total`.
     - **`belum_sampai`** = bagian dari `selesai` yang barangnya belum sampai: baris `menunggu` beralamat cabang (belum berangkat atau sedang di jalan), atau baris `dikonfirmasi` ber-`untuk_branch_id` (hasil produksi yang sudah masuk stok CK tapi belum di-`kirim-hasil`). Keduanya berbunyi "beres" di papan sementara barangnya tak bisa dipakai siapa pun.
     - Kenapa server, bukan klien: daftarnya berhalaman 20 dan diurutkan "belum selesai dulu". Terukur 2026-09-03 — `/produksi` bertotal **61** faktur, halaman pertamanya memuat **20** faktur yang **kedua puluhnya** belum selesai. Ringkasan yang dijumlahkan dari `rows` karena itu akan selalu berbunyi "0 selesai" sampai halaman terakhir.
+- `GET /api/{mod}/faktur/:fakturId` — res: `{ rows: StokMasukRow[] }` — error: **404**. SATU faktur, bentuk baris **identik** dengan `GET /api/{mod}` (kueri & pengayaannya satu fungsi, `ambilBarisFaktur`) — klien merakit `FakturGroup`-nya dengan aturan yang sama seperti dari daftar. Sumber halaman dokumen faktur (`/produksi/:fakturId`, `/pembelian/:fakturId`) di web, yang URL-nya bisa dikirim ke rekan kerja, dicetak, dan disimpan sebagai PDF.
+  - **Gerbangnya SAMA PERSIS dengan daftarnya**, dan itu inti keamanannya: `company_id`, `deleted_at IS NULL`, tipe (`produksi`/`beli`), saringan **divisi** untuk role `kitchen`/`bar`, dan penyaring faktur transfer (`TF-`) — semuanya lewat `gerbangPengadaan(auth)` yang dipakai kedua rute (satu definisi, dua pemanggil; dipaku `faktur-halaman-dokumen.test.ts`). Rute detail yang lebih longgar daripada daftarnya adalah pintu samping: `bar` bisa membaca faktur `kitchen` hanya dengan menebak URL.
+  - **Cabang diambil dari TOKEN, bukan `?branch_id=`.** Untuk role terikat cabang (`cashier`/`tim`) barisnya harus menyentuh cabangnya (`branch_id` ATAU `dari_branch_id` ATAU `asal_branch_id` — tanpa dua yang terakhir, faktur yang sudah dikirim hilang dari mata CK). Role terikat **tanpa** cabang di token tak melihat apa pun, bukan "semua cabang". Untuk owner/admin cabangnya tidak menyempit sama sekali: tautan tak boleh mati hanya karena pemilih cabang penerimanya sedang di tempat lain.
+  - **Satu 404 untuk tiga sebab** — tak ada, bukan milik perusahaan ini, atau di luar jangkauan peran/cabang ini. Membedakannya berarti memberi tahu penebak URL bahwa fakturnya ADA, cuma bukan miliknya. `fakturId` yang bukan uuid juga **404** (bukan 400), supaya jawabannya tak membocorkan bentuk yang benar.
+  - Kolom biaya tetap tunduk `bolehLihatBiaya` seperti di daftarnya.
 - `PATCH /api/{mod}/faktur/:key` — req `FakturEditBody`: `{ password: string (wajib), supplier_id?:uuid|null, no_faktur?|null (max60), catatan?|null, storage_location_id?:uuid|null, worker_id?:uuid|null, prod_date?: "YYYY-MM-DD" }` — res: `{ ok, jumlah_baris }` — error: **401** password salah, **400** supplier/storage invalid, **404**
 - `DELETE /api/{mod}/faktur/:key` — soft delete → Tempat Sampah (tanpa password) — res: `{ ok, jumlah_baris }` — error: **404**
 
@@ -1495,7 +1500,11 @@ Laporan:
   - **`client_ref` (opsional) = kunci idempotensi.** Kiriman ulang dengan `client_ref` yang SAMA memulangkan hasil pertama apa adanya — `rencana_id`, `nomor_permintaan`, dan seluruh id faktur identik — tanpa menerbitkan faktur kedua. Kunci `(company_id, client_ref)` memakai ledger yang sama dengan `/api/sync`, `/api/penjualan`, `/api/stok/opname`, dan `/api/transfer-stok`.
   - **Kenapa endpoint ini butuh.** Layar "Tambah Stok dari Menu" memanggil endpoint ini lalu `POST /api/perlengkapan/permintaan-otomatis?…&rencana_id=…` yang menaut ke hasilnya. Bila panggilan KEDUA gagal, yang pertama sudah menerbitkan faktur produksi/beli — dan percobaan ulang tanpa kunci menerbitkan satu set lagi untuk kebutuhan yang sama. Klien WAJIB memegang `client_ref` yang sama sampai SELURUH rantai sukses, bukan menggantinya tiap panggilan.
   - Tanpa `client_ref` perilakunya persis seperti sebelumnya (selalu membuat rencana baru), jadi klien lama tak perlu berubah.
-- `GET /api/rekomendasi/permintaan` — res: `PermintaanStokRow[]`
+- `GET /api/rekomendasi/permintaan` — query: `page?` (default 1), `per_page?` (default 20, maks 200) — res: `PermintaanStokDaftar` `{ rows: PermintaanStokRow[], total, page, per_page, ringkas }`. **BERUBAH BENTUK 2026-09-03** — dulu array telanjang `PermintaanStokRow[]`; bentuk tiap entri `rows[]` **tidak berubah sedikit pun**.
+  - **Berhalaman per RENCANA, bukan per baris.** Satu entri dirakit dari banyak baris `productions` ber-`rencana_id` sama plus faktur BP- yang lahir bersamanya, jadi `total` adalah cacah **permintaan** — bukan baris, bukan faktur. `LIMIT` atas barisnya akan memotong di tengah permintaan dan menampilkan kartu berisi separuh bagian.
+  - **Urutan**: yang **belum selesai** dulu (ada bagian yang belum `dikonfirmasi`/`ditolak`, atau perlengkapan yang masih `menunggu`/`diproses`), lalu terbaru → terlama, pemutus seri `rencana_id`. Kunci waktunya `MAX(waktu)` — konfirmasi menulis ulang `productions.waktu`, jadi `MIN` dan `MAX` berpisah begitu satu baris maju.
+  - **`ringkas: RingkasPermintaan`** — `{ berjalan, selesai, selesai_ada_ditolak }`, ketiganya cacah PERMINTAAN. Dihitung SERVER atas populasi yang sama dengan `total`, **bukan** atas `rows`: daftarnya menaruh yang belum selesai lebih dulu, jadi ringkasan dari halaman berjalan akan berbunyi "0 selesai" sampai halaman terakhir. Ketiganya **PARTISI** — jumlahnya selalu tepat `total`, dan verify-api §292 memakukannya.
+  - Aturan ketiga keadaan hidup di `packages/shared/src/permintaan-stok.ts` (`statusPermintaan`) — satu rumah untuk agregat server DAN badge klien.
 - `DELETE /api/rekomendasi/permintaan/:rencanaId` — soft delete semua faktur ber-rencana_id sama — res: `{ ok, jumlah_baris }` — error: **404**
 
 ## `/api/sampah` — Tempat sampah / record soft-deleted (`modules/sampah/routes.ts`) — group guard **[owner/admin]**
@@ -2497,6 +2506,55 @@ export interface PermintaanStokRow {
   kirim: PermintaanStokBagian | null;
   /** faktur BELI PERLENGKAPAN (BP-) yang lahir bersama permintaan ini */
   beli_perlengkapan: PermintaanStokBagianPerlengkapan | null;
+}
+
+/**
+ * Tiga keadaan satu permintaan stok — SATU sumber untuk badge di web dan
+ * agregat `ringkas` di server. Aturannya di `permintaan-stok.ts`
+ * (`statusPermintaan`); label & warnanya milik layar yang merendernya.
+ *
+ * `selesai_ada_ditolak` dipisahkan dari `selesai` dengan sengaja: permintaan
+ * yang seluruh bagiannya ditolak juga tak menyisakan pekerjaan, dan
+ * menyatukannya membuat kegagalan terbaca seperti keberhasilan di ubin.
+ */
+export type StatusPermintaan = "berjalan" | "selesai" | "selesai_ada_ditolak";
+
+/**
+ * Ringkasan antrean permintaan stok atas SELURUH populasi perusahaan — bukan
+ * halaman yang sedang tampil.
+ *
+ * Alasannya sama persis dengan `RingkasPengadaan`: daftarnya berhalaman dan
+ * server menaruh yang BELUM selesai lebih dulu, jadi ringkasan yang
+ * dijumlahkan dari `rows` akan berbunyi "0 selesai" sampai orangnya
+ * menelusuri ke halaman terakhir.
+ *
+ * Sengaja `Record<StatusPermintaan, number>`, bukan interface bermedan
+ * tangan: keadaan keempat yang lahir besok TIDAK BISA lupa dihitung —
+ * typecheck-nya merah di sini sebelum angkanya salah di layar.
+ *
+ * Ketiganya PARTISI: jumlahnya selalu tepat `PermintaanStokDaftar.total`.
+ */
+export type RingkasPermintaan = Record<StatusPermintaan, number>;
+
+/**
+ * Balasan `GET /rekomendasi/permintaan` — berhalaman per RENCANA, bukan per
+ * baris.
+ *
+ * Satu entri `rows[]` dirakit dari banyak baris `productions` yang berbagi
+ * `rencana_id` plus faktur BP- yang lahir bersamanya, jadi `total` adalah
+ * cacah PERMINTAAN — bukan cacah baris, dan bukan cacah faktur.
+ */
+export interface PermintaanStokDaftar {
+  rows: PermintaanStokRow[];
+  /** cacah PERMINTAAN pada populasi perusahaan (tak ada saringan di rute ini) */
+  total: number;
+  page: number;
+  /**
+   * Disebutkan supaya klien tak perlu menebak — `/transfer-stok` lupa
+   * menyebutnya dan itu terukur (lihat `lib/halaman-query.ts`).
+   */
+  per_page: number;
+  ringkas: RingkasPermintaan;
 }
 
 /**

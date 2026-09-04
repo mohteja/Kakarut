@@ -27,6 +27,7 @@ import { useAuth } from "../../context/AuthContext";
 import { usePrinter } from "../../context/PrinterContext";
 import { useCabangData } from "../../context/BranchContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
+import { KartuMenuKasir, StokBadge } from "../../components/KartuMenuKasir";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, waktuKertasWIB } from "../../lib/format";
 import { uuidV4 } from "../../lib/idempoten";
@@ -127,26 +128,6 @@ interface Kategori {
  * sedikit (≤5) → oranye; sisanya hijau. `size` mengatur kepadatan untuk tile
  * kode yang mungil.
  */
-function StokBadge({ stok, size = "md" }: { stok: MenuStokDto | undefined; size?: "sm" | "md" }) {
-  const porsi = stok?.porsi;
-  if (porsi == null) return null;
-  const kecil = size === "sm";
-  const base = kecil ? "text-[9px] leading-none" : "text-[11px]";
-  if (porsi <= 0) {
-    // bahan pembatas = bahan resep yang saldonya 0 di cabang ini → sumber "Habis".
-    const kurang = stok?.pembatas?.nama;
-    return (
-      <span
-        className={`font-semibold text-red-600 ${base}`}
-        title={kurang ? `Habis — bahan "${kurang}" kosong di cabang ini` : "Habis"}
-      >
-        Habis{kurang && !kecil ? ` · ${kurang}` : ""}
-      </span>
-    );
-  }
-  const warna = porsi <= 5 ? "text-orange-600" : "text-emerald-600";
-  return <span className={`font-medium ${warna} ${base}`}>Sisa {porsi}</span>;
-}
 
 export function KasirPage() {
   const { auth } = useAuth();
@@ -1053,44 +1034,12 @@ export function KasirPage() {
         ) : tampilan === "foto" ? (
           <div className="grid auto-rows-min grid-cols-2 gap-3 pb-4 md:flex-1 md:grid-cols-3 md:overflow-y-auto xl:grid-cols-4">
             {menuTampil.map((m) => (
-              <button
+              <KartuMenuKasir
                 key={m.id}
-                onClick={() => tambah(m)}
-                className="flex flex-col rounded-xl border border-stone-200 bg-white p-3 text-left shadow-sm transition hover:border-orange-400 hover:shadow"
-              >
-                {m.image_url ? (
-                  <img
-                    src={m.image_url}
-                    alt={m.nama}
-                    className="mb-2 h-20 w-full rounded-lg object-cover"
-                  />
-                ) : (
-                  <div className="mb-2 flex h-20 w-full items-center justify-center rounded-lg bg-orange-50 text-2xl">
-                    🍜
-                  </div>
-                )}
-                <div className="flex items-start gap-1.5">
-                  {m.kode && (
-                    <span className="shrink-0 rounded bg-orange-100 px-1.5 py-0.5 font-mono text-[11px] font-bold leading-tight text-orange-700">
-                      {m.kode}
-                    </span>
-                  )}
-                  <div className="line-clamp-2 text-sm font-semibold text-stone-800">{m.nama}</div>
-                </div>
-                {/* Isi menu — kasir bisa langsung menjawab "isinya apa?" */}
-                {m.deskripsi && (
-                  <div className="line-clamp-2 pt-0.5 text-[11px] leading-snug text-stone-500">
-                    {m.deskripsi}
-                  </div>
-                )}
-                {/* Sisa porsi di bawah nama menu — kasir bisa infokan ke konsumen */}
-                <div className="pt-0.5">
-                  <StokBadge stok={sisaByMenu.get(m.id)} />
-                </div>
-                <div className="mt-auto pt-1 text-sm font-bold text-orange-600">
-                  {formatRupiah(m.harga_jual)}
-                </div>
-              </button>
+                menu={m}
+                stok={sisaByMenu.get(m.id)}
+                onKlik={() => tambah(m)}
+              />
             ))}
             {menuTampil.length === 0 && (
               <div className="col-span-full py-10 text-center text-stone-400">

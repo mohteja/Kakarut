@@ -80,6 +80,30 @@ const DIIZINKAN = new Map<string, { ekspresi: string[]; alasan: string }>([
         "yang dirakit di berkas yang sama — tiap sisipan datanya sudah lewat esc()",
     },
   ],
+  [
+    "web/pages/produksi/FakturDetailPage.tsx",
+    {
+      ekspresi: [
+        'r.status === "ditolak" ? " (ditolak)" : ""',
+        'tipe === "produksi" ? "Bahan diproduksi" : "Bahan dibeli"',
+        'tipe === "produksi" ? "Hasil &amp; batch" : "Jumlah"',
+        "exp",
+        "batch",
+        "biaya",
+        "kolomBiaya",
+        "kop",
+        "riwayat",
+        "baris",
+        "total",
+      ],
+      alasan:
+        "PDF dokumen faktur. Tiga ternary yang KEDUA cabangnya literal, dan delapan potongan HTML " +
+        "yang dirakit di berkas yang sama beberapa baris di atasnya — di dalam masing-masing, tiap " +
+        "nilai yang berasal dari pemakai (nama bahan, catatan, nama orang, nomor faktur) sudah " +
+        "lewat esc(). Bentuknya sama persis dengan DokumenBelanjaModal di atas, sebab keduanya " +
+        "dokumen cetak yang dirakit dengan pola yang sama.",
+    },
+  ],
 ]);
 
 function daftar(t: Templat) {

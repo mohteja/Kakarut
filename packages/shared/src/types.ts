@@ -870,6 +870,55 @@ export interface PermintaanStokRow {
 }
 
 /**
+ * Tiga keadaan satu permintaan stok — SATU sumber untuk badge di web dan
+ * agregat `ringkas` di server. Aturannya di `permintaan-stok.ts`
+ * (`statusPermintaan`); label & warnanya milik layar yang merendernya.
+ *
+ * `selesai_ada_ditolak` dipisahkan dari `selesai` dengan sengaja: permintaan
+ * yang seluruh bagiannya ditolak juga tak menyisakan pekerjaan, dan
+ * menyatukannya membuat kegagalan terbaca seperti keberhasilan di ubin.
+ */
+export type StatusPermintaan = "berjalan" | "selesai" | "selesai_ada_ditolak";
+
+/**
+ * Ringkasan antrean permintaan stok atas SELURUH populasi perusahaan — bukan
+ * halaman yang sedang tampil.
+ *
+ * Alasannya sama persis dengan `RingkasPengadaan`: daftarnya berhalaman dan
+ * server menaruh yang BELUM selesai lebih dulu, jadi ringkasan yang
+ * dijumlahkan dari `rows` akan berbunyi "0 selesai" sampai orangnya
+ * menelusuri ke halaman terakhir.
+ *
+ * Sengaja `Record<StatusPermintaan, number>`, bukan interface bermedan
+ * tangan: keadaan keempat yang lahir besok TIDAK BISA lupa dihitung —
+ * typecheck-nya merah di sini sebelum angkanya salah di layar.
+ *
+ * Ketiganya PARTISI: jumlahnya selalu tepat `PermintaanStokDaftar.total`.
+ */
+export type RingkasPermintaan = Record<StatusPermintaan, number>;
+
+/**
+ * Balasan `GET /rekomendasi/permintaan` — berhalaman per RENCANA, bukan per
+ * baris.
+ *
+ * Satu entri `rows[]` dirakit dari banyak baris `productions` yang berbagi
+ * `rencana_id` plus faktur BP- yang lahir bersamanya, jadi `total` adalah
+ * cacah PERMINTAAN — bukan cacah baris, dan bukan cacah faktur.
+ */
+export interface PermintaanStokDaftar {
+  rows: PermintaanStokRow[];
+  /** cacah PERMINTAAN pada populasi perusahaan (tak ada saringan di rute ini) */
+  total: number;
+  page: number;
+  /**
+   * Disebutkan supaya klien tak perlu menebak — `/transfer-stok` lupa
+   * menyebutnya dan itu terukur (lihat `lib/halaman-query.ts`).
+   */
+  per_page: number;
+  ringkas: RingkasPermintaan;
+}
+
+/**
  * Status pipeline stok masuk: rencana (RAB) → dikerjakan → menunggu →
  * dikonfirmasi (masuk stok). 'ditolak' khusus jalur beli (kiriman ditolak
  * penerima; bisa dibatalkan → dikonfirmasi). Stok terhitung saat 'dikonfirmasi'.

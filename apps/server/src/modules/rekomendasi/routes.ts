@@ -1,6 +1,6 @@
 import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -11,7 +11,10 @@ import type {
   PermintaanStokBagian,
   PermintaanStokBagianPerlengkapan,
   PermintaanStokRow,
+  RingkasPermintaan,
 } from "@kakarut/shared";
+import { TAHAP_BELUM_SELESAI, TAHAP_PERLENGKAPAN_BELUM_SELESAI, TAHAP_PERLENGKAPAN_TIBA } from "@kakarut/shared";
+import { halamanQuery } from "../../lib/halaman-query";
 import { db } from "../../db/client";
 import {
   branches,
@@ -163,8 +166,150 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
   // (owner/admin dari Kantor).
   .get("/permintaan", async (c) => {
     const auth = c.get("auth");
+    const { page, perPage, offset } = halamanQuery(c, { bawaan: 20, maks: 200 });
     const tujuanB = alias(branches, "tujuan_permintaan");
     const pembuatU = alias(users, "pembuat_permintaan");
+    const condPermintaan = [
+      eq(productions.companyId, auth.company_id!),
+      isNotNull(productions.rencanaId),
+      isNull(productions.deletedAt),
+    ];
+    /*
+     * BERHALAMAN PER RENCANA, BUKAN PER BARIS — dan itu yang membuat kueri di
+     * bawah ini ada sama sekali.
+     *
+     * Satu entri daftar ini dirakit dari BANYAK baris `productions` yang
+     * berbagi `rencana_id`, jadi `LIMIT 20` atas barisnya akan memotong di
+     * tengah permintaan dan menampilkan kartu berisi separuh bagian. Halaman
+     * karena itu ditentukan lebih dulu sebagai 20 `rencana_id`, baru barisnya
+     * ditarik.
+     *
+     * Urutannya — "yang belum selesai dulu" — sampai 2026-09-03 dihitung di
+     * KLIEN sesudah seluruh riwayat perusahaan ditarik. Memindahkannya ke SQL
+     * adalah seluruh isi subkueri ini.
+     */
+    /*
+     * KORELASINYA DITULIS `productions.rencana_id`, BUKAN `${productions.rencanaId}`
+     * — dan ini bukan selera, ia bug yang sudah menggigit putaran ini.
+     *
+     * Menginterpolasi kolom drizzle di dalam subkueri ini merender
+     * `sp.rencana_id = "rencana_id"` — TANPA kualifikasi tabel. Di dalam
+     * `FROM supply_purchases sp`, `"rencana_id"` teresolusi ke `sp.rencana_id`,
+     * jadi syaratnya jadi `sp.rencana_id = sp.rencana_id`: selalu benar.
+     * `supBelum` karena itu berhenti bertanya "permintaan INI perlengkapannya
+     * belum beres?" dan mulai bertanya "adakah SATU SAJA baris perlengkapan
+     * yang belum beres di seluruh perusahaan?".
+     *
+     * Terukur: ringkas memulangkan `berjalan: 24, selesai: 0` untuk populasi
+     * yang hitungan tangannya `17 / 7`. Dan yang TIDAK menangkapnya: invarian
+     * partisi — jumlahnya tetap tepat 24, sebab semua kesalahannya mendarat di
+     * satu ember. Yang menangkapnya perbandingan dengan hitungan tangan §0,
+     * dan itulah gunanya mengukur lebih dulu.
+     */
+    const supBelum = sql<boolean>`EXISTS (
+      SELECT 1 FROM supply_purchases sp
+       WHERE sp.company_id = ${auth.company_id!}
+         AND sp.rencana_id = productions.rencana_id
+         AND sp.status::text IN (${sql.join(
+           TAHAP_PERLENGKAPAN_BELUM_SELESAI.map((x) => sql`${x}`),
+           sql`, `,
+         )}))`;
+    /*
+     * "tak ada satu pun yang BUKAN tiba" — sengaja NOT EXISTS, bukan
+     * `bool_and(status = 'tiba')` lewat join. Yang kedua memulangkan NULL
+     * untuk permintaan TANPA baris perlengkapan sama sekali — dan itu
+     * mayoritasnya — lalu `COUNT(*) FILTER (WHERE NULL)` tak menghitungnya,
+     * sehingga `ringkas.selesai` runtuh jadi hampir nol tanpa satu galat pun.
+     * Gejalanya cuma satu: ketiga ember berhenti menjumlah ke `total`, dan
+     * itulah yang diperiksa verify-api §292 lebih dulu.
+     */
+    const supSemuaTiba = sql<boolean>`NOT EXISTS (
+      SELECT 1 FROM supply_purchases sp
+       WHERE sp.company_id = ${auth.company_id!}
+         AND sp.rencana_id = productions.rencana_id
+         AND sp.status::text <> ${TAHAP_PERLENGKAPAN_TIBA})`;
+    const agregat = db
+      .select({
+        rencanaId: productions.rencanaId,
+        /*
+         * Daftar tahapnya DIRAKIT dari `@kakarut/shared`, tidak diketik ulang
+         * sebagai literal SQL. Menuliskan `IN ('rencana','dikerjakan',…)` di
+         * sini adalah cara paling pasti membuat ubin ringkasan dan lencana
+         * kartu berselisih soal permintaan yang sama.
+         */
+        adaBelum: sql<boolean>`bool_or(${inArray(productions.status, [...TAHAP_BELUM_SELESAI])})`.as(
+          "ada_belum",
+        ),
+        // "mulus" ≠ "tak ada yang tersisa": permintaan yang seluruhnya ditolak
+        // juga tak menyisakan pekerjaan, dan ia BUKAN keberhasilan.
+        semuaKonfirm: sql<boolean>`bool_and(productions.status = 'dikonfirmasi')`.as(
+          "semua_konfirm",
+        ),
+        supBelum: supBelum.as("sup_belum"),
+        supSemuaTiba: supSemuaTiba.as("sup_semua_tiba"),
+        /*
+         * MAX, BUKAN MIN — dan bedanya tak terlihat sampai terlambat.
+         *
+         * `GET /produksi` mengurut `MIN(waktu) DESC`; menyalinnya ke sini
+         * SALAH. `waktu` yang ditampilkan entri ini diambil dari baris pertama
+         * pemindaian `desc(waktu)`, yaitu MAX — dan MAX itu BERGERAK, sebab
+         * konfirmasi menulis ulang `productions.waktu`
+         * (`produksi/routes.ts:950, :1289, :2541`). Pada fikstur segar MIN dan
+         * MAX sama (satu submit = satu `now()`), jadi salahnya lolos seluruh
+         * uji dan baru muncul di data hidup.
+         */
+        waktu: sql<string>`MAX(${productions.waktu})`.as("waktu_maks"),
+      })
+      .from(productions)
+      .where(and(...condPermintaan))
+      .groupBy(productions.rencanaId)
+      .as("agregat_rencana");
+    // Terjemahan `selesaiPermintaan` / "mulus" (@kakarut/shared) ke SQL. SATU
+    // definisi, dipakai kueri ringkas DAN kunci halaman — jadi mustahil urutan
+    // dan ringkasan memakai aturan yang berbeda.
+    const selesaiSql = sql<boolean>`(NOT ${agregat.adaBelum} AND NOT ${agregat.supBelum})`;
+    const mulusSql = sql<boolean>`(${agregat.semuaKonfirm} AND ${agregat.supSemuaTiba})`;
+    // `total` MENUMPANG kueri ringkas — persis keputusan `GET /produksi`:
+    // ringkasan tak boleh bicara soal populasi yang berbeda dari judulnya.
+    const [hitung] = await db
+      .select({
+        total: sql<number>`COUNT(*)::int`,
+        berjalan: sql<number>`COUNT(*) FILTER (WHERE NOT ${selesaiSql})::int`,
+        selesai: sql<number>`COUNT(*) FILTER (WHERE ${mulusSql})::int`,
+        selesaiAdaDitolak: sql<number>`COUNT(*) FILTER (WHERE ${selesaiSql} AND NOT ${mulusSql})::int`,
+      })
+      .from(agregat);
+    const total = hitung?.total ?? 0;
+    const ringkas: RingkasPermintaan = {
+      berjalan: hitung?.berjalan ?? 0,
+      selesai: hitung?.selesai ?? 0,
+      selesai_ada_ditolak: hitung?.selesaiAdaDitolak ?? 0,
+    };
+    const kunci = await db
+      .select({ rencanaId: agregat.rencanaId })
+      .from(agregat)
+      .orderBy(
+        // yang BELUM selesai dulu — inilah yang pindah dari klien ke SQL
+        sql`(CASE WHEN ${selesaiSql} THEN 1 ELSE 0 END) ASC`,
+        sql`${agregat.waktu} DESC`,
+        /*
+         * PEMUTUS SERI — tanpa ini halamannya tumpang-tindih dan yang hilang
+         * tak meninggalkan gejala apa pun. Kedua kunci di atas agregat, jadi
+         * dua rencana berwaktu sama tak punya urutan sama sekali; dan waktu
+         * yang sama bukan kebetulan langka — `now()` stabil per transaksi, dan
+         * konfirmasi massal menulis SATU `new Date()` ke semua baris yang
+         * disentuhnya. `GET /produksi` sudah membayar bug ini: 60 faktur seri,
+         * `per_page=5`, seluruh halaman ditelusuri, 56 terkumpul dari 60 —
+         * EMPAT tak muncul di halaman mana pun.
+         */
+        asc(agregat.rencanaId),
+      )
+      .limit(perPage)
+      .offset(offset);
+    const kunciHalaman = kunci.map((k) => k.rencanaId!).filter((x): x is string => !!x);
+    if (kunciHalaman.length === 0) {
+      return c.json({ rows: [], total, page, per_page: perPage, ringkas });
+    }
     const rows = await db
       .select({
         rencanaId: productions.rencanaId,
@@ -185,13 +330,13 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       .from(productions)
       .leftJoin(tujuanB, eq(productions.tujuanBranchId, tujuanB.id))
       .leftJoin(pembuatU, eq(productions.userId, pembuatU.id))
-      .where(
-        and(
-          eq(productions.companyId, auth.company_id!),
-          isNotNull(productions.rencanaId),
-          isNull(productions.deletedAt),
-        ),
-      )
+      .where(and(...condPermintaan, inArray(productions.rencanaId, kunciHalaman)))
+      /*
+       * `desc(waktu)` DIPERTAHANKAN, dan bukan sisa: `g.waktu` entri ini —
+       * beserta `faktur_id` yang menang untuk bagian beli/kirim/beli_produksi —
+       * semuanya diturunkan dari urutan pemindaian ini. Yang menentukan urutan
+       * HALAMAN adalah `kunciHalaman` di atas, bukan baris ini.
+       */
       .orderBy(desc(productions.waktu));
 
     // status representatif faktur = tahap PALING AWAL di antara barisnya (bila
@@ -302,7 +447,20 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         }
       }
     }
-    const hasil: PermintaanStokRow[] = [...map.values()].map(
+    /*
+     * URUTAN HALAMAN DATANG DARI `kunciHalaman`, BUKAN DARI URUTAN PETA.
+     *
+     * `map` diisi mengikuti pemindaian `desc(waktu)`; itu BUKAN urutan "belum
+     * selesai dulu" yang dipakai mengiris halamannya. Memulangkan
+     * `[...map.values()]` memberi HIMPUNAN yang benar dengan URUTAN yang
+     * salah — tanpa typecheck, tanpa galat, dan tak seorang pun bisa
+     * membedakannya dari "memang begitu datanya". Yang menangkapnya asersi
+     * monoton di verify-api §292.
+     */
+    const hasil: PermintaanStokRow[] = kunciHalaman
+      .map((id) => map.get(id))
+      .filter((g): g is Akum => g != null)
+      .map(
       ({ _rankBeli, _rankBeliProd, _rankKirim, _prod, _ingBeli, _ingBeliProd, _ingKirim, ...rest }) => {
         // Petakan bucket produksi → bagian: faktur ber-sisiCk (untuk/dari CK) =
         // `produksi` (work-order CK); faktur lokal lainnya = `produksi_cabang`
@@ -315,6 +473,29 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
           status: b.status,
           total: b.total,
         });
+        /*
+         * BATAS YANG DIKETAHUI, terukur 2026-09-03 pada DB gerbang: NOL
+         * kejadian, jadi ditulis alih-alih dirombak.
+         *
+         * Dua jalur di bawah ini menyempit kalau satu submit melahirkan LEBIH
+         * DARI DUA faktur produksi (bucket ketiga dan seterusnya dibuang), atau
+         * kalau DUA-DUANYA ber-sisi CK (yang kedua terlabel "produksi di
+         * cabang", padahal ia work-order CK). Kueri pemeriksanya:
+         *
+         *   SELECT rencana_id, COUNT(*) FROM (
+         *     SELECT rencana_id, faktur_id,
+         *            bool_or(untuk_branch_id IS NOT NULL OR dari_branch_id IS NOT NULL) ck
+         *       FROM productions
+         *      WHERE rencana_id IS NOT NULL AND deleted_at IS NULL
+         *        AND asal_branch_id IS NULL AND tipe='produksi'
+         *      GROUP BY 1,2) b
+         *    GROUP BY 1 HAVING COUNT(*) > 2 OR COUNT(*) FILTER (WHERE ck) > 1;
+         *
+         * Kosong pada 17 rencana ber-produksi. Yang membuatnya berarti nanti:
+         * `PermintaanStokBagian.faktur_id` kini dipakai sebagai TAUTAN ke
+         * halaman dokumen fakturnya, jadi bucket yang terbuang bukan cuma
+         * angka yang kurang — ia dokumen yang tak punya pintu.
+         */
         if (buckets.length === 1) {
           rest.produksi = keBagian(buckets[0]);
         } else if (buckets.length > 1) {
@@ -327,7 +508,7 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
       },
     );
     // Nomor dokumen permintaan (PM-xxxx) — identitas tampil tiap entri.
-    const rencanaIds = [...map.keys()];
+    const rencanaIds = kunciHalaman;
     const petaNomor = await nomorUntukRefs(db, auth.company_id!, rencanaIds);
     for (const h of hasil) h.nomor = petaNomor.get(h.rencana_id) ?? null;
     // FAKTUR BELI PERLENGKAPAN (BP-) yang lahir bersama permintaan: supply
@@ -391,7 +572,7 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
         };
       }
     }
-    return c.json(hasil);
+    return c.json({ rows: hasil, total, page, per_page: perPage, ringkas });
   })
   /**
    * Hapus satu permintaan → Tempat Sampah: SOFT-DELETE semua faktur (produksi +

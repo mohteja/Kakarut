@@ -195,6 +195,13 @@ const DIIZINKAN: Entri[] = [
     catatan: "idem",
   },
   {
+    berkas: "pages/stok/PermintaanStokPage.tsx",
+    deps: "page, totalPages",
+    jenis: "rekonsiliasi",
+    catatan:
+      "idem — lahir 2026-09-03 saat daftar permintaan berhenti dipotong di klien dan mulai berhalaman di server; tanpa penjepit ini, menghapus permintaan terakhir di halaman 4 mengunci orangnya di halaman kosong",
+  },
+  {
     berkas: "context/BranchContext.tsx",
     deps: "cabang, branchId, isKasir, isAdmin",
     jenis: "rekonsiliasi",

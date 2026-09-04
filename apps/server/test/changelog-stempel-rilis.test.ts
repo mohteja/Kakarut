@@ -64,13 +64,16 @@ const BELUM_TAYANG = new Set([
   // bukan rilis
   "## Koreksi kontrak: satuan baris faktur (`qty` vs `satuan_beli` vs `is_batch`)",
   "## Cara memelihara berkas ini",
-  // belum di-merge — pemilik repo meminta putaran ini berhenti di cabang kerja
-  // sampai ia minta rilis. Stempelnya dipasang dan baris ini dihapus saat
-  // merge ke `production` terjadi.
-  "## 401 sesi kedaluwarsa dan 401 token palsu kini punya kalimat masing-masing",
-  "## `GET /shift/selisih/ringkas` — jumlah antrean putusan tanpa menarik daftarnya",
-  "## `GET /produksi` & `/pembelian` memulangkan `ringkas` — antrean pengadaan tanpa menghitung sendiri",
-  "## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)",
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-09-03. Keempat entri yang
+  // sempat berdiri di sini — 401 kedaluwarsa vs palsu, `/shift/selisih/ringkas`,
+  // `ringkas` pengadaan, dan alasan penolakan `/auth/login` — tayang lewat
+  // merge `fc56d96`, dan stempelnya dipasang pada putaran yang sama dengan
+  // penghapusan baris-baris ini. Menghapusnya terpisah dari memasang stempelnya
+  // adalah cara berkas ini pernah salah selama empat hari.
+  //
+  // belum di-merge (masih di cabang `claude`, ikut PR draft #225)
+  "## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya",
+  "## 🔴 `GET /rekomendasi/permintaan` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

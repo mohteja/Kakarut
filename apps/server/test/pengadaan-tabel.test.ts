@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { barisBelumSelesai, statusFaktur, TAHAP_BELUM_SELESAI } from "@kakarut/shared";
 import { butaKomentar } from "../src/scripts/buta-komentar";
@@ -35,8 +36,16 @@ import { butaKomentar } from "../src/scripts/buta-komentar";
  */
 const baca = (rel: string) =>
   butaKomentar(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8"));
+const WEB = fileURLToPath(new URL("../../web/src", import.meta.url));
 const HAL = baca("../../web/src/pages/produksi/TambahStokPage.tsx");
-const MODAL = baca("../../web/src/pages/produksi/FakturDetailModal.tsx");
+/*
+ * RUMAH KETIGA TOMBOL ITU PINDAH 2026-09-03, dan berkas ini merah karenanya —
+ * bukan hampa. Modal detail (`FakturDetailModal.tsx`) DIHAPUS dan digantikan
+ * halaman dokumennya sendiri (`FakturDetailPage.tsx`, ber-URL supaya bisa
+ * dicetak & tautannya dikirim). Yang dijaga uji ini tak berubah sedikit pun —
+ * "tombol yang keluar dari baris punya rumah baru" — cuma alamat rumahnya.
+ */
+const HALDETAIL = baca("../../web/src/pages/produksi/FakturDetailPage.tsx");
 const LAYOUT = baca("../../web/src/components/Layout.tsx");
 const TIM = baca("../../web/src/pages/TimBerandaPage.tsx");
 
@@ -126,7 +135,10 @@ describe("riwayat pengadaan dirender TABEL", () => {
     // persis seperti "belum ada produksi". Sapuan `gagal-muat-bukan-kosong`
     // menuntutnya juga.
     expect(HAL).toContain("galat={daftarGagal}");
-    expect(HAL).toContain("onKlikBaris={(g) => setDetail(g)}");
+    // Baris → HALAMAN dokumennya (2026-09-03; sebelumnya modal). Yang dijaga
+    // tetap sama: baris harus bisa diklik dan sampai ke detailnya.
+    expect(HAL).toMatch(/onKlikBaris=\{\(g\) => navigate\(/);
+    expect(HAL).toContain("g.fakturId ?? g.key");
     // Kartu lama membungkus tiap faktur dengan <Card onClick=...>; kalau pola
     // itu kembali, tabelnya sudah tak jadi tabel lagi.
     expect(HAL).not.toMatch(/<Card\s+key=\{g\.key\}/);
@@ -134,9 +146,11 @@ describe("riwayat pengadaan dirender TABEL", () => {
 
   it("sinyal faktur diekstrak, bukan dihitung ulang di dalam .map", () => {
     expect(HAL).toContain("export function sinyalFaktur(");
-    // Dipakai DUA tempat: kolom tabel dan modal detail. Kalau salah satunya
-    // menilai sendiri, tombol yang muncul untuk faktur yang sama bisa berbeda.
-    expect((HAL.match(/sinyalFaktur\(/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    // Dipakai DUA berkas: kolom tabel di sini, halaman detail di sebelah.
+    // Kalau salah satunya menilai sendiri, tombol yang muncul untuk faktur
+    // yang sama bisa berbeda — dan yang salah tak kelihatan sampai dicari.
+    expect((HAL.match(/sinyalFaktur\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(HALDETAIL).toContain("sinyalFaktur(");
     expect(HAL).not.toMatch(/grup\.map\(\(g\) => \{[\s\S]{0,200}?const campuran =/);
   });
 
@@ -195,19 +209,26 @@ describe("ubin ringkasan", () => {
 });
 
 describe("tombol yang keluar dari baris punya rumah baru", () => {
-  it("ketiganya ada di modal detail", () => {
-    expect(MODAL).toContain("Dokumen RAB");
-    expect(MODAL).toContain("Dokumen belanja");
-    expect(MODAL).toContain("Laporan Harga");
-    expect(MODAL).toContain("Dokumen kirim");
+  it("ketiganya ada di HALAMAN detail", () => {
+    expect(HALDETAIL).toContain("Dokumen RAB");
+    expect(HALDETAIL).toContain("Dokumen belanja");
+    expect(HALDETAIL).toContain("Laporan Harga");
+    expect(HALDETAIL).toContain("Dokumen kirim");
+  });
+
+  it("modal lamanya benar-benar tak ada lagi, dan tak ada yang mengimpornya", () => {
+    // Rumah kedua yang menganggur adalah rumah yang kelak diisi lagi diam-diam.
+    expect(existsSync(join(WEB, "pages/produksi/FakturDetailModal.tsx"))).toBe(false);
+    expect(HAL).not.toContain("FakturDetailModal");
   });
 
   it("kelayakannya dinilai `sinyalFaktur` yang sama dengan tabelnya", () => {
     // Dua penilaian terpisah akan menampilkan tombol yang berbeda untuk faktur
     // yang sama — dan yang salah tak akan pernah kelihatan sampai ada yang
     // mencarinya.
-    expect(HAL).toMatch(/onLaporanHarga: s\.bisaLapor/);
-    expect(HAL).toMatch(/onDokumenKirim: s\.adaTerkirim/);
+    expect(HALDETAIL).toContain("sinyalFaktur(grup, tipe,");
+    expect(HALDETAIL).toMatch(/sinyal\.bisaLapor/);
+    expect(HALDETAIL).toMatch(/sinyal\.adaTerkirim/);
   });
 
   it("yang dipakai tiap hari TETAP di baris", () => {

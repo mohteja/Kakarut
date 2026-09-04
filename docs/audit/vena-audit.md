@@ -50,6 +50,480 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Perbaikan yang cuma kena SETENGAH layar — dan dua gerbang yang setuju bahwa ia beres — web — 2026-09-04
+
+- **Kenapa entri ini ada**: pemilik repo meminta *"cek bug perbaikan baru"*.
+  Yang diperiksa pekerjaan saya sendiri dari putaran sebelumnya, dan ia memang
+  bercacat.
+
+- **CACATNYA**: perbaikan tautan ("tiap jalur menautkan ke halaman dokumen
+  fakturnya, bukan ke daftarnya") **hanya kena bentuk TABEL**. Bentuk KARTU —
+  yang **BAWAAN**, jadi yang paling sering dibuka orang — tetap menunjuk
+  `/produksi` dan `/pembelian`, daftarnya. Terukur di peramban: kartu punya
+  **NOL** tautan ke halaman dokumen faktur.
+
+  Jadi klaim yang saya tulis di pesan commit, PR, dan entri ledger sebelumnya
+  benar hanya untuk bentuk yang harus dipilih orang lebih dulu, dan salah untuk
+  bentuk yang ia lihat saat membuka halamannya.
+
+- **DUA GERBANG SETUJU BAHWA ITU BERES, dan tak satu pun pernah melihatnya** —
+  ini bagian yang layak diingat:
+
+  | gerbang | kenapa hijau |
+  | --- | --- |
+  | penjaga statis `tiap jalur menautkan ke FAKTURNYA` | ia hanya membaca `kolom-permintaan.tsx`; halamannya tak pernah dibuka |
+  | lengan peramban `lencana jalur membuka HALAMAN DOKUMEN` | ia menekan `☰ Tabel` lebih dulu, jadi ia tak pernah menyentuh bentuk bawaannya |
+
+  Keduanya menguji **jalan yang sama** dari dua arah, dan sama-sama melewatkan
+  jalan yang lain. Dua gerbang yang hijau atas hal yang sama bukan dua gerbang.
+
+- **Kelas cacatnya, ditulis supaya bisa dikenali lagi**: sebuah aturan
+  diperbaiki di SATU dari DUA tempat yang merendernya, dan penjaganya menjaga
+  *tempat yang diperbaiki* alih-alih *aturannya*. Asersi "berkas X menyebut
+  pola yang benar" tak pernah bisa menangkap ini; yang bisa hanya "tak ada
+  tempat lain yang boleh menentukannya sendiri".
+
+- **Perbaikannya STRUKTURAL, bukan menyalin tautan ke tempat kedua**:
+  `tautanJalur()` dan `IKON_JALUR` diekspor dari `kolom-permintaan.tsx`, prop
+  `to` pada `Bagian` **dihapus** (tak ada pemanggil yang bisa menentukan tujuan
+  sendiri lagi), dan `gayaBagian`/`gayaPerlengkapan` dinaikkan ke lingkup modul
+  supaya kartu dan tabel memakai satu fungsi. `BagianPerlengkapan` ikut lewat
+  fungsi yang sama, jadi batas "BP- tetap ke daftarnya" pun hidup di satu
+  tempat.
+
+- **DUA DUPLIKASI LAIN yang ikut ketahuan sepanjang jalan** — keduanya saya
+  sendiri yang membuatnya di putaran sebelumnya, di putaran yang justru
+  menghapus duplikasi di tempat lain:
+  - terner label tahap ditulis **dua kali** byte-identik (`Bagian` dan
+    `gayaBagian`) — kartu dan tabel bisa menyebut tahap yang sama dengan dua
+    kata berbeda untuk faktur yang sama;
+  - peta ikon jalur punya **dua rumah** (terner di halaman + `IKON_JALUR`).
+  - Plus satu impor mati (`formatTanggalRingkas`); `noUnusedLocals` tak aktif
+    di repo ini, jadi tak ada yang menagihnya.
+
+- **Urutan kerjanya sengaja dibalik**: lengan peramban untuk bentuk kartu
+  ditulis **lebih dulu** dan dijalankan terhadap kode yang masih bercacat —
+  merahnya ("kartu tak punya satu pun tautan ke halaman dokumen faktur") adalah
+  bukti cacatnya ADA, bukan sekadar dugaan dari membaca sumber. Baru sesudah
+  itu diperbaiki.
+
+- **Penjaganya diperluas dan dibuktikan bisa menuduh**: memasang kembali cacat
+  aslinya (`to=` literal di kartu) → merah; menyalin balik terner labelnya →
+  merah. Keduanya dipulihkan byte-per-byte.
+
+- **Gerbang penuh**: verify-api **3.517 / 0**, npm test **236 berkas /
+  2.884 uji**, invarian **27/27**, Playwright **38 lolos** (dari 37). Tanpa
+  rilis.
+
+---
+
+## Permintaan Stok dapat bentuk TABEL — dan korelasi SQL tak berkualifikasi yang lolos invarian partisi — web + server + ponsel — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo meminta *"permintaah stock juga ingin
+  ada yang versi tabel"* — "juga" merujuk Riwayat Pengadaan, yang putaran
+  sebelumnya diubah jadi tabel. Yang ditemukan saat mengukurnya menentukan
+  sisanya, dan pemiliknya memutuskan mengambil semuanya sekaligus.
+
+- **Keadaan sebelumnya**: `PermintaanStokPage.tsx` (414 baris) daftar kartu
+  satu kolom di dalam `max-w-2xl`, nol `<table>`, nol saringan. Rutenya
+  `GET /rekomendasi/permintaan` **tak membaca satu pun query param** dan
+  memulangkan **array telanjang** berisi seluruh riwayat permintaan
+  perusahaan; paginasinya 100% dipotong di klien.
+
+- **Terukur lewat HTTP/SQL sebelum satu baris ditulis**:
+
+  | | sebelum | sesudah |
+  | --- | --- | --- |
+  | permintaan di DB gerbang | 24 | 24 |
+  | byte balasan | **11.790, SELALU** | 10.132 (`per_page=20`) |
+  | per permintaan | ~491 B | — |
+  | proyeksi @1.000 permintaan | **~491 KB tiap buka halaman** | tetap ~10 KB |
+  | kueri | 3, **dua tanpa langit-langit** | 5, **semua berbatas** |
+
+  Ikut diukur dan menentukan bentuk kolomnya: jalur non-null per permintaan
+  **min 1, maks 4, rata 1,79** (dari 6 yang mungkin) — kolom "Isi" memang muat,
+  dan itu diketahui sebelum kolomnya diketik, bukan sesudah.
+
+- **TEMUAN UTAMA — korelasi SQL tanpa kualifikasi tabel, dan invarian yang
+  TIDAK menangkapnya.** Subkueri perlengkapan ditulis
+  `sp.rencana_id = ${productions.rencanaId}`; drizzle merendernya
+  **`sp.rencana_id = "rencana_id"`** — tanpa kualifikasi. Di dalam
+  `FROM supply_purchases sp`, `"rencana_id"` teresolusi ke **`sp.rencana_id`
+  sendiri**, jadi syaratnya jadi `sp.rencana_id = sp.rencana_id`: selalu benar.
+  `supBelum` berhenti bertanya *"permintaan INI perlengkapannya belum beres?"*
+  dan mulai bertanya *"adakah SATU SAJA baris perlengkapan yang belum beres di
+  seluruh perusahaan?"*.
+
+  Hasilnya `berjalan: 24, selesai: 0` untuk populasi yang hitungan tangannya
+  **17 / 7**. Dan yang **tidak** menangkapnya: **invarian partisi** —
+  `24 + 0 + 0 = 24`, tetap tepat, sebab seluruh kesalahannya mendarat di satu
+  ember. Yang menangkapnya perbandingan dengan hitungan tangan §0.
+  **Itulah gunanya mengukur lebih dulu**, dan ini kali pertama di ledger ini
+  sebuah invarian struktural terbukti tak cukup sendirian.
+
+- **Aturan status pindah rumah** ke `packages/shared/src/permintaan-stok.ts`
+  (kembaran `pengadaan.ts`, yang kepalanya sudah menuliskan polanya). Server
+  memakai konstantanya untuk merakit predikat SQL; web untuk badge dan label
+  ubin. Tanpa itu, ubin berbunyi "3 selesai" di atas daftar dengan 4 lencana
+  selesai — populasi yang sama, layar yang sama, nol uji merah.
+
+- **Sakelar bentuk diekstrak saat salinan KETIGA hendak lahir**
+  (`components/SakelarTampilan.tsx`). Dua yang ada sudah menyimpang persis pada
+  hal yang membuatnya terasa satu produk: Menu `text-xs`/`px-3 py-1` tanpa
+  hover, Resep `text-sm`/`px-3 py-1.5` + `hover:` + `type="button"`. Tak satu
+  pun perbedaan itu pernah diputuskan siapa pun. `type="button"` dari versi
+  Resep dipakai keduanya — tanpanya sebuah `<button>` di dalam `<form>`
+  bertipe `submit`, dan sakelar yang mengirim formulir tak meninggalkan gejala
+  selain "kenapa halamannya reload".
+
+- **Tautan tiap jalur dibetulkan** — dan ini ditemukan sambil membaca, bukan
+  diminta. Tiap blok jalur SUDAH memegang `faktur_id`, tapi tautannya menunjuk
+  `/produksi` atau `/pembelian`: **daftarnya**. Mengklik "🏭 Produksi · 3 bahan"
+  mendaratkan orang di halaman 1 dari 4 dan menyuruhnya mencari sendiri faktur
+  yang barusan ia klik. Kini ke halaman dokumen fakturnya — memakai ulang rute
+  putaran kemarin, nol kerja server baru. **Batas yang disengaja**:
+  `beli_perlengkapan` (BP-) TETAP ke daftarnya; fakturnya hidup di
+  `supply_purchases` dan halaman dokumen hanya melayani `productions`.
+
+- **Dua alarm saya sendiri yang SALAH, dikoreksi sebelum jadi pekerjaan.**
+  Saya melaporkan bahwa PM-0012 punya tiga faktur produksi dan satu di
+  antaranya tak dirender. Keliru: kueri saya tak mengupas baris ber-`asal_branch_id`
+  (jalur `kirim`) lebih dulu, jadi saya menghitung faktur kirim sebagai bucket
+  produksi. Diukur ulang dengan bucketing handler yang sebenarnya: **nol**
+  rencana ber-bucket ketiga, **nol** rencana ber-dua-bucket-CK. Keduanya jalur
+  kode yang ada tapi tak pernah terpakai — ditulis sebagai komentar batas di
+  tempat pemetaannya, **bukan** dirombak. Rencana ini sempat menuliskan
+  "diperbaiki lebih dulu"; yang benar mengukur ulang.
+
+- **Penjaga `urutan-pemutus-seri` menemukan lubangnya sendiri.** Ia memvonis
+  ORDER BY saya SERI padahal pemutus serinya ADA — sebab bentuk "agregat dulu,
+  baru dipotong" memecah rantainya jadi dua, dan `grupTerpakai` hanya melihat
+  satu rantai. Vonis itu bukan cuma salah, ia MAHAL: ia menyuruh menambahkan
+  pemutus seri kedua pada kunci yang sudah unik, dan yang berikutnya belajar
+  bahwa gerbang itu boleh ditawar. Pemindainya diajari mengenali
+  `const X = db.select(…).groupBy(k).as(…)` lalu `.from(X)` — dan **dibuktikan
+  masih bisa menuduh**: mencabut pemutus serinya memerahkannya lagi.
+
+- **Ponsel diperbaiki di putaran yang sama** (keputusan pemilik). `as List`
+  pada balasan yang kini `Map` akan melempar saat runtime. Sekalian: kedua
+  lencana "permintaan berjalan" di Beranda & Kasir dulu menyaring `rows`
+  sendiri — salinan KETIGA aturannya, dan salinan yang **menyimpang**: ia hanya
+  melihat `kirim`/`produksi`/`beli`/`beli_produksi`, jadi permintaan yang sisa
+  pekerjaannya di `produksi_cabang` atau `beli_perlengkapan` tak terhitung.
+  Keduanya kini memakai `ringkas.berjalan`. Dan karena layar ponsel tak punya
+  kendali halaman, ia meminta `per_page=200` **dan mengaku** lewat "Menampilkan
+  N dari M" — daftar yang diam-diam berhenti di 200 membuat orang mengira
+  permintaan lamanya sudah tak ada.
+
+- **Delapan bukti merah**, tiap satu dipulihkan byte-per-byte (`cmp`):
+
+  | | mutasi | gagal di |
+  | --- | --- | --- |
+  | A | `MAX(waktu)` → `MIN` | penjaga statis |
+  | B | pemutus seri dicabut | penjaga statis ×2 |
+  | C | `NOT EXISTS` → `bool_and` skalar | **`selesai` 7 → 0, invarian partisi false** |
+  | D | urutan peta, bukan urutan kunci | penjaga statis |
+  | E | `statusPermintaan` disalin balik | penjaga statis |
+  | F | ubin dijumlahkan dari `rows` | lengan peramban |
+  | G | pilihan sakelar tak ditulis | lengan peramban |
+  | H | tautan jalur dikembalikan ke daftar | lengan peramban |
+
+  **C yang paling berharga**: ia satu-satunya yang membuktikan invarian
+  partisi memang bisa menuduh — dan sekaligus, dipadu temuan utama di atas,
+  menunjukkan batasnya. Mutasi pertama saya untuk C memecahkan kuerinya
+  sama sekali (500) — merah yang benar karena alasan yang salah; diulang
+  dengan mutasi yang setia pada kelas cacatnya (`bool_and` atas himpunan
+  kosong → NULL).
+
+- **Bukti merah saya sendiri sempat merusak berkasnya.** Mutasi B mengganti
+  barisnya dengan string KOSONG, dan `str.replace("", x, 1)` menyisipkan di
+  posisi 0 — pemulihannya mendarat di baris pertama berkas. `cmp` yang
+  menangkapnya. Harnessnya kini menolak mutasi yang salah satu sisinya kosong.
+
+- **Batas yang diketahui, ditulis jujur**: jalur `/pembelian` bentuk tabel tak
+  punya lengan peramban (kolom biaya, buku dana, supplier) — hanya verify-api
+  §292 + penjaga statis. Sebabnya kuota `/auth/login` (10 per 5 menit per
+  IP+email; sepuluh berkas spec sudah memakai akun owner), dan lengan putaran
+  ini menumpang `pengadaan-tabel.spec.ts` karena itu. Perbaikan sesungguhnya
+  masuk antrean di bawah.
+
+- **Gerbang penuh**: verify-api **3.517 lolos / 0 gagal** (+9 dari §292),
+  npm test **236 berkas / 2.882 uji**, invarian **27/27**, Playwright
+  **37 lolos**. Ratchet `daftar-tanpa-langit-langit` **64 → 65** dengan alasan
+  tertulis. Kontrak + entri changelog ponsel 🔴 WAJIB didaftarkan di
+  `BELUM_TAYANG`. **Tanpa rilis** — dan untuk vena ini rilisnya WAJIB serentak
+  dua repo: APK lama + server baru = layar Permintaan gagal.
+
+---
+
+## Detail faktur jadi HALAMAN dokumen — dan bukti merah yang membuktikan lengan `reload()` bukan kelebihan — web + server — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo membuka modal Detail Produksi (PR-0137)
+  dan meminta *"detail produksi ingin di buat form seperti form produksi dan
+  page sendiri supaya bisa di print dan share"*. Tiga hal yang tak bisa
+  diberikan sebuah modal, dan ketiganya jadi ukuran pekerjaan ini: URL yang
+  bisa dikirim, kertas yang bisa dicetak, PDF yang bisa disimpan.
+
+- **Keadaan sebelumnya**: `FakturDetailModal.tsx`, **509 baris**, merender 28
+  medan, hanya bisa dibuka dengan mengklik baris di riwayat pengadaan. Tak
+  punya URL, tak bisa dicetak, tak bisa dikirim.
+
+- **Ukuran yang menentukan bentuknya** (basis data uji, `GET /produksi`
+  `branch_id=all`, token owner):
+
+  | | |
+  | --- | --- |
+  | faktur produksi | **62** |
+  | per halaman | 20 → **4 halaman** |
+  | balasan satu halaman | **~43.880 byte** |
+  | balasan `GET /produksi/faktur/:id` | **9.729 byte** |
+
+  `GET /produksi` **tak punya saringan `faktur_id` sama sekali** —
+  parameternya cuma `branch_id`, `dari`, `sampai`, `tanggal`, `page`,
+  `per_page`. Jadi halaman yang harus menemukan fakturnya sendiri menyisir
+  sampai empat permintaan, dan faktur di halaman ke-4 tak bisa dibuka dari
+  tautan tanpa memuat tiga halaman yang tak ada hubungannya. Itu satu-satunya
+  alasan putaran ini menyentuh server; kalau saringannya ada, ini murni
+  pekerjaan web.
+
+- **Satu rute, dua jalur.** `buatRuteTambahStok(tipe)` melahirkan `/produksi`
+  DAN `/pembelian`, jadi `GET {jalur}/faktur/:fakturId` melayani keduanya.
+  `select` + join + pengayaannya (rak simpan, `qty_teks`, batch) diekstrak jadi
+  `ambilBarisFaktur()` yang dipakai daftar DAN detail — dua `select` yang
+  ditulis terpisah adalah dua bentuk baris yang pelan-pelan berbeda, dan badge
+  di halaman detail berhenti cocok dengan badge di barisnya untuk faktur yang
+  SAMA. **Kesetaraannya diukur, bukan diklaim**: verify-api §291 mengambil satu
+  `faktur_id` dari daftarnya, menembak rute barunya, dan membandingkan kedua
+  `rows` dengan `jq` deep-equal → `true`.
+
+- **Gerbangnya sama persis dengan daftarnya**, dan itu inti keamanannya: rute
+  per-id yang lebih longgar adalah pintu samping — `bar` membaca faktur
+  `kitchen` hanya dengan menebak URL. Saringan divisi + penyaring faktur
+  transfer diekstrak jadi `gerbangPengadaan(auth)`: **satu definisi, dua
+  pemanggil**. Cabangnya dari **token**, bukan `?branch_id=` — untuk peran
+  terikat barisnya harus menyentuh cabangnya (`branch_id` / `dari_branch_id` /
+  `asal_branch_id`; tanpa dua yang terakhir faktur yang sudah dikirim hilang
+  dari mata CK), untuk manajemen tak menyempit sama sekali sebab tautan tak
+  boleh mati hanya karena pemilih cabang penerimanya sedang di tempat lain.
+  Tak ada / bukan miliknya / di luar jangkauan perannya → **satu 404 yang
+  sama**; membedakannya memberi tahu penebak URL bahwa fakturnya ADA.
+
+- **LUBANG DI PENJAGA SAYA SENDIRI, yang bukti merahnya temukan.** Versi
+  pertama asersi gerbang cuma memeriksa teks `condDivisi` ADA di irisan
+  rutenya. Bukti merah 1 (mencabut saringan divisi jadi
+  `const condDivisi: SQL[] = []`) **tetap HIJAU** — teks lamanya tinggal
+  sebagai binding mati, dan penjaganya tak bisa membedakannya dari nilai yang
+  dipakai. Saya sudah memastikan mutasinya benar-benar terpasang sebelum
+  menyimpulkan, jadi yang salah memang penjaganya. **Asersi teks tak bisa
+  membuktikan sebuah NILAI dipakai.** Perbaikannya struktural, bukan asersi
+  yang lebih ketat: predikatnya diekstrak, dan yang dijaga sekarang
+  bentuknya — tepat **1** definisi `ne(ingredients.divisiProduksi, auth.role)`,
+  tepat **1** `eq(dokumenNomor.jenis, "transfer")`, tepat **2**
+  `gerbangPengadaan(auth)`. Mencabutnya dari salah satu pintu berarti
+  memanggil fungsi lain, dan itu terlihat. Sesudah diperbaiki, bukti merah 1
+  gagal benar DAN lahir bukti merah kelima (predikat disalin ke dua tempat).
+
+- **Modalnya DIHAPUS, bukan dibiarkan berdampingan.** 28 medan yang dirender
+  di dua tempat adalah 28 medan yang akan berbeda — dan yang satu diperbaiki
+  sementara yang lain tidak. Kelima aksinya ikut pindah **seluruhnya** (ubah
+  tahap, Dokumen RAB/belanja, Laporan Harga, Dokumen kirim, Hapus/Batalkan);
+  tombol yang dibuang tanpa rumah baru adalah kemampuan yang hilang
+  diam-diam. Perakit `FakturGroup` (~60 baris turunan: status agregat, jejak
+  terima terakhir, penanda kiriman/permintaan, divisi, total harga) diekstrak
+  jadi `kelompokkanFaktur()` yang diekspor — satu aturan, dua pemakai.
+
+- **Mesin cetaknya yang sudah ada, nol CSS baru**: `isi(cetak)` untuk layar dan
+  kertas, `AreaCetak id="dokumen-print"` yang aturan `@media print`-nya sudah
+  hidup di `index.css`, `buildBody()`/`unduhPdf()` dengan tiap sisipan data
+  dilewatkan `lolosHtml`, plus ruang tanda tangan — itu yang membuatnya "form".
+  `AreaCetak` sudah menuliskan alasannya sendiri: tanpa memportal ke luar
+  `#root`, tinggi shell menentukan tinggi cetakan (terukur 8 halaman, 7 kosong,
+  untuk satu struk).
+
+- **Batas "share" yang dipilih pemilik, dan DIKATAKAN di layarnya**: tautannya
+  untuk sesama karyawan — penerimanya tetap wajib login dan tetap tunduk peran
+  & cabangnya. Tak ada tautan publik bertoken. Untuk ke luar, PDF-nya yang
+  dikirim. Orang yang mengira ini tautan publik akan mengirimnya ke supplier
+  dan baru tahu keliru saat supplier itu melihat layar login, jadi kalimatnya
+  ada di halamannya, bukan cuma di komentar kode.
+
+- **Lengan peramban ditumpangkan ke `pengadaan-tabel.spec.ts`, bukan berkas
+  spec sendiri** — dan itu batas fisik, bukan selera. `/auth/login` dibatasi
+  10 per 5 menit per (IP+email), cache sesi e2e hidup per-MODUL, dan Playwright
+  menjalankan tiap berkas spec sebagai proses tersendiri. Dihitung saat
+  putaran ini: **sepuluh** berkas sudah memakai akun owner — tepat di
+  plafonnya. Berkas ke-11 memerahkan berkas MANA PUN yang berjalan terakhir
+  dengan 429, kegagalan yang menuduh kode yang tak bersalah (persis yang
+  terjadi putaran sebelumnya dan menggigit `stok-awal-gagal.spec.ts`).
+  Subjeknya pun memang satu: "riwayat pengadaan, dan apa yang terjadi saat
+  barisnya diklik". Penjaga statisnya memaku keberadaan ketiga lengan itu
+  supaya rujukan silangnya tak bisa jadi basi.
+
+- **Empat bukti merah peramban**, urutan **mutasi → build → RESTART server →
+  uji** (tanpa restart, server menyajikan `index.html` yang di-cache saat boot
+  dan tiap asersi gagal di tempat yang salah — pelajaran yang sudah dibayar dua
+  kali), tiap satu dipulihkan **byte-per-byte** (`cmp`):
+
+  | | mutasi | gagal di |
+  | --- | --- | --- |
+  | A | baris menavigasi tanpa id faktur | `toHaveURL` |
+  | B | data diwarisi cache DAFTAR | **lulus sebelum `reload`, gagal sesudahnya** |
+  | C | Salin tautan menyalin URL daftar | `toBe(URL benar)` |
+  | D | gagal muat dirender dokumen kosong | kalimat "tidak bisa dibuka" |
+
+  **B yang paling berharga**, dan ia menjawab pertanyaan yang biasanya tak
+  pernah ditanyakan: apakah lengan `page.reload()` menambah sesuatu, atau cuma
+  mengulang lengan sebelumnya? Mutasinya membuat halaman merakit detailnya dari
+  cache `GET /produksi` yang dibaca layar riwayat. Hasilnya: **lulus** pada
+  `dokumenMenyebut` yang pertama (baris 188) dan **gagal** pada yang kedua
+  (baris 200), sesudah muat ulang. Cacat itu bekerja sempurna bagi orang yang
+  mengklik dari riwayat dan runtuh tepat bagi orang yang menerima tautannya —
+  satu-satunya orang yang fitur ini dibuat untuknya. Tanpa lengan `reload()`,
+  cacat itu lolos.
+
+- **Batas yang diketahui, ditulis jujur**: penjaga statisnya membaca teks
+  sumber, jadi ia tak bisa mengatakan halamannya benar-benar tercetak rapi —
+  tak ada asersi atas hasil `window.print()` di repo ini, dan e2e-nya pun tak
+  menguji PDF-nya benar-benar terbuka. Yang dijaga: mesin cetaknya yang sudah
+  terbukti dipakai (bukan yang baru), dan tiap sisipan data dilewatkan `esc()`.
+  Lengan peramban juga tak menguji jalur `/pembelian` (kolom biaya, buku dana,
+  supplier) — jalur itu hanya dijaga verify-api §291 dan penjaga statis.
+
+- **Gerbang penuh** (DB nol → seed → verify-api → regen jejak → npm test →
+  invarian → reset batas laju → Playwright): verify-api **3.508 lolos / 0
+  gagal**, npm test **235 berkas / 2.856 uji**, invarian **27/27**, Playwright
+  **34 lolos**. `rute-diketuk.txt` mencatat kedua rute baru (277 baris).
+  Kontrak API + entri `CHANGELOG-API.md` didaftarkan di `BELUM_TAYANG` —
+  belum tayang, masih di cabang `claude`. **Tanpa rilis**, sesuai aturan
+  pemilik.
+
+---
+
+## Menu & HPP dapat bentuk IKON, dan pratinjaunya kartu kasir yang SAMA — bukan yang mirip — web — 2026-09-03
+
+- **Kenapa vena ini ada**: pemilik repo meminta *"menu hpp ingin ada tampilan
+  ikon juga untuk cek preview foto menu di kasir"*. Tujuannya ia sebut sendiri,
+  dan tujuan itu yang menentukan seluruh bentuk pekerjaannya.
+
+- **Keadaan sebelumnya**: `MenuDto` membawa `image_url` sejak lama dan server
+  mengirimkannya di tiap `GET /menu` (`menu/service.ts:433`) — halaman Menu &
+  HPP tak pernah sekali pun memakainya. Bukan medan yang kurang; medan yang
+  tak pernah dibuka.
+
+- **Yang membuat putaran ini lebih dari "tambah grid"**: pratinjau yang cuma
+  MIRIP kartu kasir lebih buruk daripada tak ada pratinjau. Fotonya dipasang
+  `object-cover` di kotak `h-20` — ia MEMOTONG sisi panjang, jadi kotak yang
+  sedikit lebih pendek atau kolom grid yang sedikit lebih sempit menghasilkan
+  potongan yang lain. Dan potongan itulah satu-satunya hal yang orang membuka
+  halaman ini untuk memeriksanya. Pratinjau yang keliru soal potongan membuat
+  orang mengunggah ulang foto yang sebenarnya sudah benar — kerugian yang tak
+  akan pernah ia kenali sebagai bug.
+
+  Maka kartunya bukan kartu baru: `KasirPage.tsx:1057-1093` diekstrak jadi
+  `components/KartuMenuKasir.tsx` dan dipakai KEDUA layar, grid-nya memakai
+  titik henti yang sama (2 → 3 → 4 kolom), dan penjaganya menuntut kelas
+  `h-20 w-full` muncul di **tepat satu berkas** seluruh `apps/web/src`.
+
+- **Tiga salinan `🍜` yang ditemukan sepanjang jalan**, semuanya berarti "foto
+  belum ada": `KasirPage:1069`, `LihatMenuPage:268`, dan `MenuFormPage:498`
+  (prop `placeholder`). Ketiganya kini `IKON_MENU_KOSONG`. Empat kemunculan
+  lain (`Layout` ×2, `StokPage`, `RekomendasiBeliPage`) DIADILI dan sengaja
+  dibiarkan: di sana emojinya label navigasi ("🍜 Menu & HPP") yang berarti
+  "ini urusan menu", bukan "fotonya kosong" — mengikatnya ke konstanta yang
+  sama berarti sidebar ikut berubah saat lambang foto-kosong diganti.
+
+- **Chip "N tanpa foto"** menyaring menu yang fotonya belum ada. Hitungannya
+  menghormati saringan lokasi/kategori/cari (chip ini pintu KERJA — angka yang
+  lebih besar daripada yang bisa dibuka tombolnya adalah janji yang tak
+  ditepati) tapi **tidak** menghormati saringannya sendiri, sebab kalau ikut,
+  angkanya membeku begitu chipnya ditekan. Dan ia **tak dirender saat bacaannya
+  gagal**: "0 tanpa foto" di atas daftar yang gagal dimuat terbaca sebagai
+  "semua menu sudah berfoto" — aturan yang sudah ditulis panjang di
+  `nilai-stok.test.ts`.
+
+- **Yang TIDAK dikerjakan, beserta alasannya**: HPP & food cost sengaja tak
+  ikut di kartu (pilihan pemilik saat ditanya) — kartu yang membawa angka
+  manajemen berhenti jadi cermin layar kasir. Sisa porsi juga tidak: ia angka
+  per-cabang, dan Menu & HPP bukan layar per-cabang; `StokBadge` memulangkan
+  `null` saat porsinya tak diketahui, jadi yang terjadi bukan lencana kosong
+  melainkan tak ada lencana. Penjaganya memaku bahwa halaman ini tak mengoper
+  `stok=`, supaya tak ada yang kelak "melengkapinya" dengan angka karangan.
+
+- **Nol perubahan server**: tak ada kontrak yang berubah, jadi tak ada entri
+  `CHANGELOG-API.md` dan tak ada yang perlu distempel. verify-api tetap
+  3.499/0 — angka yang sama persis dengan sebelum putaran ini, dan itu memang
+  yang diharapkan.
+
+- **Empat hal yang ditemukan gerbangnya, bukan saya** — dan tiga di antaranya
+  membuat bukti merah saya sendiri tidak sah sampai diulang:
+
+  1. **`prettier` bukan bagian repo ini.** Saya menjalankannya atas inisiatif
+     sendiri dan ia memformat ulang seluruh `MenuListPage` — 424 baris berubah
+     untuk perubahan yang seharusnya 122. Dikembalikan, lalu diulang tanpa
+     pemformat. Diff yang membengkak bukan cuma berisik: ia bisa memutus
+     irisan `indexOf` penjaga lain tanpa ada yang menyadarinya.
+  2. **`StokBadge` ikut pindah rumah, dan `kasir-sisa-porsi-gagal.test.ts`
+     MERAH karenanya** — bukan hampa, dan itu perbedaan yang menyelamatkan.
+     Klaimnya tak berubah sedikit pun; alamatnya yang berubah. Penjaganya
+     diarahkan ke rumah baru DAN ditambahi asersi bahwa `KasirPage` tak lagi
+     mendefinisikannya sendiri.
+  3. **Spek baru melewati langit-langit kuota login.** `/auth/login` dibatasi
+     10 per 5 menit per (IP+email); **sepuluh** berkas spek memakai akun owner
+     yang sama, satu login per berkas (tiap berkas satu worker, satu cache).
+     Spek ke-sepuluh membuat `stok-awal-gagal.spec.ts` merah — berkas itu
+     menembak `/auth/login` sendiri di samping `login()` layarnya, jadi ia
+     butuh DUA jatah. Diperbaiki di sumbernya: ia kini memakai `sesiApi` yang
+     ber-cache, yang sekaligus menghapus kegagalan bisu — `(await
+     masuk.json()).token` tanpa memeriksa `.ok()` mengubah 429 jadi
+     `TypeError: Cannot read properties of undefined`, di baris yang tak
+     menyebut kuota sama sekali.
+  4. **Dua bukti merah peramban saya SAH-SEOLAH-OLAH, dan sebenarnya tidak.**
+     Keduanya "merah" — tapi pada asersi yang salah, sebab server menyajikan
+     `index.html` yang di-cache saat boot: membangun ulang tanpa me-restart
+     server membuat bundel ber-hash baru tak pernah dirujuk, halamannya kosong,
+     dan SETIAP asersi gagal. Yang menyingkapnya justru ketidakcocokan
+     kalimatnya — merah yang benar harus berbunyi asersinya sendiri. Diulang
+     dengan urutan mutasi → build → **restart server** → uji, dan barulah
+     keduanya berbunyi "kartu ikon tidak membuka layar ubah menu" dan "kotak
+     fotonya bukan kotak kasir".
+
+- **Terukur pada DB gerbang**: 104 menu aktif, **4 berfoto, 100 tanpa foto** —
+  dan keempat yang berfoto seluruhnya buatan `verify-api.sh` & spek ini
+  sendiri. Data seed repo ini tak memuat satu pun foto menu. Itu yang membuat
+  spek peramban WAJIB menanam menunya sendiri: spek yang cuma membuka halaman
+  lalu mencari `<img>` akan hijau di gerbang penuh (verify-api jalan lebih
+  dulu) dan merah saat `npm run test:e2e` dijalankan sendiri — hijau karena
+  sampah orang lain adalah bentuk hampa yang paling sulit terlihat.
+
+- **Batas yang diketahui**: (1) penjaga statis membaca teks sumber, jadi ia tak
+  bisa mengatakan pikselnya sama — yang mengukur itu spek peramban, dan
+  keduanya sepasang; (2) kartu di Menu & HPP tak menampilkan sisa porsi,
+  jadi pratinjaunya setara dalam FOTO & tata letak, bukan dalam seluruh isi
+  kartu — disengaja, dan ditulis di komponennya; (3) `POST /menu` menuntut
+  `mult` untuk menu reguler (400 "Menu reguler wajib punya mult"), yang
+  ketahuan sebagai premis merah pada gerbang pertama, bukan dari membaca skema.
+
+- **Untuk pemilik, kueri baca-saja di produksi** (kolom `deleted_at` TIDAK ada
+  di tabel `menus` — arsipnya lewat `is_active`, diperiksa langsung di skema):
+
+  ```sql
+  select count(*) filter (where image_url is null) as tanpa_foto,
+         count(*) as total_aktif
+  from menus where is_active;
+  ```
+
+- **Bukti merah**: tujuh statis + tiga peramban, tiap satu dipulihkan
+  byte-per-byte (`cmp`). Statis: kelas foto disalin balik ke `KasirPage` ·
+  grid ikon dilebarkan · chip dirender walau gagal · `🍜` diketik ulang ·
+  `tulisLokal` dicabut · bawaan diam-diam jadi ikon · pratinjau mengoper
+  `stok=`. Peramban: pilihan bentuk tak bertahan · kartu tak bisa diklik ·
+  kotak foto dikecilkan.
+
+- **Gerbang**: typecheck · build · `npm test` 234 berkas / **2.836** uji
+  (+1 berkas, +17 uji) · `verify-api.sh` **3.499 lolos, 0 gagal** (tak berubah
+  — nol perubahan server) · `audit:invarian` 27/27 · Playwright **32 spek**
+  (dari 30). `rute-diketuk.txt` diregenerasi — tak ada rute baru.
+
 ## Login menyebut ALASAN penolakannya — dan harganya keputusan pemilik, bukan kelalaian — web + server — 2026-09-03
 
 - **Kenapa vena ini ada**: pemilik repo meminta dua hal dalam satu pesan —
@@ -165,6 +639,35 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
   — keduanya permukaan enumerasi juga, dan sekarang keduanya lebih ketat
   daripada `/login` di sebelahnya. Ketimpangan itu disengaja (yang satu diminta
   pemilik, yang lain tidak) tapi belum pernah ditanyakan.
+
+- **GERBANG YANG TAK DIBACA BUKAN GERBANG — dan itu saya, pada putaran ini
+  juga.** Dua commit fikstur ponsel (`1e23e8e`, `39b0748`) didorong tanpa saya
+  periksa hasil CI-nya. Keduanya MERAH, ±40 menit, tanpa ada yang tahu:
+  `kunci_kontrak_server_test.dart` menuntut empat kunci kontrak baru
+  diputuskan — `belum_sampai`, `harus_dikerjakan`, `terlambat`,
+  `tertua_ditutup_pada` — dan keputusan itu memang belum pernah dituliskan.
+  Fiksturnya benar; langkah keduanya yang terlewat, persis pola yang
+  `ci.yml` ponsel sudah catat pernah terjadi sekali ("perintah itu hanya
+  MENYEGARKAN fikstur; memutuskan nasib kunci barunya langkah kedua").
+  Yang menangkapnya bukan putaran yang melahirkannya melainkan PERSIAPAN
+  RILIS — jarak yang tak boleh diandalkan. Aturan "jangan pernah dorong
+  gerbang merah" tak berguna bila hasilnya tak dilihat; yang kurang di
+  resep saya adalah langkah "baca CI-nya sebelum lanjut", bukan disiplinnya.
+  Diperbaiki di `98ce52d` (CI ponsel #34 hijau, 644 uji) — dan keempat asersi
+  gerbangnya dijalankan ulang lebih dulu sebagai skrip yang meniru logikanya,
+  sebab Flutter tak ada di lingkungan ini.
+
+- **TAYANG 2026-09-03.** Web: merge `fc56d96` → `production`, CI #492 hijau
+  bertiga (typecheck+unit test+build · verify-api+e2e+cakupan rute+invarian ·
+  build image & picu redeploy Dokploy). Gerbang penuh dijalankan lebih dulu
+  pada HASIL MERGE, bukan pada `claude` saja — `git diff claude production`
+  kosong, dan angkanya sama persis: 2.819 uji · verify-api 3.499/0 ·
+  invarian 27/27 · Playwright 30. Ponsel: merge `a0ea392` → `Production`,
+  CI #35 hijau. Empat entri `CHANGELOG-API.md` distempel pada commit yang
+  sama dengan penghapusannya dari `BELUM_TAYANG`.
+  **Belum diverifikasi dari luar**: domain produksinya tak bisa dijangkau dari
+  lingkungan ini (proxy 403 — kebijakan jaringan), jadi yang dilaporkan hijau
+  adalah pekerjaan CI-nya, bukan bacaan `X-Kakarut-Build` dari situs hidup.
 
 - **Bukti merah, enam, tiap satu dipulihkan byte-per-byte (`cmp`)**: satu pesan
   diketik ulang di server → 2 merah · `/lupa-password` mulai melempar 404
@@ -10318,6 +10821,25 @@ berlaku di situ).
       → `setSession` + keterangan, 401 → sebab diucapkan layar login. Uji
       di-commit lebih dulu; bukti merah CI-nya bukti KOMPILASI, bukan
       perilaku — ditulis apa adanya di entrinya
+- [ ] **Jalur `/pembelian` halaman dokumen tak punya lengan peramban** —
+      kolom biaya, buku dana faktur, dan blok supplier hanya dijaga verify-api
+      §291 + penjaga statis; nol uji browser. Sebabnya bukan kelalaian
+      melainkan kuota: `/auth/login` 10 per 5 menit per (IP+email) dan sepuluh
+      berkas spec sudah memakai akun owner. **Yang membukanya** harus lebih
+      dulu memberi e2e sesi per-worker yang tak membakar kuota (sudah ditulis
+      sebagai syarat di kepala `playwright.config.ts`), atau memakai akun
+      manajemen kedua yang belum ada di seed
+- [ ] **Kuota login menahan spec e2e ke-11** — `/auth/login` 10 per 5 menit per
+      (IP+email), cache sesi `e2e/util.ts` per-MODUL, tiap berkas spec satu
+      proses; SEPULUH berkas sudah memakai akun owner, jadi berkas ke-11
+      memerahkan berkas lain dengan 429. Sudah menggigit DUA putaran berturut
+      (halaman dokumen faktur, lalu Permintaan Stok) dan keduanya menumpang
+      `pengadaan-tabel.spec.ts` — berkas itu kini memuat delapan lengan dari
+      tiga subjek. **Perbaikannya** `globalSetup` Playwright yang login SEKALI
+      dan membagikan tokennya lewat berkas, sebagaimana sudah ditulis sebagai
+      syarat di kepala `playwright.config.ts`; sesudah itu `workers` boleh naik
+      lagi. Akibat yang terukur bila tak digarap: jalur `/pembelian` bentuk
+      tabel dan seluruh layar owner berikutnya tak bisa dapat lengan peramban
 - [ ] **Bacaan `AsyncValue` yang penerimanya variabel lokal** — gerbang
       `nilai_async` hanya melihat `ref.watch(P)`/`ref.read(P)`, jadi
       `final v = ref.watch(p); … v.value ?? kosong` di luar berkas yang sama

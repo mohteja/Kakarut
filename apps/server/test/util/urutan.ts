@@ -422,16 +422,61 @@ export function situsUrut(kode?: Record<string, string>, kodeSkema?: string): Si
     const lingkup = petaLingkup(pohon, induk);
 
     /* (1) rantai Drizzle: `.orderBy(…)` yang serantai dengan `.limit`/`.offset` */
+    /*
+     * SUBKUERI BERAGREGAT YANG DINAMAI — `const X = db.select(…).groupBy(k).as(…)`.
+     *
+     * Bentuk "agregat dulu, baru dipotong" memecah rantainya jadi DUA: yang
+     * ber-`groupBy` dan yang ber-`orderBy`/`offset`. `grupTerpakai` hanya
+     * melihat satu rantai, jadi tanpa peta ini kunci `X.k` — yang unik menurut
+     * konstruksi, persis alasan aturan 3b — terbaca sebagai kolom asing dan
+     * situsnya divonis SERI.
+     *
+     * Vonis itu bukan cuma salah, ia MAHAL: ia menyuruh orang menambahkan
+     * pemutus seri kedua pada kunci yang sudah unik, dan yang berikutnya akan
+     * belajar bahwa gerbang ini boleh ditawar.
+     */
+    const subGrup = new Map<string, string[]>();
+    jelajah(pohon, (n) => {
+      if (n.type !== "VariableDeclarator") return;
+      const nama = (n.id as Simpul | undefined)?.type === "Identifier"
+        ? ((n.id as Simpul).name as string)
+        : undefined;
+      const init = n.init as Simpul | undefined;
+      if (!nama || !init) return;
+      const teks = isi.slice(init.start, init.end);
+      if (!teks.includes(".groupBy(") || !teks.includes(".as(")) return;
+      const m = /\.groupBy\(([^)]*)\)/.exec(teks);
+      if (!m) return;
+      subGrup.set(
+        nama,
+        m[1]
+          .split(",")
+          .map((x) => rapi(x))
+          .filter(Boolean),
+      );
+    });
+
     const perRantai = new Map<
       Simpul,
-      { ob?: Simpul; batas: string; berOffset: boolean; grup: string[] }
+      { ob?: Simpul; batas: string; berOffset: boolean; grup: string[]; dari?: string }
     >();
     jelajah(pohon, (n) => {
       if (n.type !== "CallExpression") return;
       const nama = namaProperti(n.callee as Simpul);
-      if (nama !== "orderBy" && nama !== "limit" && nama !== "offset" && nama !== "groupBy") return;
+      if (
+        nama !== "orderBy" &&
+        nama !== "limit" &&
+        nama !== "offset" &&
+        nama !== "groupBy" &&
+        nama !== "from"
+      )
+        return;
       const akar = rantaiPenuh(n, induk);
       const e = perRantai.get(akar) ?? { batas: "", berOffset: false, grup: [] };
+      if (nama === "from") {
+        const a = (n.arguments ?? [])[0] as Simpul | undefined;
+        if (a?.type === "Identifier") e.dari = a.name as string;
+      }
       if (nama === "orderBy") e.ob = n;
       if (nama === "limit") {
         const a = (n.arguments ?? [])[0] as Simpul | undefined;
@@ -479,7 +524,18 @@ export function situsUrut(kode?: Record<string, string>, kodeSkema?: string): Si
         baris: barisDi(isi, prop.start),
         bentuk: "drizzle",
         kelas:
-          total(terpakai, unik) || grupTerpakai(e.grup, kunciUrut) ? "TOTAL" : "SERI",
+          total(terpakai, unik) ||
+          grupTerpakai(e.grup, kunciUrut) ||
+          // …atau `.from(X)` dengan X subkueri ber-`groupBy`, dan kunci grupnya
+          // ikut diurutkan: `X.k` unik menurut konstruksi, sama seperti 3b.
+          grupTerpakai(
+            (e.dari ? (subGrup.get(e.dari) ?? []) : []).map((g) =>
+              g.replace(/^[A-Za-z_$][\w$]*\./, `${e.dari}.`),
+            ),
+            kunciUrut,
+          )
+            ? "TOTAL"
+            : "SERI",
         kunci: `${rel} ${kunciUrut[0] ?? "?"}`,
         kunciUrut,
         kolom: terpakai.map((k) => `${k.tabel}.${k.kolom}`),

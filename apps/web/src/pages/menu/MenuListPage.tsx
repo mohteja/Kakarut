@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { SakelarTampilan, useTampilan } from "../../components/SakelarTampilan";
+import { Link, useNavigate } from "react-router-dom";
 import type { MenuDto } from "@kakarut/shared";
 import {
   ErrorText,
@@ -11,10 +12,31 @@ import {
   inputClass,
 } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
+import { IKON_MENU_KOSONG, KartuMenuKasir } from "../../components/KartuMenuKasir";
 import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { labelCabang, opsiLokasiMenu, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
+
+/**
+ * Bentuk daftar Menu & HPP: tabel angka ("daftar") atau kartu foto ("ikon").
+ *
+ * Diminta pemilik repo 2026-09-03 dengan tujuan yang ia sebut sendiri — "cek
+ * preview foto menu di kasir". Kartunya karena itu BUKAN kartu baru melainkan
+ * `KartuMenuKasir` yang sama persis dipakai layar kasir; alasan lengkapnya
+ * ditulis di komponen itu.
+ *
+ * BAWAANNYA `daftar`, dan itu disengaja: tabel adalah bentuk yang sudah ada
+ * hari ini, jadi tak ada layar siapa pun yang berubah tanpa ia menekan
+ * tombolnya. (`ResepPage` memakai penalaran yang sama untuk bawaannya
+ * sendiri — di sana yang lebih dulu ada justru bentuk ikon.)
+ *
+ * Disimpan per PERANGKAT, bukan per akun: yang menentukan bentuk mana yang
+ * berguna adalah layarnya dan pekerjaan hari itu — memeriksa foto menuntut
+ * kartu, menyetel harga menuntut baris angka. Satu orang memakai keduanya.
+ */
+type TampilanMenu = "ikon" | "daftar";
+const KUNCI_TAMPILAN = "kakarut.menuTampilan";
 
 /**
  * Food cost dinilai terhadap AMBANG perusahaan (Pengaturan → Perusahaan),
@@ -60,7 +82,15 @@ export function MenuListPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["menu"] }),
   });
 
+  const navigate = useNavigate();
+  const [tampilan, setTampilan] = useTampilan<TampilanMenu>(
+    KUNCI_TAMPILAN,
+    ["ikon", "daftar"],
+    "daftar",
+  );
   const [kelolaKategori, setKelolaKategori] = useState(false);
+  // Saring "yang fotonya belum ada" — lihat chip di baris bentuk tampilan.
+  const [hanyaTanpaFoto, setHanyaTanpaFoto] = useState(false);
   // Lihat menu yang diatur untuk cabang tertentu — tanpa baris pembatasan
   // (branch_ids kosong) berarti tampil di semua lokasi.
   const [lokasi, setLokasi] = useState<string>("all");
@@ -92,7 +122,8 @@ export function MenuListPage() {
       q === ""
         ? true
         : m.nama.toLowerCase().includes(q) || (m.kode ?? "").toLowerCase().includes(q),
-    );
+    )
+    .filter((m) => (hanyaTanpaFoto ? m.image_url == null : true));
 
   // kelompokkan per kategori mengikuti urutan katalog
   const grup = new Map<string, MenuDto[]>();
@@ -102,6 +133,28 @@ export function MenuListPage() {
     grup.set(m.kategori, list);
   }
   const disaring = tampil.length !== semua.length;
+  /*
+   * Berapa menu yang fotonya belum ada. Dihitung dari himpunan yang lolos
+   * saringan LAIN (lokasi/kategori/cari) tapi TIDAK dari saringan foto itu
+   * sendiri — kalau ikut, angkanya membeku begitu chipnya ditekan dan chip
+   * yang menyala berhenti bisa mengatakan berapa yang tersisa.
+   *
+   * Dari himpunan tersaring, bukan seluruh katalog, sebab chip ini pintu
+   * KERJA: janjinya "klik untuk mengerjakan yang bolong", dan angka yang lebih
+   * besar daripada yang bisa dibuka tombolnya adalah janji yang tak ditepati.
+   * Penyempitannya sendiri sudah diucapkan judul halaman ("N dari M").
+   */
+  const tanpaFoto = semua
+    .filter((m) =>
+      lokasi === "all" ? true : m.branch_ids.length === 0 || m.branch_ids.includes(lokasi),
+    )
+    .filter((m) => (filterKat ? m.kategori === filterKat : true))
+    .filter((m) =>
+      q === ""
+        ? true
+        : m.nama.toLowerCase().includes(q) || (m.kode ?? "").toLowerCase().includes(q),
+    )
+    .filter((m) => m.image_url == null).length;
 
   return (
     <div>
@@ -169,6 +222,42 @@ export function MenuListPage() {
         )}
       </div>
 
+      {/* Bentuk daftar + pintu "yang fotonya belum ada". Keduanya DI LUAR
+          percabangan bentuk: keduanya sifat katalognya, bukan sifat
+          tampilannya. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <SakelarTampilan
+          nilai={tampilan}
+          atur={setTampilan}
+          opsi={[
+            { nilai: "ikon", label: "🔳 Ikon" },
+            { nilai: "daftar", label: "☰ Daftar" },
+          ]}
+        />
+        {tampilan === "ikon" && (
+          <span className="text-xs text-stone-400">
+            Kartunya SAMA PERSIS dengan yang dilihat kasir — termasuk potongan fotonya.
+          </span>
+        )}
+        {/* TIDAK dirender saat bacaannya GAGAL: "0 tanpa foto" di atas daftar
+            yang gagal dimuat terbaca sebagai "semua menu sudah berfoto" — jauh
+            lebih percaya diri daripada layar kosong di bawahnya, dan salah.
+            Aturannya sudah ditulis panjang di `nilai-stok.test.ts`. */}
+        {!gagalMuat && (tanpaFoto > 0 || hanyaTanpaFoto) && (
+          <button
+            onClick={() => setHanyaTanpaFoto((v) => !v)}
+            aria-pressed={hanyaTanpaFoto}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              hanyaTanpaFoto
+                ? "bg-amber-600 text-white"
+                : "bg-amber-100 text-amber-700 hover:bg-amber-200"
+            }`}
+          >
+            {IKON_MENU_KOSONG} {tanpaFoto} tanpa foto
+          </button>
+        )}
+      </div>
+
       {lokasiOpsi.length > 1 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-stone-600">
           <span>Tampil di lokasi:</span>
@@ -209,6 +298,21 @@ export function MenuListPage() {
       {[...grup.entries()].map(([kategori, list]) => (
         <div key={kategori} className="mb-6">
           <h2 className="mb-2 text-lg font-semibold text-stone-700">{kategori}</h2>
+          {tampilan === "ikon" ? (
+            /* Grid mengikuti kasir (2 → 3 → 4 kolom): yang harus sama bukan
+               cuma kartunya melainkan LEBARNYA, sebab lebar kartu itulah yang
+               menentukan bagaimana `object-cover` memotong fotonya. */
+            <div className="grid auto-rows-min grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+              {list.map((m) => (
+                <KartuMenuKasir
+                  key={m.id}
+                  menu={m}
+                  onKlik={() => navigate(`/menu/${m.id}/edit`)}
+                />
+              ))}
+            </div>
+          ) : (
+          <>
           {/* SATU tabel per kategori, ditumpuk — jadi lebar kolomnya harus
               TETAP dan sama di semua tabel (`tetap` + `kelasJudul` w-*), atau
               kepala "HPP" tiap kategori berdiri di x yang berbeda. Kolom
@@ -325,6 +429,8 @@ export function MenuListPage() {
               },
             ]}
           />
+          </>
+          )}
         </div>
       ))}
     </div>

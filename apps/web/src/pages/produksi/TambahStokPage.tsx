@@ -57,7 +57,6 @@ interface StokMasukPage {
 }
 import { DokumenBelanjaModal } from "./DokumenBelanjaModal";
 import { DokumenKirimModal } from "./DokumenKirimModal";
-import { FakturDetailModal } from "./FakturDetailModal";
 import { LaporanHargaModal } from "./LaporanHargaModal";
 import type { TahapNavState } from "./TahapPage";
 
@@ -269,7 +268,7 @@ export const AKSI_TAHAP: Record<JenisPengadaan, Array<{ ke: TahapTujuan; label: 
   ],
 };
 
-const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: string }> = {
+export const TEKS: Record<JenisPengadaan, { judul: string; endpoint: string; logJudul: string }> = {
   produksi: { judul: "Produksi Bahan Baku", endpoint: "/produksi", logJudul: "Produksi hari ini" },
   beli: { judul: "Beli Bahan Baku", endpoint: "/pembelian", logJudul: "Pembelian hari ini" },
 };
@@ -685,6 +684,93 @@ export function kolomPengadaan(
   ];
 }
 
+/**
+ * RAKIT BARIS JADI FAKTUR — satu rumah, dan itu bukan kerapian.
+ *
+ * ~60 baris turunan: status agregat faktur, jejak terima yang PALING AKHIR,
+ * penanda kiriman/permintaan, daftar divisi, total harga yang mengecualikan
+ * baris ditolak. Dua tempat yang menurunkannya sendiri-sendiri adalah dua
+ * tempat yang akan berbeda pendapat tentang faktur yang SAMA — dan bedanya
+ * muncul sebagai badge status yang tak cocok antara daftar dan halaman
+ * detailnya, gejala yang orang baca sebagai "datanya salah", bukan sebagai bug
+ * perakitan.
+ *
+ * Fungsi murni, bukan hook: halaman detail memanggilnya atas SATU faktur
+ * (`rows` dari `GET /faktur/:id`) lalu mengambil `[0]`, daftar memanggilnya
+ * atas satu halaman riwayat. Urutannya ikut di sini — daftar mengandalkannya,
+ * halaman detail mengabaikannya, dan keduanya tetap memakai perakit yang sama.
+ */
+export function kelompokkanFaktur(rows: StokMasukRow[]): FakturGroup[] {
+
+  const byKey = new Map<string, FakturGroup>();
+  for (const r of rows) {
+    const key = r.faktur_id ?? r.id;
+    let g = byKey.get(key);
+    if (!g) {
+      g = {
+        key,
+        fakturId: r.faktur_id,
+        waktu: r.waktu,
+        prodDate: r.prod_date,
+        supplier: r.supplier,
+        supplierId: r.supplier_id,
+        noFaktur: r.no_faktur,
+        nomor: r.nomor ?? null,
+        status: r.status,
+        catatan: r.catatan,
+        dibuatOleh: r.dibuat_oleh,
+        diubahOleh: r.diubah_oleh,
+        diterimaOleh: null,
+        diterimaPada: null,
+        updatedAt: r.updated_at,
+        workerId: r.worker_id,
+        dikerjakanOleh: r.dikerjakan_oleh,
+        cabang: r.cabang ?? null,
+        tujuanCabang: r.tujuan_cabang ?? null,
+        dariPermintaan: false,
+        permintaanNomor: null,
+        kiriman: false,
+        untukCabang: null,
+        divisi: [],
+        rows: [],
+        totalHarga: 0,
+        danaCair: r.dana_cair ?? 0,
+      };
+      byKey.set(key, g);
+    }
+    g.rows.push(r);
+    // jejak terima: ambil yang PALING AKHIR — pada terima sebagian, faktur
+    // bisa punya beberapa penerimaan dan yang terakhir itulah keadaan kini
+    if (r.diterima_pada && (g.diterimaPada == null || r.diterima_pada > g.diterimaPada)) {
+      g.diterimaPada = r.diterima_pada;
+      g.diterimaOleh = r.diterima_oleh ?? null;
+    }
+    if (r.rencana_id) g.dariPermintaan = true;
+    if (r.permintaan_nomor && !g.permintaanNomor) g.permintaanNomor = r.permintaan_nomor;
+    if (r.asal_branch_id) g.kiriman = true;
+    // badge divisi: hanya resep produksi CABANG yang berdivisi (kitchen/bar)
+    if (r.produksi_di === "cabang") {
+      const d = r.divisi_produksi ?? "kitchen";
+      if (!g.divisi.includes(d)) g.divisi.push(d);
+    }
+    if (!g.untukCabang && r.untuk_cabang) g.untukCabang = r.untuk_cabang;
+    // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
+    // baris mana pun yang punya — baris bahan produksi tujuannya null
+    if (!g.tujuanCabang && r.tujuan_cabang) g.tujuanCabang = r.tujuan_cabang;
+    // baris ditolak tak menambah biaya (barang tidak diterima)
+    if (r.status !== "ditolak") g.totalHarga += r.total_harga ?? 0;
+  }
+  // status faktur = agregat status baris (campuran diterima+ditolak = "sebagian")
+  for (const g of byKey.values()) g.status = statusFaktur(g.rows);
+  // urutan kartu = urutan server: yang belum selesai dulu, lalu terbaru
+  return [...byKey.values()].sort((a, b) => {
+    const beresA = belumSelesai(a.status) ? 0 : 1;
+    const beresB = belumSelesai(b.status) ? 0 : 1;
+    if (beresA !== beresB) return beresA - beresB;
+    return b.waktu.localeCompare(a.waktu);
+  });
+}
+
 export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const t = TEKS[tipe];
   const { auth } = useAuth();
@@ -705,7 +791,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
     tipe === "produksi" &&
     !dariKantor &&
     cabang.find((b) => b.id === dataBranchId)?.tipe === "store";
-  const [detail, setDetail] = useState<FakturGroup | null>(null);
 
   // Kirim barang bertujuan cabang dari CK (produksi selesai / belanja yang
   // sudah tiba di CK) — langkah terpisah + dokumen kirim (surat jalan).
@@ -902,75 +987,7 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
   const [laporHarga, setLaporHarga] = useState<string | null>(null);
 
   // Kelompokkan baris per faktur (baris lama tanpa faktur = grup sendiri)
-  const grup = useMemo<FakturGroup[]>(() => {
-    const byKey = new Map<string, FakturGroup>();
-    for (const r of log ?? []) {
-      const key = r.faktur_id ?? r.id;
-      let g = byKey.get(key);
-      if (!g) {
-        g = {
-          key,
-          fakturId: r.faktur_id,
-          waktu: r.waktu,
-          prodDate: r.prod_date,
-          supplier: r.supplier,
-          supplierId: r.supplier_id,
-          noFaktur: r.no_faktur,
-          nomor: r.nomor ?? null,
-          status: r.status,
-          catatan: r.catatan,
-          dibuatOleh: r.dibuat_oleh,
-          diubahOleh: r.diubah_oleh,
-          diterimaOleh: null,
-          diterimaPada: null,
-          updatedAt: r.updated_at,
-          workerId: r.worker_id,
-          dikerjakanOleh: r.dikerjakan_oleh,
-          cabang: r.cabang ?? null,
-          tujuanCabang: r.tujuan_cabang ?? null,
-          dariPermintaan: false,
-          permintaanNomor: null,
-          kiriman: false,
-          untukCabang: null,
-          divisi: [],
-          rows: [],
-          totalHarga: 0,
-          danaCair: r.dana_cair ?? 0,
-        };
-        byKey.set(key, g);
-      }
-      g.rows.push(r);
-      // jejak terima: ambil yang PALING AKHIR — pada terima sebagian, faktur
-      // bisa punya beberapa penerimaan dan yang terakhir itulah keadaan kini
-      if (r.diterima_pada && (g.diterimaPada == null || r.diterima_pada > g.diterimaPada)) {
-        g.diterimaPada = r.diterima_pada;
-        g.diterimaOleh = r.diterima_oleh ?? null;
-      }
-      if (r.rencana_id) g.dariPermintaan = true;
-      if (r.permintaan_nomor && !g.permintaanNomor) g.permintaanNomor = r.permintaan_nomor;
-      if (r.asal_branch_id) g.kiriman = true;
-      // badge divisi: hanya resep produksi CABANG yang berdivisi (kitchen/bar)
-      if (r.produksi_di === "cabang") {
-        const d = r.divisi_produksi ?? "kitchen";
-        if (!g.divisi.includes(d)) g.divisi.push(d);
-      }
-      if (!g.untukCabang && r.untuk_cabang) g.untukCabang = r.untuk_cabang;
-      // faktur campuran (produk jadi + bahan produksi): tujuan diambil dari
-      // baris mana pun yang punya — baris bahan produksi tujuannya null
-      if (!g.tujuanCabang && r.tujuan_cabang) g.tujuanCabang = r.tujuan_cabang;
-      // baris ditolak tak menambah biaya (barang tidak diterima)
-      if (r.status !== "ditolak") g.totalHarga += r.total_harga ?? 0;
-    }
-    // status faktur = agregat status baris (campuran diterima+ditolak = "sebagian")
-    for (const g of byKey.values()) g.status = statusFaktur(g.rows);
-    // urutan kartu = urutan server: yang belum selesai dulu, lalu terbaru
-    return [...byKey.values()].sort((a, b) => {
-      const beresA = belumSelesai(a.status) ? 0 : 1;
-      const beresB = belumSelesai(b.status) ? 0 : 1;
-      if (beresA !== beresB) return beresA - beresB;
-      return b.waktu.localeCompare(a.waktu);
-    });
-  }, [log]);
+  const grup = useMemo<FakturGroup[]>(() => kelompokkanFaktur(log ?? []), [log]);
 
   const totalPengeluaran = data?.total_pengeluaran ?? 0;
   const adaBelumKonfirmasi = grup.some((g) => belumSelesai(g.status));
@@ -1146,7 +1163,11 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
             kunci={(g) => g.key}
             galat={daftarGagal}
             minLebar="min-w-[72rem]"
-            onKlikBaris={(g) => setDetail(g)}
+            /* Baris → HALAMAN dokumennya, bukan modal. Detailnya kini punya
+               URL sendiri supaya bisa dicetak & tautannya dikirim; modal lama
+               (`FakturDetailModal`) dihapus, sebab dua tempat yang merender
+               detail yang sama akan pelan-pelan berbeda. */
+            onKlikBaris={(g) => navigate(`${t.endpoint}/${g.fakturId ?? g.key}`)}
             kelasBaris={(g) =>
               g.fakturId && fakturBermasalah.has(g.fakturId)
                 ? "bg-red-50 hover:bg-red-100"
@@ -1244,39 +1265,6 @@ export function TambahStokPage({ tipe }: { tipe: JenisPengadaan }) {
         </div>
       )}
 
-      {detail && (
-        <FakturDetailModal
-          // remount tiap ganti faktur — form ubah tidak membawa nilai lama
-          key={detail.key}
-          grup={detail}
-          tipe={tipe}
-          endpoint={t.endpoint}
-          onClose={() => setDetail(null)}
-          // pilih tahap dari detail → buka HALAMAN Ubah Tahap
-          onUbahTahap={(ke) => {
-            const g = detail;
-            setDetail(null);
-            bukaUbahTahap(g, ke);
-          }}
-          {...(() => {
-            // Ketiga aksi ini pindah dari baris ke sini. Kelayakannya dinilai
-            // `sinyalFaktur` yang SAMA dengan yang dipakai tabelnya — dua
-            // penilaian terpisah akan menampilkan tombol yang berbeda untuk
-            // faktur yang sama.
-            const s = sinyalFaktur(detail, tipe, { dariKantor, fakturBermasalah });
-            return {
-              onDokumen:
-                tipe === "beli" && detail.rows.some((r) => r.status !== "ditolak")
-                  ? () => setDokumen(detail.key)
-                  : undefined,
-              onLaporanHarga: s.bisaLapor
-                ? { buka: () => setLaporHarga(detail.key), sudahSelesai: s.laporanSelesai }
-                : undefined,
-              onDokumenKirim: s.adaTerkirim ? () => setDokumenKirim(detail.key) : undefined,
-            };
-          })()}
-        />
-      )}
       {dokumen &&
         (() => {
           const g = grup.find((x) => x.key === dokumen);

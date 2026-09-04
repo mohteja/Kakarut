@@ -52,7 +52,16 @@ describe("keduanya kini mengatakan saat bacaannya gagal", () => {
     ["Permintaan Stok", "../../web/src/pages/stok/PermintaanStokPage.tsx", "cabang yang meminta stok"],
   ])("%s mengambil `error` dan menjelaskannya", (_nama, berkas, kalimat) => {
     const src = tanpaKomentar(baca(berkas));
-    expect(src).toMatch(/error: gagalMuat \} = useQuery/);
+    /*
+     * Pola dilonggarkan 2026-09-03 supaya TAHAN FORMAT, bukan tahan makna.
+     * Yang lama menuntut destructuring SEBARIS (`error: gagalMuat } = useQuery`);
+     * `PermintaanStokPage` kini memecahnya jadi beberapa baris karena
+     * querynya bertambah medan (`isFetching` untuk penanda muat halaman).
+     * Yang dijaga tetap sama dan tetap bisa menuduh: galatnya DIIKAT dari
+     * sebuah `useQuery`, bukan dikarang di tempat lain — cabut `error:`-nya
+     * dan pola ini merah.
+     */
+    expect(src).toMatch(/error:\s*gagalMuat[\s\S]{0,80}?useQuery\(/);
     expect(src).toMatch(/<ErrorText error=\{gagalMuat\} \/>/);
     // Bukan cuma memajang galat — dikatakan bahwa kosong ≠ tak ada pekerjaan.
     expect(src).toContain(kalimat);

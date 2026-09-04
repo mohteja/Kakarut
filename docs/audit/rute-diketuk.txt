@@ -79,6 +79,7 @@ GET /api/open-bill/:id/bon
 GET /api/open-bill/:id/slip
 GET /api/pembelian
 GET /api/pembelian/dana/:fakturId
+GET /api/pembelian/faktur/:fakturId
 GET /api/pembelian/log/:fakturId
 GET /api/penerimaan
 GET /api/penerimaan/anomali
@@ -103,6 +104,7 @@ GET /api/pesanan
 GET /api/pesanan/:jenis/:id/log
 GET /api/produksi
 GET /api/produksi/dana/:fakturId
+GET /api/produksi/faktur/:fakturId
 GET /api/produksi/log/:fakturId
 GET /api/profil
 GET /api/profil/aktivitas
