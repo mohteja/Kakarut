@@ -50,6 +50,68 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## RILIS 2026-09-04 — tiga putaran tayang, dan satu alarm palsu yang saya bunyikan sendiri — web + ponsel — 2026-09-04
+
+- **Diminta pemilik**: *"rilis"*. Aturan berdirinya ("jangan dulu rilis apapun
+  ke production ataupun staging kalo saya belum minta rilis") karena itu
+  terpenuhi.
+
+- **Yang tayang**, tujuh commit di web + satu di ponsel:
+
+  | | commit | CI |
+  | --- | --- | --- |
+  | web → `production` | `48532a3` (merge) | **#493 hijau**, termasuk deploy |
+  | ponsel → `Production` | `f429dba` (merge) | **#37 hijau** |
+
+  Isinya: Menu & HPP bentuk ikon · detail faktur jadi halaman dokumen ber-URL ·
+  Permintaan Stok bentuk tabel + rutenya berhalaman · perbaikan tautan bentuk
+  kartu.
+
+- **Gerbang dijalankan pada HASIL MERGE, bukan cabang kerja** — `ci.yml`
+  sengaja tak memicu pada `pull_request`, dan repo ini sudah pernah melihat PR
+  yang masing-masing hijau menghasilkan kegagalan saat digabung. Hasil merge
+  web terbukti **byte-identik** dengan `claude` (`git diff --stat claude`
+  kosong), lalu digerbang ulang di atasnya: verify-api **3.517/0**, npm test
+  **236 berkas / 2.884 uji**, invarian **27/27**, Playwright **38 lolos**.
+
+- **Dua repo didorong dalam selang dua menit**, sesuai syarat serentak yang
+  ditulis putaran sebelumnya: `GET /rekomendasi/permintaan` berubah bentuk dan
+  ponsel membacanya dengan cast keras. **Jendelanya belum benar-benar tertutup
+  sampai APK di tiap perangkat diperbarui** — dan itu di luar kendali repo
+  mana pun. Yang terjadi pada APK lama selama jendela itu: layar Permintaan
+  Stok menampilkan **keadaan galat**, bukan data yang salah — `as List` atas
+  `Map` melempar, dan `FutureProvider` menangkapnya. Diperiksa dua arah: APK
+  baru melawan server lama juga melempar, bukan berbohong. Ditulis di stempel
+  changelog-nya.
+
+- **ALARM PALSU YANG SAYA BUNYIKAN SENDIRI, dan layak dicatat sebagai kelas.**
+  Di tengah rilis saya melaporkan — keras, dan sebagai temuan mendesak — bahwa
+  cabang `claude` repo ponsel "di-reset ke commit 25 Agustus dan commit saya
+  hilang". **Itu keliru.** Yang basi ref pelacak lokal: `git fetch origin
+  claude` hanya memperbarui `FETCH_HEAD`, **bukan**
+  `refs/remotes/origin/claude`, jadi `git log origin/claude` menjawab dari
+  salinan lama. `git ls-remote` — yang menanya remote-nya langsung —
+  menunjukkan `claude` ada di `6cd7d88` sejak awal.
+
+  Kelasnya: **menyimpulkan keadaan sistem lain dari cache lokal yang tak
+  pernah diperiksa kesegarannya**. Persis bentuk yang sama dengan cacat
+  `supBelum` di putaran sebelumnya (nama yang teresolusi ke tempat yang salah),
+  dan dengan "gerbang yang tak dibaca bukan gerbang". Yang membedakan: di sini
+  saya menemukannya dalam dua langkah, sebelum bertindak — `git push` menjawab
+  "Everything up-to-date", yang **bertentangan** dengan kesimpulan saya, dan
+  kontradiksi itu yang memaksa `ls-remote`. Petunjuk yang bertentangan dengan
+  hipotesis lebih murah daripada bukti yang mendukungnya.
+
+  Yang HARUS berbeda lain kali: `git ls-remote` (atau `git fetch --prune` yang
+  memperbarui ref pelacaknya) **sebelum** menyimpulkan apa pun tentang keadaan
+  cabang remote — bukan sesudah.
+
+- **Stempel changelog** dipasang untuk kedua entri pada commit yang SAMA dengan
+  penghapusannya dari `BELUM_TAYANG`; memisahkan keduanya adalah cara berkas
+  itu pernah salah selama empat hari.
+
+---
+
 ## Perbaikan yang cuma kena SETENGAH layar — dan dua gerbang yang setuju bahwa ia beres — web — 2026-09-04
 
 - **Kenapa entri ini ada**: pemilik repo meminta *"cek bug perbaikan baru"*.

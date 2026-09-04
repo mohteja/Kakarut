@@ -75,6 +75,8 @@ BERSAMAAN. APK lama + server baru = layar Permintaan Stok gagal; APK baru +
 server lama = `rows` kosong. Keduanya masih di cabang kerja masing-masing dan
 belum dirilis.
 
+
+**Sudah di-merge ke production.** Server tayang lewat merge `48532a3` (CI #493); aplikasi lewat merge `f429dba` di repo ponsel (CI #37). Keduanya didorong dalam selang dua menit, sesuai syarat serentak di atas — tapi jendelanya belum benar-benar tertutup sampai APK di tiap perangkat diperbarui; sampai itu, layar Permintaan Stok pada APK lama menampilkan keadaan galat (bukan data yang salah).
 ---
 
 ## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya
@@ -121,6 +123,8 @@ punya layar "buka satu faktur dari nomornya". Kalau iya, rute ini
 menggantikan pola "tarik daftar lalu cari di klien" yang tak bisa benar untuk
 faktur di halaman ke-4.
 
+
+**Sudah di-merge ke production.** Tayang lewat merge `48532a3` (CI #493).
 ---
 
 ## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)
