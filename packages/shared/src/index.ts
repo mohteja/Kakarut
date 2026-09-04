@@ -9,6 +9,7 @@ export * from "./isi-menu";
 export * from "./ketersediaan";
 export * from "./biaya";
 export * from "./nilai-stok";
+export * from "./beli-perlengkapan";
 export * from "./pengadaan";
 export * from "./permintaan-stok";
 export * from "./perlengkapan-rak";

@@ -433,3 +433,94 @@ test("Permintaan Stok: lencana jalur di bentuk KARTU juga membuka halaman dokume
     { timeout: 10_000 },
   );
 });
+
+/**
+ * Ringkasan Beli Perlengkapan dari SERVER — premisnya dari sumber yang sama
+ * yang dipakai layarnya, bukan ditebak dari fikstur.
+ */
+async function ringkasBeli(request: APIRequestContext) {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const r = await request.get(`${BASE}/api/perlengkapan/beli?per_page=200`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(r.ok(), `GET /perlengkapan/beli (${r.status()})`).toBeTruthy();
+  return (await r.json()) as {
+    total: number;
+    rows: { faktur_id: string | null; id: string }[];
+    ringkas: { butuh_aksi: number; tiba: number; batal: number };
+  };
+}
+
+test("Beli Perlengkapan: bentuk tabel dirender, dan pilihannya bertahan sesudah muat ulang", async ({
+  page,
+  request,
+}) => {
+  const data = await ringkasBeli(request);
+  expect(data.total, "PREMIS: harus ada faktur beli perlengkapan").toBeGreaterThan(0);
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/perlengkapan/beli");
+  await expect(page.getByRole("heading", { name: /Beli Perlengkapan/ })).toBeVisible();
+
+  // Bawaannya KARTU — bentuk yang sudah ada sebelum tombol ini, jadi tak ada
+  // yang berubah bagi pemakai yang tak menyentuhnya.
+  await expect(page.getByRole("button", { name: "🗂 Kartu" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.locator("table")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "☰ Tabel" }).click();
+  await expect(page.locator("table thead th").first()).toBeVisible({ timeout: 10_000 });
+  expect(await page.locator("table thead th").allTextContents()).toEqual([
+    "Dokumen",
+    "Dibuat",
+    "Tujuan",
+    "Isi",
+    "Status",
+    "Nilai",
+    "Orang",
+    "Aksi",
+  ]);
+
+  // INTI SEBUAH SAKELAR: pilihannya bertahan. `lib/simpanan.ts` sengaja boleh
+  // gagal diam-diam (aksesnya sendiri bisa melempar di peramban yang memblokir
+  // penyimpanan), jadi "kode memanggil tulisLokal" bukan bukti apa pun.
+  await page.reload();
+  await expect(page.getByRole("button", { name: "☰ Tabel" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+    { timeout: 10_000 },
+  );
+  await expect(page.locator("table thead th").first()).toBeVisible();
+});
+
+test("Beli Perlengkapan: satu baris tabel = satu FAKTUR, dan ubinnya angka server", async ({
+  page,
+  request,
+}) => {
+  const data = await ringkasBeli(request);
+  expect(data.total, "PREMIS: harus ada faktur").toBeGreaterThan(0);
+  const barisLebihBanyak = data.rows.length > data.total;
+  expect(
+    barisLebihBanyak,
+    "PREMIS lemah: fikstur tak punya faktur multi-item, jadi 'satu baris = satu faktur' benar secara hampa",
+  ).toBeTruthy();
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/perlengkapan/beli");
+  await page.getByRole("button", { name: "☰ Tabel" }).click();
+  await expect(page.locator("table thead th").first()).toBeVisible({ timeout: 10_000 });
+
+  /*
+   * Barisnya mencacah FAKTUR, bukan baris pembelian. Ini yang membedakan
+   * "berhalaman per faktur" dari "berhalaman per baris": yang kedua akan
+   * menampilkan faktur yang sama beberapa kali, atau memotongnya di tengah.
+   */
+  const barisTabel = await page.locator("table tbody tr").count();
+  expect(barisTabel).toBe(Math.min(data.total, 20));
+
+  // UBIN dari `ringkas` server, bukan jumlahan baris yang kebetulan tampil.
+  const ubin = page.locator("text=🛒 Perlu diurus").locator("..");
+  await expect(ubin).toContainText(`${data.ringkas.butuh_aksi} faktur`);
+});

@@ -195,6 +195,12 @@ const DIIZINKAN: Entri[] = [
     catatan: "idem",
   },
   {
+    berkas: "pages/perlengkapan/BeliPerlengkapanPage.tsx",
+    deps: "page, totalPages",
+    jenis: "rekonsiliasi",
+    catatan: "idem — halaman menyusut saat faktur dibatalkan/dihapus",
+  },
+  {
     berkas: "pages/stok/PermintaanStokPage.tsx",
     deps: "page, totalPages",
     jenis: "rekonsiliasi",

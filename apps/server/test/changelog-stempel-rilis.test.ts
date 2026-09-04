@@ -81,6 +81,7 @@ const BELUM_TAYANG = new Set([
   // berlaku — tak ada yang tayang sampai ia meminta rilis. Stempelnya dipasang
   // DAN baris ini dihapus pada commit yang sama dengan merge-nya.
   "## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan",
+  "## 🔴 `GET /perlengkapan/beli` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

@@ -152,4 +152,31 @@ describe("lengan peramban ADA — yang cuma peramban bisa menjawab", () => {
     // dan lengan konfirmasinya menghitung dialognya, bukan sekadar menerimanya
     expect(E2E).toContain('expect(ditanya, "Batal membuang ketikan tanpa bertanya").toBe(1);');
   });
+
+  /*
+   * PREMISNYA MENENTUKAN, DAN SUBJEKNYA BOLEH DISIMPAN.
+   *
+   * `GET /bahan/resep-ringkas` sebuah `GROUP BY` TANPA `ORDER BY` yang
+   * diserialkan jadi objek JSON, jadi "resep pertama" adalah apa pun yang
+   * kebetulan dipulangkan Postgres. Lengan-lengan di berkas itu hijau
+   * berbulan-bulan karena UNTUNG, lalu merah karena putaran yang menyisipkan
+   * baris ke tabel LAIN menggeser tata letak fisiknya — dan merah yang pernah
+   * hijau adalah merah yang paling mahal untuk didiagnosis.
+   *
+   * Cacat keduanya lebih halus: lengan yang MENYIMPAN resep menuntut resep
+   * yang boleh disimpan. `PUT /bahan/:id/resep` menolak 409 selama bahannya
+   * punya produksi `rencana`/`dikerjakan`, dan tuntutan itu tak pernah
+   * dinyatakan — jadi saat fikstur berubah, yang gagal adalah asersi
+   * "✓ Tersimpan" dan yang tertuduh adalah fitur yang tak bersalah.
+   */
+  it("premisnya MENENTUKAN — kandidatnya diurut, bukan diambil apa adanya", () => {
+    expect(E2E, "pilihan resep kembali bergantung urutan Postgres").toContain(".sort()[0]");
+  });
+
+  it("premisnya membuang resep yang produksinya BERJALAN", () => {
+    // Cermin penjaga server, bukan tebakan: himpunan status yang sama.
+    expect(E2E).toContain("/api/produksi?per_page=200");
+    expect(E2E).toContain('b.status === "rencana" || b.status === "dikerjakan"');
+    expect(E2E).toContain("!terkunci.has(k)");
+  });
 });

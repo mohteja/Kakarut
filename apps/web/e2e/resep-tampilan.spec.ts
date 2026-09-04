@@ -119,23 +119,64 @@ test("resep: bentuk daftar bertahan sesudah muat ulang, dan barisnya membuka res
  */
 
 /**
- * Buka resep yang BENAR-BENAR PUNYA BAHAN, id-nya dari server.
+ * Buka resep yang BENAR-BENAR PUNYA BAHAN **dan boleh disimpan**, id-nya dari
+ * server.
  *
  * Versi pertama lengan ini mengklik baris pertama tabel dan gagal di premisnya
- * — resep teratas kebetulan belum punya satu bahan pun, jadi tak ada medan
- * takaran untuk diperiksa terkunci. Merahnya benar tapi menuduh fiturnya,
- * padahal yang salah pilihan fiksturnya. `/bahan/resep-ringkas` memulangkan
- * peta `id → jumlah bahan`; yang dipakai id pertama yang jumlahnya > 0.
+ * — resep teratas kebetulan belum punya satu bahan pun. Versi kedua memakai
+ * `/bahan/resep-ringkas` (peta `id → jumlah bahan`) dan mengambil id PERTAMA
+ * yang jumlahnya > 0. Itu pun salah, dua kali:
+ *
+ * 1. **PILIHANNYA TAK MENENTU.** Rutenya sebuah `GROUP BY` TANPA `ORDER BY`
+ *    (`bahan/routes.ts`), diserialkan jadi objek JSON — jadi "yang pertama"
+ *    adalah apa pun yang kebetulan dipulangkan Postgres. Lengan ini hijau
+ *    berbulan-bulan karena UNTUNG, lalu merah karena putaran yang menyisipkan
+ *    baris ke tabel lain menggeser tata letak fisiknya. Merah yang tak
+ *    menyatakan apa pun tentang produk, dan yang paling mahal untuk didiagnosis
+ *    justru karena ia pernah hijau. Karena itu kandidatnya DIURUT.
+ * 2. **TAK DIJAMIN BISA DISIMPAN.** `PUT /bahan/:id/resep` menolak dengan 409
+ *    selama bahan itu punya produksi ber-status `rencana`/`dikerjakan` —
+ *    penjaga yang benar, sebab `catatKonsumsiProduksi` membaca resep LIVE.
+ *    Lengan yang MENYIMPAN resep karena itu menuntut resep yang boleh
+ *    disimpan, dan tuntutan itu tak pernah dinyatakan di mana pun. Terukur:
+ *    layarnya memajang kalimat 409-nya dengan benar, dan yang gagal justru
+ *    asersi "✓ Tersimpan" — kegagalan yang menuduh fitur yang tak bersalah.
+ *
+ * Penyaring di bawah adalah CERMIN penjaga server, bukan tebakan: himpunan
+ * status yang sama (`rencana`, `dikerjakan`), sumber yang sama
+ * (`productions` lewat `GET /produksi`).
  */
 async function bukaResepBerbahan(page: Page, request: APIRequestContext) {
   const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
-  const r = await request.get(`${BASE}/api/bahan/resep-ringkas`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const kepala = { Authorization: `Bearer ${token}` };
+  const r = await request.get(`${BASE}/api/bahan/resep-ringkas`, { headers: kepala });
   expect(r.ok(), `GET /bahan/resep-ringkas (${r.status()})`).toBeTruthy();
   const ringkas = (await r.json()) as Record<string, number>;
-  const id = Object.keys(ringkas).find((k) => (ringkas[k] ?? 0) > 0);
-  expect(id, "PREMIS: butuh satu resep yang punya bahan").toBeTruthy();
+
+  // Bahan yang produksinya masih berjalan → resepnya TERKUNCI di server.
+  const prod = await request.get(`${BASE}/api/produksi?per_page=200`, { headers: kepala });
+  expect(prod.ok(), `GET /produksi (${prod.status()})`).toBeTruthy();
+  const { rows } = (await prod.json()) as {
+    rows: { ingredient_id?: string; status: string }[];
+  };
+  const terkunci = new Set(
+    rows
+      .filter((b) => b.status === "rencana" || b.status === "dikerjakan")
+      .map((b) => b.ingredient_id)
+      .filter((x): x is string => !!x),
+  );
+
+  const id = Object.keys(ringkas)
+    .filter((k) => (ringkas[k] ?? 0) > 0 && !terkunci.has(k))
+    // `.sort()` BUKAN kerapian: tanpanya pilihannya berpindah tiap kali tata
+    // letak tabel bergeser, dan uji yang subjeknya berpindah sendiri tak bisa
+    // dipercaya saat ia merah MAUPUN saat ia hijau.
+    .sort()[0];
+  expect(
+    id,
+    `PREMIS: butuh resep berbahan yang produksinya TIDAK berjalan — ` +
+      `${Object.keys(ringkas).length} resep berbahan, ${terkunci.size} bahan terkunci produksi`,
+  ).toBeTruthy();
   await page.goto(`/resep?bahan=${id}`);
   const takaran = page.getByPlaceholder("qty").first();
   await expect(takaran, "PREMIS: panel resepnya terbuka & punya baris bahan").toBeVisible({

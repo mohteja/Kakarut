@@ -25,6 +25,76 @@ tanpa akses repo server.
 
 ---
 
+## 🔴 `GET /perlengkapan/beli` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`
+
+🔴 **WAJIB** — memutus kode yang sudah ada. `perlengkapan_repository.dart`
+menulis `as List` pada balasannya; sesudah perubahan ini balasannya `Map`, jadi
+layar **Beli Perlengkapan** melempar saat runtime — bukan saat kompilasi.
+
+**Sudah dikerjakan di repo ponsel pada putaran yang sama** (cabang `claude`):
+`getBeli()` memulangkan `BeliPerlengkapanDaftar`, providernya membawa daftar +
+faktur terkelompok, dan layarnya menyebut kalau daftarnya dipotong. Entri ini
+tetap 🔴 supaya urutan rilisnya tak salah dibaca.
+
+```
+GET /api/perlengkapan/beli?page=1&per_page=20
+  → 200 { "rows": BeliPerlengkapanRow[], "total": 14, "page": 1,
+          "per_page": 20,
+          "ringkas": { "butuh_aksi": 4, "tiba": 5, "batal": 5 } }
+```
+
+**Bentuk tiap entri `rows[]` TIDAK berubah** — tak ada medan yang hilang, tak
+ada yang berganti nama. Yang berubah hanya pembungkusnya.
+
+### BERHALAMAN PER FAKTUR — dan ini jebakannya
+
+`per_page` menghitung **FAKTUR**, `rows` berisi **BARIS**. `per_page=20`
+berarti 20 faktur, dan seluruh baris kedua puluh faktur itu ikut — jadi
+`rows.length` hampir selalu lebih besar daripada `per_page`. Terukur di basis
+uji: **53 baris untuk 14 faktur** (rata-rata 3,79 baris/faktur).
+
+Akibatnya untuk klien: **jangan** menyalin `terpotong => rows.length < total`
+dari `PermintaanStokDaftar`. Di sini ia berkata "utuh" untuk daftar yang
+dipotong dan "terpotong" untuk daftar yang utuh, tergantung berapa item per
+faktur. Yang benar: cacah **faktur unik** (`faktur_id ?? id`) lalu bandingkan
+dengan `total`.
+
+Mengiris per baris ditolak dengan sengaja: ia akan mengirim faktur yang
+terpotong di tengah — kartu berisi separuh itemnya, tanpa penanda apa pun.
+
+**Kenapa.** Rutenya dulu memotong di **200 BARIS** dengan
+`X-Kakarut-Terpotong`. Pada 3,79 baris/faktur, plafon itu ≈53 faktur — dan
+karena urutannya menaruh yang butuh aksi di atas, yang lenyap justru **ekor
+riwayatnya**. Ia tumbuh seumur usaha buka, dan tak ada galat yang akan muncul.
+
+**`X-Kakarut-Terpotong` tidak lagi dikirim** untuk pintu ini.
+
+### `ringkas` — tiga ember, dijamin menjumlah ke `total`
+
+`{ butuh_aksi, tiba, batal }`, dihitung server atas **seluruh populasi**, bukan
+halaman berjalan. Ketiganya saling lepas menurut konstruksi.
+
+### Keadaan faktur kini LIMA, dan ponsel yang menang
+
+Aturannya pindah ke `@kakarut/shared` (`statusFakturBP`). Sampai putaran ini
+web dan ponsel memakai aturan yang **berbeda**:
+
+| | aturan | keadaan |
+| --- | --- | --- |
+| web | "tahap paling tertinggal" | 4 |
+| ponsel | buang `batal` dulu; campuran tiba → `sebagian` | **5** |
+
+Faktur berisi `[tiba, menunggu]` karena itu berbunyi **"Menunggu"** di web dan
+**"Sebagian"** di ponsel — faktur yang sama, dua layar, dua jawaban. Yang
+menang aturan ponsel: `sebagian` membawa informasi yang tak bisa diturunkan
+dari keempat keadaan lain. **Tak ada yang berubah di sisi ponsel** — bentuk
+lima-keadaannya justru yang diadopsi web.
+
+Terukur sebelum diputuskan: pada basis uji, **14 faktur, 0** di antaranya
+menghasilkan jawaban berbeda (tak satu pun faktur bercampur tiba+belum). Jadi
+ini perbedaan yang nyata di kode dan **nol kejadiannya hari ini**.
+
+
 ## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan
 
 🟢 **BARU** — pintu baru, tak ada yang berubah bentuknya. Aman diabaikan

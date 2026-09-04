@@ -3535,7 +3535,7 @@ cek "guard: target Central Kitchen → 400 (CK belanja langsung)" "V == 400" \
 
 echo "== 92b. Faktur beli perlengkapan ke CK: tiba → masuk stok CK + otomatis kirim =="
 # faktur beli BP- (qty 4, tujuan CB46) dari §90 muncul di daftar 'menunggu'
-BELI90=$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg id "$PO90" '[.[]|select(.supply_id==$id and .status=="menunggu")][0].id')
+BELI90=$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq -r --arg id "$PO90" '[.rows[]|select(.supply_id==$id and .status=="menunggu")][0].id')
 [ "$BELI90" != "null" ] && [ -n "$BELI90" ] && ok "faktur beli BP- tampil (menunggu)"
 cek "guard: kasir tandai tiba → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli/$BELI90/tiba" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d '{"qty":4}')"
@@ -3551,7 +3551,7 @@ cek "tiba: kiriman otomatis KP- diterbitkan ke cabang" "V == 1" \
 cek "CK saldo setelah tiba = 10 (6 + beli 4)" "abs(V - 10) < 0.001" \
   "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$PO90" '[.[]|select(.id==$id)][0].saldo // 0')"
 cek "faktur beli kini berstatus 'tiba'" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg b "$BELI90" '([.[]|select(.id==$b and .status=="tiba")]|length) | if . >= 1 then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq -r --arg b "$BELI90" '([.rows[]|select(.id==$b and .status=="tiba")]|length) | if . >= 1 then 1 else 0 end')"
 # dua kiriman KP- (6 + 4) menunggu diterima di CB46 → terima semuanya
 for KID in $(api "$OWNER" GET "/perlengkapan/kiriman?branch_id=$CB46_ID" | jq -r --arg id "$PO90" '.[]|select(.item.id==$id and .status=="dikirim")|.id'); do
   api "$OWNER" POST "/perlengkapan/kiriman/$KID/terima?branch_id=$CB46_ID" '{}' > /dev/null
@@ -3565,7 +3565,7 @@ cek "tiba lagi (idempoten) → 400 (sudah tiba)" "V == 400" \
 # batal: buat faktur beli baru lalu batalkan
 BELIBATAL=$(api "$OWNER" POST /perlengkapan '{"nama":"Sabun Colek Uji","satuan":"pcs","stok_minimum":5}' | jq -r .id)
 api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID" '{}' > /dev/null
-BB_ID=$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg id "$BELIBATAL" '[.[]|select(.supply_id==$id and .status=="menunggu")][0].id')
+BB_ID=$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq -r --arg id "$BELIBATAL" '[.rows[]|select(.supply_id==$id and .status=="menunggu")][0].id')
 cek "batal faktur beli menunggu → ok" "V == 1" \
   "$(api "$OWNER" POST "/perlengkapan/beli/$BB_ID/batal" '{}' | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "batal lagi (sudah batal) → 404" "V == 404" \
@@ -3576,7 +3576,7 @@ MAN92=$(api "$OWNER" POST /perlengkapan/beli "{\"supply_id\":\"$SBMAN\",\"ck_bra
 cek "manual: faktur beli BP- terbit" "V == 1" \
   "$(echo "$MAN92" | jq '((.nomor // "")|test("^BP-"))|if . then 1 else 0 end')"
 cek "manual: muncul di daftar (menunggu, tujuan CB46)" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg id "$SBMAN" '([.[]|select(.supply_id==$id and .status=="menunggu" and .tujuan_nama=="Cabang Uji 46")]|length>=1)|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg id "$SBMAN" '([.rows[]|select(.supply_id==$id and .status=="menunggu" and .tujuan_nama=="Cabang Uji 46")]|length>=1)|if . then 1 else 0 end')"
 cek "guard: kasir buat beli perlengkapan → 403" "V == 403" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/perlengkapan/beli" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"supply_id\":\"$SBMAN\",\"qty\":1}")"
 
@@ -4626,7 +4626,7 @@ cek "SATU faktur BP- menaungi seluruh item beli (>=2 baris)" "V == 1" \
 cek "semua item beli memakai SATU nomor BP- yang sama" "V == 1" \
   "$(echo "$HB110" | jq '([.beli_dibuat[].nomor]|unique|length)==1 | if . then 1 else 0 end')"
 cek "daftar beli: baris kedua item berbagi faktur_id yang sama" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg a "$P110A" --arg b "$P110B" --arg f "$FB110" '([.[]|select(.supply_id==$a or .supply_id==$b)|.faktur_id]|unique)==[$f] | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg a "$P110A" --arg b "$P110B" --arg f "$FB110" '([.rows[]|select(.supply_id==$a or .supply_id==$b)|.faktur_id]|unique)==[$f] | if . then 1 else 0 end')"
 # (c) Data Permintaan Stok: bagian beli_perlengkapan tampil di entri rencana.
 cek "permintaan stok memuat bagian beli_perlengkapan (menunggu)" "V == 1" \
   "$(api "$OWNER" GET "/rekomendasi/permintaan?per_page=200" | jq --arg r "$R110" --arg f "$FB110" '[.rows[]|select(.rencana_id==$r)][0].beli_perlengkapan | ((.faktur_id==$f) and (.status=="menunggu") and (.jumlah_baris>=2)) | if . then 1 else 0 end')"
@@ -4635,7 +4635,7 @@ TB110=$(api "$OWNER" POST "/perlengkapan/beli/faktur/$FB110/tiba" '{}')
 cek "tiba per faktur: >=2 baris diproses + kiriman KP- terbit" "V == 1" \
   "$(echo "$TB110" | jq '((.jumlah_tiba >= 2) and ((.kiriman|length) >= 2)) | if . then 1 else 0 end')"
 cek "semua baris faktur kini 'tiba'" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FB110" '[.[]|select(.faktur_id==$f)|.status]|unique==["tiba"] | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$FB110" '[.rows[]|select(.faktur_id==$f)|.status]|unique==["tiba"] | if . then 1 else 0 end')"
 cek "permintaan stok: bagian beli_perlengkapan → 'tiba'" "V == 1" \
   "$(api "$OWNER" GET "/rekomendasi/permintaan?per_page=200" | jq --arg r "$R110" '[.rows[]|select(.rencana_id==$r)][0].beli_perlengkapan.status=="tiba" | if . then 1 else 0 end')"
 cek "tiba per faktur lagi (sudah tiba) → 400" "V == 400" \
@@ -4660,12 +4660,12 @@ cek "dasar uji: faktur BP tertaut rencana baru terbit" "V == 1" \
 # (pembatalan sah; permintaannya masih hidup — inilah arti "Dibatalkan").
 api "$OWNER" POST "/perlengkapan/beli/faktur/$FB2/batal" '{}' > /dev/null
 cek "batal faktur (permintaan masih ada) → tetap tampil 'batal'" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FB2" '[.[]|select(.faktur_id==$f)|.status]|unique==["batal"] | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$FB2" '[.rows[]|select(.faktur_id==$f)|.status]|unique==["batal"] | if . then 1 else 0 end')"
 # HAPUS permintaan → productions soft-delete; faktur BP tertaut kini HILANG dari
 # daftar (tak lagi "Dibatalkan" menggantung — konsisten dgn permintaan yg lenyap).
 api "$OWNER" DELETE "/rekomendasi/permintaan/$R110B" > /dev/null
 cek "hapus permintaan → faktur BP tertaut HILANG dari daftar" "V == 0" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FB2" '[.[]|select(.faktur_id==$f)]|length')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$FB2" '[.rows[]|select(.faktur_id==$f)]|length')"
 # (g) BATAL SEMUA yang menunggu (bersih-bersih faktur warisan tanpa tautan).
 LAP110=$(api "$OWNER" GET /perlengkapan/master | jq -r '[.[]|select(.nama=="Lap Uji 110")][0].id')
 api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$LAP110\",\"qty\":1}],\"ck_branch_id\":\"$CK52_UTAMA\"}" > /dev/null
@@ -4675,7 +4675,7 @@ cek "guard: kitchen batal-semua → 403" "V == 403" \
 cek "batal-semua → semua faktur menunggu dibatalkan (>=1)" "V == 1" \
   "$(api "$OWNER" POST /perlengkapan/beli/batal-semua '{}' | jq '(.ok==true) and (.jumlah>=1) | if . then 1 else 0 end')"
 cek "tidak ada lagi faktur menunggu setelah batal-semua" "V == 0" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq '[.[]|select(.status=="menunggu")]|length')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq '[.rows[]|select(.status=="menunggu")]|length')"
 
 echo "== 111. Performa HTTP: kompresi respons + cache aset ber-hash =="
 # Kompresi gzip utk respons kompresibel ≥1 KB; aset /assets/* (ber-hash per
@@ -4796,16 +4796,16 @@ SRB116=$(api "$OWNER" POST /perlengkapan '{"nama":"Serbet Uji 116","satuan":"pcs
 api "$OWNER" PUT "/perlengkapan/$SRB116/supplier" "{\"items\":[{\"supplier_id\":\"$SUP112\",\"is_utama\":true}]}" > /dev/null
 F116=$(api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$SRB116\",\"qty\":4}],\"ck_branch_id\":\"$CK52_UTAMA\",\"tujuan_branch_id\":\"$CB46_ID\"}" | jq -r '.faktur_id // ""')
 cek "daftar beli memuat tempat beli (supplier utama) + harga estimasi" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$F116" '[.[]|select(.faktur_id==$f)][0] | (.supplier_utama=="Supplier Uji 112") and (.harga_beli==7000) | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$F116" '[.rows[]|select(.faktur_id==$f)][0] | (.supplier_utama=="Supplier Uji 112") and (.harga_beli==7000) | if . then 1 else 0 end')"
 cek "guard: kitchen tandai diproses → 403" "V == 403" \
   "$(status_code "$TKIT" POST "/perlengkapan/beli/faktur/$F116/proses")"
 cek "tandai Diproses → ok" "V == 1" \
   "$(api "$OWNER" POST "/perlengkapan/beli/faktur/$F116/proses" '{}' | jq '(.ok==true) and (.jumlah>=1) | if . then 1 else 0 end')"
 cek "status diproses + pemroses tercatat" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$F116" '[.[]|select(.faktur_id==$f)][0] | (.status=="diproses") and (.diproses_oleh|type=="string") | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$F116" '[.rows[]|select(.faktur_id==$f)][0] | (.status=="diproses") and (.diproses_oleh|type=="string") | if . then 1 else 0 end')"
 api "$OWNER" POST /perlengkapan/beli/batal-semua '{}' > /dev/null
 cek "batal-semua TIDAK menyapu faktur yang sedang diproses" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$F116" '[.[]|select(.faktur_id==$f)][0].status=="diproses" | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$F116" '[.rows[]|select(.faktur_id==$f)][0].status=="diproses" | if . then 1 else 0 end')"
 cek "tiba dari tahap diproses → masuk stok CK" "V == 1" \
   "$(api "$OWNER" POST "/perlengkapan/beli/faktur/$F116/tiba" '{}' | jq '.jumlah_tiba>=1 | if . then 1 else 0 end')"
 
@@ -4901,13 +4901,13 @@ SBH119=$(api "$OWNER" POST /perlengkapan '{"nama":"Serbet Hapus 119","satuan":"p
 # (a) faktur MANUAL (tanpa permintaan) → permintaan_aktif=false → boleh Hapus
 FM119=$(api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$SBH119\",\"qty\":2}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq -r '.faktur_id // ""')
 cek "faktur manual: permintaan_aktif=false (boleh hapus)" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FM119" '[.[]|select(.faktur_id==$f)][0].permintaan_aktif==false | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$FM119" '[.rows[]|select(.faktur_id==$f)][0].permintaan_aktif==false | if . then 1 else 0 end')"
 cek "guard: kitchen hapus faktur perlengkapan → 403" "V == 403" \
   "$(status_code "$TKIT" DELETE "/perlengkapan/beli/faktur/$FM119")"
 cek "hapus faktur manual → ok + baris terhapus" "V == 1" \
   "$(api "$OWNER" DELETE "/perlengkapan/beli/faktur/$FM119" | jq '(.ok==true) and (.jumlah>=1) | if . then 1 else 0 end')"
 cek "faktur manual HILANG permanen dari daftar" "V == 0" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FM119" '[.[]|select(.faktur_id==$f)]|length')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$FM119" '[.rows[]|select(.faktur_id==$f)]|length')"
 cek "hapus faktur yang sudah tak ada → 404" "V == 404" \
   "$(status_code "$OWNER" DELETE "/perlengkapan/beli/faktur/$FM119")"
 # (b) faktur DARI PERMINTAAN AKTIF (rencana punya produksi hidup) → tak boleh Hapus
@@ -4918,11 +4918,11 @@ FP119=$(api "$OWNER" POST "/perlengkapan/permintaan-otomatis?branch_id=$CB46_ID&
 cek "dasar uji: faktur BP tertaut permintaan terbit" "V == 1" \
   "$([ -n "$FP119" ] && echo 1 || echo 0)"
 cek "faktur permintaan aktif: permintaan_aktif=true" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FP119" '[.[]|select(.faktur_id==$f)][0].permintaan_aktif==true | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$FP119" '[.rows[]|select(.faktur_id==$f)][0].permintaan_aktif==true | if . then 1 else 0 end')"
 cek "hapus faktur dari permintaan aktif → 400 (kelola dari Permintaan Stok)" "V == 400" \
   "$(status_code "$OWNER" DELETE "/perlengkapan/beli/faktur/$FP119")"
 cek "faktur permintaan aktif TETAP ada (tak terhapus)" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq --arg f "$FP119" '[.[]|select(.faktur_id==$f)]|length>=1 | if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg f "$FP119" '[.rows[]|select(.faktur_id==$f)]|length>=1 | if . then 1 else 0 end')"
 # (c) faktur yang sudah 'tiba' (masuk stok CK) → tak boleh Hapus
 FT119=$(api "$OWNER" POST /perlengkapan/beli "{\"items\":[{\"supply_id\":\"$SBH119\",\"qty\":1}],\"ck_branch_id\":\"$CK52_UTAMA\"}" | jq -r '.faktur_id // ""')
 api "$OWNER" POST "/perlengkapan/beli/faktur/$FT119/tiba" '{}' > /dev/null
@@ -13846,7 +13846,7 @@ cek "…sesudah dihapus, detailnya 404" "V == 404" "$(status_code "$OWNER" GET "
 cek "PASANGAN: menghapus sesi yang sama lagi → 404, bukan 500" "V == 404" \
   "$(status_code "$OWNER" DELETE "/perlengkapan/opname/sesi/$SES244")"
 
-BEL244=$(api "$OWNER" GET /perlengkapan/beli | jq -r '(if type=="array" then .[0] else (.items // .rows)[0] end).id // ""')
+BEL244=$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq -r '(if type=="array" then .[0] else (.items // .rows)[0] end).id // ""')
 if [ -n "$BEL244" ] && [ "$BEL244" != "null" ]; then
   cek "hapus pembelian perlengkapan dibalas 200" "V == 200" "$(status_code "$OWNER" DELETE "/perlengkapan/beli/$BEL244")"
   cek "PASANGAN: menghapusnya lagi → 404, bukan 500" "V == 404" "$(status_code "$OWNER" DELETE "/perlengkapan/beli/$BEL244")"
@@ -15726,7 +15726,7 @@ BELI278=$(api "$OWNER" POST /perlengkapan/beli \
 # PREMIS: fakturnya memang ada dan berstatus 'menunggu'. Tanpa ini "satu 200
 # satu 400" bisa benar karena dua-duanya gagal karena sebab lain.
 cek "premis: faktur beli uji berstatus menunggu" "V == 1" \
-  "$(api "$OWNER" GET /perlengkapan/beli | jq -r --arg b "$BELI278" '([.[]|select(.id==$b and .status=="menunggu")]|length) | if . == 1 then 1 else 0 end')"
+  "$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq -r --arg b "$BELI278" '([.rows[]|select(.id==$b and .status=="menunggu")]|length) | if . == 1 then 1 else 0 end')"
 
 SALDO278_A=$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$SUP278" '[.[]|select(.id==$id)][0].saldo // 0')
 
@@ -17279,6 +17279,87 @@ cek "§293 kasir tak boleh membaca riwayat resep → bukan 200" "V == 1" \
   "$([ "$(status_code "$REISS105" GET "/bahan/$BP293/riwayat-resep")" != "200" ] && echo 1 || echo 0)"
 cek "§293 tenant LAIN → bukan 200 (bahan itu bukan miliknya)" "V == 1" \
   "$([ "$(status_code "$UJI260" GET "/bahan/$BP293/riwayat-resep")" != "200" ] && echo 1 || echo 0)"
+
+echo
+echo "── §294 Beli Perlengkapan: berhalaman per FAKTUR, ringkas atas POPULASI ──"
+# Rutenya dulu memulangkan larik telanjang yang dipotong di 200 BARIS. Terukur
+# 2026-09-04 di basis gerbang: 53 baris = 26.132 byte untuk 14 faktur —
+# rata-rata 3,79 baris per faktur, jadi plafon itu ≈53 faktur, dan karena
+# urutannya menaruh yang butuh aksi di atas, yang lenyap justru EKOR
+# RIWAYATNYA.
+#
+# EMPAT hal yang diuji, dan tak satu pun bergejala saat rusak: agregatnya benar
+# atas populasi (bukan halaman), tak ada faktur yang hilang ATAU TERBELAH di
+# antara halaman, urutannya menentukan, dan tenant lain tak melihat apa pun.
+R294=$(api "$OWNER" GET "/perlengkapan/beli?per_page=1")
+T294=$(echo "$R294" | jq '.total // -1')
+cek "§294 PREMIS: ada faktur (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$([ "$T294" -gt 0 ] && echo 1 || echo 0)"
+cek "§294 balasannya berkunci rows/total/page/per_page/ringkas" "V == 1" \
+  "$(echo "$R294" | jq '(has("rows") and has("total") and has("page") and has("per_page") and has("ringkas"))|if . then 1 else 0 end')"
+
+# per_page dalam satuan FAKTUR — `rows` boleh (dan biasanya) lebih banyak.
+cek "§294 per_page=1 mengirim TEPAT SATU faktur (barisnya boleh banyak)" "V == 1" \
+  "$(echo "$R294" | jq '(([.rows[]|(.faktur_id // .id)]|unique|length) == 1 and .per_page == 1)|if . then 1 else 0 end')"
+cek "§294 …dan faktur itu dikirim UTUH, bukan dipotong di tengah" "V == 1" \
+  "$(K=$(echo "$R294" | jq -r '.rows[0].faktur_id // .rows[0].id');
+     N=$(echo "$R294" | jq --arg k "$K" '[.rows[]|select((.faktur_id // .id)==$k)]|length');
+     SEMUA=$(api "$OWNER" GET "/perlengkapan/beli?per_page=200" | jq --arg k "$K" '[.rows[]|select((.faktur_id // .id)==$k)]|length');
+     [ "$N" = "$SEMUA" ] && echo 1 || echo 0)"
+
+# INVARIAN PARTISI — asersi PERTAMA soal angka. Ketiga ember saling lepas
+# menurut konstruksi, jadi jumlahnya WAJIB tepat `total`. Satu ekspresi ini
+# menangkap kelas cacat agregat yang paling khas: `bool_or` atas himpunan
+# kosong memulangkan NULL, dan `COUNT(*) FILTER (WHERE NULL)` tak menghitungnya.
+cek "§294 ringkas: ketiga ember menjumlah TEPAT ke total" "V == 1" \
+  "$(echo "$R294" | jq '((.ringkas.butuh_aksi + .ringkas.tiba + .ringkas.batal) == .total)|if . then 1 else 0 end')"
+
+SEMUA294=$(api "$OWNER" GET "/perlengkapan/beli?per_page=200")
+cek "§294 ringkas per_page=1 == per_page=200 (populasi, bukan halaman)" "V == 1" \
+  "$(jq -n --argjson a "$R294" --argjson b "$SEMUA294" '($a.ringkas == $b.ringkas and $a.total == $b.total)|if . then 1 else 0 end')"
+
+# RINGKASNYA COCOK DENGAN HITUNGAN TANGAN, memakai aturan `statusFakturBP`
+# yang ditulis ulang di jq — bukan dipanggil dari kode yang sedang diuji.
+cek "§294 ringkas cocok dengan hitungan tangan atas rows" "V == 1" \
+  "$(echo "$SEMUA294" | jq '
+     . as $r
+     | ([$r.rows[]|{k:(.faktur_id // .id), s:.status}] | group_by(.k) | map(map(.s))) as $f
+     | ([$f[]|map(select(.!="batal"))|select(length==0)]|length) as $batal
+     | ([$f[]|map(select(.!="batal"))|select(length>0)|select(all(.=="tiba"))]|length) as $tiba
+     | ([$f[]|map(select(.!="batal"))|select(length>0)|select(any(.!="tiba"))]|length) as $aksi
+     | ($r.ringkas.batal==$batal and $r.ringkas.tiba==$tiba and $r.ringkas.butuh_aksi==$aksi)
+     | if . then 1 else 0 end')"
+
+# TAK ADA YANG HILANG ATAU TERBELAH DI ANTARA HALAMAN. `per_page=3` memaksa
+# banyak halaman supaya pemutus serinya benar-benar diuji.
+HAL294=$(for pg in $(seq 1 $(( (T294 + 2) / 3 )) ); do
+  api "$OWNER" GET "/perlengkapan/beli?per_page=3&page=$pg" | jq -r '[.rows[]|(.faktur_id // .id)]|unique[]'
+done)
+cek "§294 telusur seluruh halaman: faktur unik == total" "V == $T294" \
+  "$(echo "$HAL294" | sort -u | grep -c .)"
+cek "§294 tak ada faktur yang muncul di DUA halaman (terbelah)" "V == 1" \
+  "$(A=$(echo "$HAL294" | grep -c .); B=$(echo "$HAL294" | sort -u | grep -c .); [ "$A" = "$B" ] && echo 1 || echo 0)"
+
+# URUTANNYA MENENTUKAN: yang butuh aksi dulu, monoton. Ini yang menangkap
+# balasan yang dipulangkan dalam urutan KUERI alih-alih urutan kunci halaman —
+# himpunannya benar, urutannya salah, tanpa gejala lain.
+cek "§294 rows monoton: faktur butuh-aksi dulu, tak berselang-seling" "V == 1" \
+  "$(echo "$SEMUA294" | jq '
+     . as $r
+     | ([$r.rows[]|{k:(.faktur_id // .id), s:.status}] | group_by(.k)
+        | map({k:.[0].k, aksi:(map(.s)|map(select(.!="batal"))|(length>0 and any(.!="tiba")))})) as $g
+     | ([$r.rows[]|(.faktur_id // .id)]) as $urut
+     | ([$urut[] as $k | ($g[]|select(.k==$k)|.aksi)] | map(if . then 0 else 1 end)) as $a
+     | ([range(1;($a|length))]|map(select($a[.] < $a[.-1]))|length) == 0
+     | if . then 1 else 0 end')"
+
+# PENGURUNGAN TENANT — premisnya sudah dibuktikan asersi di atas.
+cek "§294 tenant LAIN tak melihat faktur tenant ini" "V == 1" \
+  "$(K=$(echo "$R294" | jq -r '.rows[0].faktur_id // .rows[0].id');
+     LAIN=$(api "$UJI260" GET "/perlengkapan/beli?per_page=200" 2>/dev/null);
+     echo "$LAIN" | jq -e --arg k "$K" 'if type=="object" and has("rows") then ([.rows[]|(.faktur_id // .id)]|index($k)|not) else true end' >/dev/null 2>&1 && echo 1 || echo 0)"
+cek "§294 kasir tak boleh membaca daftar ini → bukan 200" "V == 1" \
+  "$([ "$(status_code "$REISS105" GET "/perlengkapan/beli")" != "200" ] && echo 1 || echo 0)"
 
 if [ "$FAIL" -gt 0 ]; then
   echo

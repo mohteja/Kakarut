@@ -1461,7 +1461,11 @@ Laporan:
 - `POST /api/perlengkapan/permintaan-otomatis` — [owner/admin] — query: `branch_id?`, `rencana_id?` (tautkan faktur BP ke permintaan Tambah Stok dari Menu → tampil di `PermintaanStokRow.beli_perlengkapan`) — res: `PermintaanPerlengkapanOtomatisHasil` (seluruh item kurang jadi **SATU faktur BP multi-item** — lihat `beli_faktur`) — error: **400/404**
 - `GET /api/perlengkapan/kiriman` — [any] — query: `branch_id?` — res: daftar kiriman (maks 50 + **`X-Kakarut-Terpotong`**)
 - `POST /api/perlengkapan/kiriman/:id/terima` — [any] — query: `branch_id?` — res: hasil — error: **400/404**
-- `GET /api/perlengkapan/beli` — [any] — query: `branch_id?` (owner/admin; cashier/tim terkunci CK-nya) — res: `BeliPerlengkapanRow[]` (maks 200 + **`X-Kakarut-Terpotong`**; baris; kelompokkan per `faktur_id` — baris warisan `faktur_id=null` = faktur satu-item; `nomor` BP- per FAKTUR; kini juga memuat `diproses_oleh` (pemroses), `supplier_utama` (tempat beli — supplier langganan item), dan `harga_beli` master utk estimasi RAB). **Status pipeline paritas beli bahan baku**: `menunggu` (RAB) → `diproses` (sedang dibelanjakan) → `tiba` / `batal`. **Faktur yang PERMINTAANNYA SUDAH DIHAPUS TIDAK ditampilkan** (baris non-`tiba` yang `rencana_id`-nya hanya punya produksi ter-soft-delete) — konsisten dgn productions yang lenyap; status `batal` hanya tampil bila permintaannya masih ada (pembatalan sah). Baris `tiba` (stok nyata) selalu tampil.
+- `GET /api/perlengkapan/beli` — **[owner/admin]** — query: `branch_id?`, `page?` (≥1), `per_page?` (bawaan **20**, maks **200**) — res: `BeliPerlengkapanDaftar` = `{ rows, total, page, per_page, ringkas }` (baris; kelompokkan per `faktur_id` — baris warisan `faktur_id=null` = faktur satu-item; `nomor` BP- per FAKTUR; kini juga memuat `diproses_oleh` (pemroses), `supplier_utama` (tempat beli — supplier langganan item), dan `harga_beli` master utk estimasi RAB). **Status pipeline paritas beli bahan baku**: `menunggu` (RAB) → `diproses` (sedang dibelanjakan) → `tiba` / `batal`. **Faktur yang PERMINTAANNYA SUDAH DIHAPUS TIDAK ditampilkan** (baris non-`tiba` yang `rencana_id`-nya hanya punya produksi ter-soft-delete) — konsisten dgn productions yang lenyap; status `batal` hanya tampil bila permintaannya masih ada (pembatalan sah). Baris `tiba` (stok nyata) selalu tampil.
+  - **BERHALAMAN PER FAKTUR, bukan per baris** (sejak 2026-09-04). `per_page=20` berarti 20 FAKTUR, dan seluruh baris kedua puluh faktur itu ikut — jadi `rows.length` hampir selalu lebih besar daripada `per_page`, dan `total` mencacah FAKTUR. Mengiris per baris akan mengirim faktur yang terpotong di tengah: kartu berisi separuh itemnya, tanpa penanda. Klien yang menghitung "apakah masih ada sisa" WAJIB membandingkan **faktur unik yang diterima** dengan `total`, bukan `rows.length`.
+  - **`ringkas`** = `{ butuh_aksi, tiba, batal }`, dihitung server atas SELURUH populasi (bukan halaman berjalan). Ketiganya SALING LEPAS, jadi jumlahnya tepat `total` — invarian yang dipakai verify-api §294. `butuh_aksi` memuat `menunggu`, `diproses`, DAN `sebagian`.
+  - **Keadaan faktur ada LIMA** (`statusFakturBP` di `@kakarut/shared`): `menunggu` | `diproses` | `sebagian` | `tiba` | `batal`. Baris `batal` dibuang lebih dulu; hanya faktur yang SELURUH barisnya batal yang berakhir `batal`. `sebagian` = sebagian barangnya sudah tiba, sisanya belum. Sampai 2026-09-04 aturan ini diketik dua kali dan KEDUANYA BERBEDA — web memakai "tahap paling tertinggal" (empat keadaan), ponsel memakai bentuk lima-keadaan di atas; faktur [tiba, menunggu] karena itu berbunyi "Menunggu" di satu layar dan "Sebagian" di layar lain.
+  - **`X-Kakarut-Terpotong` TIDAK lagi dikirim** — pemotongan kini dinyatakan oleh `total` vs faktur yang diterima, medan yang tak bisa hilang di proxy mana pun.
 - `POST /api/perlengkapan/beli` — [owner/admin] — req **multi-item**: `{ items: [{supply_id:uuid, qty:number(>0), total_harga?:number(≥0)|null}] (1..100), ck_branch_id?:uuid|null, tujuan_branch_id?:uuid|null, catatan?|null }` (bentuk lama satu-item `{supply_id, qty, …}` tetap diterima) — res: **201** `{ faktur_id, nomor, ids[] }` — error: **400/404**
 - `POST /api/perlengkapan/beli/faktur/:fakturId/proses` — [owner/admin] — tandai faktur **diproses** (sedang dibelanjakan; pemroses tercatat) — hanya dari 'menunggu' — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/beli/faktur/:fakturId/tiba` — [owner/admin] — req: `{ items?: [{id:uuid, qty?:number(>0), total_harga?:number(≥0)|null}] }` — proses SEMUA baris 'menunggu'/'diproses' faktur (masuk stok CK PL- per baris + auto-kirim KP- per baris) — res: `{ faktur_id, jumlah_tiba, kiriman[] }` — error: **400/404**
@@ -4487,6 +4491,46 @@ export interface PermintaanPerlengkapanOtomatisHasil {
 export type BeliPerlengkapanStatus = "menunggu" | "diproses" | "tiba" | "batal";
 
 /** Satu BARIS faktur beli perlengkapan ke Central Kitchen (BP-). */
+/**
+ * Keadaan satu FAKTUR beli perlengkapan.
+ *
+ * Aturannya dan alasan kelima keadaannya ada di `beli-perlengkapan.ts`
+ * (`statusFakturBP`) — tipenya tinggal di sini supaya `types.ts` tetap bisa
+ * dibaca tanpa mengimpor apa pun, seperti `StatusPermintaan` di atasnya.
+ */
+export type StatusFakturBP = BeliPerlengkapanStatus | "sebagian";
+
+/** Tiga ember yang saling lepas — dasar invarian partisi `ringkas`. */
+export type EmberFakturBP = "butuh_aksi" | "tiba" | "batal";
+
+/**
+ * Ringkasan seluruh populasi faktur beli perlengkapan, bukan halaman berjalan.
+ *
+ * `Record`, bukan interface bermedan tangan — ember keempat yang lahir besok
+ * tak bisa lupa dihitung.
+ */
+export type RingkasBeliPerlengkapan = Record<EmberFakturBP, number>;
+
+/**
+ * Balasan `GET /perlengkapan/beli` — BERHALAMAN PER FAKTUR.
+ *
+ * `rows` tetap larik BARIS (bentuk tiap entri tak berubah sedikit pun), tapi
+ * halamannya diiris per FAKTUR: `per_page=20` berarti 20 faktur, dan seluruh
+ * baris kedua puluh faktur itu ikut. Mengiris per baris akan mengirim faktur
+ * yang terpotong di tengah — kartu berisi separuh itemnya, tanpa penanda.
+ *
+ * `ringkas` dihitung server atas SELURUH populasi, bukan halaman berjalan.
+ */
+export interface BeliPerlengkapanDaftar {
+  rows: BeliPerlengkapanRow[];
+  /** jumlah FAKTUR (bukan baris) di seluruh populasi */
+  total: number;
+  page: number;
+  /** dalam satuan FAKTUR */
+  per_page: number;
+  ringkas: RingkasBeliPerlengkapan;
+}
+
 export interface BeliPerlengkapanRow {
   id: string;
   /**

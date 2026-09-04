@@ -54,6 +54,29 @@ const BENDERA_LAIN = new Map<string, { situs: number; alasan: string }>([
     },
   ],
   [
+    "shared/beli-perlengkapan.ts",
+    {
+      situs: 2,
+      alasan:
+        "RUMAH aturan status FAKTUR beli perlengkapan (`statusFakturBP`). Kedua " +
+        "perbandingannya justru definisi yang lain harus memakai — memanggil " +
+        "`dibatalkanDapur()` di sini akan menukar dua domain yang kebetulan " +
+        "memakai kata yang sama: pembatalan SAJIAN di dapur vs baris pembelian " +
+        "perlengkapan yang batal",
+    },
+  ],
+  [
+    "web/pages/perlengkapan/kolom-beli-perlengkapan.tsx",
+    {
+      situs: 1,
+      alasan:
+        "dropdown Ubah Tahap di kolom Aksi — `v === \"batal\"` membaca nilai " +
+        "PILIHAN pemakai, bukan status sajian. Kembaran persis dropdown yang " +
+        "sudah terdaftar di BeliPerlengkapanPage.tsx di bawah; keduanya ada " +
+        "karena bentuk kartu dan bentuk tabel memang dua pohon JSX",
+    },
+  ],
+  [
     "web/pages/perlengkapan/BeliPerlengkapanPage.tsx",
     {
       situs: 4,

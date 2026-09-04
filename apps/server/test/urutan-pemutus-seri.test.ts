@@ -137,6 +137,39 @@ describe("daftar yang dipotong: ORDER BY wajib berpemutus seri", () => {
     );
   });
 
+  it("DUA ARAH: kunci grup berupa EKSPRESI yang dialiaskan ke medan select", () => {
+    /*
+     * Bentuk yang lahir 2026-09-04 di `GET /perlengkapan/beli`. Kunci grupnya
+     * `coalesce(faktur_id, id)` — tak punya tabel untuk disematkan, jadi ia
+     * dirakit ke sebuah konstanta yang dipakai dua kali: sebagai medan select
+     * ber-`.as(…)`, dan sebagai argumen `.groupBy(…)`.
+     *
+     * Tanpa pemetaan medannya, kunci grup terbaca `kunciFaktur` — nama
+     * telanjang yang takkan pernah cocok dengan `sub.kunci` di ORDER BY luar,
+     * dan situs yang pemutus serinya JUSTRU kunci grupnya sendiri divonis
+     * SERI. Vonis begitu mahal: ia menyuruh orang menambah pemutus seri kedua
+     * pada kunci yang sudah unik.
+     */
+    const sub = `
+      const kunciFaktur = sql\`coalesce(x, y)\`;
+      const sub = db.select({ kunci: kunciFaktur.as("k"), waktu: sql\`max(t)\`.as("w") })
+        .from(barang).groupBy(kunciFaktur).as("sub");
+    `;
+    // HIJAU: kunci grupnya ikut diurutkan lewat medannya.
+    expect(
+      kelas(`${sub} db.select().from(sub).orderBy(desc(sub.waktu), asc(sub.kunci)).limit(3).offset(o)`),
+    ).toBe("TOTAL");
+    // MERAH: pemutus serinya DICABUT — pembebasannya tak boleh menular ke
+    // pengurutan yang memang tak menentukan.
+    expect(
+      kelas(`${sub} db.select().from(sub).orderBy(desc(sub.waktu)).limit(3).offset(o)`),
+    ).toBe("SERI");
+    // MERAH JUGA: medan lain yang kebetulan ada, bukan kunci grupnya.
+    expect(
+      kelas(`${sub} db.select().from(sub).orderBy(desc(sub.waktu), asc(sub.lain)).limit(3).offset(o)`),
+    ).toBe("SERI");
+  });
+
   it("HIJAU: kunci terakhir yang unik menurut skema", () => {
     expect(kelas(`db.select().from(barang).orderBy(desc(barang.waktu), desc(barang.id)).limit(10)`)).toBe(
       "TOTAL",

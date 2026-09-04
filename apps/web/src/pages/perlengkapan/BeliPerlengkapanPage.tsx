@@ -1,20 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import type { BeliPerlengkapanRow, PerlengkapanMasterRow } from "@kakarut/shared";
-import { angkaDari, teksAngka } from "@kakarut/shared";
+import { useEffect, useMemo, useState } from "react";
+import type {
+  BeliPerlengkapanDaftar,
+  BeliPerlengkapanRow,
+  PerlengkapanMasterRow,
+  StatusFakturBP,
+} from "@kakarut/shared";
+import { angkaDari, butuhAksiBP, statusFakturBP, teksAngka } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
   Modal,
   PageTitle,
   Spinner,
+  StatCard,
   btnPrimary,
   btnSecondary,
   inputClass,
 } from "../../components/ui";
+import { SakelarTampilan, useTampilan } from "../../components/SakelarTampilan";
+import { TabelResponsif } from "../../components/TabelResponsif";
+import { kolomBeliPerlengkapan } from "./kolom-beli-perlengkapan";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
-import { api, bacaTerpotong } from "../../lib/api";
+import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
 import { AreaCetak } from "../../components/AreaCetak";
 
@@ -23,7 +32,7 @@ import { AreaCetak } from "../../components/AreaCetak";
  * kartu per faktur, sejajar Beli Bahan Baku. Baris warisan tanpa faktur_id
  * diperlakukan sebagai faktur satu-item (kunci = id barisnya).
  */
-interface FakturBeli {
+export interface FakturBeli {
   key: string;
   /** faktur_id server (null = baris warisan → aksi per baris) */
   fakturId: string | null;
@@ -34,8 +43,8 @@ interface FakturBeli {
   oleh: string | null;
   catatan: string | null;
   rows: BeliPerlengkapanRow[];
-  /** tahap paling tertinggal: menunggu > diproses > tiba > batal */
-  status: BeliPerlengkapanRow["status"];
+  /** keadaan faktur menurut `statusFakturBP` — LIMA, termasuk `sebagian` */
+  status: StatusFakturBP;
   /** pemroses belanja (tercatat saat Diproses) */
   diprosesOleh: string | null;
   totalHarga: number;
@@ -45,11 +54,17 @@ interface FakturBeli {
   permintaanAktif: boolean;
 }
 
-/** faktur masih perlu aksi (belum tiba/batal seluruhnya) */
-function butuhAksi(status: BeliPerlengkapanRow["status"]): boolean {
-  return status === "menunggu" || status === "diproses";
-}
-
+/**
+ * Kelompokkan baris jadi faktur, MEMPERTAHANKAN URUTAN SERVER.
+ *
+ * Pengurutannya dulu dilakukan di sini — "butuh aksi dulu, lalu terbaru" —
+ * dan itu benar selama klien menarik seluruh riwayat. Sejak rutenya
+ * BERHALAMAN, urutan itu milik server: dialah yang memutuskan faktur mana yang
+ * masuk halaman ini. Mengurut ulang di sini akan menyusun ulang isi SATU
+ * halaman menurut aturan klien, jadi "yang butuh aksi di atas" hanya benar
+ * dalam potongan 20 faktur — dan halaman 2 bisa memuat faktur yang mestinya
+ * di atas semua isi halaman 1. Himpunannya benar, urutannya bohong.
+ */
 function kelompokkanFaktur(rows: BeliPerlengkapanRow[]): FakturBeli[] {
   const byKey = new Map<string, FakturBeli>();
   for (const r of rows) {
@@ -79,18 +94,13 @@ function kelompokkanFaktur(rows: BeliPerlengkapanRow[]): FakturBeli[] {
     if (r.diproses_oleh && !g.diprosesOleh) g.diprosesOleh = r.diproses_oleh;
     if (r.total_harga != null && r.status !== "batal") g.totalHarga += r.total_harga;
     if (r.status !== "batal") g.totalEstimasi += r.total_harga ?? r.qty * (r.harga_beli ?? 0);
-    // status faktur = tahap PALING TERTINGGAL di antara barisnya
-    if (r.status === "menunggu") g.status = "menunggu";
-    else if (r.status === "diproses" && g.status !== "menunggu") g.status = "diproses";
-    else if (r.status === "tiba" && !butuhAksi(g.status)) g.status = "tiba";
   }
-  // butuh aksi dulu (menunggu/diproses), lalu terbaru — mengikuti urutan server
-  return [...byKey.values()].sort((a, b) => {
-    const ba = butuhAksi(a.status) ? 0 : 1;
-    const bb = butuhAksi(b.status) ? 0 : 1;
-    if (ba !== bb) return ba - bb;
-    return b.waktu.localeCompare(a.waktu);
-  });
+  // Status dihitung SESUDAH semua barisnya terkumpul — `statusFakturBP`
+  // membaca himpunan utuh, bukan menganyamnya baris demi baris. Bentuk lama
+  // yang menganyam sambil jalan itulah yang menyimpang dari ponsel: ia tak
+  // punya cara melihat "sebagian tiba" tanpa melihat seluruh barisnya.
+  for (const g of byKey.values()) g.status = statusFakturBP(g.rows);
+  return [...byKey.values()];
 }
 
 /**
@@ -109,19 +119,46 @@ export function BeliPerlengkapanPage() {
   const [buatOpen, setBuatOpen] = useState(false);
 
   /*
-   * Server memotong daftar ini di 200 baris — dan urutannya menaruh yang
-   * BUTUH AKSI di atas, jadi yang dipotong justru EKOR RIWAYATNYA. Tanpa
-   * penanda, faktur lama terbaca sebagai "tak pernah ada".
+   * BERHALAMAN PER FAKTUR sejak 2026-09-04 — bukan lagi larik yang dipotong
+   * di 200 BARIS. Bentuk lamanya menarik seluruh riwayat lalu memotongnya di
+   * ujung, dan karena urutannya menaruh yang butuh aksi di atas, yang lenyap
+   * justru ekor riwayatnya. Terukur: 53 baris = 26.132 byte untuk 14 faktur.
    */
-  const [terpotong, setTerpotong] = useState<number | null>(null);
-  const { data: rows = [], isLoading } = useQuery({
-    queryKey: ["perlengkapan-beli"],
+  const [perPage, setPerPage] = useState(20);
+  const [page, setPage] = useState(1);
+  const {
+    // `data: daftar`, BUKAN `data` telanjang. Berkas ini punya `useQuery`
+    // kedua di `_BuatFakturSheet` yang mendestrukturisasi `data: items = []`,
+    // dan penganalisis alur berbasis NAMA di `kueri-web.ts` menamainya "data"
+    // (pola penugasan tak punya `.name`). Dua hal berbeda bernama sama dalam
+    // satu berkas membuat pemakaian yang satu terbaca sebagai pemakaian yang
+    // lain — dan gerbangnya menuduh bacaan yang justru sudah membaca galatnya.
+    data: daftar,
+    isLoading,
+    isFetching,
+    error: gagalMuat,
+  } = useQuery({
+    queryKey: ["perlengkapan-beli", page, perPage],
     queryFn: () =>
-      api<BeliPerlengkapanRow[]>("/perlengkapan/beli", {
-        bacaHeader: bacaTerpotong(setTerpotong),
-      }),
+      api<BeliPerlengkapanDaftar>(
+        `/perlengkapan/beli?page=${page}&per_page=${perPage}`,
+      ),
+    placeholderData: (prev) => prev,
   });
-  const grup = useMemo(() => kelompokkanFaktur(rows), [rows]);
+  const total = daftar?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const keHalaman = (v: number) => setPage(Math.min(totalPages, Math.max(1, v)));
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+  const grup = useMemo(() => kelompokkanFaktur(daftar?.rows ?? []), [daftar]);
+  // Bawaannya KARTU — bentuk yang sudah ada sebelum tombol ini, jadi tak ada
+  // yang berubah bagi pemakai yang tak menyentuhnya.
+  const [tampilan, setTampilan] = useTampilan<"kartu" | "tabel">(
+    "kakarut.beliPerlengkapanTampilan",
+    ["kartu", "tabel"],
+    "kartu",
+  );
   const batal = useMutation({
     mutationFn: (g: FakturBeli) =>
       g.fakturId
@@ -177,7 +214,65 @@ export function BeliPerlengkapanPage() {
       <ErrorText error={batalSemua.error} />
       <ErrorText error={hapus.error} />
 
-      {isLoading ? (
+      {/*
+        UBIN RINGKASAN — angkanya dari SERVER (`data.ringkas`) atas SELURUH
+        populasi, tak pernah dijumlahkan dari halaman berjalan. Ubin yang
+        menghitung halaman akan berbunyi "3 perlu diurus" untuk perusahaan yang
+        punya 40, dan tak seorang pun bisa membedakannya dari kabar baik.
+
+        TAK DIRENDER SAAT BACAANNYA GAGAL: "0 perlu diurus" di atas daftar yang
+        gagal dimuat terbaca sebagai "tak ada yang perlu dibeli".
+      */}
+      {!gagalMuat && daftar?.ringkas && total > 0 && (
+        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <StatCard
+            label="🛒 Perlu diurus"
+            value={`${formatAngka(daftar.ringkas.butuh_aksi)} faktur`}
+            sub="menunggu, diproses, sebagian tiba"
+            warna="text-amber-700"
+          />
+          <StatCard
+            label="📦 Tiba di CK"
+            value={`${formatAngka(daftar.ringkas.tiba)} faktur`}
+            sub="seluruh barangnya masuk stok"
+            warna="text-blue-700"
+          />
+          <StatCard
+            label="❌ Dibatalkan"
+            value={`${formatAngka(daftar.ringkas.batal)} faktur`}
+            sub="seluruh barisnya batal"
+          />
+        </div>
+      )}
+
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs text-stone-400">
+          {total > 0 && (
+            <>
+              {formatAngka(total)} faktur
+              {isFetching && <span className="ml-2">Memuat…</span>}
+            </>
+          )}
+        </span>
+        <SakelarTampilan
+          nilai={tampilan}
+          atur={setTampilan}
+          opsi={[
+            { nilai: "kartu", label: "🗂 Kartu" },
+            { nilai: "tabel", label: "☰ Tabel" },
+          ]}
+        />
+      </div>
+
+      {/*
+        GAGAL diperiksa SEBELUM kosong. Daftar yang gagal dimuat dan daftar yang
+        memang kosong terlihat sama persis, dan "Belum ada faktur beli
+        perlengkapan" di atas bacaan yang gagal mengajak membuat faktur yang
+        mungkin sudah ada.
+      */}
+      {gagalMuat ? (
+        <ErrorText error={gagalMuat} />
+      ) : isLoading ? (
         <Spinner />
       ) : grup.length === 0 ? (
         <Card className="p-8 text-center text-sm text-stone-400">
@@ -207,13 +302,35 @@ export function BeliPerlengkapanPage() {
               )}
             </div>
           )}
-          {terpotong !== null && (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-              Menampilkan <b>{terpotong} baris pembelian terakhir</b>, dengan yang butuh aksi di
-              atas. Riwayat yang <b>lebih lama</b> tidak ikut ditampilkan di sini.
-            </div>
-          )}
-          {grup.map((g) => {
+          {tampilan === "tabel" ? (
+            <TabelResponsif
+              kolom={kolomBeliPerlengkapan({
+                isManajemen,
+                bisaHapus: (g) =>
+                  isManajemen && !g.permintaanAktif && !g.rows.some((r) => r.status === "tiba"),
+                onRab: setRab,
+                onProses: (g) => proses.mutate(g),
+                onTiba: setTiba,
+                onBatal: (g) => {
+                  if (window.confirm(`Batalkan faktur beli ${g.nomor ?? "ini"}?`)) batal.mutate(g);
+                },
+                onHapus: (g) => {
+                  if (
+                    window.confirm(
+                      `Hapus permanen faktur ${g.nomor ?? "ini"}? Data tidak bisa dikembalikan.`,
+                    )
+                  )
+                    hapus.mutate(g);
+                },
+              })}
+              data={grup}
+              kunci={(g) => g.key}
+              onKlikBaris={(g) => setDetail(g)}
+              galat={gagalMuat}
+              kosong="Belum ada faktur beli perlengkapan."
+            />
+          ) : (
+          grup.map((g) => {
             // ringkas ala Beli Bahan Baku: 1 barang pertama + jumlah lainnya;
             // rincian lengkap via klik kartu (modal detail)
             const utama = g.rows[0];
@@ -277,13 +394,13 @@ export function BeliPerlengkapanPage() {
                   {g.totalHarga > 0 ? (
                     <> · {formatRupiah(g.totalHarga)}</>
                   ) : (
-                    butuhAksi(g.status) &&
+                    butuhAksiBP(g.status) &&
                     g.totalEstimasi > 0 && <> · estimasi {formatRupiah(g.totalEstimasi)}</>
                   )}
                 </span>
-                {(butuhAksi(g.status) && isManajemen) || bisaHapus ? (
+                {(butuhAksiBP(g.status) && isManajemen) || bisaHapus ? (
                   <div className="ml-auto flex items-center gap-2">
-                    {isManajemen && butuhAksi(g.status) && (
+                    {isManajemen && butuhAksiBP(g.status) && (
                       <>
                         <button
                           onClick={(e) => {
@@ -346,7 +463,47 @@ export function BeliPerlengkapanPage() {
               </div>
             </Card>
             );
-          })}
+          }))}
+          {total > 0 && totalPages > 1 && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1 text-sm">
+              <button
+                type="button"
+                onClick={() => keHalaman(page - 1)}
+                disabled={page <= 1}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+              >
+                ‹ Sebelumnya
+              </button>
+              <span className="px-2 text-stone-500">
+                Halaman <b>{page}</b> / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => keHalaman(page + 1)}
+                disabled={page >= totalPages}
+                className={`${btnSecondary} px-2.5 py-1 disabled:opacity-40`}
+              >
+                Berikutnya ›
+              </button>
+              <label className="ml-2 flex items-center gap-1.5 text-xs text-stone-500">
+                Faktur / halaman
+                <select
+                  value={perPage}
+                  onChange={(e) => {
+                    setPerPage(angkaDari(e.target.value));
+                    setPage(1);
+                  }}
+                  className={`${inputClass} w-auto`}
+                >
+                  {[10, 20, 50, 100].map((x) => (
+                    <option key={x} value={x}>
+                      {x}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
       )}
 
@@ -492,10 +649,20 @@ function DetailBeliPerlengkapanModal({
   );
 }
 
-export function BeliStatusBadge({ status }: { status: BeliPerlengkapanRow["status"] }) {
+/**
+ * Lencana keadaan — LIMA, dan yang kelima (`sebagian`) baru sejak aturannya
+ * dipindah ke `@kakarut/shared`.
+ *
+ * Ponsel sudah punya keadaan itu sejak lama; web yang belum. Faktur berisi
+ * [tiba, menunggu] karena itu berbunyi "Menunggu" di sini dan "Sebagian" di
+ * sana — faktur yang sama, dua layar, dua jawaban. Dipakai juga untuk status
+ * satu BARIS (empat keadaan), yang memang himpunan bagiannya.
+ */
+export function BeliStatusBadge({ status }: { status: StatusFakturBP }) {
   const map = {
     menunggu: { teks: "RAB (Menunggu dibeli)", cls: "bg-amber-100 text-amber-800" },
     diproses: { teks: "🛒 Diproses", cls: "bg-sky-100 text-sky-800" },
+    sebagian: { teks: "📦 Sebagian tiba", cls: "bg-teal-100 text-teal-800" },
     tiba: { teks: "Tiba di CK ✓", cls: "bg-blue-100 text-blue-800" },
     batal: { teks: "Dibatalkan", cls: "bg-stone-100 text-stone-500" },
   }[status];
@@ -613,7 +780,7 @@ function DokumenRabPerlengkapanModal({
  */
 function TibaFakturModal({ faktur, onClose }: { faktur: FakturBeli; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const barisMenunggu = faktur.rows.filter((r) => butuhAksi(r.status));
+  const barisMenunggu = faktur.rows.filter((r) => butuhAksiBP(r.status));
   const [draft, setDraft] = useState<Record<string, { qty: string; harga: string }>>(() =>
     Object.fromEntries(
       barisMenunggu.map((r) => [

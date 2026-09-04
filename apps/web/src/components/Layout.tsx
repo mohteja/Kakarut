@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import type { KonfirmasiStatus, RingkasSelisihDto } from "@kakarut/shared";
+import type {
+  BeliPerlengkapanDaftar,
+  KonfirmasiStatus,
+  RingkasSelisihDto,
+} from "@kakarut/shared";
 import { barisBelumSelesai } from "@kakarut/shared";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -162,18 +166,27 @@ export function Layout() {
   const beliBelum = hitungBelum(beliNav?.rows);
   // Faktur BELI PERLENGKAPAN yang masih aktif (menunggu dibeli / diproses) →
   // badge di nav "Beli Perlengkapan" — notifikasi yang sama dgn Beli Bahan Baku.
+  /*
+   * ANGKANYA DARI SERVER (`ringkas.butuh_aksi`), bukan dijumlahkan di sini.
+   *
+   * Bentuk lamanya menarik daftar fakturnya lalu menyaring sendiri — dan itu
+   * salah dua kali sejak rutenya berhalaman (2026-09-04). Pertama, balasannya
+   * kini OBJEK: `(bpNav ?? []).filter` melempar, dan karena lencana ini hidup
+   * di Layout, yang runtuh BUKAN halaman perlengkapan melainkan SETIAP
+   * halaman aplikasi. Kedua — dan ini sudah salah sebelum putaran itu —
+   * penyaringnya cuma melihat daftar yang dipotong 200 baris, jadi lencananya
+   * diam-diam berhenti bertambah pada perusahaan yang riwayatnya panjang.
+   *
+   * `per_page=1` karena yang dibutuhkan hanya `ringkas`: satu faktur cukup
+   * untuk membawanya, dan `ringkas` dihitung atas SELURUH populasi.
+   */
   const { data: bpNav, error: bpGagal } = useQuery({
-    queryKey: ["perlengkapan-beli"],
-    queryFn: () =>
-      api<{ id: string; faktur_id: string | null; status: string }[]>("/perlengkapan/beli"),
+    queryKey: ["perlengkapan-beli", "lencana"],
+    queryFn: () => api<BeliPerlengkapanDaftar>("/perlengkapan/beli?per_page=1"),
     enabled: !!auth && !auth.user.is_super_admin && manajemenGuard && divisi !== "store",
     refetchInterval: 60_000,
   });
-  const perlengkapanBelum = new Set(
-    (bpNav ?? [])
-      .filter((r) => r.status === "menunggu" || r.status === "diproses")
-      .map((r) => r.faktur_id ?? r.id),
-  ).size;
+  const perlengkapanBelum = bpNav?.ringkas.butuh_aksi ?? 0;
   // Pengajuan cuti/libur yang menunggu ACC → badge di nav "Rekap Absen".
   // Hanya manajemen yang memutuskan, jadi hanya mereka yang perlu di-query.
   const { data: pengajuanNav, error: pengajuanGagal } = useQuery({

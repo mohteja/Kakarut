@@ -447,12 +447,38 @@ export function situsUrut(kode?: Record<string, string>, kodeSkema?: string): Si
       if (!teks.includes(".groupBy(") || !teks.includes(".as(")) return;
       const m = /\.groupBy\(([^)]*)\)/.exec(teks);
       if (!m) return;
+      /*
+       * KUNCI GRUP BERUPA EKSPRESI, bukan `tabel.kolom`.
+       *
+       * `coalesce(faktur_id, id)` tak punya tabel untuk disematkan, jadi ia
+       * dirakit ke sebuah konstanta lalu dipakai dua kali:
+       *
+       *   .select({ kunci: kunciFaktur.as("kunci_faktur"), … })
+       *   .groupBy(kunciFaktur)
+       *
+       * Kunci grupnya karena itu terbaca `kunciFaktur` — nama telanjang yang
+       * takkan pernah cocok dengan `X.kunci` di `ORDER BY` luar, dan situsnya
+       * divonis SERI padahal pemutus serinya justru kunci grupnya sendiri.
+       *
+       * Yang dicari di bawah: medan select yang nilainya `<<kunci>>.as(…)`.
+       * Kalau ada, nama MEDANNYA-lah yang muncul sebagai `X.medan` di luar,
+       * jadi itulah yang disimpan. Pemetaannya sempit dengan sengaja — hanya
+       * pengenal telanjang, hanya bila `.as(` mengikutinya langsung; ekspresi
+       * yang cuma MIRIP tak ikut dibebaskan.
+       */
+      const kunci = m[1]
+        .split(",")
+        .map((x) => rapi(x))
+        .filter(Boolean);
       subGrup.set(
         nama,
-        m[1]
-          .split(",")
-          .map((x) => rapi(x))
-          .filter(Boolean),
+        kunci.map((k) => {
+          if (!/^[A-Za-z_$][\w$]*$/.test(k)) return k;
+          const medan = new RegExp(
+            `(\\w+)\\s*:\\s*${k}\\s*\\.as\\(`,
+          ).exec(teks);
+          return medan ? `${nama}.${medan[1]}` : k;
+        }),
       );
     });
 

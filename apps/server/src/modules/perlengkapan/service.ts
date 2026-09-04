@@ -15,6 +15,7 @@ import type {
   PerlengkapanRowDto,
   PermintaanPerlengkapanOtomatisHasil,
   RakLokasi,
+  RingkasBeliPerlengkapan,
   StokStatus,
 } from "@kakarut/shared";
 import { kekuranganKeMinimum } from "@kakarut/shared";
@@ -1555,10 +1556,21 @@ export async function batalBeliPerlengkapan(
 }
 
 /** Daftar faktur beli perlengkapan (menunggu dulu, lalu terbaru). Opsional CK. */
+/**
+ * Kunci sebuah FAKTUR beli perlengkapan.
+ *
+ * `faktur_id` bila ada; kalau tidak, id barisnya sendiri — baris warisan dari
+ * sebelum faktur multi-item ada diperlakukan sebagai faktur satu-item. Ditulis
+ * sekali di sini supaya kueri agregat, kueri kunci halaman, dan kueri barisnya
+ * tak pernah memakai definisi yang berbeda-beda.
+ */
+const kunciFaktur = sql<string>`coalesce(${supplyPurchases.fakturId}::text, ${supplyPurchases.id}::text)`;
+
 export async function daftarBeliPerlengkapan(
   companyId: string,
   ckBranchId?: string,
-): Promise<BeliPerlengkapanRow[]> {
+  halaman?: { perPage: number; offset: number },
+): Promise<{ rows: BeliPerlengkapanRow[]; total: number; ringkas: RingkasBeliPerlengkapan }> {
   const ckB = alias(branches, "ck_beli");
   const tujuanB = alias(branches, "tujuan_beli");
   const pemroses = alias(users, "pemroses_beli");
@@ -1591,6 +1603,82 @@ export async function daftarBeliPerlengkapan(
       )
     )`,
   );
+  /*
+   * AGREGAT PER FAKTUR — satu definisi yang memberi makan TIGA hal: hitungan
+   * `ringkas`, `total`, dan kunci halaman. Ketiganya karena itu tak mungkin
+   * bicara soal populasi yang berbeda; kalau salah satu bocor, ketiganya
+   * bocor bersama dan itu terlihat.
+   *
+   * `MAX(created_at)`, BUKAN MIN. Faktur diurut "yang terbaru dulu" di antara
+   * yang setahap, dan tahapnya berpindah dengan menulis ulang barisnya — jadi
+   * yang menentukan posisi adalah sentuhan TERAKHIR. Pada fikstur segar
+   * MIN==MAX (satu submit = satu `now()`), jadi salahnya lolos uji dan baru
+   * muncul di data hidup.
+   */
+  const perFaktur = db
+    .select({
+      kunci: kunciFaktur.as("kunci_faktur"),
+      adaTunggu: sql<boolean>`bool_or(${supplyPurchases.status} = 'menunggu')`.as("ada_tunggu"),
+      adaProses: sql<boolean>`bool_or(${supplyPurchases.status} = 'diproses')`.as("ada_proses"),
+      adaTiba: sql<boolean>`bool_or(${supplyPurchases.status} = 'tiba')`.as("ada_tiba"),
+      adaHidup: sql<boolean>`bool_or(${supplyPurchases.status} <> 'batal')`.as("ada_hidup"),
+      waktu: sql<Date>`max(${supplyPurchases.createdAt})`.as("waktu_faktur"),
+    })
+    .from(supplyPurchases)
+    .where(and(...conds))
+    .groupBy(kunciFaktur)
+    .as("per_faktur");
+
+  /*
+   * KETIGA EMBER, dirakit dari aturan yang sama dengan `emberFakturBP` di
+   * `@kakarut/shared` — dan saling lepas menurut konstruksi, jadi jumlahnya
+   * WAJIB tepat `total`. Itu invarian yang dipakai verify-api §294.
+   *
+   * `NOT ada_hidup` lebih dulu: faktur yang SELURUH barisnya batal tak boleh
+   * ikut dihitung "tiba" hanya karena `ada_tiba` kebetulan false.
+   */
+  const batalSql = sql<boolean>`NOT ${perFaktur.adaHidup}`;
+  const tibaSql = sql<boolean>`(${perFaktur.adaHidup} AND ${perFaktur.adaTiba}
+    AND NOT ${perFaktur.adaTunggu} AND NOT ${perFaktur.adaProses})`;
+  const butuhAksiSql = sql<boolean>`(${perFaktur.adaHidup}
+    AND (${perFaktur.adaTunggu} OR ${perFaktur.adaProses}))`;
+
+  const [hitung] = await db
+    .select({
+      total: sql<number>`count(*)::int`,
+      butuhAksi: sql<number>`count(*) filter (where ${butuhAksiSql})::int`,
+      tiba: sql<number>`count(*) filter (where ${tibaSql})::int`,
+      batal: sql<number>`count(*) filter (where ${batalSql})::int`,
+    })
+    .from(perFaktur);
+  const total = hitung?.total ?? 0;
+  const ringkas: RingkasBeliPerlengkapan = {
+    butuh_aksi: hitung?.butuhAksi ?? 0,
+    tiba: hitung?.tiba ?? 0,
+    batal: hitung?.batal ?? 0,
+  };
+
+  /*
+   * KUNCI HALAMAN — faktur, bukan baris. Mengiris per baris mengirim faktur
+   * yang terpotong di tengah: kartu berisi separuh itemnya, tanpa penanda.
+   *
+   * PEMUTUS SERI `asc(kunci)` wajib. Kedua kunci urut di atasnya adalah
+   * agregat, dan dua faktur berwaktu sama tak punya urutan sama sekali —
+   * waktu yang sama pun bukan kebetulan langka (`now()` stabil per transaksi;
+   * satu permintaan cabang melahirkan beberapa faktur sekaligus). Dipadu
+   * OFFSET, akibatnya bukan tampilan yang goyah melainkan faktur yang tak
+   * muncul di halaman MANA PUN. `GET /produksi` sudah membayar bug ini.
+   */
+  const kunciHalaman = (
+    await db
+      .select({ kunci: perFaktur.kunci })
+      .from(perFaktur)
+      .orderBy(desc(butuhAksiSql), desc(perFaktur.waktu), asc(perFaktur.kunci))
+      .limit(halaman?.perPage ?? BATAS_BELI_PERLENGKAPAN)
+      .offset(halaman?.offset ?? 0)
+  ).map((r) => r.kunci);
+  if (kunciHalaman.length === 0) return { rows: [], total, ringkas };
+
   const rows = await db
     .select({
       id: supplyPurchases.id,
@@ -1632,26 +1720,23 @@ export async function daftarBeliPerlengkapan(
       and(eq(ssUtama.supplyId, supplyPurchases.supplyId), eq(ssUtama.isUtama, true)),
     )
     .leftJoin(supUtama, eq(ssUtama.supplierId, supUtama.id))
-    .where(and(...conds))
-    // butuh aksi di atas (menunggu/diproses), lalu terbaru
-    .orderBy(
-      sql`(${supplyPurchases.status} in ('menunggu','diproses')) desc`,
-      desc(supplyPurchases.createdAt),
-      desc(supplyPurchases.id),
-    )
     /*
-     * SATU baris lebih. Justru karena urutannya menaruh yang "butuh aksi" di
-     * atas, potongan di batas ini memotong EKOR RIWAYATNYA — dan itu bagian
-     * yang paling mudah disalahbaca sebagai "tak pernah ada".
+     * Terkurung ke kunci halaman — jadi kueri ini TAK LAGI menyapu seluruh
+     * populasi. Batas 200 barisnya hilang bersama sebabnya: yang membatasi
+     * kini `per_page` dalam satuan FAKTUR, dan tiap faktur pada halaman itu
+     * dikirim UTUH.
      */
-    .limit(BATAS_BELI_PERLENGKAPAN + 1);
+    .where(and(...conds, inArray(kunciFaktur, kunciHalaman)))
+    // Urutan BARIS di dalam satu faktur; urutan FAKTUR-nya ditentukan
+    // penyusunan ulang di bawah, mengikuti `kunciHalaman`.
+    .orderBy(desc(supplyPurchases.createdAt), desc(supplyPurchases.id));
   // nomor BP-: ref = faktur_id (baris warisan tanpa faktur → ref = id baris)
   const nomorMap = await nomorUntukRefs(
     db,
     companyId,
     [...new Set(rows.map((r) => r.fakturId ?? r.id))],
   );
-  return rows.map((r) => ({
+  const dto = rows.map((r) => ({
     id: r.id,
     faktur_id: r.fakturId,
     supply_id: r.supplyId,
@@ -1671,6 +1756,28 @@ export async function daftarBeliPerlengkapan(
     harga_beli: r.hargaBeli,
     permintaan_aktif: r.permintaanAktif,
   }));
+  /*
+   * DISUSUN ULANG MENGIKUTI `kunciHalaman`, bukan dipulangkan apa adanya.
+   *
+   * Kueri baris di atas diurut `desc(createdAt)` — itu BUKAN urutan "yang
+   * butuh aksi dulu" yang dipakai mengiris halamannya. Memulangkan urutan
+   * kuerinya memberi HIMPUNAN YANG BENAR DENGAN URUTAN YANG SALAH: tanpa
+   * typecheck, tanpa galat, dan tak seorang pun bisa membedakannya dari
+   * "memang begitu datanya". Kedua klien mengelompokkan baris mengikuti
+   * urutan kemunculan, jadi urutan larik ini adalah urutan kartu di layar.
+   */
+  const perKunci = new Map<string, BeliPerlengkapanRow[]>();
+  for (const r of dto) {
+    const k = r.faktur_id ?? r.id;
+    const list = perKunci.get(k) ?? [];
+    list.push(r);
+    perKunci.set(k, list);
+  }
+  return {
+    rows: kunciHalaman.flatMap((k) => perKunci.get(k) ?? []),
+    total,
+    ringkas,
+  };
 }
 
 /**

@@ -17,6 +17,7 @@ import { z } from "zod";
 import {
   bolehLihatBiaya,
   tanpaBiayaKartuPerlengkapan,
+  type BeliPerlengkapanDaftar,
   type RiwayatHargaDto,
   type RiwayatHargaLot,
 } from "@kakarut/shared";
@@ -38,6 +39,7 @@ import {
   type AppEnv,
   cabangDariQuery,
 } from "../../middleware/auth";
+import { halamanQuery } from "../../lib/halaman-query";
 import { kunciAntrean } from "../../lib/kunci";
 import { potongLarik } from "../../lib/potong";
 import { tanpaBentrok } from "../../lib/pg-galat";
@@ -525,13 +527,35 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
    * dan `beli_perlengkapan_page` ponsel (laci `isManajemen`). Tak ada layar
    * peran lain yang memanggilnya.
    */
+  /**
+   * Daftar faktur beli perlengkapan — BERHALAMAN PER FAKTUR sejak 2026-09-04.
+   *
+   * Dulu larik telanjang yang dipotong di 200 BARIS. Terukur pada basis
+   * gerbang: 53 baris = 26.132 byte untuk 14 faktur — rata-rata 3,79 baris per
+   * faktur, jadi plafon 200 baris itu ≈53 faktur, dan yang terpotong justru
+   * EKOR RIWAYATNYA (urutannya menaruh yang butuh aksi di atas). Ia tumbuh
+   * seumur usaha buka, dan tak ada galat yang akan muncul — halamannya cuma
+   * memburuk sampai berhenti bisa dibuka.
+   *
+   * `per_page` dalam satuan FAKTUR: bawaan 20, maks 200 — angka yang sama
+   * dengan `/produksi` dan `/rekomendasi/permintaan`, sebab batas yang tak
+   * seragam antar pintu sudah pernah mahal (lihat `lib/halaman-query.ts`).
+   */
   .get("/beli", requireRole("owner", "admin"), async (c) => {
     const auth = c.get("auth");
     let ckFilter: string | undefined;
     if (terikatCabang(auth.role)) ckFilter = auth.branch_id ?? undefined;
     else ckFilter = (await cabangDariQuery(c)) ?? undefined;
-    const rows = await daftarBeliPerlengkapan(auth.company_id!, ckFilter);
-    return c.json(potongLarik(c, rows, BATAS_BELI_PERLENGKAPAN));
+    const { page, perPage, offset } = halamanQuery(c, {
+      bawaan: 20,
+      maks: BATAS_BELI_PERLENGKAPAN,
+    });
+    const { rows, total, ringkas } = await daftarBeliPerlengkapan(auth.company_id!, ckFilter, {
+      perPage,
+      offset,
+    });
+    const dto: BeliPerlengkapanDaftar = { rows, total, page, per_page: perPage, ringkas };
+    return c.json(dto);
   })
   /**
    * Buat FAKTUR beli perlengkapan MANUAL ke CK (multi-item — seperti faktur

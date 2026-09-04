@@ -2841,6 +2841,46 @@ export interface PermintaanPerlengkapanOtomatisHasil {
 export type BeliPerlengkapanStatus = "menunggu" | "diproses" | "tiba" | "batal";
 
 /** Satu BARIS faktur beli perlengkapan ke Central Kitchen (BP-). */
+/**
+ * Keadaan satu FAKTUR beli perlengkapan.
+ *
+ * Aturannya dan alasan kelima keadaannya ada di `beli-perlengkapan.ts`
+ * (`statusFakturBP`) — tipenya tinggal di sini supaya `types.ts` tetap bisa
+ * dibaca tanpa mengimpor apa pun, seperti `StatusPermintaan` di atasnya.
+ */
+export type StatusFakturBP = BeliPerlengkapanStatus | "sebagian";
+
+/** Tiga ember yang saling lepas — dasar invarian partisi `ringkas`. */
+export type EmberFakturBP = "butuh_aksi" | "tiba" | "batal";
+
+/**
+ * Ringkasan seluruh populasi faktur beli perlengkapan, bukan halaman berjalan.
+ *
+ * `Record`, bukan interface bermedan tangan — ember keempat yang lahir besok
+ * tak bisa lupa dihitung.
+ */
+export type RingkasBeliPerlengkapan = Record<EmberFakturBP, number>;
+
+/**
+ * Balasan `GET /perlengkapan/beli` — BERHALAMAN PER FAKTUR.
+ *
+ * `rows` tetap larik BARIS (bentuk tiap entri tak berubah sedikit pun), tapi
+ * halamannya diiris per FAKTUR: `per_page=20` berarti 20 faktur, dan seluruh
+ * baris kedua puluh faktur itu ikut. Mengiris per baris akan mengirim faktur
+ * yang terpotong di tengah — kartu berisi separuh itemnya, tanpa penanda.
+ *
+ * `ringkas` dihitung server atas SELURUH populasi, bukan halaman berjalan.
+ */
+export interface BeliPerlengkapanDaftar {
+  rows: BeliPerlengkapanRow[];
+  /** jumlah FAKTUR (bukan baris) di seluruh populasi */
+  total: number;
+  page: number;
+  /** dalam satuan FAKTUR */
+  per_page: number;
+  ringkas: RingkasBeliPerlengkapan;
+}
+
 export interface BeliPerlengkapanRow {
   id: string;
   /**

@@ -212,7 +212,15 @@ describe("aturan rumah: rute yang memotong wajib mengumumkannya, dan layar wajib
       "GET /stok/opname/riwayat",
       "GET /stok/opname",
       "GET /perlengkapan/opname/riwayat",
-      "GET /perlengkapan/beli",
+      // `GET /perlengkapan/beli` KELUAR dari daftar ini 2026-09-04, dan itu
+      // bukan pencabutan penanda melainkan penggantiannya dengan yang lebih
+      // kuat: rutenya kini BERHALAMAN dan membawa `total` (cacah faktur atas
+      // seluruh populasi) di dalam badan balasannya. `potongLarik` memasang
+      // penandanya lewat HEADER — cukup untuk larik telanjang, tapi header
+      // bisa hilang di proxy dan tak bisa menyebut BERAPA yang tak ikut.
+      // Penjaganya pindah ke `beli-perlengkapan-berhalaman.test.ts` +
+      // verify-api §294, yang menuntut invarian partisi `ringkas` dan telusur
+      // seluruh halaman.
       "GET /perlengkapan/kiriman",
       // Ditambahkan 2026-09-03. Bukan bagian dari tujuh yang dibayar
       // 2026-08-31: panel log galat memotong daftarnya di 200 sejak awal, tapi
