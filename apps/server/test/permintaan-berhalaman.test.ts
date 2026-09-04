@@ -281,16 +281,47 @@ describe("web: sakelar, ubin, dan tautan yang menunjuk fakturnya", () => {
     expect(HAL).not.toContain("beresA - beresB");
   });
 
-  it("tiap jalur menautkan ke FAKTURNYA, bukan ke daftarnya", () => {
+  it("tiap jalur menautkan ke FAKTURNYA, bukan ke daftarnya — DUA bentuk", () => {
+    /*
+     * VERSI PERTAMA UJI INI HANYA MEMBACA `KOLOM`, DAN ITU MEMBIARKAN CACAT
+     * LEWAT — dicatat di sini supaya tak terulang.
+     *
+     * Perbaikan tautannya hanya kena bentuk TABEL; bentuk KARTU — yang BAWAAN,
+     * jadi yang paling sering dibuka orang — tetap menunjuk `/produksi` dan
+     * `/pembelian`, DAFTARNYA. Penjaga ini hijau (ia tak membaca halamannya),
+     * dan lengan peramban juga hijau (ia mengklik tabel). Dua gerbang setuju
+     * bahwa sesuatu beres, dan tak satu pun pernah melihatnya.
+     *
+     * Yang dijaga sekarang bukan "berkas kolom menyebut pola tautan yang
+     * benar" melainkan **tak ada tempat lain yang boleh menentukan tujuannya
+     * sendiri**: satu fungsi, dan kedua bentuk memanggilnya.
+     */
+    expect(KOLOM).toContain("export function tautanJalur(");
     expect(KOLOM).toContain("`/pembelian/${fakturId}`");
     expect(KOLOM).toContain("`/produksi/${fakturId}`");
-    /*
-     * BATAS YANG DISENGAJA: BP- tetap ke daftarnya. Fakturnya hidup di
-     * `supply_purchases`, dan halaman dokumen `/produksi/:fakturId` hanya
-     * melayani `productions` — mengarahkannya ke sana menghasilkan 404 yang
-     * terbaca seperti "fakturnya hilang".
-     */
+    // BATAS YANG DISENGAJA: BP- tetap ke daftarnya — fakturnya hidup di
+    // `supply_purchases`, dan halaman dokumen hanya melayani `productions`.
     expect(KOLOM).toContain('if (jalur === "beli_perlengkapan") return "/perlengkapan/beli";');
+
+    // Halaman (bentuk KARTU) memanggil fungsi yang SAMA…
+    expect(HAL).toContain("tautanJalur(jalur, data.faktur_id)");
+    // …dan tak menuliskan tujuannya sendiri lagi, dalam bentuk apa pun.
+    expect(HAL, "kartu menentukan tujuannya sendiri lagi").not.toMatch(
+      /to=\{?"\/(produksi|pembelian|perlengkapan)/,
+    );
+    // Ikon jalur juga satu rumah — dua peta ikon = dua kosakata untuk hal sama.
+    expect(KOLOM).toContain("export const IKON_JALUR");
+    expect(HAL).toContain("IKON_JALUR[jalur]");
+    expect(HAL).not.toMatch(/\? "🏭"/);
+  });
+
+  it("label tahap per jalur satu rumah, dipakai kartu DAN tabel", () => {
+    // Sempat ada dua terner byte-identik (`Bagian` dan kolom tabel). Dua
+    // salinan aturan label = kartu dan tabel bisa menyebut tahap yang sama
+    // dengan dua kata berbeda untuk faktur yang sama, tanpa satu uji merah.
+    expect(HAL).toContain("export function gayaBagian(");
+    expect((HAL.match(/\? LABEL_PRODUKSI/g) ?? []).length).toBe(1);
+    expect((HAL.match(/\? LABEL_KIRIM/g) ?? []).length).toBe(1);
   });
 
   it("aturan nilai (dobel hitung) satu rumah, dipakai kartu DAN tabel", () => {

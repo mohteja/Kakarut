@@ -50,6 +50,73 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Perbaikan yang cuma kena SETENGAH layar — dan dua gerbang yang setuju bahwa ia beres — web — 2026-09-04
+
+- **Kenapa entri ini ada**: pemilik repo meminta *"cek bug perbaikan baru"*.
+  Yang diperiksa pekerjaan saya sendiri dari putaran sebelumnya, dan ia memang
+  bercacat.
+
+- **CACATNYA**: perbaikan tautan ("tiap jalur menautkan ke halaman dokumen
+  fakturnya, bukan ke daftarnya") **hanya kena bentuk TABEL**. Bentuk KARTU —
+  yang **BAWAAN**, jadi yang paling sering dibuka orang — tetap menunjuk
+  `/produksi` dan `/pembelian`, daftarnya. Terukur di peramban: kartu punya
+  **NOL** tautan ke halaman dokumen faktur.
+
+  Jadi klaim yang saya tulis di pesan commit, PR, dan entri ledger sebelumnya
+  benar hanya untuk bentuk yang harus dipilih orang lebih dulu, dan salah untuk
+  bentuk yang ia lihat saat membuka halamannya.
+
+- **DUA GERBANG SETUJU BAHWA ITU BERES, dan tak satu pun pernah melihatnya** —
+  ini bagian yang layak diingat:
+
+  | gerbang | kenapa hijau |
+  | --- | --- |
+  | penjaga statis `tiap jalur menautkan ke FAKTURNYA` | ia hanya membaca `kolom-permintaan.tsx`; halamannya tak pernah dibuka |
+  | lengan peramban `lencana jalur membuka HALAMAN DOKUMEN` | ia menekan `☰ Tabel` lebih dulu, jadi ia tak pernah menyentuh bentuk bawaannya |
+
+  Keduanya menguji **jalan yang sama** dari dua arah, dan sama-sama melewatkan
+  jalan yang lain. Dua gerbang yang hijau atas hal yang sama bukan dua gerbang.
+
+- **Kelas cacatnya, ditulis supaya bisa dikenali lagi**: sebuah aturan
+  diperbaiki di SATU dari DUA tempat yang merendernya, dan penjaganya menjaga
+  *tempat yang diperbaiki* alih-alih *aturannya*. Asersi "berkas X menyebut
+  pola yang benar" tak pernah bisa menangkap ini; yang bisa hanya "tak ada
+  tempat lain yang boleh menentukannya sendiri".
+
+- **Perbaikannya STRUKTURAL, bukan menyalin tautan ke tempat kedua**:
+  `tautanJalur()` dan `IKON_JALUR` diekspor dari `kolom-permintaan.tsx`, prop
+  `to` pada `Bagian` **dihapus** (tak ada pemanggil yang bisa menentukan tujuan
+  sendiri lagi), dan `gayaBagian`/`gayaPerlengkapan` dinaikkan ke lingkup modul
+  supaya kartu dan tabel memakai satu fungsi. `BagianPerlengkapan` ikut lewat
+  fungsi yang sama, jadi batas "BP- tetap ke daftarnya" pun hidup di satu
+  tempat.
+
+- **DUA DUPLIKASI LAIN yang ikut ketahuan sepanjang jalan** — keduanya saya
+  sendiri yang membuatnya di putaran sebelumnya, di putaran yang justru
+  menghapus duplikasi di tempat lain:
+  - terner label tahap ditulis **dua kali** byte-identik (`Bagian` dan
+    `gayaBagian`) — kartu dan tabel bisa menyebut tahap yang sama dengan dua
+    kata berbeda untuk faktur yang sama;
+  - peta ikon jalur punya **dua rumah** (terner di halaman + `IKON_JALUR`).
+  - Plus satu impor mati (`formatTanggalRingkas`); `noUnusedLocals` tak aktif
+    di repo ini, jadi tak ada yang menagihnya.
+
+- **Urutan kerjanya sengaja dibalik**: lengan peramban untuk bentuk kartu
+  ditulis **lebih dulu** dan dijalankan terhadap kode yang masih bercacat —
+  merahnya ("kartu tak punya satu pun tautan ke halaman dokumen faktur") adalah
+  bukti cacatnya ADA, bukan sekadar dugaan dari membaca sumber. Baru sesudah
+  itu diperbaiki.
+
+- **Penjaganya diperluas dan dibuktikan bisa menuduh**: memasang kembali cacat
+  aslinya (`to=` literal di kartu) → merah; menyalin balik terner labelnya →
+  merah. Keduanya dipulihkan byte-per-byte.
+
+- **Gerbang penuh**: verify-api **3.517 / 0**, npm test **236 berkas /
+  2.884 uji**, invarian **27/27**, Playwright **38 lolos** (dari 37). Tanpa
+  rilis.
+
+---
+
 ## Permintaan Stok dapat bentuk TABEL — dan korelasi SQL tak berkualifikasi yang lolos invarian partisi — web + server + ponsel — 2026-09-03
 
 - **Kenapa vena ini ada**: pemilik repo meminta *"permintaah stock juga ingin

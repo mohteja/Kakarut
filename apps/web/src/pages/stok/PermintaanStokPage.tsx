@@ -22,8 +22,16 @@ import {
 import { SakelarTampilan, useTampilan } from "../../components/SakelarTampilan";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
-import { kolomPermintaan, LABEL_STATUS, STYLE_STATUS, totalPermintaan } from "./kolom-permintaan";
+import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import {
+  IKON_JALUR,
+  kolomPermintaan,
+  LABEL_STATUS,
+  STYLE_STATUS,
+  tautanJalur,
+  totalPermintaan,
+  type Jalur,
+} from "./kolom-permintaan";
 
 const STATUS_STYLE: Record<KonfirmasiStatus, string> = {
   rencana: "bg-stone-100 text-stone-600",
@@ -57,25 +65,33 @@ const LABEL_KIRIM: Record<KonfirmasiStatus, string> = {
   ditolak: "Ditolak",
 };
 
-function Bagian({
-  jalur,
-  data,
-  to,
-}: {
-  jalur: "produksi" | "produksi_cabang" | "beli" | "beli_produksi" | "kirim";
-  data: PermintaanStokBagian;
-  to: string;
-}) {
-  const ikon =
-    jalur === "produksi"
-      ? "🏭"
-      : jalur === "produksi_cabang"
-        ? "🏪"
-        : jalur === "beli"
-          ? "🛒"
-          : jalur === "kirim"
-            ? "🚚"
-            : "🧺";
+/**
+ * Gaya & label satu bagian — SATU rumah, dipakai kartu DAN tabel.
+ *
+ * Sempat ada dua: `Bagian` menghitung labelnya sendiri dengan terner yang
+ * byte-identik dengan yang dipakai kolom tabel. Dua salinan aturan label
+ * berarti kartu dan tabel bisa menyebut tahap yang sama dengan dua kata
+ * berbeda untuk faktur yang sama — dan tak satu uji pun akan merah.
+ */
+export function gayaBagian(b: PermintaanStokBagian, jalur: Jalur) {
+  return {
+    label: (jalur === "produksi" || jalur === "produksi_cabang"
+      ? LABEL_PRODUKSI
+      : jalur === "kirim"
+        ? LABEL_KIRIM
+        : LABEL_BELI)[b.status],
+    gaya: STATUS_STYLE[b.status],
+  };
+}
+
+export function gayaPerlengkapan(r: PermintaanStokRow) {
+  return {
+    label: r.beli_perlengkapan ? LABEL_PERLENGKAPAN[r.beli_perlengkapan.status] : "",
+    gaya: r.beli_perlengkapan ? STYLE_PERLENGKAPAN[r.beli_perlengkapan.status] : "",
+  };
+}
+
+function Bagian({ jalur, data }: { jalur: Jalur; data: PermintaanStokBagian }) {
   const judul =
     jalur === "produksi"
       ? "Produksi"
@@ -86,21 +102,25 @@ function Bagian({
           : jalur === "kirim"
             ? "Kirim dari stok CK"
             : "Bahan produksi";
-  const label = (
-    jalur === "produksi" || jalur === "produksi_cabang"
-      ? LABEL_PRODUKSI
-      : jalur === "kirim"
-        ? LABEL_KIRIM
-        : LABEL_BELI
-  )[data.status];
+  const g = gayaBagian(data, jalur);
   return (
     <Link
-      to={to}
+      /*
+       * KE FAKTURNYA, lewat fungsi yang SAMA dengan bentuk tabel.
+       *
+       * Dulu prop `to` diketik pemanggilnya sebagai "/produksi" / "/pembelian"
+       * — DAFTARNYA. Mengklik "🏭 Produksi · 3 bahan" karena itu mendaratkan
+       * orang di halaman 1 dari 4 halaman riwayat dan menyuruhnya mencari
+       * sendiri faktur yang barusan ia klik, padahal `faktur_id`-nya sudah ada
+       * di tangan. Prop itu dihapus supaya tak ada pemanggil yang bisa
+       * menentukan tujuan sendiri lagi.
+       */
+      to={tautanJalur(jalur, data.faktur_id)}
       className="flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white px-3 py-2 transition hover:border-orange-400 hover:shadow-sm"
     >
       <div className="min-w-0">
         <div className="text-sm font-semibold text-stone-800">
-          {ikon} {judul} · {data.jumlah_baris} bahan
+          {IKON_JALUR[jalur]} {judul} · {data.jumlah_baris} bahan
         </div>
         {data.total > 0 && (
           <div className="text-xs text-stone-500">
@@ -111,10 +131,8 @@ function Bagian({
           </div>
         )}
       </div>
-      <span
-        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_STYLE[data.status]}`}
-      >
-        {label}
+      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${g.gaya}`}>
+        {g.label}
       </span>
     </Link>
   );
@@ -141,7 +159,9 @@ const LABEL_PERLENGKAPAN: Record<PermintaanStokBagianPerlengkapan["status"], str
 function BagianPerlengkapan({ data }: { data: PermintaanStokBagianPerlengkapan }) {
   return (
     <Link
-      to="/perlengkapan/beli"
+      // Lewat fungsi yang sama, supaya batas "BP- tetap ke daftarnya" hidup di
+      // SATU tempat dan tak bisa diperbaiki setengah lagi.
+      to={tautanJalur("beli_perlengkapan", data.faktur_id)}
       className="flex items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white px-3 py-2 transition hover:border-orange-400 hover:shadow-sm"
     >
       <div className="min-w-0">
@@ -248,19 +268,6 @@ export function PermintaanStokPage() {
     )
       hapus.mutate(rencanaId);
   };
-  /* Gaya & label per jalur — SATU sumber, dipakai kartu DAN tabel. */
-  const gayaBagian = (b: PermintaanStokBagian, jalur: string) => ({
-    label: (jalur === "produksi" || jalur === "produksi_cabang"
-      ? LABEL_PRODUKSI
-      : jalur === "kirim"
-        ? LABEL_KIRIM
-        : LABEL_BELI)[b.status],
-    gaya: STATUS_STYLE[b.status],
-  });
-  const gayaPerlengkapan = (r: PermintaanStokRow) => ({
-    label: r.beli_perlengkapan ? LABEL_PERLENGKAPAN[r.beli_perlengkapan.status] : "",
-    gaya: r.beli_perlengkapan ? STYLE_PERLENGKAPAN[r.beli_perlengkapan.status] : "",
-  });
 
   return (
     /* Lebar dilepas pada bentuk tabel — tabel di dalam kolom 42rem tak terbaca. */
@@ -416,15 +423,15 @@ export function PermintaanStokPage() {
                 </div>
                 <div className="space-y-2 border-b border-stone-100 px-4 py-2.5">
                   {/* stok yang SUDAH ADA di CK: dikirim langsung, tanpa produksi baru */}
-                  {r.kirim && <Bagian jalur="kirim" data={r.kirim} to="/produksi" />}
-                  {r.produksi && <Bagian jalur="produksi" data={r.produksi} to="/produksi" />}
+                  {r.kirim && <Bagian jalur="kirim" data={r.kirim} />}
+                  {r.produksi && <Bagian jalur="produksi" data={r.produksi} />}
                   {/* produksi lokal di cabang tujuan (kitchen) — hasil masuk stok cabang */}
                   {r.produksi_cabang && (
-                    <Bagian jalur="produksi_cabang" data={r.produksi_cabang} to="/produksi" />
+                    <Bagian jalur="produksi_cabang" data={r.produksi_cabang} />
                   )}
-                  {r.beli && <Bagian jalur="beli" data={r.beli} to="/pembelian" />}
+                  {r.beli && <Bagian jalur="beli" data={r.beli} />}
                   {r.beli_produksi && (
-                    <Bagian jalur="beli_produksi" data={r.beli_produksi} to="/pembelian" />
+                    <Bagian jalur="beli_produksi" data={r.beli_produksi} />
                   )}
                   {/* faktur beli PERLENGKAPAN (BP-) yang lahir bersama permintaan */}
                   {r.beli_perlengkapan && <BagianPerlengkapan data={r.beli_perlengkapan} />}

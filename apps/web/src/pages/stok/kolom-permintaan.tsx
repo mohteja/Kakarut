@@ -55,8 +55,8 @@ export function totalPermintaan(r: PermintaanStokRow): number {
   );
 }
 
-/** Lambang tiap jalur — satu kosakata dengan kartu. */
-const IKON_JALUR = {
+/** Lambang tiap jalur — SATU rumah, dipakai kartu DAN tabel. */
+export const IKON_JALUR = {
   kirim: "🚚",
   produksi: "🏭",
   produksi_cabang: "🏪",
@@ -65,7 +65,7 @@ const IKON_JALUR = {
   beli_perlengkapan: "🧰",
 } as const;
 
-type Jalur = keyof typeof IKON_JALUR;
+export type Jalur = keyof typeof IKON_JALUR;
 
 /**
  * Ke mana sebuah jalur menautkan.
@@ -80,8 +80,15 @@ type Jalur = keyof typeof IKON_JALUR;
  * hidup di `supply_purchases` — tabel yang berbeda — dan halaman dokumen
  * `/produksi/:fakturId` hanya melayani `productions`. Mengarahkannya ke sana
  * menghasilkan 404 yang terbaca seperti "fakturnya hilang".
+ *
+ * DIEKSPOR, dan itu perbaikan atas cacat yang sempat dikirim: putaran pertama
+ * hanya membetulkan bentuk TABEL, sementara bentuk KARTU — yang BAWAAN, jadi
+ * yang paling sering dibuka — tetap menunjuk daftarnya. Penjaganya cuma
+ * membaca berkas ini dan lengan peramban cuma mengklik tabel, jadi keduanya
+ * hijau atas layar yang belum diperbaiki. Sekarang kedua bentuk memanggil
+ * fungsi yang sama; memperbaiki satu tanpa yang lain berhenti mungkin.
  */
-function tautanJalur(jalur: Jalur, fakturId: string): string {
+export function tautanJalur(jalur: Jalur, fakturId: string): string {
   if (jalur === "beli_perlengkapan") return "/perlengkapan/beli";
   if (jalur === "beli" || jalur === "beli_produksi") return `/pembelian/${fakturId}`;
   return `/produksi/${fakturId}`;

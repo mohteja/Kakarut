@@ -390,3 +390,46 @@ test("Permintaan Stok: lencana jalur membuka HALAMAN DOKUMEN fakturnya", async (
     { timeout: 10_000 },
   );
 });
+
+test("Permintaan Stok: lencana jalur di bentuk KARTU juga membuka halaman dokumen", async ({
+  page,
+  request,
+}) => {
+  /*
+   * BENTUK KARTU ADALAH BAWAANNYA — dan itu yang membuat lengan ini bukan
+   * duplikat lengan tabel di atasnya.
+   *
+   * Perbaikan tautan (jalur → halaman dokumen fakturnya, bukan daftarnya)
+   * awalnya hanya kena bentuk TABEL: `kolom-permintaan.tsx` diperbaiki,
+   * `Bagian` di halamannya tidak. Penjaga statisnya cuma membaca berkas kolom,
+   * dan lengan peramban cuma mengklik tabel — jadi keduanya HIJAU sementara
+   * bentuk yang paling sering dibuka orang tetap mendaratkannya di halaman 1
+   * dari 4 daftar riwayat. Lengan ini yang menutupnya.
+   */
+  const data = await ringkasPermintaan(request);
+  expect(data.total, "PREMIS: harus ada permintaan").toBeGreaterThan(0);
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/permintaan-stok");
+  await expect(page.getByRole("heading", { name: /Data Permintaan Stok/ })).toBeVisible();
+  // Bawaannya kartu — tak ada tombol yang ditekan lebih dulu, dan itu premisnya.
+  await expect(page.getByRole("button", { name: "🗂 Kartu" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  const tautan = page.locator('a[href^="/produksi/"], a[href^="/pembelian/"]').first();
+  await expect(
+    tautan,
+    "kartu tak punya satu pun tautan ke halaman dokumen faktur",
+  ).toBeVisible({ timeout: 10_000 });
+  const href = await tautan.getAttribute("href");
+  expect(href).toMatch(/^\/(produksi|pembelian)\/[0-9a-f-]{36}$/);
+
+  await tautan.click();
+  await expect(page).toHaveURL(new RegExp(`${href}$`));
+  await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toContainText(
+    "Dokumen",
+    { timeout: 10_000 },
+  );
+});
