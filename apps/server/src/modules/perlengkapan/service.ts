@@ -837,9 +837,20 @@ export async function detailOpnamePerlengkapan(
       qtyFisik: supplyMutations.qtyFisik,
       selisih: supplyMutations.qty,
       status: supplyMutations.status,
+      /*
+       * Stempel & pencatat SESI, bukan baris — dihitung `min(...) over ()` di
+       * kueri yang sama supaya aturannya PERSIS milik `riwayatOpnamePerlengkapan`
+       * (`MIN(waktu)`, `MIN(users.nama)`, SQL yang sama, kolasi yang sama).
+       * Menghitungnya di JS atas baris yang sama akan menghasilkan jawaban yang
+       * hampir selalu sama — dan "hampir" adalah celah tempat daftar dan detail
+       * mulai menyebut jam berbeda untuk satu sesi.
+       */
+      waktuSesi: sql<string>`min(${supplyMutations.waktu}) over ()::text`,
+      olehSesi: sql<string | null>`min(${users.nama}) over ()`,
     })
     .from(supplyMutations)
     .innerJoin(supplies, eq(supplyMutations.supplyId, supplies.id))
+    .leftJoin(users, eq(supplyMutations.userId, users.id))
     .where(
       and(
         eq(supplyMutations.companyId, companyId),
@@ -854,6 +865,8 @@ export async function detailOpnamePerlengkapan(
     session_id: sessionId,
     nomor: nomorMap.get(sessionId) ?? null,
     status: rows[0].status as "menunggu" | "disetujui" | "ditolak",
+    waktu: new Date(rows[0].waktuSesi).toISOString(),
+    oleh: rows[0].olehSesi,
     rows: rows.map((r) => ({
       supply_id: r.supplyId,
       nama: r.nama,

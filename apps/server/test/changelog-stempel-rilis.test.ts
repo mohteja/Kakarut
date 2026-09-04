@@ -80,6 +80,11 @@ const BELUM_TAYANG = new Set([
   // BELUM DI-MERGE (2026-09-04): pintu riwayat resep & harga. Aturan pemilik
   // berlaku — tak ada yang tayang sampai ia meminta rilis. Stempelnya dipasang
   // DAN baris ini dihapus pada commit yang sama dengan merge-nya.
+  // Aditif: dua medan (`waktu`, `oleh`) pada balasan yang sudah ada; ponsel
+  // mengurai rute ini lewat fromJson yang mengabaikan kunci tak dikenal.
+  // Belum tayang — aturan pemilik: tak ada rilis sampai diminta. Hapus dari
+  // sini begitu stempel "Sudah di-merge ke production." dipasang.
+  "## 🟢 `GET /perlengkapan/opname/sesi/:sessionId` kini membawa `waktu` + `oleh`",
   "## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan",
   "## 🔴 `GET /perlengkapan/beli` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`",
 ]);

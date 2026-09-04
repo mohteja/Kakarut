@@ -25,6 +25,31 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 `GET /perlengkapan/opname/sesi/:sessionId` kini membawa `waktu` + `oleh`
+
+🟢 **BARU** — dua medan DITAMBAH pada balasan yang sudah ada; tak ada yang
+berubah bentuk maupun hilang. `fromJson` yang mengabaikan kunci tak dikenal
+(`perlengkapan_repository.dart:525`) tetap jalan tanpa disentuh.
+
+| medan | tipe | arti |
+| --- | --- | --- |
+| `waktu` | `string` (ISO) | stempel SESI — `MIN(waktu)` seluruh barisnya |
+| `oleh` | `string \| null` | pencatat sesi — `MIN(nama)`; null bila tak ada pengguna |
+
+**Aturannya SAMA PERSIS dengan `GET /perlengkapan/opname/riwayat`** — bukan
+kebetulan, melainkan dijaga: verify-api §84 menagih `detail.waktu == daftar.waktu`
+dan `detail.oleh == daftar.oleh` untuk sesi yang sama. Kalau layar detail di
+ponsel kelak menampilkan jam sesi, baca medan ini — jangan merakitnya dari
+`rows[]`, yang tak membawa waktu per baris.
+
+Lahir dari web: lembar detail opname perlengkapan tak menampilkan waktu sama
+sekali, sementara lembar bahan baku menampilkannya — dan DTO-nya memang tak
+membawanya.
+
+_Belum tayang._
+
+---
+
 ## 🔴 `GET /perlengkapan/beli` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`
 
 🔴 **WAJIB** — memutus kode yang sudah ada. `perlengkapan_repository.dart`

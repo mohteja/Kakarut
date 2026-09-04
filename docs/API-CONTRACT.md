@@ -1454,7 +1454,7 @@ Laporan:
 - `POST /api/perlengkapan/stok-awal` — [owner/admin] — query: `branch_id?` — req: `{ items: [{supply_id:uuid, qty:number(≥0)}] (min1) }` — res: `{ ok, jumlah, diubah }` — error: **404**
 - `POST /api/perlengkapan/opname` — [any] — query: `branch_id?` — req: `{ items: [{supply_id:uuid, qty_fisik:number(≥0)}] (min1), catatan?|null (max300) }` — res: **201** `{session_id,nomor,...}` atau `{ session_id: null, ... }` bila tak ada selisih
 - `GET /api/perlengkapan/opname/riwayat` — [any] — query: `branch_id?` — res: daftar sesi (maks 100 + **`X-Kakarut-Terpotong`**)
-- `GET /api/perlengkapan/opname/sesi/:sessionId` — [any] — res: detail sesi — error: **404**
+- `GET /api/perlengkapan/opname/sesi/:sessionId` — [any] — res: detail sesi (`session_id`, `nomor`, `status`, `waktu`, `oleh`, `rows[]`) — `waktu`/`oleh` mengikuti aturan daftarnya (`MIN`), jadi daftar dan detail selalu menyebut jam & orang yang sama untuk satu sesi — error: **404**
 - `POST /api/perlengkapan/opname/sesi/:sessionId/acc` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/opname/sesi/:sessionId/tolak` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `DELETE /api/perlengkapan/opname/sesi/:sessionId` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
@@ -4693,6 +4693,14 @@ export interface OpnamePerlengkapanDetail {
   session_id: string;
   nomor: string | null;
   status: PenyesuaianStatus;
+  /**
+   * Stempel SESI (ISO) — `MIN(waktu)` seluruh barisnya, ATURAN YANG SAMA dengan
+   * `OpnamePerlengkapanSesiRow.waktu`: daftar dan detail tak boleh menyebut jam
+   * berbeda untuk satu sesi.
+   */
+  waktu: string;
+  /** Pencatat sesi — `MIN(nama)` seperti daftarnya; null bila tak ada pengguna. */
+  oleh: string | null;
   rows: {
     supply_id: string;
     nama: string;

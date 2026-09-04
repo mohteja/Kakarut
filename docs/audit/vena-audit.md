@@ -50,6 +50,90 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Lembar detail opname perlengkapan tak menyebut waktu — dan DTO yang memang tak membawanya — web + server + ponsel(fikstur) — 2026-09-04
+
+Diminta pemilik sesudah laporan "diakui tak penuh" putaran sebelumnya:
+*"kerjakan sekalian lembar detail opname perlengkapan"*.
+
+### Yang diukur
+
+`OpnamePerlengkapanDetail` membawa `session_id`, `nomor`, `status`, `rows[]` —
+**tanpa `waktu`, tanpa `oleh`**. Jadi lembar detail perlengkapan bukan lupa
+merender; ia tak punya apa pun untuk dirender. Lembar bahan baku di sebelahnya
+menyebut keduanya. Ponsel mengurai rute ini (`perlengkapan_repository.dart:525`)
+lewat `fromJson` yang mengabaikan kunci tak dikenal → dua medan tambahan
+**aditif**, 🟢, bukan 🔴.
+
+### Keputusan yang menentukan: aturan detail = aturan daftar, di SQL yang sama
+
+`riwayatOpnamePerlengkapan` menghitung `MIN(waktu)` dan `MIN(users.nama)`.
+Detailnya kini menghitung `min(...) over ()` di kueri yang sama — bukan `Math.min`
+di JS atas baris yang sama. Hasilnya "hampir selalu" sama; dan "hampir" adalah
+celah tempat daftar dan detail mulai menyebut jam berbeda untuk satu sesi —
+kelas yang sudah dua kali dibayar repo ini (aturan status faktur; lencana
+permintaan). verify-api §84a menagih **`detail.waktu == daftar.waktu`** dan
+**`detail.oleh == daftar.oleh`** untuk sesi yang sama, bukan sekadar "ada".
+
+### Penjaga saya sendiri yang buta, dan ketahuan dari bukti merahnya
+
+Bukti merah II — `waktu: string;` dicabut dari DTO — **19 lolos**. Penjaganya
+mengiris `types.ts` 900 karakter dari awal interface; interface itu **609**
+karakter, jadi irisannya menembus ke `PerlengkapanMutasiDto` di bawahnya, yang
+juga punya `waktu: string;`. DTO yang kehilangan `waktu` tetap "mengandung"
+`waktu: string;` milik tetangganya.
+
+Kelas yang sama dengan tiga temuan hari sebelumnya — **memeriksa bahannya ADA
+di sekitar, bukan di tempatnya** — kali ini milik saya, dan tertangkap oleh
+disiplin yang sama: bukti merah yang gagal adalah temuan, bukan kejutan.
+Irisannya kini sampai kurung tutup interface-nya sendiri, plus asersi bahwa
+irisan itu tak memuat `export interface` kedua. II diulang → merah dengan
+kalimatnya sendiri.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut | penjaga yang harus menuduh |
+| --- | --- | --- |
+| II | `waktu: string;` dari DTO | **GAGAL** di percobaan pertama (irisan 900) → diperbaiki → menuduh |
+| JJ | `formatTanggalJam(data.waktu)` dari lembar perlengkapan | "lembar perlengkapan tak merender…" |
+| KK | service mengirim `waktu` sebagai teks Postgres mentah, **di server hidup** | cermin §84a: `ISO? 0`, `waktu ==? 0`; sesudah pulih keduanya `1` |
+
+KK sengaja mengubah BENTUK, bukan saatnya: sesi di fikstur berbaris tunggal,
+jadi menukar `min`→`max` tak akan terlihat. Yang menangkap mutasi bentuk itu
+justru asersi `detail == daftar` — karena daftarnya ISO.
+
+### Ponsel
+
+Fikstur `kunci-kontrak-server.txt` bertambah **tepat dua kunci**
+(`OpnamePerlengkapanDetail|waktu`, `|oleh`); fikstur status tak berubah.
+`waktu` (66 kali di lib/) dan `oleh` (12) sudah nama yang disentuh, jadi
+**tak butuh entri** di `kunci-belum-dibaca.txt` — dan cermin KELAS di
+`kunci-satu-kontrak` (dipasang sesudah CI ponsel #38) yang mengonfirmasinya di
+gerbang ini, bukan CI ponsel sesudah PR ditulis. Tak ada kode Dart yang berubah.
+
+### Cakupan yang DIAKUI tak penuh
+
+- Lengan peramban mengukur "tanggal BERTAMBAH sesudah lembar terbuka", bukan
+  "tanggal ada di dalam lembar" — sebab tabel di belakangnya sudah memuat
+  tanggal yang sama. Cukup untuk menuduh lembar yang diam; tak membedakan
+  lembar yang menyebut tanggal sesi LAIN.
+- `ditinjau_oleh` (ada di lembar bahan) tak ditambahkan: `supply_mutations` tak
+  mencatat siapa yang ACC/tolak. Itu putaran skema, bukan putaran ini.
+
+### Gerbang penuh ke-46 — merah di SATU tahap, lalu diperbaiki
+
+| | hasil |
+| --- | --- |
+| verify-api | **3.550 lolos / 0 gagal** (+4: §84a) |
+| vitest | **merah 1 uji** → `changelog-stempel-rilis`: entri 🟢 baru berbunyi "belum tayang" tapi belum didaftarkan di `BELUM_TAYANG` |
+| invarian | **27 sehat / 0 dilanggar** |
+| Playwright | **48 lolos / 0 gagal** |
+
+Perbaikannya satu berkas uji (registri changelog). Vitest diulang penuh:
+**241 berkas / 3.004 uji**, typecheck bersih. Ketiga tahap lain TIDAK diulang,
+dan itu dikatakan apa adanya: perbaikannya tak bisa menyentuh rute, verify-api,
+maupun peramban, jadi hasilnya berlaku atas sumber yang sama persis. Tak ada
+yang di-push sebelum vitest-nya hijau.
+
 ## Daftar lintas-hari yang cuma menyebut JAM — lima berkas, satu pemformat, satu ratchet — web — 2026-09-04
 
 Ekor langsung dari putaran riwayat SO. Pemilik memilih "SO dulu, sisanya

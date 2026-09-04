@@ -411,6 +411,13 @@ function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: (
                     {data.nomor}
                   </span>
                 )}
+                {/* Sejajar dengan lembar bahan baku: sesi LAMA yang dibuka
+                    dari riwayat harus menyebut harinya. Sampai putaran ini
+                    lembar ini tak menampilkan waktu sama sekali — DTO-nya
+                    memang tak membawanya. */}
+                <span>
+                  {formatTanggalJam(data.waktu)} · {data.oleh ?? "—"}
+                </span>
               </div>
               <StatusBadgePerl status={data.status} jumlah={data.rows.length} />
             </div>

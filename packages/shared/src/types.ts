@@ -3043,6 +3043,14 @@ export interface OpnamePerlengkapanDetail {
   session_id: string;
   nomor: string | null;
   status: PenyesuaianStatus;
+  /**
+   * Stempel SESI (ISO) — `MIN(waktu)` seluruh barisnya, ATURAN YANG SAMA dengan
+   * `OpnamePerlengkapanSesiRow.waktu`: daftar dan detail tak boleh menyebut jam
+   * berbeda untuk satu sesi.
+   */
+  waktu: string;
+  /** Pencatat sesi — `MIN(nama)` seperti daftarnya; null bila tak ada pengguna. */
+  oleh: string | null;
   rows: {
     supply_id: string;
     nama: string;

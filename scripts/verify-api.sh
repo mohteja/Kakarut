@@ -3368,6 +3368,21 @@ cek "selisih menunggu ACC → saldo CK MASIH 10" "abs(V - 10) < 0.001" \
   "$(api "$OWNER" GET "/perlengkapan?branch_id=$CK52_UTAMA" | jq --arg id "$TU84" '[.[]|select(.id==$id)][0].saldo')"
 cek "riwayat opname memuat sesi (status menunggu)" "V == 1" \
   "$(api "$OWNER" GET "/perlengkapan/opname/riwayat?branch_id=$CK52_UTAMA" | jq --arg s "$SESI84" '([.[]|select(.session_id==$s)] | (length==1) and (.[0].status=="menunggu") and (.[0].jumlah_item==1)) | if . then 1 else 0 end')"
+# --- §84a DETAIL SESI membawa waktu+oleh, dan SAMA dengan daftarnya ---
+# `waktu`/`oleh` dihitung `min(...) over ()` di kueri detail — aturan SQL yang
+# sama dengan `MIN(...)` di kueri daftar. Yang ditagih di sini bukan cuma "ada",
+# melainkan daftar == detail untuk sesi yang SAMA: dua jawaban yang menjauh
+# untuk satu sesi adalah kelas cacat yang sudah dua kali dibayar repo ini.
+DET84=$(api "$OWNER" GET "/perlengkapan/opname/sesi/$SESI84?branch_id=$CK52_UTAMA")
+RIW84=$(api "$OWNER" GET "/perlengkapan/opname/riwayat?branch_id=$CK52_UTAMA" | jq --arg s "$SESI84" '[.[]|select(.session_id==$s)][0]')
+cek "detail sesi: waktu ISO (T…Z), bukan teks Postgres" "V == 1" \
+  "$(echo "$DET84" | jq '(.waktu|type=="string") and (.waktu|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$")) | if . then 1 else 0 end')"
+cek "detail sesi: oleh string/null, dan terisi (opname ini dicatat owner)" "V == 1" \
+  "$(echo "$DET84" | jq '(.oleh|type=="string") and ((.oleh|length) > 0) | if . then 1 else 0 end')"
+cek "detail == daftar: waktu sesi SAMA (aturan MIN yang satu)" "V == 1" \
+  "$(jq -n --argjson d "$DET84" --argjson r "$RIW84" '($d.waktu == $r.waktu) | if . then 1 else 0 end')"
+cek "detail == daftar: oleh sesi SAMA" "V == 1" \
+  "$(jq -n --argjson d "$DET84" --argjson r "$RIW84" '($d.oleh == $r.oleh) | if . then 1 else 0 end')"
 cek "guard: kasir ACC sesi → 403" "V == 403" \
   "$(status_code "$KASIR" POST "/perlengkapan/opname/sesi/$SESI84/acc")"
 api "$OWNER" POST "/perlengkapan/opname/sesi/$SESI84/acc" > /dev/null

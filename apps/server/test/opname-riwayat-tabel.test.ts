@@ -68,6 +68,44 @@ describe("riwayat opname — TANGGAL benar-benar dirender", () => {
     expect(selJ).toContain("formatWaktu(");
   });
 
+  it("KEDUA lembar detail menyebut tanggal sesi — dan DTO perlengkapan memang membawanya", () => {
+    /*
+     * Lembar detail perlengkapan sempat tak menampilkan waktu SAMA SEKALI —
+     * bukan karena lupa merender, melainkan karena `OpnamePerlengkapanDetail`
+     * tak membawanya. Jadi yang dipaku dua lapis: DTO-nya punya `waktu`/`oleh`
+     * (kalau tidak, lembar mana pun tak bisa menyebutnya), DAN kedua lembar
+     * benar-benar merendernya lewat `formatTanggalJam` — bukan `formatWaktu`.
+     */
+    const TYPES = readFileSync(
+      fileURLToPath(new URL("../../../packages/shared/src/types.ts", import.meta.url)),
+      "utf8",
+    );
+    /*
+     * Diiris sampai KURUNG TUTUP interface-nya sendiri, bukan 900 karakter.
+     * Versi pertama memakai jendela 900 dan bukti merahnya GAGAL: interface ini
+     * 609 karakter, jadi jendela itu menembus ke `PerlengkapanMutasiDto` di
+     * bawahnya, yang juga punya `waktu: string;` — DTO yang kehilangan `waktu`
+     * tetap "mengandung" `waktu: string;` milik tetangganya.
+     * Penjaga yang memeriksa bahannya ADA di sekitar, bukan di tempatnya.
+     */
+    const awal = TYPES.indexOf("export interface OpnamePerlengkapanDetail");
+    expect(awal, "DTO OpnamePerlengkapanDetail tak ditemukan").toBeGreaterThan(-1);
+    const dto = TYPES.slice(awal, TYPES.indexOf("\n}\n", awal) + 3);
+    expect(dto, "irisan DTO menembus interface tetangga").not.toMatch(/export interface \w+[\s\S]+export interface/);
+    expect(dto, "DTO detail perlengkapan kehilangan `waktu`").toContain("waktu: string;");
+    expect(dto, "DTO detail perlengkapan kehilangan `oleh`").toContain("oleh: string | null;");
+
+    const bahan = HAL.slice(HAL.indexOf("function DetailSheet("), HAL.indexOf("function StatusBadgePerl"));
+    const perl = HAL.slice(HAL.indexOf("function DetailSheetPerl("), HAL.indexOf("export function OpnameRiwayatPage"));
+    for (const [nama, isi] of [["bahan", bahan], ["perlengkapan", perl]] as const) {
+      expect(isi, `lembar ${nama} tak merender formatTanggalJam(data.waktu)`).toContain(
+        "formatTanggalJam(data.waktu)",
+      );
+      expect(isi, `lembar ${nama} tak menyebut pencatatnya`).toContain("data.oleh");
+      expect(isi, `lembar ${nama} kembali jam-saja`).not.toContain("formatWaktu(");
+    }
+  });
+
   it("SATU sel Tanggal dipakai kedua tab, bukan disalin dua kali", () => {
     // Dua salinan yang lahir kembar lalu menjawab beda adalah bentuk yang
     // sudah dua kali dibayar repo ini (aturan status faktur; lencana

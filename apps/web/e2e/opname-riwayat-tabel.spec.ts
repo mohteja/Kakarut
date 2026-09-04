@@ -159,4 +159,26 @@ test("riwayat SO perlengkapan: tabel dengan kolom Selisih, dan tanggalnya ada", 
     page.locator("table tbody tr").first().locator("td").nth(1),
     `kolom Tanggal harus memuat "${harusnya}"`,
   ).toHaveText(harusnya);
+
+  /*
+   * LEMBAR DETAILNYA juga menyebut tanggal sesi. Sampai putaran ini lembar
+   * detail perlengkapan tak menampilkan waktu sama sekali — DTO-nya tak
+   * membawanya. Diukur dari jumlah kemunculan tanggal di halaman: tabel sudah
+   * memuatnya (satu per baris hari itu), jadi yang ditagih adalah BERTAMBAH
+   * sesudah lembar terbuka — bukan "ada", yang sudah benar sebelum diklik.
+   */
+  const sebelum = await page.getByText(harusnya).count();
+  await page.locator("table tbody tr").first().click();
+  await expect(page.getByText("Detail Opname Perlengkapan")).toBeVisible({ timeout: 10_000 });
+  await expect
+    .poll(async () => await page.getByText(harusnya).count(), {
+      timeout: 10_000,
+      message: "lembar detail perlengkapan tak menyebut tanggal sesinya",
+    })
+    .toBeGreaterThan(sebelum);
+  // …dan pencatatnya, dari medan `oleh` yang baru — bukan dirakit dari rows[].
+  const olehTeratas = (sesi[0] as { oleh?: string | null }).oleh;
+  if (olehTeratas) {
+    await expect(page.getByText(`· ${olehTeratas}`).first()).toBeVisible();
+  }
 });
