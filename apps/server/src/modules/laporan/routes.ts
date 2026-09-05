@@ -3,6 +3,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { lewatTargetDurasi } from "@kakarut/shared";
 import type {
+  BasisBep,
+  BepResult,
   LaporanDurasiPesanan,
   LaporanHarian,
   LaporanPembelian,
@@ -640,7 +642,7 @@ export const laporanRoutes = new Hono<AppEnv>()
     let totalQty = Number(agg?.qty ?? 0);
     let avgHarga: number;
     let avgMargin: number;
-    let basis: "penjualan" | "katalog";
+    let basis: BasisBep;
 
     const rata = rataPerPorsi({
       subtotal: Number(uang?.subtotal ?? 0),
@@ -669,7 +671,7 @@ export const laporanRoutes = new Hono<AppEnv>()
     }
 
     const porsiBep = Math.ceil(biayaTetap / avgMargin);
-    return c.json({
+    const hasil: BepResult = {
       biaya_tetap: biayaTetap,
       basis,
       periode: { dari, sampai },
@@ -678,5 +680,6 @@ export const laporanRoutes = new Hono<AppEnv>()
       porsi_untuk_bep: porsiBep,
       omzet_untuk_bep: porsiBep * avgHarga,
       porsi_per_hari_30: Math.ceil(porsiBep / 30),
-    });
+    };
+    return c.json(hasil);
   });

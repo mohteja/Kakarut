@@ -1064,6 +1064,30 @@ export interface ProduksiBerjalan {
   menunggu: number;
 }
 
+/**
+ * Ringkasan nilai rupiah stok — balasan `GET /stok/nilai` (semua peran).
+ * Rumusnya `ringkasNilaiStok` di `nilai-stok.ts`. Sampai 2026-09-05 interface
+ * ini hidup DI BERKAS ITU: "sudah di shared", tapi Lampiran A dan fikstur
+ * kunci ponsel hanya membaca `types.ts` — lima kuncinya tercatat ponsel
+ * sebagai hantu. Bentuk kawat tinggal di sini; rumusnya boleh di mana saja.
+ */
+export interface NilaiStokRingkas {
+  /** Σ(saldo × harga per unit) atas baris bersaldo POSITIF. */
+  nilai: number;
+  /** banyak bahan yang benar-benar menyumbang rupiah (saldo > 0 & berharga) */
+  bahan_bernilai: number;
+  /** banyak bahan bersaldo minus — catatan belum lengkap, tak ikut dinilai */
+  minus_bahan: number;
+  /**
+   * Besarnya (POSITIF) rupiah yang akan hilang dari total seandainya saldo
+   * minus ikut dijumlahkan. Dibawa supaya layar bisa menyebut ongkos dari
+   * catatan yang belum beres, bukan sekadar mencacahnya.
+   */
+  minus_nilai: number;
+  /** bahan bersaldo positif yang `harga_beli`-nya masih 0 → nilainya tak terhitung */
+  tanpa_harga_bahan: number;
+}
+
 export interface StokRowDto {
   ingredient_id: string;
   slug: string;
@@ -1897,6 +1921,27 @@ export interface SampahRow {
 
 /** Metode pembayaran transaksi. */
 export type MetodeBayar = "tunai" | "qris" | "transfer";
+
+/** Dasar perhitungan BEP: riwayat penjualan pada rentang, atau rata-rata katalog bila rentangnya tanpa penjualan. */
+export type BasisBep = "penjualan" | "katalog";
+
+/**
+ * Balasan `GET /laporan/bep?biaya_tetap=…` (owner/admin). Sampai 2026-09-05
+ * diketik ulang di web tanpa `periode` (dikirim, tak dideklarasikan) dan
+ * diurai ponsel tanpa `basis` — angka BEP tampil tanpa menyebut ia dihitung
+ * dari penjualan sungguhan atau dari katalog.
+ */
+export interface BepResult {
+  biaya_tetap: number;
+  basis: BasisBep;
+  /** rentang yang dipakai (default 30 hari terakhir dalam zona waktu perusahaan) */
+  periode: { dari: string; sampai: string };
+  rata_harga_jual: number;
+  rata_margin_kontribusi: number;
+  porsi_untuk_bep: number;
+  omzet_untuk_bep: number;
+  porsi_per_hari_30: number;
+}
 
 export interface LaporanHarian {
   dari: string;

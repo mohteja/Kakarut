@@ -25,6 +25,40 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ `BepResult` & `NilaiStokRingkas` kini ada di Lampiran A — dan `basis` BEP layak ditampilkan
+
+> Tidak ada bentuk balasan yang berubah. `GET /api/laporan/bep` dan `GET
+> /api/stok/nilai` akhirnya **dideklarasikan di `types.ts`** (Lampiran A +
+> fikstur kunci ponsel). Yang kedua sudah "di shared" sejak lama — di
+> `nilai-stok.ts`, berkas yang fikstur dan Lampiran tak pernah baca; kelima
+> kuncinya karena itu tercatat ponsel sebagai hantu meski dikirim tiap hari.
+
+Terukur lewat HTTP (owner, DB gerbang): `/laporan/bep` **8 kunci** —
+`biaya_tetap`, `basis`, `periode {dari, sampai}`, `rata_harga_jual`,
+`rata_margin_kontribusi`, `porsi_untuk_bep`, `omzet_untuk_bep`,
+`porsi_per_hari_30`. Web mendeklarasikan 7 (`periode` dikirim tanpa
+dideklarasikan); ponsel membaca 6.
+
+**Yang perlu dicek di ponsel — dan sudah dikerjakan di `kakarut-mobile`
+putaran yang sama:** `basis` (`"penjualan" | "katalog"`, kini `BasisBep`
+bernama → ikut fikstur status) menyatakan angka BEP dihitung dari riwayat
+penjualan pada rentang, atau — bila rentangnya tanpa penjualan — dari
+rata-rata katalog menu. Web menampilkannya ("Basis perhitungan"); ponsel
+sampai 2026-09-05 tidak, jadi angka yang sama tampil tanpa menyebut dasarnya.
+`periode` adalah gema rentang yang dipakai server (bawaan 30 hari terakhir
+dalam zona waktu perusahaan) — berguna bila klien tak mengirim `dari`/`sampai`.
+
+`/stok/nilai` (**5 kunci**, semua peran; agregat dihitung server sebelum
+harga per bahan ditahan untuk non-manajemen): ponsel sudah membaca semuanya.
+
+Penjaga di server: `bep-nilai-dto-utuh.test.ts` (literal `/bep` == `BepResult`,
+literal `ringkasNilaiStok` == `NilaiStokRingkas`, dua arah; **arah balik kelas
+barunya**: tak satu entri hantu ponsel pun bernama medan yang dideklarasikan
+berkas shared mana pun) dan verify-api §297 (kunci HTTP == kontrak, dua arah,
+owner dan kasir).
+
+---
+
 ## ⚪️ Sesi & cabang kini ada di Lampiran A: `SesiLogin`, `SesiDto`, `CompanyDto`, `CabangDto` — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: bentuk `POST

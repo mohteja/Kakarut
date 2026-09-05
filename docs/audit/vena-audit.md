@@ -50,6 +50,140 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## BEP dan nilai stok — `periode` yang dikirim tanpa dideklarasikan, `basis` yang ponsel tak baca, dan "sudah di shared" yang ternyata tak terlihat kontrak — server + web + ponsel — 2026-09-05
+
+**Vena.** Butir antrean "16 tipe lokal web + 47 `api<{…}>` inline", dari
+ujung yang ditunjuk butirnya: `/laporan/bep` (`BepResult`) dan `/stok/nilai`
+(keduanya sudah bernama di `hantuDiketahui` ponsel — 6 + 5 entri). Butir
+"`/register` & `/resend-verification` masih netral" tetap DILEWATI
+(keputusan pemilik).
+
+**Populasi, diukur lewat HTTP** (owner dan kasir, DB gerbang):
+
+| rute | kunci yang dikirim | web | ponsel |
+| --- | --- | --- | --- |
+| `GET /laporan/bep?biaya_tetap=…` (owner/admin; kasir 403) | **8**: `biaya_tetap`, `basis`, `periode {dari, sampai}`, `rata_harga_jual`, `rata_margin_kontribusi`, `porsi_untuk_bep`, `omzet_untuk_bep`, `porsi_per_hari_30` | `BepResult` lokal, **7** — `periode` dikirim tanpa dideklarasikan | `BepHasil.fromJson` membaca **6** — tanpa `basis`, tanpa `periode` |
+| `GET /stok/nilai` (semua peran; kasir 200 dengan kunci sama) | **5**: `nilai`, `bahan_bernilai`, `minus_bahan`, `minus_nilai`, `tanpa_harga_bahan` | `NilaiStokRingkas` **dari `@kakarut/shared`** | 5 dibaca — semuanya tercatat HANTU |
+
+Tiga temuan:
+
+1. **`basis` tak dibaca ponsel.** Server mengirim `"penjualan" | "katalog"`:
+   angka BEP dihitung dari riwayat penjualan pada rentang, atau — bila
+   rentangnya tanpa penjualan — dari rata-rata katalog menu. Web
+   menampilkannya ("Basis perhitungan: …"). Ponsel tidak: angka dari katalog
+   tampil persis seperti angka dari penjualan sungguhan. Kini `BasisBep`
+   bernama di kontrak (ikut fikstur status), `BepHasil.basis` dibaca, dan
+   layar laporan menaruh kalimatnya lewat `labelBasisBep` (nilai asing/kosong
+   → '' — tak mengarang dasar yang tak dikirim).
+2. **`periode` dikirim, tak dideklarasikan web** — kelas `qty_teks`. Gema
+   rentang yang dipakai server (bawaan 30 hari dalam zona waktu perusahaan);
+   berguna bila klien tak mengirim `dari`/`sampai`. Kini di `BepResult`.
+3. **"Sudah di shared" ≠ "terlihat kontrak".** `NilaiStokRingkas` diekspor
+   `@kakarut/shared` sejak lama — dari `nilai-stok.ts`, bersama rumusnya.
+   Pembangkit fikstur kunci ponsel (`acuan-kunci-mobile`) dan Lampiran A
+   (`sinkron-lampiran-dto`) hanya membaca `types.ts`. Diukur: **27 berkas
+   shared selain `types.ts` mengekspor 55 medan interface**; dari 26 entri
+   `hantuDiketahui` ponsel, yang bertabrakan dengan medan itu hanya
+   `diskon`/`subtotal` (masukan klien `ReceiptData`/`BonData`/`UangPenjualan`,
+   ≠ `sale.*` dari `POST /penjualan` yang DTO-nya `SaleResult` masih lokal
+   web) — dan, sebelum putaran ini, kelima kunci `/stok/nilai`. Satu-satunya
+   bentuk KAWAT yang hidup di luar `types.ts`, dan ia tercatat hantu di ponsel
+   sejak entri itu ditulis. Interface-nya pindah ke `types.ts`; rumusnya tetap.
+
+### Yang dibangun
+
+- **shared**: `export type BasisBep`, `BepResult` (8), `NilaiStokRingkas`
+  pindah ke `types.ts` (`nilai-stok.ts` mengimpornya dari `./types`);
+  Lampiran A +45 baris.
+- **server**: `/laporan/bep` memulangkan `const hasil: BepResult`; `let
+  basis: BasisBep`. `/stok/nilai` tak berubah (sudah lewat `ringkasNilaiStok`).
+- **web**: `LaporanPage` mengimpor `BepResult` dari kontrak; salinan 7-medan
+  dicabut. Nol perubahan perilaku; typecheck hijau.
+- **`apps/server/test/bep-nilai-dto-utuh.test.ts`** (baru, 6 uji): literal
+  `/bep` == `BepResult` dan literal `ringkasNilaiStok` == `NilaiStokRingkas`
+  (dua arah); `basis: BasisBep` bernama; `nilai-stok.ts` tak mendeklarasikan
+  ulang; web tak mengetik ulang; **KELAS lintas-repo** (bila ponsel ada di
+  sebelah): tak satu entri `hantuDiketahui` pun bernama medan yang
+  dideklarasikan berkas shared MANA PUN — `types.ts` termasuk (di sana =
+  sudah di fikstur, cabut entrinya; di berkas lain = tak terlihat siapa pun,
+  pindahkan) — dengan `TABRAKAN_NAMA` beralasan untuk `diskon`/`subtotal`,
+  diratchet dua arah (harus masih hantu DAN masih bertabrakan); PASANGAN.
+- **`test/kunci-sumber.ts`**: `kunciObjek` ditulis ulang — memenggal teks
+  kedalaman-1 pada koma dan mengenali properti SINGKAT (`basis,`); versi
+  pertama hanya mengenali `kunci:`.
+- **verify-api §297** (9 lengan): kontrak terbaca (13); `/laporan/bep` kunci
+  == `BepResult` dua arah, `periode` == {dari, sampai} berformat tanggal,
+  enam angka bertipe number, kasir 403; `/stok/nilai` kunci ==
+  `NilaiStokRingkas` dua arah, lima number, kasir dengan kunci yang sama.
+- Changelog ponsel: entri ⚪️ (nol perubahan kawat; `basis` "layak dicek,
+  bukan wajib") + `BELUM_TAYANG`.
+- **Ponsel `9d46f79`** (PR #18): `BepHasil.basis` + `labelBasisBep` + kalimat
+  di layar; fikstur kunci +13, fikstur status +2 (`union:BasisBep`);
+  `hantuDiketahui` −11 (37 → 26); `test/bep_basis_test.dart` (baru).
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut / dimutasi | tuduhan |
+| --- | --- | --- |
+| GG | `periode` dicabut dari `BepResult`; §297 mandiri atas server hidup | premis 12 ≠ 13; `kunci == BepResult — nilai: 1`, stderr `periode` |
+| HH | `minus_nilai` dicabut dari `NilaiStokRingkas`; §297 mandiri | 3 lengan merah (premis, owner, kasir), stderr `minus_nilai` |
+| II | `periode` dicabut dari `BepResult`; uji statis | `dikirim /bep tapi tak ada di BepResult: [ 'periode' ]`; premis 7 < 8 |
+| JJ | `nilai-stok.ts` mendeklarasikan ulang `export interface NilaiStokRingkas` | `nilai-stok.ts mendeklarasikan ulang interface kawatnya` |
+| KK | entri hantu `'nilai'` dihidupkan lagi di ponsel | KELAS: `nilai ← types.ts` — **baru menuduh setelah sapuan mencakup `types.ts`** (lihat di bawah) |
+| LL | web mengetik ulang `interface BepResult` | `not to match /interface BepResult\b/` |
+
+**Yang jujur soal detektornya.** Empat alat ukur salah pada percobaan pertama:
+
+- `kunciObjek` buta terhadap properti singkat: literal `/bep` menulis
+  `basis,` (tanpa `:`) → 7 ≠ 8 dan `basis` tertuduh hantu. Ditulis ulang
+  (pemenggalan koma di kedalaman 1). Ketiga uji pemakainya tetap hijau.
+- Sapuan KELAS versi pertama berkunci NAMA dan menuduh `diskon`/`subtotal`
+  ← `bon-tagihan.ts`; versi kedua mengecualikan enam berkas cetak dan
+  tuduhannya berpindah ke `refund.ts`. Pengecualian per-berkas hanya
+  memindahkan masalah; diukur penuh tanpa pengecualian: **hanya dua nama itu**
+  yang bertabrakan (masing-masing di tiga bentuk klien). Diganti daftar
+  tabrakan-nama BERALASAN yang diratchet; begitu `SaleResult` masuk
+  `types.ts`, keduanya wajib dicabut.
+- Sapuan KELAS versi ketiga mengecualikan `types.ts` — dan bukti merah KK
+  (entri `'nilai'` hidup lagi) TIDAK menuduh, sebab `nilai` kini justru di
+  `types.ts`. Bukti merahnya yang menyingkap; sapuan kini mencakup seluruh
+  shared, dan KK menuduh dengan berkasnya.
+- Skrip §297 mandiri saya tak memuat `bocorkan` (didefinisikan di §295) →
+  tiga lengan "gagal" dengan nilai kosong. Bukan cacat skrip verify-api; cacat
+  alat bukti merahnya. Dicatat supaya angka "20 lolos, 0 gagal" yang dipakai
+  sesudahnya terbaca dengan sejarahnya.
+
+### Batas yang diakui
+
+- Nol perubahan kawat → gerbang tanpa build/e2e (web hanya impor tipe);
+  typecheck tahap pertama, gagal keras.
+- Tak ada Flutter: kalimat basis di layar tak pernah dilihat merender;
+  yang dibuktikan CI ponsel: unit `fromJson`/`labelBasisBep` + sapuan statis.
+- KELAS berkunci NAMA: DTO kawat yang kelak ditaruh di berkas shared lain
+  DAN kuncinya bertabrakan dengan nama yang sudah dicatat beralasan tak
+  tertangkap; yang tertangkap adalah nama baru (kelas `NilaiStokRingkas`).
+- 14 tipe lokal web + 47 `api<{…}>` inline tetap di antrean; `SaleResult`
+  (dibaca ponsel sebagai `diskon`/`subtotal`/`sale`) kandidat berikutnya.
+
+### Gerbang
+
+- Server (`gerbang-dto.sh`: typecheck tahap pertama → DB nol → boot → seed →
+  verify-api → vitest → invarian; tanpa build/e2e — nol perubahan kawat, web
+  hanya impor tipe): typecheck hijau, **verify-api 3.576 / 0** (3.567 + 9
+  lengan §297) dengan log UTUH (3.939 baris, 0 NUL, kesembilan lengan §297
+  tertulis), **invarian 27 / 0** — dan **vitest MERAH 1** pada jalan pertama:
+  `jangkar-iris.test.ts` (uji meta yang menagih tiap jangkar `indexOf` di
+  berkas uji ada di sumber repo ini) menuduh jangkar `const hantuDiketahui =
+  …` di `bep-nilai-dto-utuh` — jangkar itu memang ada di repo PONSEL. Kelas
+  senyap yang dijaga uji meta itu tak berlaku (fungsinya melempar bila jangkar
+  hilang), tapi aturannya benar apa adanya: diganti regex yang melempar
+  eksplisit, berkomentar. Ulang atas perubahan satu berkas uji itu: typecheck
+  hijau, **vitest 246 berkas / 3.042 uji** (+1 berkas `bep-nilai-dto-utuh`);
+  verify-api & invarian TIDAK diulang — kode server/kontrak identik dengan
+  jalan pertama, dan dikatakan apa adanya.
+- Ponsel: commit `9d46f79`, **CI #51 hijau** (run 33975458533).
+- **Tak ada rilis.**
+
 ## Sesi & cabang — bentuk yang dibaca SETIAP klien pada SETIAP sesi: nol medan di kontrak, dua penulis satu bentuk, dan setelan yang dikirim "supaya kasir memperingatkan" tanpa satu klien pun membacanya — server + web + ponsel — 2026-09-05
 
 **Vena.** Butir antrean "19 tipe lokal web + 47 `api<{…}>` inline", diambil
@@ -12401,19 +12535,25 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **16 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+- [ ] **15 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
       bersama** — diukur 2026-09-05 dari DUA arah; putaran #95 membayar
-      ujungnya: `AuthState`/`Company` (→ `SesiLogin`/`CompanyDto`) dan
-      `Cabang` (→ `CabangDto`), jadi `/auth/login`, `/auth/me`, `/cabang` kini
-      di Lampiran A dan `hantuDiketahui` ponsel 51 → 37. Sisa arah web: dari
-      105 tipe yang dipakai `api<T>()`, **16 tak diekspor shared** (`Kategori`
-      3×, `Karyawan` 3×, `SaleResult`, `BepResult`, `CompanyStruk`/
-      `CabangStruk`, `PenerimaanRow`, `DanaEntri`, `StokAwalTersimpan`,
-      `Tenant`, …) plus **47 pemanggilan `api<{…}>` inline** tanpa nama.
-      Diadu HTTP: `/laporan/bep` 8 kunci — nol medan kontrak (ponsel: 6 entri
-      `hantuDiketahui` kelas `/laporan/bep`). Satu-dua tipe per putaran;
-      berikutnya `/laporan/bep` (`BepResult`) atau `/stok/nilai` (5 entri
-      hantu ponsel) — keduanya sudah bernama di `hantuDiketahui`
+      `AuthState`/`Company`/`Cabang` (sesi & cabang), #96 membayar `BepResult`
+      dan menyingkap `NilaiStokRingkas` yang "sudah di shared" tapi di luar
+      `types.ts`; `hantuDiketahui` ponsel 51 → 26. Sisa arah web: dari 105
+      tipe yang dipakai `api<T>()`, **15 tak diekspor shared** (`Kategori`
+      3×, `Karyawan` 3×, `SaleResult`, `CompanyStruk`/`CabangStruk`,
+      `PenerimaanRow`, `DanaEntri`, `StokAwalTersimpan`, `Tenant`, …) plus
+      **47 pemanggilan `api<{…}>` inline** tanpa nama. Satu-dua tipe per
+      putaran; berikutnya `SaleResult` (`POST /penjualan` — ponsel membacanya
+      sebagai `sale`/`diskon`/`subtotal`, tiga entri hantu yang dua di
+      antaranya kini tercatat sebagai tabrakan nama di `bep-nilai-dto-utuh`)
+- [ ] **Bentuk kawat di berkas shared selain `types.ts` tak terlihat kontrak**
+      — pembangkit fikstur ponsel dan Lampiran A hanya membaca `types.ts`;
+      27 berkas lain mengekspor 55 medan interface (rumus, cetak, nilai
+      turunan — dan, sampai #96, satu bentuk kawat: `NilaiStokRingkas`).
+      Penjaga KELAS di `bep-nilai-dto-utuh` menangkap kelasnya lewat nama
+      hantu ponsel; yang belum ada: aturan statis "interface yang dipulangkan
+      `c.json` harus di `types.ts`" — menuntut informasi tipe, bukan regex
 - [ ] **`company.blokir_jual_minus` dikirim untuk peringatan kasir yang tak
       pernah dibuat** — komentar `companyDto`: "supaya kasir bisa
       MEMPERINGATKAN sebelum tombol Bayar"; terukur 2026-09-05 tak satu klien

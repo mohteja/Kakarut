@@ -17457,6 +17457,39 @@ cek "§296 tiap baris /cabang membawa SEMUA 14 kunci (bukan cuma gabungannya)" "
 cek "§296 kasir pun membaca /cabang dengan kunci yang sama (rute semua peran)" "V == 0" \
   "$(selisih296 "$(jq -r 'if type=="array" then [.[]|keys[]]|unique|.[] else "BUKAN_LARIK" end' <<<"$R296CK")" "$K296_CAB")"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §297 — BEP & NILAI STOK: kunci yang DIKIRIM == kontrak (BepResult,
+#        NilaiStokRingkas), dari kawat
+# ═══════════════════════════════════════════════════════════════════════════
+# Terukur 2026-09-05: `/laporan/bep` 8 kunci — web mendeklarasikan 7 (`periode`
+# dikirim tanpa dideklarasikan), ponsel membaca 6 (tanpa `basis`);
+# `/stok/nilai` 5 kunci yang interface-nya SUDAH di shared, tapi di
+# `nilai-stok.ts` — tak terlihat fikstur ponsel maupun Lampiran A (keduanya
+# hanya membaca types.ts). Statisnya `bep-nilai-dto-utuh.test.ts`; `medan296`
+# dan `selisih296` didefinisikan di §296.
+K297_BEP=$(medan296 BepResult); K297_NILAI=$(medan296 NilaiStokRingkas)
+R297B=$(api "$OWNER" GET "/laporan/bep?biaya_tetap=1000000&branch_id=all")
+R297N=$(api "$OWNER" GET "/stok/nilai")
+R297NK=$(api "$REISS105" GET "/stok/nilai")
+cek "§297 premis: kontrak terbaca dari types.ts (BepResult 8 + NilaiStokRingkas 5)" "V == 13" \
+  "$(printf '%s\n%s\n' "$K297_BEP" "$K297_NILAI" | grep -c .)"
+cek "§297 premis: /laporan/bep owner 200 berbadan objek (basis penjualan/katalog)" "V == 1" \
+  "$(jq -r 'if type=="object" and (.basis=="penjualan" or .basis=="katalog") then 1 else 0 end' <<<"$R297B")"
+cek "§297 /laporan/bep kunci == BepResult (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R297B")" "$K297_BEP")"
+cek "§297 /laporan/bep .periode == {dari, sampai} berformat tanggal" "V == 1" \
+  "$(jq -r 'if (.periode|keys)==["dari","sampai"] and (.periode.dari|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.periode.sampai|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) then 1 else 0 end' <<<"$R297B")"
+cek "§297 /laporan/bep enam angka bertipe number (bukan teks)" "V == 6" \
+  "$(jq -r '[.biaya_tetap,.rata_harga_jual,.rata_margin_kontribusi,.porsi_untuk_bep,.omzet_untuk_bep,.porsi_per_hari_30]|map(select(type=="number"))|length' <<<"$R297B")"
+cek "§297 kasir tak boleh menghitung BEP → 403" "V == 403" \
+  "$(status_code "$REISS105" GET "/laporan/bep?biaya_tetap=1000000")"
+cek "§297 /stok/nilai kunci == NilaiStokRingkas (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R297N")" "$K297_NILAI")"
+cek "§297 /stok/nilai kelima nilainya number" "V == 5" \
+  "$(jq -r '[.[]|select(type=="number")]|length' <<<"$R297N")"
+cek "§297 kasir membaca /stok/nilai dengan kunci yang sama (agregat sebelum harga ditahan)" "V == 0" \
+  "$(selisih296 "$(jq -r 'if type=="object" then keys[] else "BUKAN_OBJEK" end' <<<"$R297NK")" "$K297_NILAI")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

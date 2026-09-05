@@ -9,30 +9,42 @@ import { butaKomentar } from "../src/scripts/buta-komentar";
  * Buta komentar: kunci di dalam komentar TIDAK ikut (dibuktikan PASANGAN di
  * kedua uji pemakainya).
  */
-/** Kunci tingkat-1 sebuah objek literal, mulai dari `{` di posisi `awal`. */
+/**
+ * Kunci tingkat-1 sebuah objek literal, mulai dari `{` di posisi `awal`.
+ * Teks kedalaman-1 dipenggal pada koma; tiap penggalan diambil pengenalnya
+ * bila berbentuk `kunci: …` ATAU properti singkat `kunci` (tanpa titik dua —
+ * `{ biaya_tetap: x, basis, … }`). Versi pertama hanya mengenali `kunci:` dan
+ * karena itu buta terhadap `basis,` di literal `/laporan/bep` (2026-09-05:
+ * 7 ≠ 8, `basis` tertuduh hantu). Isi bersarang (`{…}`, `(…)`, `[…]`) tak
+ * dibaca; `...sebar` diabaikan. Pemanggil sudah membutakan komentar.
+ */
 export function kunciObjek(src: string, awal: number): string[] {
-  const keluar: string[] = [];
+  const penggalan: string[] = [];
   let d = 0;
-  let i = awal;
-  let mulaiBaris = -1;
-  for (; i < src.length; i += 1) {
+  let sekarang = "";
+  for (let i = awal; i < src.length; i += 1) {
     const c = src[i];
     if (c === "{" || c === "(" || c === "[") {
       d += 1;
-      if (d === 1) mulaiBaris = i + 1;
+      if (d === 1) continue;
     } else if (c === "}" || c === ")" || c === "]") {
       d -= 1;
       if (d === 0) break;
-    } else if (c === "\n" && d === 1) {
-      mulaiBaris = i + 1;
-    } else if (d === 1 && mulaiBaris >= 0) {
-      // awal sebuah properti: `nama:` di kedalaman 1
-      const m = /^\s*(\w+)\s*:/.exec(src.slice(mulaiBaris, i + 1));
-      if (m && src[i] === ":") {
-        keluar.push(m[1]);
-        mulaiBaris = -1;
-      }
+      continue;
     }
+    if (d !== 1) continue;
+    if (c === ",") {
+      penggalan.push(sekarang);
+      sekarang = "";
+    } else {
+      sekarang += c;
+    }
+  }
+  penggalan.push(sekarang);
+  const keluar: string[] = [];
+  for (const p of penggalan) {
+    const m = /^\s*(\w+)\s*(?::|$)/.exec(p);
+    if (m) keluar.push(m[1]);
   }
   return keluar;
 }
