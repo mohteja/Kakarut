@@ -50,6 +50,186 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Sepuluh daftar ponsel yang dipotong server dan DIAM — satu rumah, sebelas pengakuan, tiga lencana yang berhenti berbohong — ponsel + cermin server — 2026-09-05
+
+**Vena.** Utang yang tercatat eksplisit di antrean Mobile sejak 2026-08-31:
+"Header `X-Kakarut-Terpotong` belum dirender ponsel". Diambil sesudah antrean
+A⁷/B⁷ lunas; keputusan pemilik untuk putarannya: **ponsel-saja, tanpa perubahan
+API** — lencana selisih kas beralih ke `GET /shift/selisih/ringkas` yang sudah
+ada, dua lencana lain tampil "N+" saat daftarnya terpotong, dan pintu ringkas
+server untuk keduanya masuk antrean.
+
+**Populasi, disapu mekanis rute → repository → layar.** Di server: 14 situs
+pengirim pemotongan (`potongLarik(` ×11, `rows_terpotong:` ×2,
+`riwayat_terpotong:` ×1), 13 di luar panel super admin. Di ponsel:
+
+| | jumlah |
+| --- | --- |
+| tak dipanggil ponsel (`/stok/opname` baris mentah, `/supplier/:id/kartu`) | 2 |
+| dirender — `sampah_page.dart`, SATU-SATUNYA pembaca header di seluruh aplikasi | 1 |
+| **DIAM** — dibaca `as List` telanjang, header/bendera dibuang | **10** |
+
+Yang diam, dan layarnya: `/shift` (Tutup Kasir + lembar riwayat Operasional
+Cabang), `/shift/selisih` (Selisih Kas), `/stok/exp`, `/stok/opname/riwayat`
+(Riwayat SO + 2 situs lencana), `/perlengkapan/opname/riwayat` (Riwayat SO
+Perlengkapan + 2 situs lencana), `/perlengkapan/kiriman` (spanduk kiriman +
+3 situs lencana), `/menu/:id/riwayat-harga` (lembar riwayat harga di Analisis
+Harga), `/laporan/durasi-pesanan` (`riwayat_terpotong` tak pernah diurai —
+`operasional_models.dart:1374`), `/transfer-stok` (`rows_terpotong` dibuang di
+`transfer_repository.dart:51`, dan ponsel meminta **`per_page=50`** sendiri
+padahal maksimum server 200), `/stok/penyesuaian` (utang tertulis sejak 2026-08).
+
+**Tiga lencana dihitung `.length` atas daftar yang sudah dipotong**, jadi
+mentok diam-diam: selisih kas → 50 (`shift_repository.dart:51`), SO menunggu
+ACC → 200 (`dashboard_page.dart:87`, `kasir_page.dart:1358`), kiriman belum
+diterima → 50 (`kasir_page.dart:1351`, `dashboard_tim.dart:120`,
+`dashboard_page.dart:95`). Lencana yang berhenti bergerak justru saat antreannya
+paling panjang. Server **sudah** punya `GET /shift/selisih/ringkas` (seluruh
+populasi, lahir 2026-09-03 untuk sidebar web) yang ponsel tak pernah panggil.
+
+**Tak ada rumah bersama.** Delapan situs yang SUDAH mengaku merakit kalimatnya
+sendiri: 4 rumusan, 3 warna (`grey.shade600`, `orange.shade800`,
+`amber.shade900`), 2 penempatan (di atas daftar / di bawah), 1 duplikat
+verbatim (`kartu_stok_page.dart:128` = `perlengkapan_stok_page.dart:1176`).
+
+### Yang dibangun (repo `kakarut-mobile`, satu commit)
+
+- **`lib/core/widgets/daftar_dipotong.dart`** (baru, 200 baris): `Berbatas<T>`
+  (`rows` + `batas`; header absen = utuh, BUKAN nol; `0`/`-1`/teks tak
+  dipercaya), `bacaBerbatas(api, path, dari, {query})` — pola `sampah_page`
+  dipindah, bukan disalin — `kalimatDipotong({ditampilkan, total?, apa,
+  lanjutan?})` SATU rumusan ("Menampilkan N [dari T] apa — selebihnya tidak
+  ikut dimuat. Buka Kakarut di peramban untuk daftar lengkapnya."; kalimat
+  khusus layar MENAMBAH lewat `lanjutan`, tak mengganti), `DaftarDipotong`
+  (satu warna `orange.shade800`, satu ikon, satu tempat: baris penutup
+  daftar), `labelLencana(n, terpotong:)` → `"50+"`, `Lencana` +
+  `hitungLencana`/`gabungLencana`, `keteranganLencanaDipotong`.
+- **Repository → `Berbatas`**: `shift` (`/shift`, `/shift/selisih`, +
+  `getRingkasSelisih` + model `RingkasSelisih{menunggu, terpotong}`), `stok`
+  (`/stok/exp`, `/stok/opname/riwayat`, `/stok/penyesuaian`), `perlengkapan`
+  (`/perlengkapan/opname/riwayat`, `/perlengkapan/kiriman`), `manajemen`
+  (`/menu/:id/riwayat-harga`), `transfer` (`rows_terpotong` dibaca,
+  **`per_page` 50 → 200**), `LaporanDurasi.riwayatTerpotong`.
+- **12 layar memasang `DaftarDipotong`** bila `terpotong`: shift_page,
+  operasional_cabang_page, selisih_kas_page, stok_exp_page,
+  opname_riwayat_page, opname_perlengkapan_page, perlengkapan_stok_page
+  (spanduk kiriman — angkanya pun lewat `labelLencana`), analisis_harga_page,
+  laporan_page (kalimatnya menyebut bahwa sajian terhitung/rata-rata/per
+  menu TIDAK terpotong), transfer_page, penyesuaian_page, sampah_page.
+- **8 situs lama pindah rumah**: sampah (`IsiSampah` kini
+  `typedef Berbatas<SampahRow>`), kartu_fifo, kartu_stok, kartu perlengkapan,
+  beli_perlengkapan, permintaan, riwayat_harga_sheet, shift_detail. Kalimat
+  khususnya masuk `lanjutan`. Dua kartu (stok & perlengkapan) mendapat
+  kalimat yang dulu tak pernah dikatakan: server menjalankan saldo hanya atas
+  mutasi yang dikirim (`stok/service.ts:498`, `perlengkapan/service.ts:610`),
+  jadi **saldo akhir & total di kartu ikut terpotong**, bukan cuma daftarnya —
+  kalimatnya kini bilang "persempit rentang tanggalnya".
+- **Tiga lencana, satu aturan**: selisih kas dari `RingkasSelisih.menunggu`
+  (+ `terpotong` milik ringkas bila kuerinya sendiri menyentuh plafon); SO
+  menunggu & kiriman lewat `hitungLencana` → `BadgeAngka(terpotong:)` /
+  `BarisAksi(terpotong:)` → "200+" / "50+". Aturan nol: **0 pada daftar
+  terpotong tetap tanpa lencana** — "0+" di tiap layar warung besar adalah
+  peringatan yang orang belajar abaikan; sisa ketidakpastiannya diucapkan
+  `DaftarDipotong` di layar daftarnya.
+- `kunci-belum-dibaca.txt`: `rows_terpotong` dan `riwayat_terpotong` DICABUT
+  (keduanya kini dibaca; ratchet dua arah `kunci_kontrak_server_test`
+  menagihnya). Layar kartu supplier tetap belum ada — yang berubah cuma nama
+  medannya yang kini punya pembaca lain.
+
+### Detektor — `test/daftar_dipotong_test.dart` (Dart) + cermin server
+
+- **premis**: 11 rute, tiap rute punya pemanggil di `lib/`; pemakai provider
+  ≥ 12 layar + 3 berkas lencana; rumah memuat keenam penghuninya.
+- **INTI-1**: rute ber-header — nol `.get('<jalur>'` telanjang di `lib/`
+  (komentar dibutakan; `/shift` tak menuduh `/shift/pantau`; `:id` cocok
+  `$x`/`${x}`), ≥ 1 `bacaBerbatas(…'<jalur>'`; rute berkunci badan — kunci
+  `'rows_terpotong'`/`'riwayat_terpotong'` dibaca di fitur pemanggilnya.
+- **INTI-2**: tiap berkas yang `ref.watch` salah satu dari 12 provider daftar
+  memuat `DaftarDipotong(` — kecuali 3 berkas lencana, yang wajib
+  `hitungLencana(`.
+- **INTI-3**: nol kalimat rakitan tangan di luar rumah: literal string
+  (bersebelahan disambung; interpolasi `${…}` dibuang) yang dibuka
+  "Menampilkan " atau memuat `terpotong`/`dipotong` sebagai kata; frasa
+  `stok terpotong` (potongan STOK: "stok terpotong setelah di-ACC")
+  dikecualikan — satu-satunya arti lain kata itu, terukur 3 literal.
+- **INTI-4**: berkas lencana tanpa bentuk lama `ref.watch(P)…asData?.value
+  ?? …length`; `selisihMenungguProvider` memanggil `getRingkasSelisih`,
+  tanpa `.length`, rute `'/shift/selisih/ringkas'` ada; lencana selisih di
+  kasir membawa `terpotong:`; `BadgeAngka` memakai `labelLencana`.
+- **unit**: `batasDariHeader` (5 nilai omong kosong → null), `bacaBerbatas`
+  atas `ApiClient` palsu ber-header, `kalimatDipotong` 3 varian,
+  `labelLencana`, `hitungLencana` 4 keadaan + `gabungLencana`,
+  `LaporanDurasi.riwayatTerpotong`, `TransferRepository.getFaktur`
+  (`per_page=200` + `rows_terpotong`), `RingkasSelisih.fromJson`.
+- **widget**: `DaftarDipotong` melukis kalimatnya; `BadgeAngka(terpotong:)`
+  → teks `50+` (dan `50` tanpanya); `BarisAksi` meneruskannya.
+- **PASANGAN**: pemindai `.get` telanjang vs `bacaBerbatas`, jalur `:id`,
+  awalan `/shift` vs `/shift/pantau`, komentar; kalimat rakitan — kedelapan
+  rumusan lama tertuduh, 6 literal sah (termasuk interpolasi
+  `${labelLencana(…, terpotong: t)}` dan `'x-kakarut-terpotong'`) tidak.
+- **Cermin lintas-repo di SERVER** —
+  `apps/server/test/rute-terpotong-satu-kontrak.test.ts`: himpunan rute
+  pengirim DIURAI dari `modules/*/routes.ts` (penanda → deklarasi `.get("`
+  di awal baris — `c.get("auth")` di tengah baris sempat menang dan
+  menghasilkan `/shiftauth`; itu bukti pertama pengurainya jalan — + mount
+  dari `app.ts`), dikurangi 3 pengecualian BERALASAN (super admin,
+  `/stok/opname` baris mentah, kartu supplier) yang alasannya ikut diperiksa:
+  rute yang dikecualikan karena "tak dipanggil ponsel" memang tak boleh muncul
+  di `lib/` ponsel. Dua arah terhadap `ruteTerpotong` Dart. Ambang premis
+  pengurai Dart SENGAJA 8 (< 11): pengurai buta memberi 0, sedangkan satu
+  rute yang dicabut harus jatuh ke asersi BERNAMA RUTE — versi pertama
+  berambang 11 dan menuduh lewat premis, tanpa nama; dibetulkan.
+
+**Bukti merah** (Python meniru tiap asersi statis; dipulihkan byte-per-byte,
+`cmp`):
+
+| | dicabut | tertuduh |
+| --- | --- | --- |
+| LL | `bacaBerbatas` → `.get` telanjang di `/stok/exp` | INTI-1: `/stok/exp .get telanjang di ['features/stok/stok_repository.dart']` |
+| MM | `DaftarDipotong(` dicabut dari `penyesuaian_page` | INTI-2: `layar tanpa DaftarDipotong: ['features/stok/penyesuaian_page.dart']` |
+| NN | `Text('Menampilkan mutasi terbaru (dipotong).')` dirakit di `kartu_stok_page` | INTI-3 |
+| OO | lencana kiriman `dashboard_tim` kembali `.asData?.value.rows ?? …length` | INTI-4: `dashboard_tim.dart tanpa hitungLencana(` |
+| PP | `/stok/exp` dicabut dari `ruteTerpotong` Dart | cermin server: `expected [ '/stok/exp' ] to deeply equal []` |
+
+Dua tuduhan INTI-3 atas kode putaran ini SENDIRI sebelum pemindainya
+diperhalus: interpolasi `${labelLencana(…, terpotong: …)}` (nama parameter,
+bukan kalimat → interpolasi dibuang dulu) dan tooltip "daftar sumbernya
+dipotong server" di `badge_angka.dart` — yang kedua memang kalimat pemotongan
+di luar rumah, jadi dipindah ke rumah (`keteranganLencanaDipotong`), bukan
+diputihkan.
+
+### Batas yang diakui
+
+- **Tak ada Flutter di mesin ini.** Tiap asersi statis ditiru Python sebelum
+  push; yang menjalankan Dart-nya (analyze + seluruh uji, termasuk widget
+  test) CI ponsel pada `claude`. Tak satu pun layar dilihat merender terhadap
+  server hidup; "terpotong → mengaku" dibuktikan lewat balasan palsu
+  ber-header + widget test.
+- Fikstur gerbang server kecil — header pemotongan hampir tak pernah menyala
+  di data uji, jadi tak ada lengan verify-api/e2e untuk putaran ini (nol
+  perubahan rute/web; verify-api & e2e **tidak** dijalankan, dikatakan apa
+  adanya).
+- Lencana SO menunggu & kiriman tetap **tak akurat di atas plafon** — hanya
+  jujur ("200+"). Pintu ringkas servernya di antrean. Aturan nol (0 pada
+  daftar terpotong → tanpa lencana; spanduk kiriman tak muncul bila 0 yang
+  menunggu meski daftarnya terpotong) adalah kompromi yang ditulis di
+  `hitungLencana`, bukan yang tak disadari.
+- `selisihMenungguProvider` masih `catch (_) → 0` (kini `RingkasSelisih` nol)
+  — butir antrean Mobile yang terpisah, TIDAK disentuh putaran ini.
+- INTI-3 hanya melihat literal berspasi yang memuat kata kuncinya; kalimat
+  pemotongan yang ditulis tanpa `terpotong`/`dipotong`/"Menampilkan" lolos.
+
+### Gerbang
+
+- Ponsel: commit tunggal `006eb51` di `claude`, PR #18 (draft). **CI #43
+  hijau** (run 33970721672; `flutter analyze` 22 s, `flutter test` 111 s —
+  seluruh uji termasuk `daftar_dipotong_test.dart` dan widget test-nya).
+  Cermin Python-nya tak pernah merah sebelum push, dan CI membenarkannya.
+- Server: typecheck hijau; vitest penuh **242 berkas / 3.009 uji hijau**
+  (241/3.004 + cermin baru 5). verify-api & e2e tidak dijalankan — nol
+  perubahan rute/web.
+- **Tak ada rilis** (aturan pemilik: rilis hanya bila diminta).
+
 ## RILIS 2026-09-05 — tujuh putaran tayang, dan clone satu-cabang yang dua kali membuat ref pelacaknya basi — web + ponsel — 2026-09-05
 
 - **Diminta pemilik**: *"ok rilis sekarang ke production, web dan ponsel
@@ -11850,7 +12030,13 @@ berlaku di situ).
       harfiah di 34 berkas); **1 daftar / 4 entri** berkunci nomor baris, kini
       berkunci `berkas:nama-parameter`. Aturannya — sudah ditulis di 4 berkas,
       dibayar 4 kali, dijaga 0 — akhirnya punya gerbang
-- [ ] **Header `X-Kakarut-Terpotong` belum dirender ponsel** — kini **delapan**
+- [x] ~~**Header `X-Kakarut-Terpotong` belum dirender ponsel**~~ — SELESAI
+      2026-09-05, lihat entri "Sepuluh daftar ponsel yang dipotong server dan
+      DIAM" di atas. 13 pengirim / 2 tak dipanggil / 1 dirender / **10 diam**
+      → 11 rute lewat satu rumah `daftar_dipotong.dart`, 12 layar mengaku, 8
+      situs lama pindah, 3 lencana "N+" (selisih kas dari ringkas server),
+      `per_page` transfer 50 → 200. Daftar rutenya dicerminkan DUA ARAH di
+      gerbang server. Semula: kini **delapan**
       rute mengirimnya (`/stok/penyesuaian` yang lama + tujuh yang dibayar
       2026-08-31), plus medan badan `riwayat_terpotong` pada laporan Lama
       Pesanan. `core/api_client.dart:97` sudah punya pembacanya dan **tepat

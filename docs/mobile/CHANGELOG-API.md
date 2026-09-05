@@ -574,7 +574,11 @@ punya pembacanya.
 **Yang masih jadi utang di sisi ponsel** (tercatat di
 `docs/audit/vena-audit.md`): `GET /api/stok/penyesuaian` sudah mengirim header
 ini sejak lama dan **belum dirender** layar mobilenya. Delapan rute di atas
-menambah daftar itu bila tak ikut ditampilkan.
+menambah daftar itu bila tak ikut ditampilkan. **Dibayar 2026-09-05** — sebelas
+rute (kesembilan ber-header + `rows_terpotong` transfer + `riwayat_terpotong`
+durasi) kini dibaca lewat satu rumah `core/widgets/daftar_dipotong.dart`,
+dan daftarnya dicerminkan dua arah oleh
+`apps/server/test/rute-terpotong-satu-kontrak.test.ts`.
 
 **`riwayat_terpotong` pada `LaporanDurasiPesanan`**: `bool` (bukan nullable).
 `per_menu`, `jumlah`, dan `rata_detik` **tidak** ikut terpotong — ketiganya
