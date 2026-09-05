@@ -144,9 +144,16 @@ Yang dipercaya barisnya, bukan skornya; skripnya alat sekali pakai.
 
 ### Gerbang
 
-- Ponsel: commit `2715d68` di `claude`, PR #18. CI #44 (run 33971591264)
-  masih berjalan saat entri ini di-commit — verdiknya tercatat di PR #18 dan
-  distempel di sini pada commit berikutnya.
+- Ponsel: commit `2715d68` di `claude`, PR #18. **CI #44 MERAH** (694 lolos,
+  1 gagal) — dan merahnya milik uji putaran ini sendiri, bukan layar: lengan
+  "tanpa `emailAwal` → kolom kosong" memompa `RegisterPage()` bertipe sama di
+  posisi yang sama, jadi Flutter memakai ulang `State` lama (initState tak
+  jalan, controller masih `x@y.id`). Ketiga widget test `LoginPage` LOLOS di
+  run yang sama — `Image.asset` aman, kode → tombol → `RegisterPage` terisi.
+  Perbaikan `3ca056c` (lepas pohon dulu, `pumpWidget(SizedBox())`) →
+  **CI #45 hijau** (run 33971823318). Batas "asersi yang belum pernah
+  dijalankan siapa pun sebelum CI" di atas menggigit persis sekali, di
+  harness, dan tercatat.
 - Server: typecheck hijau; vitest penuh **242 berkas / 3.012 uji hijau**
   (3.009 + 3 lengan baru). verify-api & e2e tidak dijalankan — nol perubahan
   rute/web.
