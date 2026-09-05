@@ -25,11 +25,111 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ `BepResult` & `NilaiStokRingkas` kini ada di Lampiran A — dan `basis` BEP layak ditampilkan
+
+> Tidak ada bentuk balasan yang berubah. `GET /api/laporan/bep` dan `GET
+> /api/stok/nilai` akhirnya **dideklarasikan di `types.ts`** (Lampiran A +
+> fikstur kunci ponsel). Yang kedua sudah "di shared" sejak lama — di
+> `nilai-stok.ts`, berkas yang fikstur dan Lampiran tak pernah baca; kelima
+> kuncinya karena itu tercatat ponsel sebagai hantu meski dikirim tiap hari.
+
+Terukur lewat HTTP (owner, DB gerbang): `/laporan/bep` **8 kunci** —
+`biaya_tetap`, `basis`, `periode {dari, sampai}`, `rata_harga_jual`,
+`rata_margin_kontribusi`, `porsi_untuk_bep`, `omzet_untuk_bep`,
+`porsi_per_hari_30`. Web mendeklarasikan 7 (`periode` dikirim tanpa
+dideklarasikan); ponsel membaca 6.
+
+**Yang perlu dicek di ponsel — dan sudah dikerjakan di `kakarut-mobile`
+putaran yang sama:** `basis` (`"penjualan" | "katalog"`, kini `BasisBep`
+bernama → ikut fikstur status) menyatakan angka BEP dihitung dari riwayat
+penjualan pada rentang, atau — bila rentangnya tanpa penjualan — dari
+rata-rata katalog menu. Web menampilkannya ("Basis perhitungan"); ponsel
+sampai 2026-09-05 tidak, jadi angka yang sama tampil tanpa menyebut dasarnya.
+`periode` adalah gema rentang yang dipakai server (bawaan 30 hari terakhir
+dalam zona waktu perusahaan) — berguna bila klien tak mengirim `dari`/`sampai`.
+
+`/stok/nilai` (**5 kunci**, semua peran; agregat dihitung server sebelum
+harga per bahan ditahan untuk non-manajemen): ponsel sudah membaca semuanya.
+
+Penjaga di server: `bep-nilai-dto-utuh.test.ts` (literal `/bep` == `BepResult`,
+literal `ringkasNilaiStok` == `NilaiStokRingkas`, dua arah; **arah balik kelas
+barunya**: tak satu entri hantu ponsel pun bernama medan yang dideklarasikan
+berkas shared mana pun) dan verify-api §297 (kunci HTTP == kontrak, dua arah,
+owner dan kasir).
+
+---
+
+## ⚪️ Sesi & cabang kini ada di Lampiran A: `SesiLogin`, `SesiDto`, `CompanyDto`, `CabangDto` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: bentuk `POST
+> /api/auth/login` (dan tiap pintu lain yang memulangkan sesi baru —
+> `/register` saat akun aktif, `/onboarding/*`), `GET /api/auth/me`, dan baris
+> `GET /api/cabang` akhirnya **dideklarasikan** di `packages/shared`, jadi
+> ikut Lampiran A dan fikstur kunci ponsel. Sampai 2026-09-05 tak satu pun
+> medannya ada di kontrak: `SesiLogin` hidup di server saja, web mengetik
+> ulang sesinya sendiri, ponsel mengurai `CompanyDto`/`BranchDto` lokal.
+
+Terukur lewat HTTP terhadap DB gerbang (owner): `/auth/login` **4 kunci
+atas** (`token`, `user`, `company`, `branch`), `/auth/me` 3 (tanpa `token`),
+`.user` 7 (= `AuthUser`), `.company` **9**, `/cabang` 31 baris × **14 kunci**.
+Ponsel sudah membaca semuanya kecuali tiga: `slug`, `blokir_jual_minus`
+(company) dan `central_kitchen_id` (cabang).
+
+**Satu hal yang layak dicek di ponsel, bukan wajib:** `company.blokir_jual_minus`
+(boolean) dikirim sejak lama "supaya kasir bisa MEMPERINGATKAN sebelum tombol
+Bayar" — penegakannya tetap di server (`POST /penjualan` menolak bila stok
+minus dan setelan ini hidup). Terukur 2026-09-05: **tak satu klien pun** (web
+maupun ponsel) membaca medan ini; peringatan yang dijanjikan belum pernah
+dibuat di mana pun. Ponsel mencatatnya sebagai "belum dibaca, beralasan";
+kalau kelak peringatan itu dibuat, bacalah dari sini — bukan dari tebakan.
+
+Yang juga dipaku putaran ini di server: bentuk `company` kini punya **satu
+penulis** (`companyDto`); sampai 2026-09-05 `GET /auth/me` merakit objek yang
+sama sendiri, sembilan medan yang tetap sinkron hanya karena kebetulan.
+
+Penjaga di server: `sesi-cabang-dto-utuh.test.ts` (literal `companyDto` ==
+`CompanyDto`, literal `GET /cabang` == `CabangDto`, satu penulis company di
+seluruh `apps/server/src`, web memakai tipe kontrak) dan verify-api §296
+(kunci `/auth/login`, `/auth/me`, `/cabang` == kontrak, dua arah, seluruh baris).
+
+---
+
+## ⚪️ `StokMasukRow` & `StokMasukPage` kini ada di Lampiran A — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: tipe baris `GET
+> /api/produksi`, `GET /api/pembelian`, dan `GET /api/{mod}/faktur/:fakturId`
+> akhirnya **dideklarasikan** di `packages/shared` (jadi ikut Lampiran A dan
+> fikstur kunci ponsel). Sampai 2026-09-05 ia hidup sebagai DTO lokal halaman
+> web, dan itu berarti tak satu pun fikstur bisa menagihnya.
+
+Terukur lewat HTTP terhadap DB gerbang (237 baris, 2 rute): **55 kunci per
+baris**, 52 dideklarasikan web. Tiga yang dikirim sejak lama tanpa pernah
+dideklarasikan: `harga_tebakan` (bool — `total_harga` masih tebakan),
+`pengadaan` (`"produksi" | "beli"`), `qty_setara` (padanan `qty` dalam
+satuan beli, ditulis server; saudara `qty_teks`). Ponsel sudah membaca
+ketiganya.
+
+**Yang perlu dicek di ponsel — dan sudah dikerjakan di `kakarut-mobile`
+putaran yang sama:** `FakturRow.fromJson` dan `KirimanRow.fromJson` membaca
+`asal_cabang`, kunci yang **tidak pernah dikirim** `/produksi`, `/pembelian`,
+maupun `/penerimaan` (25 kunci, tak satu pun `asal_*`) — bacaan hantu, null
+selamanya; label "Transfer dari X" tak pernah tampil. Kini keduanya dicabut,
+dan arah baliknya dijaga (`kunci_hantu_test.dart`: tiap kunci yang dibaca
+ponsel harus ada di kontrak atau tercatat beralasan).
+
+Penjaga di server: `stok-masuk-row-utuh.test.ts` (kunci `select` + pengayaan
+`ambilBarisFaktur` == interface, dua arah) dan verify-api §295 (kunci baris
+HTTP == kontrak, dua arah).
+
+---
+
 ## 🟢 `GET /perlengkapan/opname/sesi/:sessionId` kini membawa `waktu` + `oleh`
 
 🟢 **BARU** — dua medan DITAMBAH pada balasan yang sudah ada; tak ada yang
 berubah bentuk maupun hilang. `fromJson` yang mengabaikan kunci tak dikenal
 (`perlengkapan_repository.dart:525`) tetap jalan tanpa disentuh.
+
+**Sudah di-merge ke production.** Tayang lewat merge `fcf6c64` (CI #494); fikstur ponsel lewat merge `d606025` (CI #42).
 
 | medan | tipe | arti |
 | --- | --- | --- |
@@ -46,7 +146,6 @@ Lahir dari web: lembar detail opname perlengkapan tak menampilkan waktu sama
 sekali, sementara lembar bahan baku menampilkannya — dan DTO-nya memang tak
 membawanya.
 
-_Belum tayang._
 
 ---
 
@@ -55,6 +154,8 @@ _Belum tayang._
 🔴 **WAJIB** — memutus kode yang sudah ada. `perlengkapan_repository.dart`
 menulis `as List` pada balasannya; sesudah perubahan ini balasannya `Map`, jadi
 layar **Beli Perlengkapan** melempar saat runtime — bukan saat kompilasi.
+
+**Sudah di-merge ke production.** Server tayang lewat merge `fcf6c64` (CI #494, termasuk deploy); aplikasi lewat merge `d606025` di repo ponsel (CI #42). Keduanya didorong dalam selang tiga detik (08:57:25 → 08:57:28), sesuai syarat serentak di atas — tapi jendelanya belum benar-benar tertutup sampai APK di tiap perangkat diperbarui (build store belum ada di CI ponsel; `scripts/build-rilis.sh` manual); sampai itu, layar Beli Perlengkapan pada APK lama menampilkan keadaan galat (`as List` atas `Map` melempar, `FutureProvider` menangkapnya), bukan data yang salah.
 
 **Sudah dikerjakan di repo ponsel pada putaran yang sama** (cabang `claude`):
 `getBeli()` memulangkan `BeliPerlengkapanDaftar`, providernya membawa daftar +
@@ -124,6 +225,8 @@ ini perbedaan yang nyata di kode dan **nol kejadiannya hari ini**.
 
 🟢 **BARU** — pintu baru, tak ada yang berubah bentuknya. Aman diabaikan
 sampai layar Resep ponsel memang mau menampilkan riwayat.
+
+**Sudah di-merge ke production.** Tayang lewat merge `fcf6c64` (CI #494).
 
 ```
 GET /api/bahan/<id>/riwayat-resep          [owner/admin]
@@ -569,7 +672,11 @@ punya pembacanya.
 **Yang masih jadi utang di sisi ponsel** (tercatat di
 `docs/audit/vena-audit.md`): `GET /api/stok/penyesuaian` sudah mengirim header
 ini sejak lama dan **belum dirender** layar mobilenya. Delapan rute di atas
-menambah daftar itu bila tak ikut ditampilkan.
+menambah daftar itu bila tak ikut ditampilkan. **Dibayar 2026-09-05** — sebelas
+rute (kesembilan ber-header + `rows_terpotong` transfer + `riwayat_terpotong`
+durasi) kini dibaca lewat satu rumah `core/widgets/daftar_dipotong.dart`,
+dan daftarnya dicerminkan dua arah oleh
+`apps/server/test/rute-terpotong-satu-kontrak.test.ts`.
 
 **`riwayat_terpotong` pada `LaporanDurasiPesanan`**: `bool` (bukan nullable).
 `per_menu`, `jumlah`, dan `rata_detik` **tidak** ikut terpotong — ketiganya

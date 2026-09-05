@@ -17376,6 +17376,120 @@ cek "§294 tenant LAIN tak melihat faktur tenant ini" "V == 1" \
 cek "§294 kasir tak boleh membaca daftar ini → bukan 200" "V == 1" \
   "$([ "$(status_code "$REISS105" GET "/perlengkapan/beli")" != "200" ] && echo 1 || echo 0)"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §295 — BARIS PENGADAAN: kunci yang DIKIRIM == medan `StokMasukRow` di kontrak
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 tipe baris `/produksi` & `/pembelian` hidup sebagai DTO
+# lokal halaman web, jadi Lampiran A & fikstur ponsel tak pernah melihatnya:
+# 55 kunci per baris, 52 dideklarasikan (`harga_tebakan`, `pengadaan`,
+# `qty_setara` dikirim tanpa pernah dideklarasikan). Kini tipenya di shared dan
+# dijaga statis (`stok-masuk-row-utuh.test.ts`: select+pengayaan == interface).
+# Lengan ini menagih hal yang sama dari sisi yang tak bisa dibohongi pengurai:
+# balasan HTTP sungguhan atas DB gerbang, dua arah.
+#
+# `bocorkan` (tulis selisih ke fd 2 yang DIWARISI, lalu hitung barisnya), BUKAN
+# `tee /dev/stderr`: saat skrip ini dijalankan `> log 2>&1` (gerbang),
+# `/dev/stderr` adalah berkas log itu sendiri. `tee` membukanya ULANG — tanpa
+# `-a` dengan O_TRUNC (seluruh log sebelum lengan ini terhapus; sisanya jadi
+# berkas jarang penuh NUL — terjadi di gerbang #95, 2026-09-05: 231.667 NUL
+# dari 231.786 byte, dua baris tersisa), dengan `-a` tak memotong tapi baris
+# diagnostiknya TERTIMPA tulisan stdout berikutnya (offset fd induk tak maju
+# pada O_APPEND). `>&2` di dalam `$(…)` memakai deskripsi berkas yang sama,
+# offsetnya bersama, urutannya benar. Penghitung PASS/FAIL hidup di memori,
+# jadi verdik gerbang #95 tetap sah; yang lenyap bukti tertulisnya. Dijaga
+# `verify-api-log-utuh.test.ts` (menjalankan ketiga bentuk di bash sungguhan).
+bocorkan() { local d; d=$(cat); [ -n "$d" ] && printf '%s\n' "$d" >&2; printf '%s\n' "$d" | grep -c . || true; }
+KUNCI295=$(awk '/^export interface StokMasukRow \{/{f=1;next} f&&/^\}/{exit} f&&/^  [a-z_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u)
+R295P=$(api "$OWNER" GET "/produksi?per_page=200&branch_id=all")
+R295B=$(api "$OWNER" GET "/pembelian?per_page=200&branch_id=all")
+HTTP295=$(printf '%s\n%s' "$R295P" "$R295B" | jq -r '[.rows[]|keys[]]|unique|.[]' | sort -u)
+cek "§295 premis: kedua rute berbalasan baris (≥ 20 baris gabungan)" "V >= 20" \
+  "$(printf '%s\n%s' "$R295P" "$R295B" | jq -s 'map(.rows|length)|add')"
+cek "§295 premis: kontrak StokMasukRow terbaca dari types.ts (≥ 50 medan)" "V >= 50" \
+  "$(echo "$KUNCI295" | grep -c .)"
+cek "§295 tiap kunci yang DIKIRIM ada di kontrak (dikirim − kontrak = ∅)" "V == 0" \
+  "$(comm -23 <(echo "$HTTP295") <(echo "$KUNCI295") | bocorkan)"
+cek "§295 tiap medan KONTRAK benar-benar dikirim (kontrak − dikirim = ∅)" "V == 0" \
+  "$(comm -13 <(echo "$HTTP295") <(echo "$KUNCI295") | bocorkan)"
+cek "§295 ketiga kunci yang dulu tak dideklarasikan kini ada di kontrak" "V == 3" \
+  "$(echo "$KUNCI295" | grep -cx 'harga_tebakan\|pengadaan\|qty_setara')"
+cek "§295 tak ada baris yang membawa asal_cabang (kunci hantu yang ponsel baca)" "V == 0" \
+  "$(printf '%s\n%s' "$R295P" "$R295B" | jq -r '[.rows[]|select(has("asal_cabang"))]|length' | paste -sd+ | bc)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §296 — SESI & CABANG: kunci yang DIKIRIM == kontrak (SesiLogin, SesiDto,
+#        AuthUser, CompanyDto, CabangDto)
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 tak satu pun medan sesi maupun baris `/cabang` ada di
+# Lampiran A: `SesiLogin` hidup di auth/session.ts, web mengetik ulang
+# `AuthState` tanpa `blokir_jual_minus`, `Cabang` diketik di BranchContext,
+# dan bentuk `company` dirakit di DUA tempat (companyDto + inline `/auth/me`).
+# Statisnya dijaga `sesi-cabang-dto-utuh.test.ts`; lengan ini menagih dari
+# kawat: balasan HTTP sungguhan, dua arah, seluruh baris.
+medan296() { awk -v N="$1" 'BEGIN{re="^export interface " N "( extends [A-Za-z, ]+)? \\{"} $0 ~ re {f=1;next} f&&/^\}/{exit} f&&/^  [a-z0-9_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u; }
+K296_USER=$(medan296 AuthUser); K296_CO=$(medan296 CompanyDto); K296_SESI=$(medan296 SesiDto); K296_CAB=$(medan296 CabangDto)
+K296_LOGIN=$(printf '%s\n%s\n' "$K296_SESI" "$(medan296 SesiLogin)" | sort -u)
+R296L=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")
+R296M=$(api "$OWNER" GET "/auth/me")
+R296C=$(api "$OWNER" GET "/cabang")
+R296CK=$(api "$REISS105" GET "/cabang")
+selisih296() { comm -3 <(printf '%s\n' "$1" | sort -u) <(printf '%s\n' "$2") | bocorkan; }
+cek "§296 premis: kontrak terbaca dari types.ts (AuthUser 7 + CompanyDto 9 + SesiDto 3 + SesiLogin 1 + CabangDto 14)" "V == 34" \
+  "$(printf '%s\n%s\n%s\n%s\n%s\n' "$K296_USER" "$K296_CO" "$K296_SESI" "$(medan296 SesiLogin)" "$K296_CAB" | grep -c .)"
+cek "§296 premis: owner punya company (bukan null) dan /cabang ≥ 2 baris" "V == 1" \
+  "$([ "$(jq -r '.company|type' <<<"$R296M")" = object ] && [ "$(jq 'length' <<<"$R296C")" -ge 2 ] && echo 1 || echo 0)"
+cek "§296 /auth/login kunci atas == SesiLogin {token,user,company,branch} (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R296L")" "$K296_LOGIN")"
+cek "§296 /auth/me kunci atas == SesiDto {user,company,branch} (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R296M")" "$K296_SESI")"
+cek "§296 /auth/me .user == AuthUser (dua arah — iat/exp JWT tak bocor)" "V == 0" \
+  "$(selisih296 "$(jq -r '.user|keys[]' <<<"$R296M")" "$K296_USER")"
+cek "§296 /auth/me .company == CompanyDto (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r '.company|keys[]' <<<"$R296M")" "$K296_CO")"
+cek "§296 /auth/login .company == /auth/me .company — satu penulis, dibuktikan dari kawat" "V == 0" \
+  "$(selisih296 "$(jq -r '.company|keys[]' <<<"$R296L")" "$(jq -r '.company|keys[]' <<<"$R296M" | sort -u)")"
+cek "§296 pb1_rate & diskon_maks_persen angka JSON (kontrak: number), blokir_jual_minus boolean" "V == 1" \
+  "$(jq -r '.company|if (.pb1_rate|type)=="number" and (.diskon_maks_persen|type)=="number" and (.blokir_jual_minus|type)=="boolean" then 1 else 0 end' <<<"$R296M")"
+cek "§296 tiap baris /cabang == CabangDto (dua arah, gabungan seluruh baris)" "V == 0" \
+  "$(selisih296 "$(jq -r '[.[]|keys[]]|unique|.[]' <<<"$R296C")" "$K296_CAB")"
+cek "§296 tiap baris /cabang membawa SEMUA 14 kunci (bukan cuma gabungannya)" "V == 1" \
+  "$(jq -r --argjson n "$(echo "$K296_CAB" | grep -c .)" '[.[]|(keys|length)==$n]|all|if . then 1 else 0 end' <<<"$R296C")"
+cek "§296 kasir pun membaca /cabang dengan kunci yang sama (rute semua peran)" "V == 0" \
+  "$(selisih296 "$(jq -r 'if type=="array" then [.[]|keys[]]|unique|.[] else "BUKAN_LARIK" end' <<<"$R296CK")" "$K296_CAB")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §297 — BEP & NILAI STOK: kunci yang DIKIRIM == kontrak (BepResult,
+#        NilaiStokRingkas), dari kawat
+# ═══════════════════════════════════════════════════════════════════════════
+# Terukur 2026-09-05: `/laporan/bep` 8 kunci — web mendeklarasikan 7 (`periode`
+# dikirim tanpa dideklarasikan), ponsel membaca 6 (tanpa `basis`);
+# `/stok/nilai` 5 kunci yang interface-nya SUDAH di shared, tapi di
+# `nilai-stok.ts` — tak terlihat fikstur ponsel maupun Lampiran A (keduanya
+# hanya membaca types.ts). Statisnya `bep-nilai-dto-utuh.test.ts`; `medan296`
+# dan `selisih296` didefinisikan di §296.
+K297_BEP=$(medan296 BepResult); K297_NILAI=$(medan296 NilaiStokRingkas)
+R297B=$(api "$OWNER" GET "/laporan/bep?biaya_tetap=1000000&branch_id=all")
+R297N=$(api "$OWNER" GET "/stok/nilai")
+R297NK=$(api "$REISS105" GET "/stok/nilai")
+cek "§297 premis: kontrak terbaca dari types.ts (BepResult 8 + NilaiStokRingkas 5)" "V == 13" \
+  "$(printf '%s\n%s\n' "$K297_BEP" "$K297_NILAI" | grep -c .)"
+cek "§297 premis: /laporan/bep owner 200 berbadan objek (basis penjualan/katalog)" "V == 1" \
+  "$(jq -r 'if type=="object" and (.basis=="penjualan" or .basis=="katalog") then 1 else 0 end' <<<"$R297B")"
+cek "§297 /laporan/bep kunci == BepResult (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R297B")" "$K297_BEP")"
+cek "§297 /laporan/bep .periode == {dari, sampai} berformat tanggal" "V == 1" \
+  "$(jq -r 'if (.periode|keys)==["dari","sampai"] and (.periode.dari|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.periode.sampai|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) then 1 else 0 end' <<<"$R297B")"
+cek "§297 /laporan/bep enam angka bertipe number (bukan teks)" "V == 6" \
+  "$(jq -r '[.biaya_tetap,.rata_harga_jual,.rata_margin_kontribusi,.porsi_untuk_bep,.omzet_untuk_bep,.porsi_per_hari_30]|map(select(type=="number"))|length' <<<"$R297B")"
+cek "§297 kasir tak boleh menghitung BEP → 403" "V == 403" \
+  "$(status_code "$REISS105" GET "/laporan/bep?biaya_tetap=1000000")"
+cek "§297 /stok/nilai kunci == NilaiStokRingkas (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R297N")" "$K297_NILAI")"
+cek "§297 /stok/nilai kelima nilainya number" "V == 5" \
+  "$(jq -r '[.[]|select(type=="number")]|length' <<<"$R297N")"
+cek "§297 kasir membaca /stok/nilai dengan kunci yang sama (agregat sebelum harga ditahan)" "V == 0" \
+  "$(selisih296 "$(jq -r 'if type=="object" then keys[] else "BUKAN_OBJEK" end' <<<"$R297NK")" "$K297_NILAI")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

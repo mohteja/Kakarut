@@ -50,6 +50,826 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## BEP dan nilai stok — `periode` yang dikirim tanpa dideklarasikan, `basis` yang ponsel tak baca, dan "sudah di shared" yang ternyata tak terlihat kontrak — server + web + ponsel — 2026-09-05
+
+**Vena.** Butir antrean "16 tipe lokal web + 47 `api<{…}>` inline", dari
+ujung yang ditunjuk butirnya: `/laporan/bep` (`BepResult`) dan `/stok/nilai`
+(keduanya sudah bernama di `hantuDiketahui` ponsel — 6 + 5 entri). Butir
+"`/register` & `/resend-verification` masih netral" tetap DILEWATI
+(keputusan pemilik).
+
+**Populasi, diukur lewat HTTP** (owner dan kasir, DB gerbang):
+
+| rute | kunci yang dikirim | web | ponsel |
+| --- | --- | --- | --- |
+| `GET /laporan/bep?biaya_tetap=…` (owner/admin; kasir 403) | **8**: `biaya_tetap`, `basis`, `periode {dari, sampai}`, `rata_harga_jual`, `rata_margin_kontribusi`, `porsi_untuk_bep`, `omzet_untuk_bep`, `porsi_per_hari_30` | `BepResult` lokal, **7** — `periode` dikirim tanpa dideklarasikan | `BepHasil.fromJson` membaca **6** — tanpa `basis`, tanpa `periode` |
+| `GET /stok/nilai` (semua peran; kasir 200 dengan kunci sama) | **5**: `nilai`, `bahan_bernilai`, `minus_bahan`, `minus_nilai`, `tanpa_harga_bahan` | `NilaiStokRingkas` **dari `@kakarut/shared`** | 5 dibaca — semuanya tercatat HANTU |
+
+Tiga temuan:
+
+1. **`basis` tak dibaca ponsel.** Server mengirim `"penjualan" | "katalog"`:
+   angka BEP dihitung dari riwayat penjualan pada rentang, atau — bila
+   rentangnya tanpa penjualan — dari rata-rata katalog menu. Web
+   menampilkannya ("Basis perhitungan: …"). Ponsel tidak: angka dari katalog
+   tampil persis seperti angka dari penjualan sungguhan. Kini `BasisBep`
+   bernama di kontrak (ikut fikstur status), `BepHasil.basis` dibaca, dan
+   layar laporan menaruh kalimatnya lewat `labelBasisBep` (nilai asing/kosong
+   → '' — tak mengarang dasar yang tak dikirim).
+2. **`periode` dikirim, tak dideklarasikan web** — kelas `qty_teks`. Gema
+   rentang yang dipakai server (bawaan 30 hari dalam zona waktu perusahaan);
+   berguna bila klien tak mengirim `dari`/`sampai`. Kini di `BepResult`.
+3. **"Sudah di shared" ≠ "terlihat kontrak".** `NilaiStokRingkas` diekspor
+   `@kakarut/shared` sejak lama — dari `nilai-stok.ts`, bersama rumusnya.
+   Pembangkit fikstur kunci ponsel (`acuan-kunci-mobile`) dan Lampiran A
+   (`sinkron-lampiran-dto`) hanya membaca `types.ts`. Diukur: **27 berkas
+   shared selain `types.ts` mengekspor 55 medan interface**; dari 26 entri
+   `hantuDiketahui` ponsel, yang bertabrakan dengan medan itu hanya
+   `diskon`/`subtotal` (masukan klien `ReceiptData`/`BonData`/`UangPenjualan`,
+   ≠ `sale.*` dari `POST /penjualan` yang DTO-nya `SaleResult` masih lokal
+   web) — dan, sebelum putaran ini, kelima kunci `/stok/nilai`. Satu-satunya
+   bentuk KAWAT yang hidup di luar `types.ts`, dan ia tercatat hantu di ponsel
+   sejak entri itu ditulis. Interface-nya pindah ke `types.ts`; rumusnya tetap.
+
+### Yang dibangun
+
+- **shared**: `export type BasisBep`, `BepResult` (8), `NilaiStokRingkas`
+  pindah ke `types.ts` (`nilai-stok.ts` mengimpornya dari `./types`);
+  Lampiran A +45 baris.
+- **server**: `/laporan/bep` memulangkan `const hasil: BepResult`; `let
+  basis: BasisBep`. `/stok/nilai` tak berubah (sudah lewat `ringkasNilaiStok`).
+- **web**: `LaporanPage` mengimpor `BepResult` dari kontrak; salinan 7-medan
+  dicabut. Nol perubahan perilaku; typecheck hijau.
+- **`apps/server/test/bep-nilai-dto-utuh.test.ts`** (baru, 6 uji): literal
+  `/bep` == `BepResult` dan literal `ringkasNilaiStok` == `NilaiStokRingkas`
+  (dua arah); `basis: BasisBep` bernama; `nilai-stok.ts` tak mendeklarasikan
+  ulang; web tak mengetik ulang; **KELAS lintas-repo** (bila ponsel ada di
+  sebelah): tak satu entri `hantuDiketahui` pun bernama medan yang
+  dideklarasikan berkas shared MANA PUN — `types.ts` termasuk (di sana =
+  sudah di fikstur, cabut entrinya; di berkas lain = tak terlihat siapa pun,
+  pindahkan) — dengan `TABRAKAN_NAMA` beralasan untuk `diskon`/`subtotal`,
+  diratchet dua arah (harus masih hantu DAN masih bertabrakan); PASANGAN.
+- **`test/kunci-sumber.ts`**: `kunciObjek` ditulis ulang — memenggal teks
+  kedalaman-1 pada koma dan mengenali properti SINGKAT (`basis,`); versi
+  pertama hanya mengenali `kunci:`.
+- **verify-api §297** (9 lengan): kontrak terbaca (13); `/laporan/bep` kunci
+  == `BepResult` dua arah, `periode` == {dari, sampai} berformat tanggal,
+  enam angka bertipe number, kasir 403; `/stok/nilai` kunci ==
+  `NilaiStokRingkas` dua arah, lima number, kasir dengan kunci yang sama.
+- Changelog ponsel: entri ⚪️ (nol perubahan kawat; `basis` "layak dicek,
+  bukan wajib") + `BELUM_TAYANG`.
+- **Ponsel `9d46f79`** (PR #18): `BepHasil.basis` + `labelBasisBep` + kalimat
+  di layar; fikstur kunci +13, fikstur status +2 (`union:BasisBep`);
+  `hantuDiketahui` −11 (37 → 26); `test/bep_basis_test.dart` (baru).
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut / dimutasi | tuduhan |
+| --- | --- | --- |
+| GG | `periode` dicabut dari `BepResult`; §297 mandiri atas server hidup | premis 12 ≠ 13; `kunci == BepResult — nilai: 1`, stderr `periode` |
+| HH | `minus_nilai` dicabut dari `NilaiStokRingkas`; §297 mandiri | 3 lengan merah (premis, owner, kasir), stderr `minus_nilai` |
+| II | `periode` dicabut dari `BepResult`; uji statis | `dikirim /bep tapi tak ada di BepResult: [ 'periode' ]`; premis 7 < 8 |
+| JJ | `nilai-stok.ts` mendeklarasikan ulang `export interface NilaiStokRingkas` | `nilai-stok.ts mendeklarasikan ulang interface kawatnya` |
+| KK | entri hantu `'nilai'` dihidupkan lagi di ponsel | KELAS: `nilai ← types.ts` — **baru menuduh setelah sapuan mencakup `types.ts`** (lihat di bawah) |
+| LL | web mengetik ulang `interface BepResult` | `not to match /interface BepResult\b/` |
+
+**Yang jujur soal detektornya.** Empat alat ukur salah pada percobaan pertama:
+
+- `kunciObjek` buta terhadap properti singkat: literal `/bep` menulis
+  `basis,` (tanpa `:`) → 7 ≠ 8 dan `basis` tertuduh hantu. Ditulis ulang
+  (pemenggalan koma di kedalaman 1). Ketiga uji pemakainya tetap hijau.
+- Sapuan KELAS versi pertama berkunci NAMA dan menuduh `diskon`/`subtotal`
+  ← `bon-tagihan.ts`; versi kedua mengecualikan enam berkas cetak dan
+  tuduhannya berpindah ke `refund.ts`. Pengecualian per-berkas hanya
+  memindahkan masalah; diukur penuh tanpa pengecualian: **hanya dua nama itu**
+  yang bertabrakan (masing-masing di tiga bentuk klien). Diganti daftar
+  tabrakan-nama BERALASAN yang diratchet; begitu `SaleResult` masuk
+  `types.ts`, keduanya wajib dicabut.
+- Sapuan KELAS versi ketiga mengecualikan `types.ts` — dan bukti merah KK
+  (entri `'nilai'` hidup lagi) TIDAK menuduh, sebab `nilai` kini justru di
+  `types.ts`. Bukti merahnya yang menyingkap; sapuan kini mencakup seluruh
+  shared, dan KK menuduh dengan berkasnya.
+- Skrip §297 mandiri saya tak memuat `bocorkan` (didefinisikan di §295) →
+  tiga lengan "gagal" dengan nilai kosong. Bukan cacat skrip verify-api; cacat
+  alat bukti merahnya. Dicatat supaya angka "20 lolos, 0 gagal" yang dipakai
+  sesudahnya terbaca dengan sejarahnya.
+
+### Batas yang diakui
+
+- Nol perubahan kawat → gerbang tanpa build/e2e (web hanya impor tipe);
+  typecheck tahap pertama, gagal keras.
+- Tak ada Flutter: kalimat basis di layar tak pernah dilihat merender;
+  yang dibuktikan CI ponsel: unit `fromJson`/`labelBasisBep` + sapuan statis.
+- KELAS berkunci NAMA: DTO kawat yang kelak ditaruh di berkas shared lain
+  DAN kuncinya bertabrakan dengan nama yang sudah dicatat beralasan tak
+  tertangkap; yang tertangkap adalah nama baru (kelas `NilaiStokRingkas`).
+- 14 tipe lokal web + 47 `api<{…}>` inline tetap di antrean; `SaleResult`
+  (dibaca ponsel sebagai `diskon`/`subtotal`/`sale`) kandidat berikutnya.
+
+### Gerbang
+
+- Server (`gerbang-dto.sh`: typecheck tahap pertama → DB nol → boot → seed →
+  verify-api → vitest → invarian; tanpa build/e2e — nol perubahan kawat, web
+  hanya impor tipe): typecheck hijau, **verify-api 3.576 / 0** (3.567 + 9
+  lengan §297) dengan log UTUH (3.939 baris, 0 NUL, kesembilan lengan §297
+  tertulis), **invarian 27 / 0** — dan **vitest MERAH 1** pada jalan pertama:
+  `jangkar-iris.test.ts` (uji meta yang menagih tiap jangkar `indexOf` di
+  berkas uji ada di sumber repo ini) menuduh jangkar `const hantuDiketahui =
+  …` di `bep-nilai-dto-utuh` — jangkar itu memang ada di repo PONSEL. Kelas
+  senyap yang dijaga uji meta itu tak berlaku (fungsinya melempar bila jangkar
+  hilang), tapi aturannya benar apa adanya: diganti regex yang melempar
+  eksplisit, berkomentar. Ulang atas perubahan satu berkas uji itu: typecheck
+  hijau, **vitest 246 berkas / 3.042 uji** (+1 berkas `bep-nilai-dto-utuh`);
+  verify-api & invarian TIDAK diulang — kode server/kontrak identik dengan
+  jalan pertama, dan dikatakan apa adanya.
+- Ponsel: commit `9d46f79`, **CI #51 hijau** (run 33975458533).
+- **Tak ada rilis.**
+
+## Sesi & cabang — bentuk yang dibaca SETIAP klien pada SETIAP sesi: nol medan di kontrak, dua penulis satu bentuk, dan setelan yang dikirim "supaya kasir memperingatkan" tanpa satu klien pun membacanya — server + web + ponsel — 2026-09-05
+
+**Vena.** Butir antrean "19 tipe lokal web + 47 `api<{…}>` inline", diambil
+dari ujung yang ditunjuk butirnya sendiri: `/auth/me` + `/cabang` — sesi dan
+cabang, dibaca semua klien pada tiap sesi. Butir "`/register` &
+`/resend-verification` masih netral" di atasnya tetap DILEWATI (keputusan
+pemilik; ditawarkan di laporan).
+
+**Populasi, diukur lewat HTTP** (owner dan kasir, DB gerbang):
+
+| rute | kunci yang dikirim | deklarasi SEBELUM putaran ini |
+| --- | --- | --- |
+| `POST /auth/login` | 4 atas: `token`, `user`, `company`, `branch` | `SesiLogin` lokal di `auth/session.ts`; web `AuthState` lokal — **tanpa `blokir_jual_minus`**; ponsel `AuthState.toJson` lokal |
+| `GET /auth/me` | 3 atas; `.user` 7 (= `AuthUser`, iat/exp JWT tak bocor); `.company` **9** | objek `company` **dirakit ulang inline** di handler — penulis kedua |
+| `GET /cabang` | 31 baris × **14** kunci, sama untuk kasir | web `Cabang` lokal (`BranchContext.tsx`); ponsel `BranchDto` lokal |
+| Lampiran A / fikstur ponsel | — | **0 medan** untuk company, sesi, cabang |
+
+Tiga temuan di balik angka itu:
+
+1. **Dua penulis satu bentuk.** `companyDto` (dipakai `buatSesi` → login,
+   register, onboarding) dan objek inline di `GET /auth/me` menulis sembilan
+   medan yang sama — sinkron hanya karena kebetulan; medan yang ditambah di
+   satu tempat hilang dari yang lain tanpa suara. Kini satu: `companyDto`,
+   diekspor dan diketik `CompanyDto`.
+2. **`blokir_jual_minus` — dikirim, tak dibaca siapa pun.** Komentar di
+   `companyDto`: "Kasir perlu tahu setelan ini untuk MEMPERINGATKAN sebelum
+   tombol Bayar ditekan; penegakannya tetap di server." Diadu ke seluruh klien:
+   web hanya MENULISNYA di `PerusahaanPage` (pengaturan), `AuthState`-nya
+   bahkan tak mendeklarasikannya; ponsel tak menyentuh namanya sama sekali.
+   Server menegakkan di `penjualan/service.ts` — jadi kasir baru tahu saat
+   Bayar ditolak. Peringatan yang dijanjikan medan itu belum pernah dibuat di
+   mana pun → antrean, dengan medannya kini bernama di kontrak.
+3. **Ponsel: 14 entri `hantuDiketahui` adalah kelas ini** (`user`/`company`/
+   `branch`/`token` sesi tersimpan, lima medan cabang, lima medan perusahaan)
+   — semuanya kini di kontrak dan ratchet menuntut pencabutannya (51 → 37).
+   Tiga nama kontrak baru yang ponsel tak sentuh: `slug` (ponsel mengenali
+   perusahaan lewat `id`), `blokir_jual_minus` (temuan 2), dan
+   `central_kitchen_id` — ponsel memilih CK lewat `tipe == 'central_kitchen'`
+   (`beli_perlengkapan_page`, `kasir_providers`), bukan tautan pemasok
+   cabang; pada perusahaan ber-CK lebih dari satu daftar CK di ponsel belum
+   menyempit ke pemasok cabang ini. Ketiganya dicatat beralasan.
+
+### Yang dibangun
+
+- **shared**: `CompanyDto` (9), `BranchRingkas` (2), `SesiDto` {user, company,
+  branch}, `SesiLogin extends SesiDto` {token}, `CabangDto` (14) — komentar
+  medan dipertahankan dari deklarasi web. Lampiran A disinkronkan (+79 baris).
+- **server**: `companyDto` diekspor, diketik `CompanyDto`; `GET /auth/me`
+  memanggilnya dan memulangkan `const sesi: SesiDto`; `GET /cabang` memetakan
+  `(r): CabangDto`; `SesiLogin` lokal dicabut. Nol perubahan kawat.
+- **web**: `export type AuthState = SesiLogin;` dan `export type Cabang =
+  CabangDto;` — 6 + 1 situs pemakai tak berubah; typecheck hijau.
+- **`apps/server/test/sesi-cabang-dto-utuh.test.ts`** (baru, 7 uji): literal
+  `return {…}` `companyDto` == `CompanyDto` dua arah; literal `rows.map((r):
+  CabangDto => ({…}))` == `CabangDto` dua arah; **SATU penulis** — kelima kunci
+  khas company (`pb1_enabled`, `pb1_rate`, `diskon_maks_persen`,
+  `blokir_jual_minus`, `logo_url`) hanya boleh muncul sebagai properti di
+  `companyDto` di seluruh `apps/server/src` (buta komentar, skema zod
+  dikecualikan); `SesiDto`/`SesiLogin`/`BranchRingkas` persis; web memakai tipe
+  kontrak; PASANGAN (kunci karangan di literal, komentar, medan karangan di
+  kontrak, penulis kedua sintetis vs zod). Pengurai `kunciObjek`/
+  `medanInterface` pindah ke **`test/kunci-sumber.ts`** — mengimpor dari berkas
+  `.test.ts` mendaftarkan suite-nya dua kali; `medanInterface` kini mengenal
+  `extends`.
+- **verify-api §296** (11 lengan): premis kontrak terbaca (34 medan) + owner
+  ber-company + `/cabang` ≥ 2; kunci atas `/auth/login` == `SesiLogin`,
+  `/auth/me` == `SesiDto`, `.user` == `AuthUser`, `.company` == `CompanyDto`
+  (semua dua arah); `login.company == me.company` (satu penulis, dari kawat);
+  `pb1_rate`/`diskon_maks_persen` angka & `blokir_jual_minus` boolean; tiap
+  baris `/cabang` == `CabangDto` dua arah DAN tiap baris membawa semua 14;
+  kasir membaca `/cabang` dengan kunci yang sama.
+- Changelog ponsel: entri ⚪️ (nol perubahan kawat; menyebut `blokir_jual_minus`
+  sebagai "layak dicek, bukan wajib"), terdaftar `BELUM_TAYANG`.
+- **Ponsel `dfe1e74`** (PR #18): fikstur kunci +29; `hantuDiketahui` −14;
+  `kunci-belum-dibaca.txt` +2 kelompok beralasan (+ catatan `slug`). Nol
+  perubahan kode produksi ponsel.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut / dimutasi | tuduhan |
+| --- | --- | --- |
+| AA | `blokir_jual_minus: co.blokirJualMinus,` dicabut dari literal `companyDto` | `di CompanyDto tapi tak pernah dibangun — hantu: expected [ 'blokir_jual_minus' ]`; premis 8 < 9; satu-penulis 4 ≠ 5 |
+| BB | objek inline company dihidupkan lagi di `GET /auth/me` | satu-penulis: `expected [ …(10) ] to deeply equal [ …(5) ]` |
+| CC | web mengetik ulang `interface AuthState` | `to match /^export type AuthState = SesiLogin;/m` |
+| DD | `medan_hantu: string;` di `CabangDto` | `di CabangDto tapi tak pernah dikirim /cabang — hantu: [ 'medan_hantu' ]` |
+| EE | `blokir_jual_minus` dicabut dari `CompanyDto`; §296 mandiri atas server hidup | premis 33 ≠ 34; `.company == CompanyDto — nilai: 1`, stderr menyebut `blokir_jual_minus` |
+| FF | `jam_buka` dicabut dari `CabangDto`; §296 mandiri | 4 lengan merah (gabungan baris, tiap-baris-14, kasir, premis), dua menyebut `jam_buka` |
+
+**Yang jujur soal detektornya.** Empat alat ukur putaran ini salah pada
+percobaan pertama, dan semuanya ketahuan oleh lengan yang memang ada untuk itu
+(yang keempat — log gerbang yang memotong dirinya — dicatat di bagian Gerbang):
+
+- Regex satu-penulis versi pertama `:\s*(?!z\.)` MUNDUR (`\s*` kosong) dan
+  meloloskan `pb1_enabled: z.boolean()` sebagai penulis — lima baris zod di
+  `company/routes.ts` tertuduh (10 ≠ 5) dan PASANGAN ikut merah (3 ≠ 2).
+  Diperbaiki `:(?!\s*z\.)`; PASANGAN kini memuat lengan zod sintetis.
+- `awk` §296 versi pertama memakai kelas `[a-z_]+` — `pb1_enabled`/`pb1_rate`
+  (ada angka) tak terbaca: premis 32 ≠ 34 dan `.company == CompanyDto` merah
+  palsu 2. §295 memakai kelas yang sama dan aman hanya karena `StokMasukRow`
+  tak punya angka; lengan dua-arahnya akan menyingkapkan medan berangka
+  sebagai "dikirim − kontrak". Tak diubah putaran ini — dicatat, bukan
+  diselesaikan diam-diam.
+- Saringan `grep` saya atas keluaran uji lintas-repo hanya memperlihatkan
+  `blokir_jual_minus` sebagai kunci tanpa keputusan; `central_kitchen_id`
+  tersembunyi di baris yang tersaring. Cermin Python (`cermin_hantu.py`)
+  menyingkapkannya sebelum push — dan itu satu-satunya sebab ia dicatat.
+
+### Batas yang diakui
+
+- Nol perubahan kawat → gerbang tanpa build/e2e (web hanya alias tipe). Kali
+  ini `npm run typecheck` adalah tahap PERTAMA gerbang dan gagal keras —
+  pelajaran koreksi #93.
+- Peringatan `blokir_jual_minus` di kasir TIDAK dibangun putaran ini: satu
+  tipe per putaran adalah batas yang sengaja; medannya kini bernama di kontrak
+  dan butir antreannya menyebut kedua klien.
+- Tak ada Flutter di mesin ini: kedua uji Dart ditiru Python; CI ponsel yang
+  menjalankannya.
+- 16 tipe lokal web + 47 `api<{…}>` inline lainnya tetap di antrean.
+
+### Gerbang
+
+- Server (`gerbang-dto.sh`: **typecheck sebagai tahap pertama, gagal keras** →
+  DB nol → boot → seed → verify-api → vitest → invarian; tanpa build/e2e —
+  nol perubahan kawat, web hanya alias tipe): typecheck ketiga workspace
+  hijau (dibaca dari LOG-nya), **verify-api 3.567 / 0** (3.556 + 11 lengan
+  §296), **vitest 244 berkas / 3.030 uji** (+1 berkas
+  `sesi-cabang-dto-utuh`), **invarian 27 / 0** — commit `2355514`.
+- **Log gerbang itu ternyata memotong dirinya sendiri.** Saat menagih bukti
+  tertulis kesebelas lengan §296, `grep "§296"` memulangkan 1 dari 11: log
+  verify-api 231.786 byte, **231.667 di antaranya NUL**, dua baris tersisa.
+  Sebab: di dalam `$(…)`, `tee /dev/stderr` membuka ULANG `/dev/stderr` —
+  yang saat `> log 2>&1` adalah berkas log itu sendiri — dengan O_TRUNC; log
+  sebelum lengan itu terhapus, sisanya mendarat di offset lama sebagai berkas
+  jarang. Pola itu lahir di §295 (#93) dan saya salin ke §296. Verdik
+  3.567/0 tetap sah (penghitung PASS/FAIL hidup di memori; ringkasan
+  kegagalan dicetak sesudahnya), tapi klaim "kesebelasnya hijau di jalan
+  penuh" versi pertama baris ini bertumpu pada aritmetika 3.567 − 3.556,
+  bukan pada bukti tertulis — maka gerbangnya diulang. `tee -a` pun bukan
+  jawabannya: tak memotong, tapi baris diagnostiknya TERTIMPA tulisan stdout
+  berikutnya (offset fd induk tak maju pada O_APPEND) — ketahuan saat uji
+  penjaganya pertama ditulis dengan `-a`. Yang benar: `>&2` dari dalam
+  `$(…)` (deskripsi berkas yang sama) → helper `bocorkan`; ketiga situs
+  diganti. **`verify-api-log-utuh.test.ts`** (baru, 3 uji) MENJALANKAN ketiga
+  bentuk di bash sungguhan: tanpa `-a` → NUL, `-a` → tertimpa, `bocorkan` →
+  200 baris utuh dan berurutan; INTI: tak ada `tee [-a] /dev/stderr` di
+  skrip. Commit terpisah (perbaikan alat ukur, bukan bagian vena).
+- Gerbang ULANG sesudah perbaikan (jalan yang sama): typecheck hijau (tahap pertama), **verify-api 3.567 / 0** dengan log
+  UTUH (3.930 baris, 0 NUL — §295 6 lengan, §296 11 lengan tertulis), **vitest
+  245 berkas / 3.033 uji** (+1 berkas `verify-api-log-utuh`), **invarian 27 / 0**.
+- Ponsel: commit `dfe1e74`, **CI #50 hijau** (run 33974257848).
+- **Tak ada rilis.**
+
+## Lencana yang gagal ≠ lencana nol — dan tiga provider di hulu yang membuat aturan itu menjaga keadaan yang tak pernah terjadi — ponsel — 2026-09-05
+
+**Vena.** Butir antrean Mobile "`shift_repository.dart:54` menelan galat jadi
+NOL" (ditemukan 2026-09-03 saat lencana selisih web). Dikerjakan selagi
+gerbang server vena sebelumnya berjalan — repo ponsel tak menyentuh pohon
+yang sedang diuji.
+
+**Populasi.** Provider yang MEMBERI MAKAN lencana: penerima
+`gagal: X.hasError` di `kasir_page`, `dashboard_page`, `dashboard_tim`
+dipetakan balik ke `ref.watch(P)`-nya → **7 provider**. Badannya diadu dengan
+`catch (`: **3 menelan** — `selisihMenungguProvider` (`catch (_) → 0`, kini
+`RingkasSelisih` nol), `ringkasKebersihanProvider` (`→ null`),
+`pesananDikerjakanProvider` (`→ 0`). Ketiganya punya konsumen yang PATUH
+(`badgeMerah(n, gagal: X.hasError)`) — kepatuhan di hilir menjaga `hasError`
+yang di hulu tak pernah bisa true. `galat_ditelan_test` tak menuduhnya:
+pemindainya hanya menghitung catch berbadan KOSONG, dan ketiganya berbadan
+`return`.
+
+**Diukur lewat HTTP** (2026-09-05, token kasir): `/shift/selisih/ringkas` →
+403, `/kebersihan/ringkas` → 403 — dan kedua ubinnya hanya tampil untuk
+manajemen (`kasir_page:1689`), jadi 403 itu memang bukan kabar untuk kasir.
+Yang ikut ditelan bersamanya: jaringan putus & server tumbang untuk OWNER,
+yang ubinnya tampil dan lencananya berbunyi "tak ada yang menunggu".
+
+### Yang dibangun
+
+- `selisihMenungguProvider`: gerbang PERAN (`isManajemen`, non-manajemen →
+  nol tanpa menyentuh jaringan — pola `pengajuanMenungguProvider`), tanpa
+  `try/catch`. `ringkasKebersihanProvider` & `pesananDikerjakanProvider`:
+  gerbang peran sudah ada, `try/catch` dicabut. Konsumen tak berubah — mereka
+  sudah benar.
+- **`test/lencana_menelan_galat_test.dart`** (baru): unit provider dengan
+  `ApiClient` palsu melempar + `AuthController` di-override memulangkan sesi
+  tetap — owner + API gagal → `AsyncError` (`throwsA(ApiException)`), kasir →
+  nol/null dengan **nol panggilan API**; statis — pemetaan `gagal: X.hasError`
+  → provider (premis ≥5, lima nama dipaku), badan tanpa `catch (`; PASANGAN
+  sintetis (menelan tertuduh; `catch` di komentar tidak).
+
+**Bukti merah** (Python meniru asersi statis, pulih byte-per-byte):
+YY `catch (_)` dipulihkan di `selisihMenungguProvider` →
+`menelan: ['selisihMenungguProvider']`; ZZ di `pesananDikerjakanProvider` →
+`menelan: ['pesananDikerjakanProvider']`.
+
+### Batas yang diakui
+
+- Unit provider-nya belum pernah dijalankan siapa pun sebelum CI (tak ada
+  Flutter di sini) — override `AuthController` dengan subkelas yang
+  `build()`-nya memulangkan sesi tetap adalah bentuk yang belum ada di repo.
+- "Server lama tanpa endpoint ringkas" (404) kini juga sampai ke lencana
+  sebagai `!` untuk manajemen — benar (rutenya tayang sejak 2026-09-03), dan
+  disebut supaya tak ada yang mengira itu regresi.
+- Pil `!` untuk owner saat jaringan putus tak dilihat merender: yang
+  dibuktikan adalah `AsyncError` sampai ke provider; jalur `hasError → "!"`
+  sudah diukur `lencana_gagal_test` (2026-08-27).
+
+### Gerbang
+
+- Ponsel: tiga commit di `claude`, PR #18 — `78a6a3e` **CI #47 merah**
+  (704 lolos, 3 gagal: ketiga lengan "API gagal → galat" TimeoutException 30
+  detik; API palsunya melempar seketika, yang menahan Riverpod 3 mengulang
+  provider gagal dengan backoff sehingga `.future` tak pernah selesai —
+  artefak harness, provider produksinya benar) → `ffb6781` **CI #48 merah**
+  (`flutter analyze`: `ProviderListenable` bukan kelas publik Riverpod 3 +
+  lint `unnecessary_underscores`) → `b7eebb2` **CI #49 hijau** (run
+  33973573090; uji membaca KEADAAN provider lewat `listen` + `hasError`,
+  bukan `.future`). Kode produksi identik di ketiga commit.
+- Server: dokumen saja (entri ini); tak ada gerbang kode.
+- **Tak ada rilis.**
+
+## Baris pengadaan yang tipenya tak pernah dilihat siapa pun — 55 kunci, tiga yang tak dideklarasikan, dan bacaan hantu yang baru ketahuan dari arah sebaliknya — server + web + ponsel — 2026-09-05
+
+**Vena.** Butir antrean "`StokMasukPage`/`StokMasukRow` masih DTO lokal
+halaman" (lahir dari temuan `qty_teks`: dikirim sejak lama, tak pernah
+dideklarasikan, dirakit ulang di klien). Butir "`/register` &
+`/resend-verification` masih netral" di atasnya DILEWATI — itu keputusan
+pemilik, bukan pekerjaan; ditawarkan di laporan.
+
+**Populasi, diukur lewat HTTP** (owner, `per_page=200&branch_id=all`, DB
+gerbang): `/produksi` 107 baris, `/pembelian` 130 baris — **55 kunci per
+baris**, sama di kedua rute. Dibandingkan tiga deklarasi:
+
+| deklarasi | medan | selisih terhadap 55 yang dikirim |
+| --- | --- | --- |
+| `StokMasukRow` lokal web (`TambahStokPage.tsx`) | 52 | **3 dikirim tanpa dideklarasikan**: `harga_tebakan`, `pengadaan`, `qty_setara`; 0 hantu |
+| `FakturRow.fromJson` ponsel | 40 | **1 dibaca tapi TAK PERNAH dikirim**: `asal_cabang` |
+| Lampiran A / fikstur ponsel | 0 | tak pernah melihat tipenya sama sekali |
+
+`qty_setara` adalah saudara `qty_teks` — kelas yang sama, dua kali.
+`/penerimaan` diukur juga (owner, `branch_id=all`): 25 kunci per baris, tak
+satu pun `asal_*` — dan `KirimanRow.fromJson` ponsel membaca `asal_cabang` di
+sana pula. Dua bacaan hantu, dua label ("🚚 Dari stok X", "Transfer dari X")
+yang menunggu kabar yang tak akan datang; keduanya jatuh ke cabang lain diam-
+diam, jadi tak ada yang pernah salah TERLIHAT.
+
+**Temuan detektor.** Ratchet kunci ponsel (`kunci_kontrak_server_test`)
+hanya menagih SATU arah: kunci kontrak yang tak disentuh. Arah balik — kunci
+yang dibaca ponsel tapi tak ada di kontrak mana pun — tak pernah dijaga.
+Diukur: dari **1.123** bacaan `['kunci']` di `lib/`, **51 kunci berbeda** tak
+ada di fikstur: penyimpanan lokal ponsel (sync_queue, printer, sesi),
+dev/generik, dan **±37 balasan server yang DTO-nya belum pernah di shared**
+(`/stok/nilai`, `/laporan/bep`, ringkas beli perlengkapan, `BranchDto`/
+`CompanyDto` lokal, struk `/penjualan`, …) — kelas `StokMasukRow`, dan
+populasinya jauh lebih besar dari satu tipe. Dicatat sebagai vena berikutnya.
+
+### Yang dibangun
+
+- **Shared** — `StokMasukRow` (55 medan, tiga yang hilang diberi tipe dari
+  sumbernya: `harga_tebakan: boolean`, `pengadaan: "produksi" | "beli"`,
+  `qty_setara: string | null`) + `StokMasukPage` (`rows`, `total`, `page`,
+  `per_page`, `total_pengeluaran`, `ringkas: RingkasPengadaan`), di sebelah
+  `RingkasPengadaan`. Lampiran A disinkronkan (`sinkron:lampiran`, +139
+  baris).
+- **Web** — deklarasi lokal dicabut; `TambahStokPage`, `DokumenBelanjaModal`,
+  `DokumenKirimModal`, `FakturDetailPage` mengimpor dari `@kakarut/shared`.
+  Typecheck ketiga workspace hijau — nol pemakai yang berubah perilaku.
+- **Server, penjaga** — `stok-masuk-row-utuh.test.ts`: kunci `select` +
+  pengayaan (`return { ...r, … }`) `ambilBarisFaktur` diurai dengan
+  kedalaman kurung == medan interface, DUA ARAH (tak dideklarasikan / hantu),
+  PASANGAN (kunci karangan di select, medan karangan di interface, kunci di
+  komentar diabaikan). **verify-api §295**: kunci baris HTTP gabungan kedua
+  rute == kontrak (`awk` atas `types.ts`), dua arah, + tak ada baris yang
+  membawa `asal_cabang`.
+- **Ponsel** — fikstur kunci +61 baris; bacaan hantu `asal_cabang` dicabut di
+  `FakturRow`/`FakturGroup` dan `KirimanRow`/`KirimanGroup`; label pengadaan
+  memakai `g.cabang` (paritas web), penerimaan "Transfer stok"; 9 nama yang
+  belum disentuh dicatat beralasan di `kunci-belum-dibaca.txt` (rak default,
+  kolom audit/laporan harga, blok supplier dokumen belanja, id cabang
+  peminta — semuanya layar/dokumen web). **`kunci_hantu_test.dart`** (baru):
+  arah balik — tiap `['kunci']` yang dibaca `lib/` ada di kontrak atau tercatat
+  di `hantuDiketahui` (51 entri, tiga kelas beralasan); ratchet dua arah
+  (entri yang tak lagi dibaca / sudah masuk kontrak = basi); PASANGAN
+  (komentar & peta lokal diabaikan).
+- Changelog ponsel: entri ⚪️ (nol perubahan kawat) + `BELUM_TAYANG`.
+
+### Bukti merah (dipulihkan byte-per-byte)
+
+| | dicabut | tertuduh |
+| --- | --- | --- |
+| TT | `json['asal_cabang_nama']` ditambahkan ke `FakturRow` | `kunci_hantu` INTI: `liar: ['asal_cabang_nama']` |
+| UU | bacaan `['kotor']` diganti `['kotor_x']` | RATCHET `basi: ['kotor']` + INTI `liar: ['kotor_x']` |
+| VV | `supplier_bahan_telepon` dicabut dari `kunci-belum-dibaca` | `kunci_kontrak` INTI: `['supplier_bahan_telepon']` |
+| WW | `harga_tebakan: boolean;` dicabut dari interface | `stok-masuk-row-utuh`: `expected [ 'harga_tebakan' ] to deeply equal []` |
+| XX | sama, logika §295 dijalankan mandiri atas server hidup | `dikirim − kontrak: [harga_tebakan]` |
+
+**Yang jujur soal detektornya.** Bukti TT versi pertama memulihkan bacaan
+`asal_cabang` yang asli — dan `kunci_hantu` TIDAK menuduh, karena berkas
+fikstur berkunci NAMA dan `TransferStokFaktur` memang punya `asal_cabang`.
+Hantu historis putaran ini karena itu hanya tertangkap oleh pengukuran HTTP,
+bukan oleh uji yang lahir darinya; uji itu menangkap kelas yang lebih sempit
+(nama yang tak ada di kontrak MANA PUN). Menutup celahnya menuntut fikstur
+berpasangan `Dto|kunci` di sisi pembaca — dicatat di antrean, bukan
+diselesaikan diam-diam.
+
+### Batas yang diakui
+
+- Tak ada Flutter di mesin ini: asersi Dart ditiru Python; CI ponsel yang
+  menjalankannya.
+- §295 diuji merah secara MANDIRI (perintah `awk`/`jq`-nya dijalankan
+  terhadap server hidup dengan `types.ts` yang dimutasi), bukan lewat
+  `verify-api.sh` utuh — gerbang penuh menjalankannya hijau, merahnya
+  dibuktikan di luar.
+- 37-an DTO balasan yang belum di shared TIDAK dipindahkan putaran ini —
+  satu tipe per putaran adalah batas yang sengaja.
+
+### Gerbang
+
+- Server (DB nol → seed → verify-api → vitest → invarian; tanpa build/e2e —
+  perubahan web hanya impor tipe): **verify-api 3.556 / 0** (3.550 + 6
+  lengan §295), **vitest 243 berkas / 3.020 uji** (+1 berkas
+  `stok-masuk-row-utuh`, +11 uji), **invarian 27 / 0**.
+- **KOREKSI (ditulis putaran berikutnya, 2026-09-05).** Versi pertama baris
+  di atas berbunyi "typecheck ketiga workspace hijau" — itu SALAH. Gerbang
+  putaran ini melewatkan `build`, jadi tak ada tahap yang menjalankan `tsc`;
+  `typecheck` dijalankan terpisah di latar, dan yang dibaca adalah kode
+  keluar pembungkusnya (selalu 0), bukan lognya (`EXIT=1`). Yang merah:
+  `apps/web` — baris contoh `contohFakturBelanja` di
+  `packages/shared/src/contoh-cetak.ts` (dianotasi `FakturGroup` di web)
+  kehilangan tiga medan yang putaran ini sendiri tambahkan ke `StokMasukRow`
+  (`harga_tebakan`, `pengadaan`, `qty_setara`). Commit `a2b1fdd` ter-push
+  dengan typecheck web merah. Diperbaiki di commit dokumen putaran #94
+  (tiga medan ditambah ke baris contoh; `tsc` hijau di ketiga workspace),
+  dan skrip gerbang kini menjalankan `npm run typecheck` sebagai tahap
+  pertama yang GAGAL KERAS — supaya kelas "build dilewati, tsc ikut lewat"
+  tak terulang.
+- Ponsel: commit `aee7ad9`, **CI #46 hijau** (run 33972433656).
+- **Tak ada rilis.**
+
+## Layar masuk ponsel diam pada KODE penolakan yang sudah dikirim server — dan salinan literal yang akhirnya diikat ke sumbernya — ponsel + server — 2026-09-05
+
+**Vena.** Butir teratas antrean: "Ponsel: tombol Daftar di layar masuk belum
+membawa alamatnya" (lahir dari putaran `/login` menyebut alasannya,
+2026-09-03).
+
+**Populasi.** Empat kode `SEBAB_LOGIN` × tiga permukaan.
+
+| | server melempar | web bercabang | ponsel bercabang |
+| --- | --- | --- | --- |
+| `email_tak_dikenal` | ✓ | ✓ tautan "Daftar dengan email ini →" `?email=` | **✗** |
+| `akun_terhapus` | ✓ (jaring; tombstone diganti nama → jatuh ke `email_tak_dikenal`) | — | — |
+| `akun_nonaktif` | ✓ | — | — |
+| `password_salah` | ✓ | — | — |
+
+Diukur lewat HTTP terhadap server gerbang (2026-09-05): alamat tak dikenal →
+401 `{"sebab":"email_tak_dikenal"}`; password salah → `password_salah`; akun
+`is_active=false` → `akun_nonaktif` (cabangnya SEBELUM password — password
+apa pun); alamat cacat (`bukan-email`) → `email_tak_dikenal`; akun
+belum-verifikasi dengan password salah → `password_salah` (cabang 403 belum
+verifikasi baru sesudah password cocok). `ApiException.data` di ponsel sudah
+membawa badan itu utuh; `login_page.dart` menampilkan `e.message` lalu
+berhenti. Satu-satunya dari keempatnya yang bisa diselesaikan orangnya
+sendiri di layar itu — dan pembaca tersering adalah karyawan yang SUDAH
+diundang (undangan cuma baris `invitations`).
+
+**Temuan kedua, di gerbang.** `status_cermin_server_test.dart` (ponsel)
+menagih tiap `x == 'nilai'` ber-medan enum ke fikstur `status-kontrak-server`.
+Fikstur itu punya TIGA sumber (pgEnum, `z.enum`/`kode:`/`sebab:` literal di
+rute, union literal bernama di shared) — dan `SEBAB_LOGIN` lolos dari
+ketiganya: server melemparnya lewat `SEBAB_LOGIN.takTerdaftar` (bukan literal
+`sebab: "…"`), dan tipenya `(typeof X)[keyof typeof X]` (bukan union literal).
+Jadi ponsel yang menulis `sebab == 'email_tak_dikenal'` — hal yang BENAR —
+akan dituduh memakai nilai "yang tak ada di kontrak mana pun", dan jalan
+keluar termudahnya adalah mendaftarkannya di `milikPonsel`: pengecualian yang
+memutus ikatan ke sumber persis pada nilai yang paling butuh ikatan itu.
+
+### Yang dibangun
+
+- **Server** — `acuan-status-mobile.ts` sumber ke-4 `konst:<NAMA>`: objek
+  `export const X = {…} as const` di `packages/shared`, hanya nilai berbentuk
+  kode (`^[a-z][a-z0-9_]*$`) — `PESAN_LOGIN` yang bertetangga dan berbentuk
+  sama TIDAK ikut (kalimat manusia bukan kontrak mesin). Fikstur ponsel +4
+  baris. `status-satu-kontrak.test.ts`: KEEMPAT sumber terwakili,
+  `email_tak_dikenal` ada, `konst:PESAN_LOGIN|` nol. `login-beralasan.test.ts`
+  lengan lintas-repo (bila repo ponsel ada): `login_page.dart` memuat
+  `== '${SEBAB_LOGIN.takTerdaftar}'` (nilainya DIBACA dari shared, bukan
+  diketik), `RegisterPage(emailAwal:`, TIDAK memuat `PESAN_LOGIN.takTerdaftar`
+  maupun `contains('…terdaftar')`; `register_page.dart` membaca
+  `widget.emailAwal`; fikstur ponsel memuat keempat `konst:SEBAB_LOGIN|…`.
+- **Ponsel** — `login_page.dart`: `_sebab` dari `e.data?['sebab']`, tombol
+  "Daftar dengan email ini →" hanya bila `== 'email_tak_dikenal'`, membuka
+  `RegisterPage(emailAwal: alamat yang diketik)`; `_tamu` ikut mereset
+  `_sebab`. `register_page.dart`: `emailAwal` (trim → kolom email).
+  `test/sebab_login_ponsel_test.dart`: widget test (kode → tombol →
+  `RegisterPage` dengan kolom terisi; `password_salah` → tanpa tombol; kalimat
+  yang SAMA tanpa kode → tanpa tombol — bukti layarnya tak mengendus teks;
+  `emailAwal` terisi/kosong), statis, ikatan fikstur.
+
+### Detektor & bukti merah
+
+Asersi statis ditiru Python sebelum push; lengan server dijalankan vitest.
+Dipulihkan byte-per-byte.
+
+| | dicabut | tertuduh |
+| --- | --- | --- |
+| QQ | kode diganti `_error!.contains('tidak terdaftar')` | cermin ponsel: `login: tak bercabang pada kode`; lengan server: `expected … to contain "== 'email_tak_dikenal'"` |
+| RR | `widget.emailAwal` diabaikan di `initState` | `daftar: emailAwal tak dibaca` |
+| SS | baris `konst:SEBAB_LOGIN|email_tak_dikenal` dicabut dari fikstur | tiruan `status_cermin`: `_sebab == 'email_tak_dikenal'` asing; lengan server: `konst:SEBAB_LOGIN|email_tak_dikenal hilang dari fikstur ponsel — regenerasi` |
+
+Catatan jujur atas alat ukurnya: skrip bukti merah menilai lengan server
+lewat kode keluar, padahal perintahnya dipipakan ke `grep` (keluar 0) — skor
+otomatisnya "gagal menuduh" untuk QQ-server dan SS-server, sementara baris
+`AssertionError` yang tertangkap adalah persis tuduhan yang diharapkan.
+Yang dipercaya barisnya, bukan skornya; skripnya alat sekali pakai.
+
+### Batas yang diakui
+
+- Tak ada Flutter di mesin ini; widget test-nya (memompa `LoginPage` dan
+  `RegisterPage` sungguhan, termasuk `Image.asset`) adalah asersi yang belum
+  pernah dijalankan siapa pun sebelum CI — kalau CI merah, itu kabar dari
+  putaran ini sendiri.
+- Tiga kode lain (`akun_terhapus`, `akun_nonaktif`, `password_salah`) tetap
+  hanya kalimat di kedua klien — sama dengan web; tak ada tindakan yang bisa
+  ditawarkan layar untuk ketiganya.
+- `akun_terhapus` tak bisa diukur lewat HTTP: tombstone diganti nama
+  (`deleted:<id>:<email>`), dan alamat `hapus96@…` di DB gerbang sudah
+  didaftarkan ulang (→ `password_salah`). Cabangnya jaring, seperti ditulis
+  di `PESAN_LOGIN`.
+- Butir antrean "`/register` & `/resend-verification` masih netral" TIDAK
+  disentuh — itu keputusan pemilik, bukan pekerjaan.
+
+### Gerbang
+
+- Ponsel: commit `2715d68` di `claude`, PR #18. **CI #44 MERAH** (694 lolos,
+  1 gagal) — dan merahnya milik uji putaran ini sendiri, bukan layar: lengan
+  "tanpa `emailAwal` → kolom kosong" memompa `RegisterPage()` bertipe sama di
+  posisi yang sama, jadi Flutter memakai ulang `State` lama (initState tak
+  jalan, controller masih `x@y.id`). Ketiga widget test `LoginPage` LOLOS di
+  run yang sama — `Image.asset` aman, kode → tombol → `RegisterPage` terisi.
+  Perbaikan `3ca056c` (lepas pohon dulu, `pumpWidget(SizedBox())`) →
+  **CI #45 hijau** (run 33971823318). Batas "asersi yang belum pernah
+  dijalankan siapa pun sebelum CI" di atas menggigit persis sekali, di
+  harness, dan tercatat.
+- Server: typecheck hijau; vitest penuh **242 berkas / 3.012 uji hijau**
+  (3.009 + 3 lengan baru). verify-api & e2e tidak dijalankan — nol perubahan
+  rute/web.
+- **Tak ada rilis.**
+
+## Sepuluh daftar ponsel yang dipotong server dan DIAM — satu rumah, sebelas pengakuan, tiga lencana yang berhenti berbohong — ponsel + cermin server — 2026-09-05
+
+**Vena.** Utang yang tercatat eksplisit di antrean Mobile sejak 2026-08-31:
+"Header `X-Kakarut-Terpotong` belum dirender ponsel". Diambil sesudah antrean
+A⁷/B⁷ lunas; keputusan pemilik untuk putarannya: **ponsel-saja, tanpa perubahan
+API** — lencana selisih kas beralih ke `GET /shift/selisih/ringkas` yang sudah
+ada, dua lencana lain tampil "N+" saat daftarnya terpotong, dan pintu ringkas
+server untuk keduanya masuk antrean.
+
+**Populasi, disapu mekanis rute → repository → layar.** Di server: 14 situs
+pengirim pemotongan (`potongLarik(` ×11, `rows_terpotong:` ×2,
+`riwayat_terpotong:` ×1), 13 di luar panel super admin. Di ponsel:
+
+| | jumlah |
+| --- | --- |
+| tak dipanggil ponsel (`/stok/opname` baris mentah, `/supplier/:id/kartu`) | 2 |
+| dirender — `sampah_page.dart`, SATU-SATUNYA pembaca header di seluruh aplikasi | 1 |
+| **DIAM** — dibaca `as List` telanjang, header/bendera dibuang | **10** |
+
+Yang diam, dan layarnya: `/shift` (Tutup Kasir + lembar riwayat Operasional
+Cabang), `/shift/selisih` (Selisih Kas), `/stok/exp`, `/stok/opname/riwayat`
+(Riwayat SO + 2 situs lencana), `/perlengkapan/opname/riwayat` (Riwayat SO
+Perlengkapan + 2 situs lencana), `/perlengkapan/kiriman` (spanduk kiriman +
+3 situs lencana), `/menu/:id/riwayat-harga` (lembar riwayat harga di Analisis
+Harga), `/laporan/durasi-pesanan` (`riwayat_terpotong` tak pernah diurai —
+`operasional_models.dart:1374`), `/transfer-stok` (`rows_terpotong` dibuang di
+`transfer_repository.dart:51`, dan ponsel meminta **`per_page=50`** sendiri
+padahal maksimum server 200), `/stok/penyesuaian` (utang tertulis sejak 2026-08).
+
+**Tiga lencana dihitung `.length` atas daftar yang sudah dipotong**, jadi
+mentok diam-diam: selisih kas → 50 (`shift_repository.dart:51`), SO menunggu
+ACC → 200 (`dashboard_page.dart:87`, `kasir_page.dart:1358`), kiriman belum
+diterima → 50 (`kasir_page.dart:1351`, `dashboard_tim.dart:120`,
+`dashboard_page.dart:95`). Lencana yang berhenti bergerak justru saat antreannya
+paling panjang. Server **sudah** punya `GET /shift/selisih/ringkas` (seluruh
+populasi, lahir 2026-09-03 untuk sidebar web) yang ponsel tak pernah panggil.
+
+**Tak ada rumah bersama.** Delapan situs yang SUDAH mengaku merakit kalimatnya
+sendiri: 4 rumusan, 3 warna (`grey.shade600`, `orange.shade800`,
+`amber.shade900`), 2 penempatan (di atas daftar / di bawah), 1 duplikat
+verbatim (`kartu_stok_page.dart:128` = `perlengkapan_stok_page.dart:1176`).
+
+### Yang dibangun (repo `kakarut-mobile`, satu commit)
+
+- **`lib/core/widgets/daftar_dipotong.dart`** (baru, 200 baris): `Berbatas<T>`
+  (`rows` + `batas`; header absen = utuh, BUKAN nol; `0`/`-1`/teks tak
+  dipercaya), `bacaBerbatas(api, path, dari, {query})` — pola `sampah_page`
+  dipindah, bukan disalin — `kalimatDipotong({ditampilkan, total?, apa,
+  lanjutan?})` SATU rumusan ("Menampilkan N [dari T] apa — selebihnya tidak
+  ikut dimuat. Buka Kakarut di peramban untuk daftar lengkapnya."; kalimat
+  khusus layar MENAMBAH lewat `lanjutan`, tak mengganti), `DaftarDipotong`
+  (satu warna `orange.shade800`, satu ikon, satu tempat: baris penutup
+  daftar), `labelLencana(n, terpotong:)` → `"50+"`, `Lencana` +
+  `hitungLencana`/`gabungLencana`, `keteranganLencanaDipotong`.
+- **Repository → `Berbatas`**: `shift` (`/shift`, `/shift/selisih`, +
+  `getRingkasSelisih` + model `RingkasSelisih{menunggu, terpotong}`), `stok`
+  (`/stok/exp`, `/stok/opname/riwayat`, `/stok/penyesuaian`), `perlengkapan`
+  (`/perlengkapan/opname/riwayat`, `/perlengkapan/kiriman`), `manajemen`
+  (`/menu/:id/riwayat-harga`), `transfer` (`rows_terpotong` dibaca,
+  **`per_page` 50 → 200**), `LaporanDurasi.riwayatTerpotong`.
+- **12 layar memasang `DaftarDipotong`** bila `terpotong`: shift_page,
+  operasional_cabang_page, selisih_kas_page, stok_exp_page,
+  opname_riwayat_page, opname_perlengkapan_page, perlengkapan_stok_page
+  (spanduk kiriman — angkanya pun lewat `labelLencana`), analisis_harga_page,
+  laporan_page (kalimatnya menyebut bahwa sajian terhitung/rata-rata/per
+  menu TIDAK terpotong), transfer_page, penyesuaian_page, sampah_page.
+- **8 situs lama pindah rumah**: sampah (`IsiSampah` kini
+  `typedef Berbatas<SampahRow>`), kartu_fifo, kartu_stok, kartu perlengkapan,
+  beli_perlengkapan, permintaan, riwayat_harga_sheet, shift_detail. Kalimat
+  khususnya masuk `lanjutan`. Dua kartu (stok & perlengkapan) mendapat
+  kalimat yang dulu tak pernah dikatakan: server menjalankan saldo hanya atas
+  mutasi yang dikirim (`stok/service.ts:498`, `perlengkapan/service.ts:610`),
+  jadi **saldo akhir & total di kartu ikut terpotong**, bukan cuma daftarnya —
+  kalimatnya kini bilang "persempit rentang tanggalnya".
+- **Tiga lencana, satu aturan**: selisih kas dari `RingkasSelisih.menunggu`
+  (+ `terpotong` milik ringkas bila kuerinya sendiri menyentuh plafon); SO
+  menunggu & kiriman lewat `hitungLencana` → `BadgeAngka(terpotong:)` /
+  `BarisAksi(terpotong:)` → "200+" / "50+". Aturan nol: **0 pada daftar
+  terpotong tetap tanpa lencana** — "0+" di tiap layar warung besar adalah
+  peringatan yang orang belajar abaikan; sisa ketidakpastiannya diucapkan
+  `DaftarDipotong` di layar daftarnya.
+- `kunci-belum-dibaca.txt`: `rows_terpotong` dan `riwayat_terpotong` DICABUT
+  (keduanya kini dibaca; ratchet dua arah `kunci_kontrak_server_test`
+  menagihnya). Layar kartu supplier tetap belum ada — yang berubah cuma nama
+  medannya yang kini punya pembaca lain.
+
+### Detektor — `test/daftar_dipotong_test.dart` (Dart) + cermin server
+
+- **premis**: 11 rute, tiap rute punya pemanggil di `lib/`; pemakai provider
+  ≥ 12 layar + 3 berkas lencana; rumah memuat keenam penghuninya.
+- **INTI-1**: rute ber-header — nol `.get('<jalur>'` telanjang di `lib/`
+  (komentar dibutakan; `/shift` tak menuduh `/shift/pantau`; `:id` cocok
+  `$x`/`${x}`), ≥ 1 `bacaBerbatas(…'<jalur>'`; rute berkunci badan — kunci
+  `'rows_terpotong'`/`'riwayat_terpotong'` dibaca di fitur pemanggilnya.
+- **INTI-2**: tiap berkas yang `ref.watch` salah satu dari 12 provider daftar
+  memuat `DaftarDipotong(` — kecuali 3 berkas lencana, yang wajib
+  `hitungLencana(`.
+- **INTI-3**: nol kalimat rakitan tangan di luar rumah: literal string
+  (bersebelahan disambung; interpolasi `${…}` dibuang) yang dibuka
+  "Menampilkan " atau memuat `terpotong`/`dipotong` sebagai kata; frasa
+  `stok terpotong` (potongan STOK: "stok terpotong setelah di-ACC")
+  dikecualikan — satu-satunya arti lain kata itu, terukur 3 literal.
+- **INTI-4**: berkas lencana tanpa bentuk lama `ref.watch(P)…asData?.value
+  ?? …length`; `selisihMenungguProvider` memanggil `getRingkasSelisih`,
+  tanpa `.length`, rute `'/shift/selisih/ringkas'` ada; lencana selisih di
+  kasir membawa `terpotong:`; `BadgeAngka` memakai `labelLencana`.
+- **unit**: `batasDariHeader` (5 nilai omong kosong → null), `bacaBerbatas`
+  atas `ApiClient` palsu ber-header, `kalimatDipotong` 3 varian,
+  `labelLencana`, `hitungLencana` 4 keadaan + `gabungLencana`,
+  `LaporanDurasi.riwayatTerpotong`, `TransferRepository.getFaktur`
+  (`per_page=200` + `rows_terpotong`), `RingkasSelisih.fromJson`.
+- **widget**: `DaftarDipotong` melukis kalimatnya; `BadgeAngka(terpotong:)`
+  → teks `50+` (dan `50` tanpanya); `BarisAksi` meneruskannya.
+- **PASANGAN**: pemindai `.get` telanjang vs `bacaBerbatas`, jalur `:id`,
+  awalan `/shift` vs `/shift/pantau`, komentar; kalimat rakitan — kedelapan
+  rumusan lama tertuduh, 6 literal sah (termasuk interpolasi
+  `${labelLencana(…, terpotong: t)}` dan `'x-kakarut-terpotong'`) tidak.
+- **Cermin lintas-repo di SERVER** —
+  `apps/server/test/rute-terpotong-satu-kontrak.test.ts`: himpunan rute
+  pengirim DIURAI dari `modules/*/routes.ts` (penanda → deklarasi `.get("`
+  di awal baris — `c.get("auth")` di tengah baris sempat menang dan
+  menghasilkan `/shiftauth`; itu bukti pertama pengurainya jalan — + mount
+  dari `app.ts`), dikurangi 3 pengecualian BERALASAN (super admin,
+  `/stok/opname` baris mentah, kartu supplier) yang alasannya ikut diperiksa:
+  rute yang dikecualikan karena "tak dipanggil ponsel" memang tak boleh muncul
+  di `lib/` ponsel. Dua arah terhadap `ruteTerpotong` Dart. Ambang premis
+  pengurai Dart SENGAJA 8 (< 11): pengurai buta memberi 0, sedangkan satu
+  rute yang dicabut harus jatuh ke asersi BERNAMA RUTE — versi pertama
+  berambang 11 dan menuduh lewat premis, tanpa nama; dibetulkan.
+
+**Bukti merah** (Python meniru tiap asersi statis; dipulihkan byte-per-byte,
+`cmp`):
+
+| | dicabut | tertuduh |
+| --- | --- | --- |
+| LL | `bacaBerbatas` → `.get` telanjang di `/stok/exp` | INTI-1: `/stok/exp .get telanjang di ['features/stok/stok_repository.dart']` |
+| MM | `DaftarDipotong(` dicabut dari `penyesuaian_page` | INTI-2: `layar tanpa DaftarDipotong: ['features/stok/penyesuaian_page.dart']` |
+| NN | `Text('Menampilkan mutasi terbaru (dipotong).')` dirakit di `kartu_stok_page` | INTI-3 |
+| OO | lencana kiriman `dashboard_tim` kembali `.asData?.value.rows ?? …length` | INTI-4: `dashboard_tim.dart tanpa hitungLencana(` |
+| PP | `/stok/exp` dicabut dari `ruteTerpotong` Dart | cermin server: `expected [ '/stok/exp' ] to deeply equal []` |
+
+Dua tuduhan INTI-3 atas kode putaran ini SENDIRI sebelum pemindainya
+diperhalus: interpolasi `${labelLencana(…, terpotong: …)}` (nama parameter,
+bukan kalimat → interpolasi dibuang dulu) dan tooltip "daftar sumbernya
+dipotong server" di `badge_angka.dart` — yang kedua memang kalimat pemotongan
+di luar rumah, jadi dipindah ke rumah (`keteranganLencanaDipotong`), bukan
+diputihkan.
+
+### Batas yang diakui
+
+- **Tak ada Flutter di mesin ini.** Tiap asersi statis ditiru Python sebelum
+  push; yang menjalankan Dart-nya (analyze + seluruh uji, termasuk widget
+  test) CI ponsel pada `claude`. Tak satu pun layar dilihat merender terhadap
+  server hidup; "terpotong → mengaku" dibuktikan lewat balasan palsu
+  ber-header + widget test.
+- Fikstur gerbang server kecil — header pemotongan hampir tak pernah menyala
+  di data uji, jadi tak ada lengan verify-api/e2e untuk putaran ini (nol
+  perubahan rute/web; verify-api & e2e **tidak** dijalankan, dikatakan apa
+  adanya).
+- Lencana SO menunggu & kiriman tetap **tak akurat di atas plafon** — hanya
+  jujur ("200+"). Pintu ringkas servernya di antrean. Aturan nol (0 pada
+  daftar terpotong → tanpa lencana; spanduk kiriman tak muncul bila 0 yang
+  menunggu meski daftarnya terpotong) adalah kompromi yang ditulis di
+  `hitungLencana`, bukan yang tak disadari.
+- `selisihMenungguProvider` masih `catch (_) → 0` (kini `RingkasSelisih` nol)
+  — butir antrean Mobile yang terpisah, TIDAK disentuh putaran ini.
+- INTI-3 hanya melihat literal berspasi yang memuat kata kuncinya; kalimat
+  pemotongan yang ditulis tanpa `terpotong`/`dipotong`/"Menampilkan" lolos.
+
+### Gerbang
+
+- Ponsel: commit tunggal `006eb51` di `claude`, PR #18 (draft). **CI #43
+  hijau** (run 33970721672; `flutter analyze` 22 s, `flutter test` 111 s —
+  seluruh uji termasuk `daftar_dipotong_test.dart` dan widget test-nya).
+  Cermin Python-nya tak pernah merah sebelum push, dan CI membenarkannya.
+- Server: typecheck hijau; vitest penuh **242 berkas / 3.009 uji hijau**
+  (241/3.004 + cermin baru 5). verify-api & e2e tidak dijalankan — nol
+  perubahan rute/web.
+- **Tak ada rilis** (aturan pemilik: rilis hanya bila diminta).
+
+## RILIS 2026-09-05 — tujuh putaran tayang, dan clone satu-cabang yang dua kali membuat ref pelacaknya basi — web + ponsel — 2026-09-05
+
+- **Diminta pemilik**: *"ok rilis sekarang ke production, web dan ponsel
+  bersamaan"*. Aturan berdirinya terpenuhi oleh kalimat itu.
+
+- **Yang tayang**, sembilan commit di web + empat di ponsel:
+
+  | | commit merge | induk | CI |
+  | --- | --- | --- | --- |
+  | web → `production` | `fcf6c64` | `48532a3` + `33e99c3` | **#494 hijau**, termasuk build image + deploy Dokploy |
+  | ponsel → `Production` | `d606025` | `f429dba` + `bcbdc80` | **#42 hijau** |
+
+  Isinya: detail opname perlengkapan bertanggal (DTO +`waktu`/`oleh`) · lima
+  daftar lintas-hari bertanggal + ratchet · riwayat SO tabel+tanggal+saringan ·
+  Beli Perlengkapan tabel + berhalaman per faktur (**memutus ponsel**) · garis
+  waktu resep & harga · resep terkunci · ringkasan menu dibuang.
+
+- **Diukur dengan SHA dari `ls-remote`, bukan ref pelacak**: 18 dan 11 "commit
+  ekstra" di kedua cabang rilis semuanya commit merge lama — nol hotfix;
+  `git merge-tree` memulangkan pohon yang **byte-identik** dengan `claude` di
+  kedua repo. Gerbang tetap dijalankan di atas commit merge web yang persis
+  didorong: verify-api **3.550/0**, vitest **241/3.004**, invarian **27/27**,
+  Playwright **48**. CI #494 mengulang verify-api + e2e di runner-nya sendiri
+  dan hijau — konfirmasi independen.
+
+- **Dua push berselang tiga detik** (08:57:25 → 08:57:28). Jendela putus
+  Beli Perlengkapan tetap terbuka sampai APK di perangkat diperbarui — build
+  store belum ada di CI ponsel (`scripts/build-rilis.sh` manual). Selama
+  jendela itu APK lama menampilkan **keadaan galat**, bukan data yang salah
+  (mekanisme yang sama dengan rilis Permintaan Stok: `as List` atas `Map`
+  melempar, `FutureProvider` menangkapnya).
+
+- **Ref pelacak ponsel basi LAGI — dan kali ini sebabnya ketemu.** Merge
+  pertama `git merge --no-ff origin/claude` menjawab *"Already up to date"* dan
+  `git diff --stat origin/claude` **kosong** — konfirmasi palsu terhadap ref
+  `6cd7d88` yang basi. Yang membongkarnya baris **induk SHA** commit yang
+  dihasilkan (`a0ea392 6cd7d88` = merge lama), bukan diff-nya. Sebab
+  strukturalnya: clone ponsel adalah **clone satu-cabang** — `remote.origin.fetch`
+  hanya memetakan `Production`, jadi `git fetch origin claude` memang tak
+  pernah memperbarui `refs/remotes/origin/claude`. Itu alasan alarm palsu
+  rilis sebelumnya, yang waktu itu dicatat sebagai kebiasaan. Diulang dengan
+  SHA eksplisit `bcbdc80`; refspec-nya kini ditambah permanen. Kelasnya sama
+  dengan tiga temuan sehari sebelumnya: **memeriksa nama yang ada, bukan
+  apakah nama itu menunjuk ke tempat yang benar.**
+
+- **Kontainer didaur ulang tepat saat gerbang-merge pertama mulai.** Postgres
+  mati, seed gagal, dan skrip gerbang mencetak *"server hidup setelah 90s"*
+  padahal loop health-nya habis tanpa satu pun jawaban — baris yang berbohong.
+  Gerbang itu tak menguji apa pun. Skripnya kini **gagal keras** bila Postgres
+  mati atau server tak hidup; Postgres dihidupkan lewat `scripts/dev-db.sh`;
+  gerbang diulang dari nol. Tak ada yang didorong sebelum itu.
+
+- **Stempel changelog** dipasang untuk ketiga entri pada commit yang SAMA
+  dengan penghapusannya dari `BELUM_TAYANG`. Stempel ini ikut ke `production`
+  pada rilis berikutnya — pola yang sama dengan `278158e`.
+
+---
+
 ## Lembar detail opname perlengkapan tak menyebut waktu — dan DTO yang memang tak membawanya — web + server + ponsel(fikstur) — 2026-09-04
 
 Diminta pemilik sesudah laporan "diakui tak penuh" putaran sebelumnya:
@@ -11695,12 +12515,12 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
-- [ ] **Ponsel: tombol "Daftar" di layar masuk belum membawa alamatnya** —
-      `login_page.dart` sudah merender kalimat penolakan apa adanya (tak ada
-      yang salah di sana), tapi `sebab == "email_tak_dikenal"` belum dipakai
-      untuk membuka `RegisterPage` dengan emailnya terisi. Web sudah. Kecil,
-      dan sekarang aman dikerjakan sebab tak lagi menuntut menyalin kalimat
-      lintas repo
+- [x] ~~**Ponsel: tombol "Daftar" di layar masuk belum membawa alamatnya**~~ —
+      SELESAI 2026-09-05, lihat entri "Layar masuk ponsel diam pada KODE
+      penolakan" di atas. 4 kode × 3 permukaan: ponsel bercabang 0 → 1
+      (`email_tak_dikenal` → `RegisterPage(emailAwal:)`). Temuan di gerbang:
+      fikstur status BUTA terhadap objek `as const` di shared — sumber ke-4
+      `konst:` ditambahkan, literal ponselnya kini terikat dua arah
 - [ ] **`/register` & `/resend-verification` masih netral sementara `/login` di
       sebelahnya kini bicara** — ketimpangan yang lahir 2026-09-03 dan belum
       pernah ditanyakan ke pemilik. Keduanya permukaan enumerasi yang sama;
@@ -11709,12 +12529,49 @@ berlaku di situ).
       di layar daftar tak tahu apa-apa. Pilihannya dua-duanya sah — dirapatkan
       ke `/login`, atau dibiarkan sebagai batas yang disengaja — tapi harus
       dipilih, bukan diwarisi
-- [ ] **`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman** — dideklarasikan
-      di `TambahStokPage.tsx`, bukan `packages/shared`, sehingga Lampiran A &
-      fikstur ponsel tak pernah melihatnya dan medan yang server kirim bisa
-      hilang dari tipenya diam-diam (`qty_teks` sudah membuktikannya: dikirim
-      sejak lama, tak pernah dideklarasikan, dirakit ulang di klien). ~40 kunci
-      kontrak sekaligus — putaran tersendiri
+- [x] ~~**`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman**~~ — SELESAI
+      2026-09-05, lihat entri "Baris pengadaan yang tipenya tak pernah dilihat
+      siapa pun" di atas. 55 kunci/baris terukur HTTP; 3 tak dideklarasikan
+      (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
+      (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
+      statis + §295, fikstur ponsel +61
+- [ ] **15 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+      bersama** — diukur 2026-09-05 dari DUA arah; putaran #95 membayar
+      `AuthState`/`Company`/`Cabang` (sesi & cabang), #96 membayar `BepResult`
+      dan menyingkap `NilaiStokRingkas` yang "sudah di shared" tapi di luar
+      `types.ts`; `hantuDiketahui` ponsel 51 → 26. Sisa arah web: dari 105
+      tipe yang dipakai `api<T>()`, **15 tak diekspor shared** (`Kategori`
+      3×, `Karyawan` 3×, `SaleResult`, `CompanyStruk`/`CabangStruk`,
+      `PenerimaanRow`, `DanaEntri`, `StokAwalTersimpan`, `Tenant`, …) plus
+      **47 pemanggilan `api<{…}>` inline** tanpa nama. Satu-dua tipe per
+      putaran; berikutnya `SaleResult` (`POST /penjualan` — ponsel membacanya
+      sebagai `sale`/`diskon`/`subtotal`, tiga entri hantu yang dua di
+      antaranya kini tercatat sebagai tabrakan nama di `bep-nilai-dto-utuh`)
+- [ ] **Bentuk kawat di berkas shared selain `types.ts` tak terlihat kontrak**
+      — pembangkit fikstur ponsel dan Lampiran A hanya membaca `types.ts`;
+      27 berkas lain mengekspor 55 medan interface (rumus, cetak, nilai
+      turunan — dan, sampai #96, satu bentuk kawat: `NilaiStokRingkas`).
+      Penjaga KELAS di `bep-nilai-dto-utuh` menangkap kelasnya lewat nama
+      hantu ponsel; yang belum ada: aturan statis "interface yang dipulangkan
+      `c.json` harus di `types.ts`" — menuntut informasi tipe, bukan regex
+- [ ] **`company.blokir_jual_minus` dikirim untuk peringatan kasir yang tak
+      pernah dibuat** — komentar `companyDto`: "supaya kasir bisa
+      MEMPERINGATKAN sebelum tombol Bayar"; terukur 2026-09-05 tak satu klien
+      pun membacanya (web hanya menulisnya di `PerusahaanPage`; ponsel tak
+      menyentuh namanya). Penegakan server (`penjualan/service.ts`) baru
+      terasa saat Bayar ditolak. Bangun peringatannya di kasir web + ponsel
+      (tanda pada baris keranjang yang stoknya minus saat setelan hidup), atau
+      berhenti mengirim medan yang tak dibaca. Medannya kini bernama di
+      kontrak (`CompanyDto`), ponsel mencatatnya beralasan
+- [ ] **Ponsel memilih CK lewat `tipe`, bukan `central_kitchen_id`** —
+      `beli_perlengkapan_page:674` dan `kasir_providers:69` menyaring
+      `tipe == 'central_kitchen'`; pada perusahaan ber-CK lebih dari satu,
+      daftar CK di ponsel tak menyempit ke pemasok cabang ini (web memakai
+      tautannya). Tercatat beralasan di `kunci-belum-dibaca.txt`
+- [ ] **Fikstur kunci ponsel berkunci NAMA, bukan `Dto|kunci`** — `asal_cabang`
+      lolos `kunci_hantu` karena `TransferStokFaktur` memilikinya; bacaan
+      `FakturRow` atasnya tetap hantu. Menutupnya menuntut pemindai yang tahu
+      DTO mana yang sedang diurai (nama kelas `fromJson` → pasangan fikstur)
 - [ ] **`rekapWindow` ditembakkan sekali PER BARIS** — `GET /shift/selisih`
       (dan kini `/selisih/ringkas`) memanggilnya untuk tiap shift kandidat, dan
       ia sendiri 2+ kueri. Terukur 2026-09-03: ~30 ms pada 39 kandidat, tumbuh
@@ -11731,12 +12588,11 @@ berlaku di situ).
       Stok Menu TAMPIL — mengalirkannya lewat helper membalik itu
 
 ### Mobile
-- [ ] **`shift_repository.dart:54` menelan galat jadi NOL** — provider yang
-      memberi makan lencana selisih kas berbunyi `catch (_) { return 0; }`,
-      jadi jaringan putus atau 403 terbaca sebagai "tak ada yang menunggu
-      keputusan". Aturan "lencana gagal ≠ lencana nol" sudah ditegakkan repo
-      itu sendiri lewat `badgeAsync`; pintu ini terlewat. Ditemukan saat
-      putaran lencana selisih di web (2026-09-03)
+- [x] ~~**`shift_repository.dart:54` menelan galat jadi NOL**~~ — SELESAI
+      2026-09-05, lihat entri "Lencana yang gagal ≠ lencana nol" di atas.
+      Populasi 7 provider lencana, **3 menelan** (selisih kas, kebersihan,
+      pesanan dikerjakan) — semuanya kini gerbang peran tanpa `try/catch`;
+      penjaga statis memetakan `gagal: X.hasError` → provider → badan
 - [x] ~~**Enum status dibandingkan sebagai teks**~~ — BERSIH dua arah, lihat
       entri di atas. 156 perbandingan / 41 nilai diadu dengan 297 baris
       kontrak server; artefaknya tautan mekanis yang selama ini tak ada
@@ -11792,7 +12648,13 @@ berlaku di situ).
       harfiah di 34 berkas); **1 daftar / 4 entri** berkunci nomor baris, kini
       berkunci `berkas:nama-parameter`. Aturannya — sudah ditulis di 4 berkas,
       dibayar 4 kali, dijaga 0 — akhirnya punya gerbang
-- [ ] **Header `X-Kakarut-Terpotong` belum dirender ponsel** — kini **delapan**
+- [x] ~~**Header `X-Kakarut-Terpotong` belum dirender ponsel**~~ — SELESAI
+      2026-09-05, lihat entri "Sepuluh daftar ponsel yang dipotong server dan
+      DIAM" di atas. 13 pengirim / 2 tak dipanggil / 1 dirender / **10 diam**
+      → 11 rute lewat satu rumah `daftar_dipotong.dart`, 12 layar mengaku, 8
+      situs lama pindah, 3 lencana "N+" (selisih kas dari ringkas server),
+      `per_page` transfer 50 → 200. Daftar rutenya dicerminkan DUA ARAH di
+      gerbang server. Semula: kini **delapan**
       rute mengirimnya (`/stok/penyesuaian` yang lama + tujuh yang dibayar
       2026-08-31), plus medan badan `riwayat_terpotong` pada laporan Lama
       Pesanan. `core/api_client.dart:97` sudah punya pembacanya dan **tepat
@@ -11851,7 +12713,12 @@ berlaku di situ).
       dulu memberi e2e sesi per-worker yang tak membakar kuota (sudah ditulis
       sebagai syarat di kepala `playwright.config.ts`), atau memakai akun
       manajemen kedua yang belum ada di seed
-- [ ] **Kuota login menahan spec e2e ke-11** — `/auth/login` 10 per 5 menit per
+- [x] ~~**Kuota login menahan spec e2e ke-11**~~ — DIBAYAR 2026-09-04 di
+      entri "Beli Perlengkapan dapat bentuk TABEL" (`globalSetup` login sekali
+      per akun untuk seluruh suite, token lewat berkas; suite kini dua login
+      berapa pun berkasnya). Butir ini tertinggal `[ ]` sesudahnya — ditutup
+      2026-09-05 saat antrean dibaca ulang; `workers` masih 1, dan menaikkannya
+      belum diukur. Semula: `/auth/login` 10 per 5 menit per
       (IP+email), cache sesi `e2e/util.ts` per-MODUL, tiap berkas spec satu
       proses; SEPULUH berkas sudah memakai akun owner, jadi berkas ke-11
       memerahkan berkas lain dengan 429. Sudah menggigit DUA putaran berturut

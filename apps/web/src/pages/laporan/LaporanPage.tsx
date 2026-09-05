@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import type { LaporanHarian } from "@kakarut/shared";
+import type { BepResult, LaporanHarian } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, StatCard, btnPrimary, inputClass, tdClass, thClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
@@ -14,16 +14,6 @@ const METODE_LABEL: Record<string, string> = {
   qris: "📱 QRIS",
   transfer: "🏦 Transfer",
 };
-
-interface BepResult {
-  biaya_tetap: number;
-  basis: "penjualan" | "katalog";
-  rata_harga_jual: number;
-  rata_margin_kontribusi: number;
-  porsi_untuk_bep: number;
-  omzet_untuk_bep: number;
-  porsi_per_hari_30: number;
-}
 
 export function LaporanPage() {
   const { auth } = useAuth();

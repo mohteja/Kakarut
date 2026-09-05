@@ -36,6 +36,8 @@
  *      sebagai nilai buku, lalu dipakai orang untuk hal yang bukan haknya.
  */
 
+import type { NilaiStokRingkas } from "./types";
+
 /** Baris stok minimal yang dibutuhkan untuk menilai — subset `StokRowDto`. */
 export interface BarisNilaiStok {
   saldo: number;
@@ -49,22 +51,6 @@ export interface BarisNilaiStok {
   harga_per_unit: number | null;
 }
 
-export interface NilaiStokRingkas {
-  /** Σ(saldo × harga per unit) atas baris bersaldo POSITIF. */
-  nilai: number;
-  /** banyak bahan yang benar-benar menyumbang rupiah (saldo > 0 & berharga) */
-  bahan_bernilai: number;
-  /** banyak bahan bersaldo minus — catatan belum lengkap, tak ikut dinilai */
-  minus_bahan: number;
-  /**
-   * Besarnya (POSITIF) rupiah yang akan hilang dari total seandainya saldo
-   * minus ikut dijumlahkan. Dibawa supaya layar bisa menyebut ongkos dari
-   * catatan yang belum beres, bukan sekadar mencacahnya.
-   */
-  minus_nilai: number;
-  /** bahan bersaldo positif yang `harga_beli`-nya masih 0 → nilainya tak terhitung */
-  tanpa_harga_bahan: number;
-}
 
 /**
  * Ringkas nilai rupiah sekumpulan baris stok.

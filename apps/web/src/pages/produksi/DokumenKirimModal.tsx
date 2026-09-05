@@ -1,7 +1,8 @@
 import type { JenisPengadaan } from "@kakarut/shared";
 import { Modal, btnPrimary, btnSecondary } from "../../components/ui";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
-import type { FakturGroup, StokMasukRow } from "./TambahStokPage";
+import type { StokMasukRow } from "@kakarut/shared";
+import type { FakturGroup } from "./TambahStokPage";
 import { AreaCetak } from "../../components/AreaCetak";
 
 /** qty kemasan (satuan beli): qty ÷ isi — hanya info, tak dibulatkan. */

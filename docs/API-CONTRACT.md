@@ -193,7 +193,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 >
 > **PRASYARAT PRODUKSI — SMTP wajib aktif.** `register`, `verify-email`, `resend-verification`, `forgot-password`, dan undangan karyawan semuanya bergantung pada email **benar-benar terkirim**. Field bantuan `dev_verify_kode` / `dev_verify_url` / `dev_reset_url` **hanya** muncul saat email server BELUM dikonfigurasi **dan** `NODE_ENV !== "production"` — di produksi tidak pernah dibocorkan. Tanpa SMTP aktif di produksi, alur daftar/verifikasi/reset **mati total** (server tetap balas `200` netral demi anti-enumerasi, tapi tak ada email masuk). Super-admin WAJIB mengatur SMTP di panel sistem + memastikan tes kirim berhasil sebelum go-live.
 
-- `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: sesi (`company` bisa null bila user belum punya perusahaan) — error: **401** dengan **empat kalimat yang berbeda** (2026-09-03; sebelumnya keempatnya dijawab satu kalimat gabungan "Email atau password salah"): `"Email tidak terdaftar — periksa ejaannya, atau daftar dulu"` · `"Akun ini sudah dihapus"` · `"Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda"` · `"Password salah"`. **Statusnya tetap 401 pada keempatnya** — yang berubah kalimatnya, bukan kontraknya; klien yang bercabang atas status TIDAK perlu berubah, klien yang menampilkan `error` apa adanya otomatis ikut membaik. Badan 401-nya juga membawa **`sebab`** — kode untuk mesin, berpasangan satu-satu dengan kalimatnya: `email_tak_dikenal` · `akun_terhapus` · `akun_nonaktif` · `password_salah`. **Klien yang harus BERCABANG wajib memakai `sebab`, bukan mencocokkan teks** — kalimatnya bisa diperbaiki kapan saja dan pencocokan teks akan berhenti cocok tanpa gejala. Rumah keduanya `PESAN_LOGIN` & `SEBAB_LOGIN` di `packages/shared/src/constants.ts` — **bukan** di Lampiran A, yang hanya menyalin `types.ts`; karena itu keempatnya dikutip lengkap di sini. **KEPUTUSAN SADAR PEMILIK REPO, bukan kelalaian:** ini membuka **enumerasi akun** — dari luar orang bisa memanen alamat mana yang punya akun. Biayanya disampaikan lebih dulu dan pilihannya tetap; penahannya kini hanya batas laju login (10 per 5 menit per IP+email). `POST /auth/forgot-password` **tidak ikut berubah** dan tetap netral. Jangan "merapikan" keempatnya kembali jadi satu tanpa menanyakan pemilik. Saran klien: pada `"Email tidak terdaftar…"` tawarkan tautan **Daftar** yang membawa emailnya (web melakukannya lewat `/daftar?email=`), pada `"…dinonaktifkan…"` jangan tawarkan reset password; **403** `{ error: "Email belum diverifikasi. …" }` bila email **belum diverifikasi** (dicek SETELAH password benar; super-admin dikecualikan). Klien: tangani `403` → tampilkan layar "verifikasi email" dengan tombol **kirim ulang** (panggil `/resend-verification`). **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — user tanpa perusahaan login sukses dgn `company: null`; 403 di login kini KHUSUS email belum terverifikasi.)**
+- `POST /api/auth/login` — [public] — req: `{ email (trim, lowercase), password (min 1) }` — res: **`SesiLogin`** = `{ token, user: AuthUser, company: CompanyDto | null, branch: BranchRingkas | null }` (`company` bisa null bila user belum punya perusahaan; sejak 2026-09-05 bentuknya bernama di Lampiran A) — error: **401** dengan **empat kalimat yang berbeda** (2026-09-03; sebelumnya keempatnya dijawab satu kalimat gabungan "Email atau password salah"): `"Email tidak terdaftar — periksa ejaannya, atau daftar dulu"` · `"Akun ini sudah dihapus"` · `"Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda"` · `"Password salah"`. **Statusnya tetap 401 pada keempatnya** — yang berubah kalimatnya, bukan kontraknya; klien yang bercabang atas status TIDAK perlu berubah, klien yang menampilkan `error` apa adanya otomatis ikut membaik. Badan 401-nya juga membawa **`sebab`** — kode untuk mesin, berpasangan satu-satu dengan kalimatnya: `email_tak_dikenal` · `akun_terhapus` · `akun_nonaktif` · `password_salah`. **Klien yang harus BERCABANG wajib memakai `sebab`, bukan mencocokkan teks** — kalimatnya bisa diperbaiki kapan saja dan pencocokan teks akan berhenti cocok tanpa gejala. Rumah keduanya `PESAN_LOGIN` & `SEBAB_LOGIN` di `packages/shared/src/constants.ts` — **bukan** di Lampiran A, yang hanya menyalin `types.ts`; karena itu keempatnya dikutip lengkap di sini. **KEPUTUSAN SADAR PEMILIK REPO, bukan kelalaian:** ini membuka **enumerasi akun** — dari luar orang bisa memanen alamat mana yang punya akun. Biayanya disampaikan lebih dulu dan pilihannya tetap; penahannya kini hanya batas laju login (10 per 5 menit per IP+email). `POST /auth/forgot-password` **tidak ikut berubah** dan tetap netral. Jangan "merapikan" keempatnya kembali jadi satu tanpa menanyakan pemilik. Saran klien: pada `"Email tidak terdaftar…"` tawarkan tautan **Daftar** yang membawa emailnya (web melakukannya lewat `/daftar?email=`), pada `"…dinonaktifkan…"` jangan tawarkan reset password; **403** `{ error: "Email belum diverifikasi. …" }` bila email **belum diverifikasi** (dicek SETELAH password benar; super-admin dikecualikan). Klien: tangani `403` → tampilkan layar "verifikasi email" dengan tombol **kirim ulang** (panggil `/resend-verification`). **(CATATAN: tak lagi 403 untuk user tanpa perusahaan — user tanpa perusahaan login sukses dgn `company: null`; 403 di login kini KHUSUS email belum terverifikasi.)**
 - `POST /api/auth/register` — [public] — req: `{ nama, email (email valid, lowercase), password (min 8) }` — res: **200** `{ ok: true, message, retry_after_detik, dev_verify_kode?, dev_verify_url? }` — **TANPA sesi** (tidak auto-login) untuk email baru. **SATU pengecualian (2026-09-02):** bila email itu milik akun yang **sudah terverifikasi** DAN `password`-nya **cocok**, balasannya adalah **sesi login** (bentuk sama dengan `POST /auth/login`) ditambah `sudah_aktif: true` — klien wajib memeriksa `token` dan langsung memasukkan pengguna, jangan diarahkan ke layar kode. Yang dibocorkan pengecualian ini TEPAT SAMA dengan yang dibocorkan `/login` (keberadaan akun hanya terungkap kepada pemegang password yang benar); password yang salah tetap menerima balasan netral yang identik dengan email baru. Akun yang **belum** terverifikasi tidak pernah diberi sesi dari sini walau passwordnya cocok — kodenya dikirim (ulang), verifikasi tetap wajib. Respons **selalu netral** (anti-enumerasi akun) di luar pengecualian itu: baik email baru maupun email yang sudah terdaftar mengembalikan `200` yang sama — **tak ada lagi `409`**. Untuk email baru, email berisi **KODE 6 ANGKA** (jalan utama) **dan** tautan verifikasi (untuk deep link mobile) — keduanya dari **satu penerbitan**: memakai salah satunya mematikan yang lain. `retry_after_detik` (tetap `120`) = jarak minimum sebelum kode berikutnya boleh diminta; nilainya SAMA untuk email terdaftar maupun tidak, jadi ia tak membocorkan apa pun — pakai untuk hitung mundur tombol "kirim ulang". `dev_verify_kode`/`dev_verify_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi. — error: **400** validasi. Setelah ini, arahkan user ke layar "masukkan kode".
 - `POST /api/auth/verify-email` — [public] — req: **`{ email, kode }` ATAU `{ token }`** — res: **sesi** `{ token, user, company, branch }` (auto-login begitu email terverifikasi) — error: **400** kode/token salah, kedaluwarsa, atau terpakai **atau** akun nonaktif.
   - **`{ email, kode }`** — `kode` = **6 angka** dari email. Dipakai web, dan bisa dipakai mobile bila lebih suka layar isian daripada deep link.
@@ -205,7 +205,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/auth/resend-verification` — [public] — req: `{ email }` — res: **200** `{ ok: true, retry_after_detik, dev_verify_kode?, dev_verify_url? }` — SELALU 200 (netral; tak bocorkan status email). Benar-benar mengirim hanya bila akun ADA, aktif, & BELUM terverifikasi **dan** kode hidup terakhirnya sudah lebih tua dari `retry_after_detik` (**120 dtk**). **JARAK 2 MENIT itu dijaga server, bukan cuma tampilan** — tekanan yang terlalu cepat dibalas `200` yang sama tetapi **tidak** mengirim apa pun, dan **tidak** merusak kode yang sedang dipegang user (kode lamanya tetap berlaku). Klien: pakai `retry_after_detik` untuk hitung mundur, dan **simpan tenggatnya** supaya muat-ulang layar tak membuat tombolnya tampak siap padahal server akan menolak. Dibatasi rate limit juga (429 + `Retry-After`).
 - `POST /api/auth/forgot-password` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_reset_url? }` — SELALU 200 (tak bocorkan apakah email ada). Bila akun aktif: token reset dibuat + tautan dikirim via email. `dev_reset_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi.
 - `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` (tanpa sesi — pengguna login ulang dengan password baru) — error: **400** token tidak valid/kedaluwarsa/terpakai. **Sejak 2026-09-02: sekaligus menandai email TERVERIFIKASI** bila belum (tautan reset hanya pernah dikirim ke alamat yang tercatat, jadi memegangnya = bukti kepemilikan inbox, standar yang sama dengan kode verifikasi); akun yang sudah terverifikasi tak berubah. Klien: sesudah reset sukses, login langsung bisa — jangan lagi mengarahkan ke layar verifikasi. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB); email reset juga menampilkan **kode yang mudah disalin** (identik dengan parameter `token`) untuk klien tempel-manual. **Efek samping:** menaikkan token_version user → semua token lama user itu jadi **401** (lihat bagian Autentikasi).
-- `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: `{ user: AuthUser, company | null, branch: {id,nama} | null }` — error: **401**
+- `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: **`SesiDto`** = `{ user: AuthUser, company: CompanyDto | null, branch: BranchRingkas | null }` (sesi tanpa `token`; `company` dirakit SATU penulis, `companyDto`, sama dengan login) — error: **401**
   > **Ini sumber kebenaran peran & cabang, bukan isi token.** `requireAuth`
   > membaca ulang keanggotaan dari database pada **setiap** request, jadi
   > `user.role` / `user.branch_id` di sini sudah mengikuti perubahan admin
@@ -283,7 +283,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## `/api/cabang` — Cabang (`modules/branches/routes.ts`)
 
-- `GET /api/cabang` — [any] — res: array `{ id, nama, alamat, telepon, tipe, central_kitchen_id, receipt_footer, receipt_show_alamat, latitude, longitude, radius_absen_m, jam_buka: string|null, jam_tutup: string|null, is_active }` — `jam_*` = jam operasional "HH:MM"
+- `GET /api/cabang` — [any] — res: **`CabangDto[]`** = array `{ id, nama, alamat, telepon, tipe, central_kitchen_id, receipt_footer, receipt_show_alamat, latitude, longitude, radius_absen_m, jam_buka: string|null, jam_tutup: string|null, is_active }` — `jam_*` = jam operasional "HH:MM"
 - `PUT /api/cabang/struk` — [owner/admin/cashier] — query: `branch_id` (owner/admin; cashier terkunci) — req: `{ receipt_footer?|null (max 200), receipt_show_alamat?: bool }` — res: `{ ok: true }` — error: **404**
 - `POST /api/cabang` — [owner/admin] — req `CabangBody`: `{ nama: string, alamat?|null, telepon?|null, tipe?: "store"|"central_kitchen"|"kantor", central_kitchen_id?: uuid|null, receipt_footer?|null (max200), receipt_show_alamat?: bool, latitude?: number(-90..90)|null, longitude?: number(-180..180)|null, radius_absen_m?: int(10..10000), jam_buka?: string(HH:MM atau "")|null, jam_tutup?: string(HH:MM atau "")|null, is_active?: bool }` — res: **201** `{ id, nama }` — error: **400** (Lite maks 1 cabang / CK invalid / format jam bukan HH:MM), **409** nama ada
 - `PATCH /api/cabang/:id` — [owner/admin] — req: `CabangBody` (semua field parsial; termasuk `jam_buka`/`jam_tutup` untuk mengatur jam operasional) — res: `{ ok: true }` — error: **400** CK invalid / format jam salah, **404**
@@ -1673,6 +1673,82 @@ export interface AuthUser {
   branch_id: string | null;
 }
 
+/**
+ * PERUSAHAAN SEBAGAIMANA DILIHAT KLIEN — bagian `company` dari sesi
+ * (`POST /auth/login`, `/register` bila akunnya sudah aktif, `/onboarding/*`,
+ * `GET /auth/me`). Sampai 2026-09-05 bentuk ini dirakit di DUA tempat
+ * (`companyDto` di `auth/session.ts` dan objek inline di `GET /auth/me`),
+ * dideklarasikan lokal di web (`AuthState`), dan diurai ponsel tanpa satu
+ * fikstur pun bisa menagihnya — terukur: 9 medan dikirim, nol di Lampiran A.
+ */
+export interface CompanyDto {
+  id: string;
+  nama: string;
+  slug: string;
+  logo_url: string | null;
+  pb1_enabled: boolean;
+  pb1_rate: number;
+  diskon_maks_persen: number;
+  /**
+   * Setelan "tolak jual saat stok minus". Dikirim supaya kasir bisa
+   * MEMPERINGATKAN sebelum tombol Bayar; penegakannya tetap di server
+   * (`penjualan/service.ts`). Terukur 2026-09-05: tak satu klien pun membaca
+   * medan ini — peringatan yang dijanjikan belum pernah dibuat (antrean vena).
+   */
+  blokir_jual_minus: boolean;
+  timezone: string;
+}
+
+/** Cabang tempat sesi ini terikat — identitasnya saja. */
+export interface BranchRingkas {
+  id: string;
+  nama: string;
+}
+
+/** Bentuk `GET /auth/me`: sesi tanpa token. */
+export interface SesiDto {
+  user: AuthUser;
+  /** null bila user belum punya perusahaan → klien mengarahkan ke onboarding. */
+  company: CompanyDto | null;
+  branch: BranchRingkas | null;
+}
+
+/** Bentuk `POST /auth/login` dan tiap pintu lain yang memulangkan sesi baru. */
+export interface SesiLogin extends SesiDto {
+  token: string;
+}
+
+/**
+ * Satu baris `GET /cabang` — cabang milik perusahaan, semua peran.
+ * Sampai 2026-09-05 dideklarasikan lokal di web (`Cabang` di BranchContext)
+ * dan diurai ponsel (`BranchDto`) tanpa tipe bersama: 14 medan dikirim, nol
+ * di Lampiran A.
+ */
+export interface CabangDto {
+  id: string;
+  nama: string;
+  alamat: string | null;
+  telepon: string | null;
+  /**
+   * store = outlet penjualan; central_kitchen = dapur produksi pengirim;
+   * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
+   */
+  tipe: "store" | "central_kitchen" | "kantor";
+  /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
+  central_kitchen_id: string | null;
+  /** struk per cabang: footer + tampil/tidaknya alamat & telepon cabang */
+  receipt_footer: string | null;
+  receipt_show_alamat: boolean;
+  /** titik maps + radius absen — absen hanya diterima dalam radius ini */
+  latitude: number | null;
+  longitude: number | null;
+  radius_absen_m: number;
+  /** jam operasional cabang "HH:MM" (null bila belum diatur) */
+  jam_buka: string | null;
+  jam_tutup: string | null;
+  is_active: boolean;
+}
+
 /** Profil akun sendiri (semua peran): identitas + kode/QR absen. */
 export interface ProfilDto {
   nama: string;
@@ -2638,6 +2714,30 @@ export interface ProduksiBerjalan {
   menunggu: number;
 }
 
+/**
+ * Ringkasan nilai rupiah stok — balasan `GET /stok/nilai` (semua peran).
+ * Rumusnya `ringkasNilaiStok` di `nilai-stok.ts`. Sampai 2026-09-05 interface
+ * ini hidup DI BERKAS ITU: "sudah di shared", tapi Lampiran A dan fikstur
+ * kunci ponsel hanya membaca `types.ts` — lima kuncinya tercatat ponsel
+ * sebagai hantu. Bentuk kawat tinggal di sini; rumusnya boleh di mana saja.
+ */
+export interface NilaiStokRingkas {
+  /** Σ(saldo × harga per unit) atas baris bersaldo POSITIF. */
+  nilai: number;
+  /** banyak bahan yang benar-benar menyumbang rupiah (saldo > 0 & berharga) */
+  bahan_bernilai: number;
+  /** banyak bahan bersaldo minus — catatan belum lengkap, tak ikut dinilai */
+  minus_bahan: number;
+  /**
+   * Besarnya (POSITIF) rupiah yang akan hilang dari total seandainya saldo
+   * minus ikut dijumlahkan. Dibawa supaya layar bisa menyebut ongkos dari
+   * catatan yang belum beres, bukan sekadar mencacahnya.
+   */
+  minus_nilai: number;
+  /** bahan bersaldo positif yang `harga_beli`-nya masih 0 → nilainya tak terhitung */
+  tanpa_harga_bahan: number;
+}
+
 export interface StokRowDto {
   ingredient_id: string;
   slug: string;
@@ -3472,6 +3572,27 @@ export interface SampahRow {
 /** Metode pembayaran transaksi. */
 export type MetodeBayar = "tunai" | "qris" | "transfer";
 
+/** Dasar perhitungan BEP: riwayat penjualan pada rentang, atau rata-rata katalog bila rentangnya tanpa penjualan. */
+export type BasisBep = "penjualan" | "katalog";
+
+/**
+ * Balasan `GET /laporan/bep?biaya_tetap=…` (owner/admin). Sampai 2026-09-05
+ * diketik ulang di web tanpa `periode` (dikirim, tak dideklarasikan) dan
+ * diurai ponsel tanpa `basis` — angka BEP tampil tanpa menyebut ia dihitung
+ * dari penjualan sungguhan atau dari katalog.
+ */
+export interface BepResult {
+  biaya_tetap: number;
+  basis: BasisBep;
+  /** rentang yang dipakai (default 30 hari terakhir dalam zona waktu perusahaan) */
+  periode: { dari: string; sampai: string };
+  rata_harga_jual: number;
+  rata_margin_kontribusi: number;
+  porsi_untuk_bep: number;
+  omzet_untuk_bep: number;
+  porsi_per_hari_30: number;
+}
+
 export interface LaporanHarian {
   dari: string;
   sampai: string;
@@ -3921,6 +4042,145 @@ export interface RingkasPengadaan {
   ditolak: PasanganHitung;
   /** Bagian dari `selesai` yang barangnya belum sampai — lihat `barisBelumSampai`. */
   belum_sampai: PasanganHitung;
+}
+
+/**
+ * BARIS PENGADAAN — satu bentuk untuk `GET /api/produksi`, `GET /api/pembelian`,
+ * dan `GET /api/{mod}/faktur/:fakturId` (kueri & pengayaannya satu fungsi,
+ * `ambilBarisFaktur` di `modules/produksi/routes.ts`).
+ *
+ * Sampai 2026-09-05 tipe ini hidup sebagai DTO LOKAL halaman
+ * (`apps/web/src/pages/produksi/TambahStokPage.tsx`), jadi Lampiran A dan
+ * fikstur kunci ponsel tak pernah melihatnya — medan yang server kirim bisa
+ * hilang dari tipenya diam-diam. Terukur lewat HTTP terhadap DB gerbang
+ * (237 baris, 2 rute): 55 kunci per baris, 52 dideklarasikan; `harga_tebakan`,
+ * `pengadaan`, `qty_setara` dikirim tanpa pernah dideklarasikan. Ponsel
+ * (`FakturRow.fromJson`) membaca 40 di antaranya — plus SATU yang tak pernah
+ * dikirim siapa pun (`asal_cabang`). Dijaga `stok-masuk-row-utuh.test.ts`
+ * (select + pengayaan == interface, dua arah) dan verify-api §295 (HTTP).
+ */
+export interface StokMasukRow {
+  id: string;
+  ingredient_id?: string;
+  bahan: string;
+  isi: number;
+  satuan: string;
+  /** satuan beli/kemasan (mis. "dus"); 1 satuan_beli = isi satuan */
+  satuan_beli?: string | null;
+  qty: number;
+  /**
+   * Teks qty siap-pakai dari server (`qtyTeks`), sudah memperhitungkan satuan
+   * beli & isi. Server mengirimnya sejak lama (`docs/API-CONTRACT.md`), tapi
+   * tipe ini tak pernah mendeklarasikannya dan layarnya merakit ulang
+   * `formatAngka(qty) + satuan` sendiri — medan ini ada persis untuk mencegah
+   * itu. Opsional karena baris lama di cache bisa belum membawanya.
+   */
+  qty_teks?: string | null;
+  /**
+   * `total_harga` masih TEBAKAN — belum pernah dilihat manusia (estimasi RAB,
+   * belanja otomatis, hasil skala saat realisasi melebihi rencana). Baris
+   * bertanda ini dikecualikan dari median harga acuan. Dikirim sejak lama
+   * (kontrak menyebutnya di prosa `GET /api/{mod}`), tak pernah dideklarasikan
+   * di tipe mana pun sampai 2026-09-05 — ponsel sudah membacanya.
+   */
+  harga_tebakan: boolean;
+  /** jalur pengadaan bahan — dasar `batch`/`batch_teks` (hanya `produksi`). */
+  pengadaan: "produksi" | "beli";
+  /**
+   * Padanan `qty` dalam satuan beli, ditulis SERVER (`qtyTeks().setara`);
+   * null bila bahan tak berkemasan. Saudara `qty_teks`, dan sama-sama tak
+   * pernah dideklarasikan sampai 2026-09-05.
+   */
+  qty_setara: string | null;
+  /**
+   * BERAPA KALI RESEP DIJALANKAN (`qty ÷ isi`) — null untuk bahan beli atau
+   * bahan tanpa ukuran batch. `qty` menjawab "jadinya berapa"; ini menjawab
+   * "berapa kali masak", yang justru itulah pekerjaannya.
+   */
+  batch?: number | null;
+  /** teks siap tampil dari server, mis. "3 batch × 700 ml"; null = tak relevan */
+  batch_teks?: string | null;
+  total_harga: number | null;
+  is_batch: boolean;
+  catatan: string | null;
+  waktu: string;
+  prod_date: string;
+  /** tanggal kedaluwarsa lot — terisi saat baris masuk stok (Tiba/Selesai) */
+  exp_date?: string | null;
+  /** masa simpan (hari) dari master bahan — default form exp saat Tiba */
+  masa_simpan_hari?: number;
+  /** lokasi produksi resep ("cabang" = dikerjakan kitchen/bar cabang) */
+  produksi_di?: "ck" | "cabang" | null;
+  /** divisi pelaksana resep produksi cabang — dasar badge Kitchen/Bar */
+  divisi_produksi?: "kitchen" | "bar" | null;
+  faktur_id: string | null;
+  no_faktur: string | null;
+  /** nomor dokumen otomatis (PB-/PR-), sama untuk semua baris satu faktur */
+  nomor?: string | null;
+  status: KonfirmasiStatus;
+  supplier: string | null;
+  tempat: string | null;
+  supplier_id: string | null;
+  storage_location_id: string | null;
+  /** RAK SIMPAN default (home) bahan di CK — untuk auto-file & pratinjau per rak */
+  default_storage_location_id?: string | null;
+  default_tempat?: string | null;
+  dibuat_oleh: string | null;
+  diubah_oleh: string | null;
+  /**
+   * Siapa yang MENERIMA baris ini. Untuk kiriman beralamat cabang satu-satunya
+   * pintu yang mengisinya adalah tombol Terima di Penerimaan Barang — jadi ini
+   * sekaligus bukti bahwa penerimaannya sah, bukan hasil ubah tahap manual.
+   */
+  diterima_oleh?: string | null;
+  diterima_pada?: string | null;
+  updated_at: string | null;
+  worker_id: string | null;
+  dikerjakan_oleh: string | null;
+  qty_dipesan: number | null;
+  alasan_tolak: string | null;
+  /** waktu Laporan Harga riil dibuat utk baris ini (jalur beli); null = belum */
+  laporan_harga_at?: string | null;
+  /** cabang baris (utk tampilan Kantor "semua cabang") */
+  branch_id?: string | null;
+  cabang?: string | null;
+  /** work-order CK: cabang tujuan pengiriman (null = bukan work-order) */
+  tujuan_branch_id?: string | null;
+  tujuan_cabang?: string | null;
+  /** transfer stok antar-cabang (kirim dari stok CK / kirim hasil) — bukan produksi baru */
+  asal_branch_id?: string | null;
+  /** dari Permintaan Tambah Stok (rencana menu); null = input langsung */
+  rencana_id?: string | null;
+  /** nomor dokumen permintaan (PM-xxxx) — identitas asal faktur */
+  permintaan_nomor?: string | null;
+  /** produksi dari permintaan: hasil masuk stok CK lalu PERLU DIKIRIM ke cabang ini */
+  untuk_branch_id?: string | null;
+  untuk_cabang?: string | null;
+  /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
+  dana_cair: number;
+  /** supplier UTAMA bahan baris ini (info "beli di mana" saat diproses) */
+  supplier_bahan?: string | null;
+  supplier_bahan_alamat?: string | null;
+  supplier_bahan_telepon?: string | null;
+}
+
+export interface StokMasukPage {
+  rows: StokMasukRow[];
+  /** Jumlah FAKTUR atas seluruh populasi tersaring — bukan panjang `rows`. */
+  total: number;
+  page: number;
+  per_page: number;
+  total_pengeluaran: number;
+  /**
+   * Ringkasan antrean, dihitung SERVER atas populasi yang sama dengan `total`.
+   *
+   * Wajib dari server, dan itu terukur: daftarnya berhalaman 20 dan server
+   * mengurutkan faktur yang belum selesai lebih dulu, jadi halaman pertama
+   * `/produksi` (total 61 faktur) memuat 20 faktur yang KEDUA PULUHNYA belum
+   * selesai. Ringkasan yang dijumlahkan dari `rows` karena itu akan selalu
+   * berbunyi "0 selesai" sampai orangnya menelusuri ke halaman terakhir.
+   */
+  ringkas: RingkasPengadaan;
 }
 
 export interface RingkasSelisihDto {

@@ -47,6 +47,15 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-05): BEP & nilai stok masuk Lampiran A — nol
+  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## ⚪️ `BepResult` & `NilaiStokRingkas` kini ada di Lampiran A — dan `basis` BEP layak ditampilkan",
+  // BELUM DI-MERGE (2026-09-05): sesi & cabang masuk Lampiran A — nol
+  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## ⚪️ Sesi & cabang kini ada di Lampiran A: `SesiLogin`, `SesiDto`, `CompanyDto`, `CabangDto` — tak ada perubahan di kawat",
+  // BELUM DI-MERGE (2026-09-05): tipe baris pengadaan masuk Lampiran A — nol
+  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## ⚪️ `StokMasukRow` & `StokMasukPage` kini ada di Lampiran A — tak ada perubahan di kawat",
   /*
    * PARUH "belum di-merge" KOSONG sejak 2026-08-31 — dan kosongnya bukan
    * kerapian. Entri "Angka BIAYA hanya untuk manajemen" tercantum di sini
@@ -80,13 +89,6 @@ const BELUM_TAYANG = new Set([
   // BELUM DI-MERGE (2026-09-04): pintu riwayat resep & harga. Aturan pemilik
   // berlaku — tak ada yang tayang sampai ia meminta rilis. Stempelnya dipasang
   // DAN baris ini dihapus pada commit yang sama dengan merge-nya.
-  // Aditif: dua medan (`waktu`, `oleh`) pada balasan yang sudah ada; ponsel
-  // mengurai rute ini lewat fromJson yang mengabaikan kunci tak dikenal.
-  // Belum tayang — aturan pemilik: tak ada rilis sampai diminta. Hapus dari
-  // sini begitu stempel "Sudah di-merge ke production." dipasang.
-  "## 🟢 `GET /perlengkapan/opname/sesi/:sessionId` kini membawa `waktu` + `oleh`",
-  "## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan",
-  "## 🔴 `GET /perlengkapan/beli` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */
