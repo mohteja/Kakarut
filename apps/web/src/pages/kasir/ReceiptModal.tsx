@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { qtyDitagih, tarifPb1Struk } from "@kakarut/shared";
-import type { MetodeBayar, OrderSlipData, ReceiptData } from "@kakarut/shared";
+import type { MetodeBayar, OrderSlipData, ReceiptData, SaleResult as SaleResultDto } from "@kakarut/shared";
 
 const METODE_LABEL: Record<MetodeBayar, string> = {
   tunai: "Tunai",
@@ -16,54 +16,15 @@ import { formatRupiah, formatWaktu, waktuKertasWIB } from "../../lib/format";
 import { RefundPanel } from "./RefundPanel";
 import { AreaCetak } from "../../components/AreaCetak";
 
-export interface SaleResult {
-  sale: {
-    id: string;
-    branchId: string;
-    nomor: string;
-    subtotal: number;
-    diskon: number;
-    diskonPersen: number | null;
-    pb1Amount: number;
-    total: number;
-    waktu: string;
-    isDineIn: boolean;
-    mejaLabel: string | null;
-    customerNama: string | null;
-    customerWa: string | null;
-    metodeBayar: MetodeBayar;
-    uangDiterima: number | null;
-    catatan: string | null;
-    /**
-     * Angka SEBELUM refund apa pun — jangkar tetap agar refund bertahap tak
-     * menggerus diskon dua kali. null = transaksi ini belum pernah direfund,
-     * jadi nilai terkini di atas memang nilai asalnya.
-     */
-    subtotalAsal: number | null;
-    diskonAsal: number | null;
-    pb1Asal: number | null;
-    /** uang yang sudah dikembalikan ke pembeli (kumulatif, Rp) */
-    refundTotal: number;
-  };
-  items: {
-    id: string;
-    menuNama: string;
-    hargaSatuan: number;
-    qty: number;
-    lineTotal: number;
-    isDineIn: boolean;
-    catatan: string | null;
-    /**
-     * Porsi baris ini yang sudah dikembalikan (kumulatif). `qty` sengaja tidak
-     * dikurangi — berapa yang dipesan dan berapa yang dikembalikan adalah dua
-     * fakta, dan struk asli harus tetap terbaca. Yang DITAGIH = `qty − ini`.
-     */
-    qtyRefund: number;
-  }[];
-  branch_nama: string;
-  /** nama kasir yang melayani (untuk dicetak di nota) */
-  kasir?: string | null;
-}
+/**
+ * Bentuk struk milik KONTRAK (`SaleResult`, Lampiran A) — satu bentuk untuk
+ * `POST /penjualan`, `GET /penjualan/:id`, dan perintah `penjualan` di
+ * `/sync`. Sampai 2026-09-05 ia diketik ulang di sini sebagai pandangan
+ * sempit tulisan tangan (20 dari 30 medan `sale`, 8 dari 16 per baris), jadi
+ * tak satu fikstur pun bisa menagihnya — dan `totalHpp`/`hppSatuan` yang
+ * server kirim ke kasir lewat POST tak pernah terlihat dari sini.
+ */
+export type SaleResult = SaleResultDto;
 
 /**
  * Catatan baris untuk struk: catatan pembeli, plus keterangan porsi yang

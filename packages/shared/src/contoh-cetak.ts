@@ -1,4 +1,4 @@
-import type { MetodeBayar } from "./types";
+import type { MetodeBayar, SaleResult } from "./types";
 
 /**
  * DATA CONTOH UNTUK CETAK UJI.
@@ -44,7 +44,7 @@ export interface OpsiContohStruk {
   waktu?: string;
 }
 
-export function contohStruk(opts: OpsiContohStruk) {
+export function contohStruk(opts: OpsiContohStruk): SaleResult {
   const items = [
     { nama: "Contoh Nasi Goreng", harga: HARGA_A, qty: 2 },
     { nama: "Contoh Es Teh Manis", harga: HARGA_B, qty: 1 },
@@ -56,7 +56,9 @@ export function contohStruk(opts: OpsiContohStruk) {
   return {
     sale: {
       id: "contoh",
+      companyId: "contoh",
       branchId: opts.branchId,
+      cashierUserId: "contoh",
       // Bukan format nomor sungguhan: struk contoh yang tercecer tak boleh
       // bisa dicari di Riwayat, dan tak boleh disangka nota yang hilang.
       nomor: "CONTOH-CETAK-UJI",
@@ -77,6 +79,17 @@ export function contohStruk(opts: OpsiContohStruk) {
       diskonAsal: null,
       pb1Asal: null,
       refundTotal: 0,
+      // Struk contoh dicetak dari halaman Printer oleh siapa pun yang boleh
+      // membukanya; biayanya tak pernah ikut. `null` di sini berarti hal yang
+      // sama dengan di balasan sungguhan: DITAHAN.
+      totalHpp: null,
+      mejaId: null,
+      customerId: null,
+      saleDate: (opts.waktu ?? new Date().toISOString()).slice(0, 10),
+      shiftId: null,
+      asalOpenBillId: null,
+      deletedAt: null,
+      deletedBy: null,
     },
     items: items.map((i, n) => ({
       id: `contoh-${n}`,
@@ -89,6 +102,14 @@ export function contohStruk(opts: OpsiContohStruk) {
       // itulah baris yang paling sering meluber di kertas 58 mm.
       catatan: n === 1 ? "tanpa gula" : null,
       qtyRefund: 0,
+      saleId: "contoh",
+      menuId: `contoh-menu-${n}`,
+      hppSatuan: null,
+      pesananStatus: "selesai" as const,
+      pesananStatusAt: null,
+      pesananStatusOleh: null,
+      pesananMasukAt: opts.waktu ?? new Date().toISOString(),
+      sajianTakeaway: false,
     })),
     branch_nama: opts.branchNama,
     kasir: opts.kasir ?? "Contoh Kasir",

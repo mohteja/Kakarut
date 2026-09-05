@@ -4,6 +4,7 @@ import { and, desc, eq, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { bolehLihatBiaya } from "@kakarut/shared";
 import type { SyncItemResult, SyncResponse } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, companies, memberships, shifts, syncCommands, users } from "../../db/schema";
@@ -12,6 +13,7 @@ import { tanggalDi } from "../../lib/time";
 import { pastikanCabang, terikatCabang, type AppEnv } from "../../middleware/auth";
 import { lewatiRateLimit, rateLimit } from "../../middleware/rateLimit";
 import { createSale } from "../penjualan/service";
+import { strukPenjualan } from "../penjualan/struk";
 import { bukaShift } from "../shift/routes";
 import { pangkasLedgerSync } from "./idempoten";
 import { SaleBody } from "../penjualan/routes";
@@ -461,11 +463,25 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     transaksiSusulan: true,
     items: p.items,
   });
+  /*
+   * Bentuk struknya dari `strukPenjualan` — penulis yang sama dengan `POST
+   * /penjualan` dan `GET /penjualan/:id`, jadi gerbang biayanya ikut. Sampai
+   * 2026-09-05 baris ini menyebar `...result` (baris Drizzle mentah), dan
+   * kasir offline menerima `totalHpp` & `hppSatuan` persis seperti kasir
+   * online. Kunci di sekelilingnya (`shift`, `ada_transaksi_susulan`,
+   * `di_luar_jendela_shift`) MILIK jalur sinkron dan tetap di sini.
+   */
+  const struk = strukPenjualan(
+    result.sale,
+    result.items,
+    result.branch_nama,
+    auth.nama,
+    bolehLihatBiaya(auth.role),
+  );
   return {
     kode: 201,
     data: {
-      ...result,
-      kasir: auth.nama,
+      ...struk,
       shift: ringkasShift(shift),
       ada_transaksi_susulan: susulan,
       /** true bila `waktu` di LUAR jendela shift (dibukukan lewat toleransi) */

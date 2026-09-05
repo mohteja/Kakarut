@@ -25,6 +25,63 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 Struk penjualan bernama di Lampiran A — dan BIAYA berhenti terkirim ke kasir lewat `POST /penjualan`
+
+🟡 **PERLU DICEK** — ini perubahan **di kawat**, bukan sekadar penamaan tipe
+seperti dua entri di bawah. Dua kunci yang selama ini berisi ANGKA kini
+`null` untuk peran non-manajemen.
+
+**Yang berubah.** `sale.totalHpp` dan `items[].hppSatuan` pada balasan `POST
+/api/penjualan` (dan perintah `penjualan` di `POST /api/sync`) kini **ditahan**
+untuk peran non-manajemen — `null`, sama seperti yang sudah berlaku di `GET
+/api/penjualan/:id` sejak 2026-08-26. Karena `POST /penjualan` **kasir-saja**,
+praktisnya keduanya selalu `null` di sana sekarang.
+
+**Kenapa.** Terukur 2026-09-05 pada SATU transaksi yang sama:
+
+| pintu | peran | `totalHpp` | `hppSatuan` |
+| --- | --- | --- | --- |
+| `POST /penjualan` | kasir | **4000** | **2000** |
+| `GET /penjualan/:id` | kasir | `null` | `null` |
+| `GET /penjualan/:id` | owner | 4000 | 2000 |
+
+Pintu yang sama, kasir yang sama, jawaban berlawanan — dan yang bocor justru
+pintu yang `requireRole("cashier")`, jadi tiap kasir menerima biaya pada tiap
+checkout. Sebabnya bentuk balasan POST tak pernah ditulis siapa pun: ia baris
+Drizzle mentah (`.returning()`), jadi gerbang biaya yang dipasang di `GET
+/:id` tak punya tempat untuk ikut. Kini ketiga pintu memakai satu penulis
+(`strukPenjualan`) dan satu gerbang.
+
+**Kerja di ponsel: TIDAK ADA.** Terukur: `SaleRow.fromJson` (19 kunci) dan
+`SaleItemRow.fromJson` (8 kunci) tak membaca `totalHpp` maupun `hppSatuan`,
+dan struk ESC/POS tak mencetak biaya. Entri ini 🟡 karena kawatnya berubah,
+bukan karena ada yang harus dikerjakan. **Yang perlu diketahui bila kelak
+dipakai:** `null` di sana berarti **DITAHAN**, bukan "nol biaya" — jangan
+menjumlahkannya sebagai 0.
+
+**Yang juga masuk Lampiran A (nol perubahan kawat):** `SaleResult`, `SaleRow`
+(30 medan), `SaleItemRow` (16) — bentuk `POST /penjualan`, `GET
+/penjualan/:id`, dan perintah `penjualan` di `/sync`, yang selama ini hanya
+hidup sebagai DTO lokal halaman web dan kelas Dart di sini. Kuncinya
+**camelCase** dan tetap begitu: menyeragamkannya ke snake_case memecah kedua
+klien sekaligus, jadi itu vena tersendiri.
+
+**Catatan alat ukur untuk tim ponsel:** sapuan kunci di `kunci_kontrak_server_test`
+dan `kunci_hantu_test` sampai 2026-09-05 memakai kelas `[a-z][a-z0-9_]*` —
+huruf kecil saja. Balasan ini satu-satunya pulau camelCase di kontrak, jadi
+**16 kuncinya tak pernah tersapu ratchet mana pun**. Kelasnya kini
+`[a-z][a-zA-Z0-9_]*` (huruf pertama tetap kecil agar literal UI tak ikut);
+terukur: disentuh 651 → 687, kunci kontrak tanpa keputusan 35 → 19.
+
+Penjaga di server: `struk-penjualan-dto-utuh.test.ts` (literal `strukPenjualan`
+== kontrak dua arah; SATU perakit di seluruh `apps/server/src`; ketiga
+pemanggil melewatkan gerbang biaya dan tak satu pun `true` harfiah; kunci yang
+diurai ponsel ⊆ kontrak) dan verify-api §298 (12 lengan dari kawat, termasuk
+"kasir menerima `null`" DAN "owner tetap menerima angka" — supaya gerbangnya
+terbukti gerbang, bukan penghapus).
+
+---
+
 ## ⚪️ `BepResult` & `NilaiStokRingkas` kini ada di Lampiran A — dan `basis` BEP layak ditampilkan
 
 > Tidak ada bentuk balasan yang berubah. `GET /api/laporan/bep` dan `GET

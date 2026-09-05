@@ -1787,6 +1787,119 @@ export type SebabPenjualanGagal =
   | "kasir_belum_dibuka"
   | "shift_tidak_cocok";
 
+/**
+ * BENTUK STRUK: satu baris `sales` sebagaimana dilihat klien.
+ *
+ * camelCase — dan itu WARISAN, bukan gaya. Balasan ini satu-satunya pulau
+ * camelCase di kontrak yang serba snake_case, sebab sampai 2026-09-05 ia
+ * memang baris Drizzle mentah (`.returning()`) yang tak pernah dipetakan
+ * siapa pun. Menyeragamkannya ke snake_case adalah perubahan kawat yang
+ * memecah web DAN ponsel sekaligus; putaran ini MENAMAI bentuknya, bukan
+ * merapikannya. Penyeragaman itu vena tersendiri.
+ *
+ * Cakupan kolomnya sama persis dengan `KOLOM_SALE` (`db/kolom-publik.ts`) —
+ * yaitu yang `GET /penjualan/:id` sudah kirim hari ini. Menyempitkannya
+ * (`companyId`, `deletedAt`, …) perubahan kontrak tersendiri; komentar
+ * `KOLOM_SALE` sendiri sudah menyatakan itu butuh pengukurannya sendiri.
+ */
+export interface SaleRow {
+  id: string;
+  companyId: string;
+  branchId: string;
+  cashierUserId: string;
+  nomor: string;
+  isDineIn: boolean;
+  mejaId: string | null;
+  mejaLabel: string | null;
+  subtotal: number;
+  diskon: number;
+  diskonPersen: number | null;
+  pb1Amount: number;
+  total: number;
+  /**
+   * Jangkar SEBELUM refund pertama — `null` berarti transaksi ini belum pernah
+   * direfund, jadi nilai terkini di atas memang nilai asalnya. Diisi sekali dan
+   * tak pernah berubah; kalau ikut bergerak, refund kedua menggerus diskon
+   * untuk kedua kalinya.
+   */
+  subtotalAsal: number | null;
+  diskonAsal: number | null;
+  pb1Asal: number | null;
+  /** uang yang sudah dikembalikan ke pembeli (kumulatif, Rp) */
+  refundTotal: number;
+  /**
+   * BIAYA — `null` berarti DITAHAN, bukan "nol biaya".
+   *
+   * Sama seperti `harga_per_unit` di `BarisNilaiStok`: server menihilkannya
+   * untuk peran non-manajemen (`bolehLihatBiaya`). Terukur 2026-09-05: pintu
+   * `GET /penjualan/:id` sudah menahannya sejak 2026-08-26, tapi `POST
+   * /penjualan` — yang kasir-saja — memulangkan baris mentah, jadi tiap kasir
+   * menerima `totalHpp` dan `hppSatuan` pada TIAP checkout (terukur: 4000 dan
+   * 2000 pada transaksi yang GET-nya memulangkan null untuk kasir yang sama).
+   * Sejak putaran ini kedua pintu memakai satu penulis, `strukPenjualan`.
+   */
+  totalHpp: number | null;
+  catatan: string | null;
+  customerId: string | null;
+  customerNama: string | null;
+  customerWa: string | null;
+  metodeBayar: MetodeBayar;
+  uangDiterima: number | null;
+  waktu: string;
+  saleDate: string;
+  shiftId: string | null;
+  asalOpenBillId: string | null;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+/** Satu baris `sale_items` pada struk. */
+export interface SaleItemRow {
+  id: string;
+  saleId: string;
+  menuId: string;
+  menuNama: string;
+  hargaSatuan: number;
+  /** biaya per porsi — `null` = DITAHAN (lihat `SaleRow.totalHpp`) */
+  hppSatuan: number | null;
+  /**
+   * Porsi yang DIPESAN. Sengaja TIDAK dikurangi refund: berapa yang dipesan
+   * dan berapa yang dikembalikan adalah dua fakta, dan struk asli harus tetap
+   * terbaca. Yang DITAGIH = `qty − qtyRefund` — pakai `qtyDitagih` di
+   * `refund.ts`, jangan menghitungnya sendiri.
+   */
+  qty: number;
+  isDineIn: boolean;
+  catatan: string | null;
+  /** nilai baris pada `qty` ASAL — hitung ulang bila `qtyRefund > 0` */
+  lineTotal: number;
+  pesananStatus: PesananStatus;
+  pesananStatusAt: string | null;
+  pesananStatusOleh: string | null;
+  pesananMasukAt: string;
+  sajianTakeaway: boolean;
+  /** porsi yang sudah dikembalikan uangnya (kumulatif) */
+  qtyRefund: number;
+}
+
+/**
+ * Balasan struk penjualan — bentuk yang SAMA untuk tiga pintu: `POST
+ * /penjualan` (201), `GET /penjualan/:id` (cetak ulang), dan perintah
+ * `penjualan` di `POST /sync` (yang menambah `shift`, `ada_transaksi_susulan`,
+ * `di_luar_jendela_shift` di sekelilingnya).
+ *
+ * Sampai 2026-09-05 bentuknya hidup sebagai DTO lokal halaman web
+ * (`ReceiptModal.tsx`) dan kelas Dart di ponsel — nol medan di Lampiran A,
+ * padahal ia yang dicetak jadi kertas di kedua klien.
+ */
+export interface SaleResult {
+  sale: SaleRow;
+  items: SaleItemRow[];
+  branch_nama: string;
+  /** nama kasir yang melayani (untuk dicetak di nota) */
+  kasir: string | null;
+}
+
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
 export interface RiwayatTransaksiRow {
   id: string;

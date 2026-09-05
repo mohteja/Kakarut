@@ -71,7 +71,11 @@ export function medanSemuaInterface(src: string): Set<string> {
 export function kunciHantuDiketahui(dart: string): string[] {
   const m = /const hantuDiketahui = <String, String>\{([\s\S]*?)\n\};/.exec(dart);
   if (!m) throw new Error("peta `hantuDiketahui` tak ditemukan di kunci_hantu_test.dart — bentuknya berubah?");
-  return [...m[1].matchAll(/^\s+'([a-z0-9_]+)':\s*'/gm)].map((x) => x[1]).sort();
+  // camelCase IKUT: `hantuDiketahui` memuat `logoUrl`, `autoPrint`, dst sejak
+  // sapuan ponsel dilebarkan (2026-09-05). Kelas `[a-z0-9_]+` di sini akan
+  // membuat pemeriksaan di bawah diam-diam melewati separuh petanya — kelas
+  // kebutaan yang SAMA dengan yang baru saja ditutup di sisi Dart.
+  return [...m[1].matchAll(/^\s+'([a-z][a-zA-Z0-9_]*)':\s*'/gm)].map((x) => x[1]).sort();
 }
 
 describe("BepResult / NilaiStokRingkas == bentuk yang dibangun; shared di luar types.ts tak menyembunyikan kunci kawat", () => {
@@ -134,16 +138,25 @@ describe("BepResult / NilaiStokRingkas == bentuk yang dibangun; shared di luar t
     }
     // Terukur 2026-09-05: 55 medan di 27 berkas shared selain types.ts, +500-an di types.ts.
     expect(dideklarasikan.size).toBeGreaterThan(400);
-    // Sapuan ini berkunci NAMA. Dua nama di bawah memang dideklarasikan shared —
-    // di bentuk MASUKAN klien (struk `ReceiptData`, bon `BonData`, aritmetika
-    // refund `UangPenjualan`), bukan balasan HTTP — sementara ponsel membacanya
-    // dari balasan `POST /penjualan` yang DTO-nya (`SaleResult`) masih lokal
-    // web (antrean). Tabrakannya nyata, tersembunyinya tidak. Tiap entri di
-    // sini diratchet: harus MASIH hantu di ponsel dan MASIH bertabrakan —
-    // begitu `SaleResult` masuk types.ts, keduanya wajib dicabut.
+    // Sapuan ini berkunci NAMA, jadi satu nama bisa dideklarasikan shared untuk
+    // hal LAIN daripada yang ponsel baca. Dua entri pernah berdiri di sini —
+    // `diskon` dan `subtotal`, yang shared deklarasikan sebagai MASUKAN klien
+    // (`ReceiptData`/`BonData`/`UangPenjualan`) sementara ponsel membacanya
+    // dari balasan `POST /penjualan`. Keduanya DICABUT 2026-09-05 begitu
+    // `SaleResult` masuk types.ts: ponsel berhenti mencatatnya sebagai hantu,
+    // dan ratchet di bawah menuduh entri yang tinggal — persis seperti yang
+    // ditulis di komentar aslinya.
     const TABRAKAN_NAMA: Record<string, string> = {
-      diskon: "ReceiptData/BonData/UangPenjualan (masukan klien) ≠ sale.diskon dari POST /penjualan (SaleResult lokal web)",
-      subtotal: "ReceiptData/BonData/UangPenjualan (masukan klien) ≠ sale.subtotal dari POST /penjualan (SaleResult lokal web)",
+      // Ketiga nama di bawah lahir dari pelebaran sapuan ke camelCase
+      // (2026-09-05) dan sekelas persis dengan dua yang baru dicabut: shared
+      // mendeklarasikannya sebagai MASUKAN PERENDER, ponsel membacanya dari
+      // tempat lain.
+      charsPerLine: "receipt.ts:ReceiptOptions (opsi cetak) ≠ printer_settings.dart, penyimpanan LOKAL ponsel",
+      feedLines: "receipt.ts:ReceiptOptions (opsi cetak) ≠ printer_settings.dart, penyimpanan LOKAL ponsel",
+      // `pb1Rate` di ReceiptData/BonData adalah tarif yang DITURUNKAN klien
+      // untuk kertas (`tarifPb1Struk`); yang ponsel baca adalah row camelCase
+      // `GET /company`, yang DTO-nya belum di shared — kelas NilaiStokRingkas.
+      pb1Rate: "receipt.ts/bon-tagihan.ts (tarif turunan utk kertas) ≠ row camelCase GET /company, DTO belum di shared",
     };
     for (const k of Object.keys(TABRAKAN_NAMA)) {
       expect(hantu, `TABRAKAN_NAMA basi: ${k} tak lagi hantu di ponsel — cabut`).toContain(k);

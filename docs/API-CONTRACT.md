@@ -371,7 +371,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## 7. `/api/penjualan` — Penjualan POS (`modules/penjualan/routes.ts`)
 
-- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?, open_bill_item_id?:uuid|null}] (min 1) }` — res: **201** hasil sale + `{ kasir }` — error: **400** (validasi/diskon lewat batas / baris open bill tak cocok / `open_bill_item_id` tanpa `open_bill_id`), **403** kasir di luar cabang, **404** open bill tak ada di cabang ini, **409** (lihat tabel `sebab` di bawah)
+- `POST /api/penjualan` — **[cashier only]** (`requireRole("cashier")` inline) — req `SaleBody`: `{ branch_id?: uuid, is_dine_in: bool=false, meja_id?: uuid, catatan?|null, diskon_tipe?: "persen"|"nominal", diskon_nilai?: number(≥0), customer_nama?|null, customer_wa?|null, metode_bayar?: "tunai"|"qris"|"transfer", uang_diterima?: number(≥0), open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, catatan?, open_bill_item_id?:uuid|null}] (min 1) }` — res: **201** **`SaleResult`** = `{ sale: SaleRow, items: SaleItemRow[], branch_nama, kasir }` (sejak 2026-09-05 bentuknya bernama di Lampiran A; sebelumnya baris tabel mentah tanpa satu tipe pun). **`sale.totalHpp` dan `items[].hppSatuan` DITAHAN (`null`) untuk peran non-manajemen** — dan rute ini kasir-saja, jadi keduanya selalu `null` di sini. Sampai 2026-09-05 pintu ini mengirim ANGKA-nya (terukur: 4000 & 2000 pada transaksi yang `GET /:id`-nya memulangkan `null` untuk kasir yang sama); gerbang di `GET /:id` sudah ada sejak 2026-08-26, pintu POST tak pernah ikut ditutup sebab bentuknya tak pernah ditulis siapa pun. `null` berarti DITAHAN, bukan "nol biaya" — error: **400** (validasi/diskon lewat batas / baris open bill tak cocok / `open_bill_item_id` tanpa `open_bill_id`), **403** kasir di luar cabang, **404** open bill tak ada di cabang ini, **409** (lihat tabel `sebab` di bawah)
   > ### 409 pada penjualan SELALU membawa `sebab` — jangan baca teksnya
   >
   > Badan galat: `{ error, sebab }`. Yang menentukan tindakan klien hanya satu pertanyaan: **transaksinya tercatat atau tidak?**
@@ -457,7 +457,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > `open_bill_item_id` terkirim.** Pastikan lewat pengujian di sisi klien, bukan
 > lewat respons server.
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
-- `GET /api/penjualan/:id` — [any] — res: `{ sale, items, branch_nama, kasir }` — error: **403** kasir luar cabang, **404**
+- `GET /api/penjualan/:id` — [any] — res: **`SaleResult`** — bentuk yang SAMA PERSIS dengan `POST /api/penjualan` (satu penulis, `strukPenjualan`; dijaga verify-api §298 dari kawat, dua arah). Biaya ditahan untuk non-manajemen, sama seperti di POST — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
 - `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, client_ref?: uuid, device_id?: string|null, items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini)
 
@@ -3436,6 +3436,119 @@ export type SebabPenjualanGagal =
   | "baris_dibatalkan"
   | "kasir_belum_dibuka"
   | "shift_tidak_cocok";
+
+/**
+ * BENTUK STRUK: satu baris `sales` sebagaimana dilihat klien.
+ *
+ * camelCase — dan itu WARISAN, bukan gaya. Balasan ini satu-satunya pulau
+ * camelCase di kontrak yang serba snake_case, sebab sampai 2026-09-05 ia
+ * memang baris Drizzle mentah (`.returning()`) yang tak pernah dipetakan
+ * siapa pun. Menyeragamkannya ke snake_case adalah perubahan kawat yang
+ * memecah web DAN ponsel sekaligus; putaran ini MENAMAI bentuknya, bukan
+ * merapikannya. Penyeragaman itu vena tersendiri.
+ *
+ * Cakupan kolomnya sama persis dengan `KOLOM_SALE` (`db/kolom-publik.ts`) —
+ * yaitu yang `GET /penjualan/:id` sudah kirim hari ini. Menyempitkannya
+ * (`companyId`, `deletedAt`, …) perubahan kontrak tersendiri; komentar
+ * `KOLOM_SALE` sendiri sudah menyatakan itu butuh pengukurannya sendiri.
+ */
+export interface SaleRow {
+  id: string;
+  companyId: string;
+  branchId: string;
+  cashierUserId: string;
+  nomor: string;
+  isDineIn: boolean;
+  mejaId: string | null;
+  mejaLabel: string | null;
+  subtotal: number;
+  diskon: number;
+  diskonPersen: number | null;
+  pb1Amount: number;
+  total: number;
+  /**
+   * Jangkar SEBELUM refund pertama — `null` berarti transaksi ini belum pernah
+   * direfund, jadi nilai terkini di atas memang nilai asalnya. Diisi sekali dan
+   * tak pernah berubah; kalau ikut bergerak, refund kedua menggerus diskon
+   * untuk kedua kalinya.
+   */
+  subtotalAsal: number | null;
+  diskonAsal: number | null;
+  pb1Asal: number | null;
+  /** uang yang sudah dikembalikan ke pembeli (kumulatif, Rp) */
+  refundTotal: number;
+  /**
+   * BIAYA — `null` berarti DITAHAN, bukan "nol biaya".
+   *
+   * Sama seperti `harga_per_unit` di `BarisNilaiStok`: server menihilkannya
+   * untuk peran non-manajemen (`bolehLihatBiaya`). Terukur 2026-09-05: pintu
+   * `GET /penjualan/:id` sudah menahannya sejak 2026-08-26, tapi `POST
+   * /penjualan` — yang kasir-saja — memulangkan baris mentah, jadi tiap kasir
+   * menerima `totalHpp` dan `hppSatuan` pada TIAP checkout (terukur: 4000 dan
+   * 2000 pada transaksi yang GET-nya memulangkan null untuk kasir yang sama).
+   * Sejak putaran ini kedua pintu memakai satu penulis, `strukPenjualan`.
+   */
+  totalHpp: number | null;
+  catatan: string | null;
+  customerId: string | null;
+  customerNama: string | null;
+  customerWa: string | null;
+  metodeBayar: MetodeBayar;
+  uangDiterima: number | null;
+  waktu: string;
+  saleDate: string;
+  shiftId: string | null;
+  asalOpenBillId: string | null;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+/** Satu baris `sale_items` pada struk. */
+export interface SaleItemRow {
+  id: string;
+  saleId: string;
+  menuId: string;
+  menuNama: string;
+  hargaSatuan: number;
+  /** biaya per porsi — `null` = DITAHAN (lihat `SaleRow.totalHpp`) */
+  hppSatuan: number | null;
+  /**
+   * Porsi yang DIPESAN. Sengaja TIDAK dikurangi refund: berapa yang dipesan
+   * dan berapa yang dikembalikan adalah dua fakta, dan struk asli harus tetap
+   * terbaca. Yang DITAGIH = `qty − qtyRefund` — pakai `qtyDitagih` di
+   * `refund.ts`, jangan menghitungnya sendiri.
+   */
+  qty: number;
+  isDineIn: boolean;
+  catatan: string | null;
+  /** nilai baris pada `qty` ASAL — hitung ulang bila `qtyRefund > 0` */
+  lineTotal: number;
+  pesananStatus: PesananStatus;
+  pesananStatusAt: string | null;
+  pesananStatusOleh: string | null;
+  pesananMasukAt: string;
+  sajianTakeaway: boolean;
+  /** porsi yang sudah dikembalikan uangnya (kumulatif) */
+  qtyRefund: number;
+}
+
+/**
+ * Balasan struk penjualan — bentuk yang SAMA untuk tiga pintu: `POST
+ * /penjualan` (201), `GET /penjualan/:id` (cetak ulang), dan perintah
+ * `penjualan` di `POST /sync` (yang menambah `shift`, `ada_transaksi_susulan`,
+ * `di_luar_jendela_shift` di sekelilingnya).
+ *
+ * Sampai 2026-09-05 bentuknya hidup sebagai DTO lokal halaman web
+ * (`ReceiptModal.tsx`) dan kelas Dart di ponsel — nol medan di Lampiran A,
+ * padahal ia yang dicetak jadi kertas di kedua klien.
+ */
+export interface SaleResult {
+  sale: SaleRow;
+  items: SaleItemRow[];
+  branch_nama: string;
+  /** nama kasir yang melayani (untuk dicetak di nota) */
+  kasir: string | null;
+}
 
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
 export interface RiwayatTransaksiRow {

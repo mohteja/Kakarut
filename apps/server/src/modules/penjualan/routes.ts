@@ -24,6 +24,7 @@ import {
   deviceIdField,
 } from "../sync/idempoten";
 import { refundSajian } from "./refund";
+import { strukPenjualan } from "./struk";
 import { createSale, PenjualanGagal } from "./service";
 
 export const SaleBody = z.object({
@@ -127,7 +128,21 @@ export const penjualanRoutes = new Hono<AppEnv>()
           openBillId: body.open_bill_id,
           items: body.items,
         });
-        return { ...result, kasir: auth.nama };
+        /*
+         * Bentuknya DITULIS, bukan disebar. `createSale` memulangkan baris
+         * Drizzle mentah, dan `{ ...result }` mengirim seluruh kolomnya —
+         * termasuk `totalHpp` & `items[].hppSatuan` ke rute yang
+         * `requireRole("cashier")`. Terukur 2026-09-05: kasir membaca 4000 &
+         * 2000 di sini, sementara `GET /:id` untuk transaksi yang sama
+         * memulangkan null kepadanya. Satu penulis, satu gerbang.
+         */
+        return strukPenjualan(
+          result.sale,
+          result.items,
+          result.branch_nama,
+          auth.nama,
+          bolehLihatBiaya(auth.role),
+        );
       },
     );
     return c.json(data, baru ? 201 : 200);
@@ -273,13 +288,15 @@ export const penjualanRoutes = new Hono<AppEnv>()
      * di ponsel membaca `total_hpp` dari balasan POST
      * `/pesanan/:jenis/:id/item/:itemId/sajian`, bukan dari sini.
      */
-    const lihatBiaya = bolehLihatBiaya(auth.role);
-    return c.json({
-      sale: lihatBiaya ? sale : { ...sale, totalHpp: null },
-      items: lihatBiaya ? items : items.map((it) => ({ ...it, hppSatuan: null })),
-      branch_nama: branch?.nama ?? "",
-      kasir: kasirUser?.nama ?? null,
-    });
+    return c.json(
+      strukPenjualan(
+        sale,
+        items,
+        branch?.nama ?? "",
+        kasirUser?.nama ?? null,
+        bolehLihatBiaya(auth.role),
+      ),
+    );
   })
   /**
    * SLIP PESANAN penjualan ini — menu & jumlah saja, TANPA HARGA.

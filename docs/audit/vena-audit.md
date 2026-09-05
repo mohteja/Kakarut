@@ -50,6 +50,161 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Struk kasir: bentuk yang tak pernah ditulis siapa pun, biaya yang bocor lewat pintu kasir, dan tiga sapuan yang buta terhadap satu-satunya pulau camelCase — server + web + ponsel — 2026-09-05
+
+**Vena.** Dipilih pemilik dari empat tawaran: "struk kasir ke kontrak". Butir
+antreannya "15 tipe lokal web + 47 `api<{…}>` inline"; `SaleResult` nama yang
+ledger sendiri sebut sebagai kandidat berikutnya sesudah #95 dan #96.
+
+Yang ditemukan lebih dalam dari memindahkan tipe: **tiga temuan, dua di
+antaranya bukan soal tipe.**
+
+**Populasi.** `SaleResult` (`ReceiptModal.tsx:19-66`) — 30 medan daun, dua
+bentuk bersarang **tanpa nama**, menutupi **dua rute**: `POST /penjualan`
+(`KasirPage.tsx:601`) dan `GET /penjualan/:id` (`RiwayatPage.tsx:41`, cetak
+ulang). Ponsel mengurai bentuk yang sama (`SaleRow` 19 kunci, `SaleItemRow` 8
+— `kasir_models.dart:581-845`) dan **mencetaknya jadi kertas** ESC/POS. Nol
+medannya di Lampiran A. Server tak punya anotasi apa pun: `c.json(data)` atas
+`createSale` yang memulangkan `.returning()` telanjang.
+
+### Temuan 1 — biaya bocor lewat pintu KASIR, dan pintu sebelah sudah menutupnya sejak Agustus
+
+Diukur lewat HTTP pada SATU transaksi yang sama (kasir `kasir@basooopa.id`,
+DB gerbang, 2026-09-05):
+
+| pintu | peran | `sale.totalHpp` | `items[].hppSatuan` |
+| --- | --- | --- | --- |
+| `POST /penjualan` | kasir | **4000** | **2000** |
+| `GET /penjualan/:id` | kasir | `null` | `null` |
+| `GET /penjualan/:id` | owner | 4000 | 2000 |
+
+Bentuk kuncinya IDENTIK (4 atas / 30 `sale` / 16 `items`) — yang berbeda
+persis gerbangnya. Gerbang di `GET /:id` lahir 2026-08-26 dari pengukuran yang
+sama persis (komentarnya: *"token `bar` dan `cashier`: keduanya membaca
+5662,0314, angka yang sama persis dengan owner"*). Pintu POST tak pernah ikut
+ditutup — dan ia `requireRole("cashier")`, jadi **tiap kasir menerima biaya
+pada tiap checkout**. Jalur `POST /sync` perintah `penjualan` menyebar
+`...result` yang sama → kasir offline juga.
+
+Sebabnya bukan kelalaian gerbang, melainkan bentuk yang tak pernah ditulis:
+baris tabel mentah tak punya tempat untuk menaruh gerbang.
+
+### Temuan 2 — gerbang yang menjaga kelas ini buta terhadapnya
+
+`bentuk-balasan.test.ts` ATURAN A memaku `MAKS_UTANG = 0`: *"Balasan tak boleh
+dibentuk oleh `select()`/`returning()` TELANJANG."* Pemindainya berlingkup
+SATU fungsi (`test/util/bentuk-balasan.ts:46-49`), sehingga `.returning()`
+yang menyeberang dari `service.ts` ke `c.json` di `routes.ts` tak terlihat.
+Nolnya benar untuk yang bisa ia lihat, bukan untuk yang ia klaim. Rute ini
+berhenti melanggar putaran ini; **kelasnya belum tertutup** → antrean.
+
+### Temuan 3 — tiga (lalu empat) sapuan buta camelCase
+
+Balasan ini satu-satunya pulau camelCase di kontrak yang serba snake_case.
+Sapuan kunci memakai `[a-z][a-z0-9_]*` — huruf kecil saja — di
+`kunci_hantu_test.dart:75`, `kunci_kontrak_server_test.dart:60`, cerminnya di
+`kunci-satu-kontrak.test.ts:117`, **dan** `medan296` di `verify-api.sh` (yang
+ketahuan hanya karena §298 memulangkan premis 14 dari 50). Akibatnya 16 kunci
+tak pernah tersapu ratchet mana pun.
+
+Terukur saat dilebarkan ke `[a-z][a-zA-Z0-9_]*` (huruf pertama tetap kecil
+supaya literal UI tak ikut): **disentuh 651 → 687**, **kunci kontrak tanpa
+keputusan 35 → 19**. Sembilan belas sisanya memang tak dibaca ponsel dan
+dicatat beralasan dalam tiga kelompok. Pelebaran itu juga menyingkap **18
+bacaan camelCase lama** yang selama ini tak terlihat siapa pun: 13
+`printer_settings` (penyimpanan lokal ponsel) dan 5 row camelCase `GET
+/company` (DTO belum di shared; `kasir_models.dart:389-395` sengaja menerima
+DUA ejaan). Semuanya dicatat, tak satu pun disembunyikan dengan mengecilkan
+sapuannya lagi.
+
+**Yang TIDAK ditemukan, dan disebut supaya tak dicari ulang.** Kontrak
+mewajibkan klien menagih `qty − qty_refund`. **Kedua klien menghormatinya** —
+web lewat `qtyDitagih` (`ReceiptModal.tsx:172,230,294`), ponsel lewat
+`qtyDitagih`/`lineTotalDitagih` (`receipt_page.dart:101-113`). Dugaan awal saya
+bahwa struk mencetak `qty` mentah SALAH.
+
+### Yang dibangun
+
+- **shared**: `SaleRow` (30), `SaleItemRow` (16), `SaleResult`; `totalHpp` &
+  `hppSatuan` diketik `number | null` dengan arti `null` = DITAHAN tertulis di
+  komentarnya. camelCase-nya dipertahankan dan alasannya ditulis: menyeragamkan
+  ke snake_case memecah kedua klien sekaligus. Lampiran A +113 baris.
+- **`penjualan/struk.ts`** (baru): `strukPenjualan(sale, items, branchNama,
+  kasir, lihatBiaya)` — memetakan KOLOM DEMI KOLOM (bukan sebar) dan menihilkan
+  biaya. Dipakai ketiga pintu; `lihatBiaya` DIOPER, bukan dihitung di dalam,
+  supaya pintu baru tak bisa lupa gerbangnya ada.
+- **web**: `interface SaleResult` dicabut → alias ke tipe kontrak; kelima
+  berkas pengimpornya tak berubah satu baris pun. `contohStruk` di shared kini
+  dianotasi `: SaleResult` sehingga data contohnya ikut ditagih ke-46 medan.
+- **alat ukur**: keempat sapuan melihat camelCase; premis `disentuh` dinaikkan
+  500 → 650 supaya pelebarannya tak diam-diam melonggarkan gerbang. Regex peta
+  `hantuDiketahui` di `bep-nilai-dto-utuh` ikut (salinan kelima kebutaan yang
+  sama). `TABRAKAN_NAMA` #96 dikosongkan lalu diisi ulang: `diskon`/`subtotal`
+  dicabut (ratchet-nya sendiri yang menuduh, persis seperti yang ditulis
+  komentar aslinya), `charsPerLine`/`feedLines`/`pb1Rate` masuk beralasan.
+- **`struk-penjualan-dto-utuh.test.ts`** (baru, 7 uji): literal ==
+  `SaleRow`/`SaleItemRow`/`SaleResult` dua arah; SATU perakit di seluruh
+  `apps/server/src`; ketiga pemanggil melewatkan gerbang biaya dan tak satu pun
+  `true` harfiah; penulisnya memang menihilkan; web tak mendeklarasikan ulang;
+  KELAS lintas-repo (kunci `fromJson` ponsel ⊆ kontrak); PASANGAN.
+- **verify-api §298** (12 lengan): kunci POST == `SaleResult`/`SaleRow`/
+  `SaleItemRow` dua arah, tiap baris membawa semua 16; **kasir menerima `null`**
+  di POST DAN GET; **owner tetap menerima angka** — supaya gerbangnya terbukti
+  gerbang, bukan penghapus; POST dan GET berbentuk identik dari kawat.
+- Changelog ponsel **🟡 PERLU DICEK** (kawatnya berubah; kerja di ponsel nol,
+  dan itu dikatakan) + `BELUM_TAYANG`. Ponsel `4f66f9a`: sapuan + fikstur +50
+  + 19 keputusan + 18 catatan baru; **nol perubahan `lib/`**.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut / dimutasi | tuduhan |
+| --- | --- | --- |
+| MM | gerbang `lihatBiaya` dicabut dari `strukPenjualan` — **statis DAN lewat kawat** (server dibangun ulang) | statis: `to match /totalHpp: lihatBiaya \? …/`; HTTP: 3 lengan §298 merah, kasir membaca angka lagi |
+| NN | POST kembali `return { ...result, kasir }` | SATU perakit: `expected 1 to be 2` (panggilan hilang) |
+| OO | `refundTotal` dicabut dari `SaleRow` | premis 29 ≠ 30 + `dibangun tapi tak ada di SaleRow: [refundTotal]` |
+| PP | sapuan dikembalikan ke `[a-z][a-z0-9_]*` (cermin server + cermin Dart) | 16 kunci camelCase tanpa keputusan — membuktikan perbaikan alat ukurnya menanggung beban |
+| QQ | web mendeklarasikan ulang `interface SaleResult` | `not to match /interface SaleResult\b/` |
+| RR | `strukPenjualan` dipanggil `true` harfiah | `routes.ts: gerbang biaya dilangkahi dengan literal` |
+
+**Yang jujur soal detektornya.** Alat bukti merah §298 mandiri saya
+memulangkan sembilan kegagalan palsu pada jalan pertama: `api()` di skrip itu
+membuang argumen BADAN, dan §296/§297 hanya ber-GET sehingga cacatnya tak
+pernah ketahuan sampai §298 mem-POST. Bukan cacat `verify-api.sh` (yang
+`api()`-nya memang menerima badan) — cacat harness-nya, kembar dengan
+`bocorkan` yang lupa disalin putaran lalu. Dicatat supaya angka "32 lolos, 0
+gagal" terbaca dengan sejarahnya.
+
+### Batas yang diakui
+
+- POST tetap mengirim `companyId`/`deletedAt`/dst. Yang diperbaiki putaran ini
+  **asimetri** dan **kebocoran biaya**-nya, bukan lebar balasannya.
+- Pemindai `bentuk-balasan` tetap berlingkup satu fungsi (temuan 2).
+- Tak ada Flutter di sini: yang berubah di ponsel hanya fikstur & uji.
+- KELAS lintas-repo membaca `kasir_models.dart` dengan regex; kelas Dart yang
+  pindah berkas akan membuatnya MELEMPAR (bukan lolos diam-diam) — itu sengaja.
+
+### Gerbang
+
+- Server (`gerbang-struk.sh`: typecheck tahap pertama → DB nol → boot → seed →
+  verify-api → vitest → invarian → **e2e**): typecheck hijau, **verify-api
+  3.588 / 0** (3.576 + 12 lengan §298) dengan log UTUH (3.951 baris, 0 NUL),
+  **vitest 247 berkas / 3.053 uji** (+1 berkas `struk-penjualan-dto-utuh`),
+  **invarian 27 / 0**, **e2e 48 lolos** (`pos.spec` & `printer.spec` benar-benar
+  men-checkout dan mencetak struk — satu-satunya putaran DTO yang menyentuh
+  jalur bayar, jadi e2e disertakan).
+- **Jalan PERTAMA gerbang ini MERAH, dan tuduhannya benar** — dua-duanya
+  perbuatan putaran ini, bukan artefak: (1) empat lengan verify-api lama
+  membaca HPP dari balasan `POST /penjualan` **sebagai kasir** (`hpp dine-in <
+  hpp take-away`, tiga premis §286) — mereka memakai kebocorannya sebagai
+  saluran ukur, dan gerbang biaya baru memutusnya. Diperbaiki dengan membaca
+  angka yang sama lewat `GET /penjualan/:id` sebagai OWNER; asersinya tak
+  berubah, sumber bacaannya yang dibetulkan. (2) §298 memakai `$KASIR` sesudah
+  §105 (token yang mati sesudah ganti password) — `verify-api-token.test.ts`
+  menangkapnya, persis kelas yang uji itu ada untuk menangkap; diganti
+  `$REISS105` + `/shift/buka` yang idempoten.
+- Ponsel: commit `4f66f9a`, **CI #52 hijau** (run 33998511233).
+- **Tak ada rilis.**
+
 ## BEP dan nilai stok — `periode` yang dikirim tanpa dideklarasikan, `basis` yang ponsel tak baca, dan "sudah di shared" yang ternyata tak terlihat kontrak — server + web + ponsel — 2026-09-05
 
 **Vena.** Butir antrean "16 tipe lokal web + 47 `api<{…}>` inline", dari
@@ -12521,32 +12676,48 @@ berlaku di situ).
       (`email_tak_dikenal` → `RegisterPage(emailAwal:)`). Temuan di gerbang:
       fikstur status BUTA terhadap objek `as const` di shared — sumber ke-4
       `konst:` ditambahkan, literal ponselnya kini terikat dua arah
-- [ ] **`/register` & `/resend-verification` masih netral sementara `/login` di
-      sebelahnya kini bicara** — ketimpangan yang lahir 2026-09-03 dan belum
-      pernah ditanyakan ke pemilik. Keduanya permukaan enumerasi yang sama;
-      sesudah `/login` dibuka, netralitas keduanya melindungi lebih sedikit
-      daripada sebelumnya sambil tetap membuat orang yang salah ketik alamat
-      di layar daftar tak tahu apa-apa. Pilihannya dua-duanya sah — dirapatkan
-      ke `/login`, atau dibiarkan sebagai batas yang disengaja — tapi harus
-      dipilih, bukan diwarisi
+- [ ] **`/register` & `/resend-verification` DIRAPATKAN ke `/login`** —
+      KEPUTUSAN PEMILIK 2026-09-05 (ditanyakan sesudah menggantung dua
+      putaran). Keduanya menyebut sebab terstruktur seperti `/login`, dengan
+      `sebab` berpasangan satu-satu dengan kalimatnya. Konsekuensinya ditulis
+      di kontrak apa adanya: enumerasi akun melebar ke pintu yang TAK butuh
+      password, tak seperti `/login`. Menyentuh rute, kontrak, changelog,
+      ponsel — vena tersendiri
 - [x] ~~**`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman**~~ — SELESAI
       2026-09-05, lihat entri "Baris pengadaan yang tipenya tak pernah dilihat
       siapa pun" di atas. 55 kunci/baris terukur HTTP; 3 tak dideklarasikan
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **15 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
-      bersama** — diukur 2026-09-05 dari DUA arah; putaran #95 membayar
-      `AuthState`/`Company`/`Cabang` (sesi & cabang), #96 membayar `BepResult`
-      dan menyingkap `NilaiStokRingkas` yang "sudah di shared" tapi di luar
-      `types.ts`; `hantuDiketahui` ponsel 51 → 26. Sisa arah web: dari 105
-      tipe yang dipakai `api<T>()`, **15 tak diekspor shared** (`Kategori`
-      3×, `Karyawan` 3×, `SaleResult`, `CompanyStruk`/`CabangStruk`,
-      `PenerimaanRow`, `DanaEntri`, `StokAwalTersimpan`, `Tenant`, …) plus
-      **47 pemanggilan `api<{…}>` inline** tanpa nama. Satu-dua tipe per
-      putaran; berikutnya `SaleResult` (`POST /penjualan` — ponsel membacanya
-      sebagai `sale`/`diskon`/`subtotal`, tiga entri hantu yang dua di
-      antaranya kini tercatat sebagai tabrakan nama di `bep-nilai-dto-utuh`)
+- [ ] **12 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+      bersama** — diukur ulang 2026-09-05 SESUDAH #97. Angka "15" sebelumnya
+      terlalu besar: sapuan `api<T>` memungut `Record`/`Pick` (bawaan TS) dan
+      `AuthState`/`Cabang` yang sejak #95 sudah jadi ALIAS ke tipe kontrak.
+      Yang benar-benar lokal 12, dan tiga di antaranya dibayar #97
+      (`SaleResult` + dua bentuk bersarangnya). Sisa: `Kategori` 3×,
+      `Karyawan` 3×, `SistemStatus` 2×, `CompanyStruk`/`CabangStruk`,
+      `KaryawanRow`, `Company`, `PenerimaanRow`, `DanaEntri`,
+      `StokAwalTersimpan`, `Tenant`, `CompanyMode`, `DaftarResult` — plus 47
+      `api<{…}>` inline tanpa nama. Berikutnya `CompanyStruk`/`CabangStruk`
+      (`ReceiptModal.tsx`, tetangga yang baru saja dibongkar) atau `Company`
+      (`GET /company` — row ORM camelCase, 18 kunci menurut §273; ponsel
+      mencatat 5 di antaranya sebagai hantu)
+- [ ] **Balasan refund `{ok, nominal, total_lama, total_baru}` tanpa DTO** —
+      satu-satunya sisa alasan entri hantu `nominal` di ponsel
+      (`kasir_repository.dart:232`). Kecil, dan pasangannya `SaleResult` sudah
+      di kontrak
+- [ ] **Menyempitkan `KOLOM_SALE`** (`companyId`, `cashierUserId`, `saleDate`,
+      `shiftId`, `asalOpenBillId`, `deletedAt`, `deletedBy`) — sesudah #97
+      ketujuhnya bernama di kontrak dan tercatat "belum dibaca" di ponsel,
+      jadi biayanya kini terlihat. Komentar `kolom-publik.ts` sendiri sudah
+      menyatakan ini butuh pengukurannya sendiri
+- [ ] **Pemindai `bentuk-balasan` berlingkup SATU FUNGSI** — ATURAN A memaku
+      `MAKS_UTANG = 0` ("balasan tak boleh dibentuk `returning()` telanjang"),
+      tapi `test/util/bentuk-balasan.ts:46-49` tak mengikuti nilai balik
+      lintas-berkas. `POST /penjualan` melanggarnya bertahun-tahun lewat
+      `service.ts` → `routes.ts` tanpa terlihat (temuan #97, dan itulah yang
+      membuat HPP bocor ke kasir). Rute itu berhenti melanggar; KELASNYA
+      belum tertutup. Memperdalam pemindainya = vena alat ukur tersendiri
 - [ ] **Bentuk kawat di berkas shared selain `types.ts` tak terlihat kontrak**
       — pembangkit fikstur ponsel dan Lampiran A hanya membaca `types.ts`;
       27 berkas lain mengekspor 55 medan interface (rumus, cetak, nilai
@@ -12554,15 +12725,12 @@ berlaku di situ).
       Penjaga KELAS di `bep-nilai-dto-utuh` menangkap kelasnya lewat nama
       hantu ponsel; yang belum ada: aturan statis "interface yang dipulangkan
       `c.json` harus di `types.ts`" — menuntut informasi tipe, bukan regex
-- [ ] **`company.blokir_jual_minus` dikirim untuk peringatan kasir yang tak
-      pernah dibuat** — komentar `companyDto`: "supaya kasir bisa
-      MEMPERINGATKAN sebelum tombol Bayar"; terukur 2026-09-05 tak satu klien
-      pun membacanya (web hanya menulisnya di `PerusahaanPage`; ponsel tak
-      menyentuh namanya). Penegakan server (`penjualan/service.ts`) baru
-      terasa saat Bayar ditolak. Bangun peringatannya di kasir web + ponsel
-      (tanda pada baris keranjang yang stoknya minus saat setelan hidup), atau
-      berhenti mengirim medan yang tak dibaca. Medannya kini bernama di
-      kontrak (`CompanyDto`), ponsel mencatatnya beralasan
+- [ ] **Peringatan `blokir_jual_minus` DIBANGUN di kasir** — KEPUTUSAN
+      PEMILIK 2026-09-05. Tanda pada baris keranjang yang stoknya minus saat
+      setelan hidup, di kasir web DAN ponsel, supaya kasir tahu SEBELUM
+      menekan Bayar alih-alih sesudah ditolak server (`penjualan/service.ts`).
+      Medannya sudah bernama di kontrak (`CompanyDto`) sejak #95 dan tercatat
+      beralasan di ponsel — dua repo, vena tersendiri
 - [ ] **Ponsel memilih CK lewat `tipe`, bukan `central_kitchen_id`** —
       `beli_perlengkapan_page:674` dan `kasir_providers:69` menyaring
       `tipe == 'central_kitchen'`; pada perusahaan ber-CK lebih dari satu,

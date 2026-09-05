@@ -229,7 +229,13 @@ cek "complement −1" "abs(V - ($COMP0 - 1)) < 0.001" "$(stok_of "$S1" "compleme
 echo "== 4. Penjualan dine-in TIDAK memotong kemasan, complement −0.5 =="
 PLASTIK1=$(stok_of "$S1" "plastik take away"); COMP1=$(stok_of "$S1" "complement saos & sambal")
 JUAL2=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
-HPP_TA=$(echo "$JUAL1" | jq '.items[0].hppSatuan'); HPP_DI=$(echo "$JUAL2" | jq '.items[0].hppSatuan')
+# HPP dibaca lewat `GET /penjualan/:id` sebagai OWNER, bukan dari balasan POST
+# milik kasir. Sampai 2026-09-05 balasan POST membawa `hppSatuan` berisi angka
+# untuk kasir juga — dan lengan ini memakai kebocoran itu sebagai saluran ukur.
+# Sejak biayanya ditahan di ketiga pintu (§298), yang berhak melihat angkanya
+# hanya manajemen; asersinya tak berubah, sumber bacaannya yang dibetulkan.
+HPP_TA=$(api "$OWNER" GET "/penjualan/$(echo "$JUAL1" | jq -r .sale.id)" | jq '.items[0].hppSatuan')
+HPP_DI=$(api "$OWNER" GET "/penjualan/$(echo "$JUAL2" | jq -r .sale.id)" | jq '.items[0].hppSatuan')
 cek "hpp dine-in < hpp take-away" "V == 1" "$(python3 -c "print(1 if $HPP_DI < $HPP_TA else 0)")"
 S2=$(api "$KASIR" GET /stok)
 cek "plastik take away tetap" "abs(V - $PLASTIK1) < 0.001" "$(stok_of "$S2" "plastik take away")"
@@ -16685,12 +16691,16 @@ cek "dasar §286: tiga nota tercatat" "V == 1" \
   "$([ ${#SID286_1} -eq 36 ] && [ ${#SID286_2} -eq 36 ] && [ ${#SID286_3} -eq 36 ] && echo 1 || echo 0)"
 # Premis angka per nota — kalau ini meleset, laporan di bawah meleset karena
 # nota, bukan karena laporannya.
+# TOTAL dibaca dari nota kasir (ia memang berhak); HPP dari `GET /penjualan/:id`
+# sebagai OWNER — biaya ditahan untuk kasir sejak 2026-09-05 (§298), dan lengan
+# ini dulu membacanya dari balasan POST yang bocor.
+D286_1=$(api "$OWNER" GET "/penjualan/$SID286_1"); D286_2=$(api "$OWNER" GET "/penjualan/$SID286_2"); D286_3=$(api "$OWNER" GET "/penjualan/$SID286_3")
 cek "premis §286: S1 total 47.520 & HPP 10.000" "V == 1" \
-  "$(echo "$S286_1" | jq '((.sale.total==47520) and (.sale.totalHpp==10000))|if . then 1 else 0 end')"
+  "$(jq -n --argjson a "$S286_1" --argjson b "$D286_1" 'if ($a.sale.total==47520) and ($b.sale.totalHpp==10000) then 1 else 0 end')"
 cek "premis §286: S2 total 16.500 & HPP 5.000" "V == 1" \
-  "$(echo "$S286_2" | jq '((.sale.total==16500) and (.sale.totalHpp==5000))|if . then 1 else 0 end')"
+  "$(jq -n --argjson a "$S286_2" --argjson b "$D286_2" 'if ($a.sale.total==16500) and ($b.sale.totalHpp==5000) then 1 else 0 end')"
 cek "premis §286: S3 total 26.400 & HPP 0" "V == 1" \
-  "$(echo "$S286_3" | jq '((.sale.total==26400) and (.sale.totalHpp==0))|if . then 1 else 0 end')"
+  "$(jq -n --argjson a "$S286_3" --argjson b "$D286_3" 'if ($a.sale.total==26400) and ($b.sale.totalHpp==0) then 1 else 0 end')"
 
 # Sajian S1 dan S2 diselesaikan (dikerjakan → selesai) SEBELUM refund, supaya
 # baris durasinya lahir dari sajian yang memang dibuat.
@@ -17426,7 +17436,12 @@ cek "§295 tak ada baris yang membawa asal_cabang (kunci hantu yang ponsel baca)
 # dan bentuk `company` dirakit di DUA tempat (companyDto + inline `/auth/me`).
 # Statisnya dijaga `sesi-cabang-dto-utuh.test.ts`; lengan ini menagih dari
 # kawat: balasan HTTP sungguhan, dua arah, seluruh baris.
-medan296() { awk -v N="$1" 'BEGIN{re="^export interface " N "( extends [A-Za-z, ]+)? \\{"} $0 ~ re {f=1;next} f&&/^\}/{exit} f&&/^  [a-z0-9_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u; }
+# Kelas medannya `[a-zA-Z0-9_]` — camelCase IKUT. Sampai 2026-09-05 ia
+# `[a-z0-9_]`, dan itu aman hanya selama kontraknya serba snake_case; `SaleRow`
+# (30 medan camelCase) langsung menyingkapkannya: premis §298 memulangkan 14
+# dari 50. Kebutaan yang sama ada di tiga sapuan kunci ponsel, ditutup pada
+# putaran yang sama.
+medan296() { awk -v N="$1" 'BEGIN{re="^export interface " N "( extends [A-Za-z, ]+)? \\{"} $0 ~ re {f=1;next} f&&/^\}/{exit} f&&/^  [a-zA-Z0-9_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u; }
 K296_USER=$(medan296 AuthUser); K296_CO=$(medan296 CompanyDto); K296_SESI=$(medan296 SesiDto); K296_CAB=$(medan296 CabangDto)
 K296_LOGIN=$(printf '%s\n%s\n' "$K296_SESI" "$(medan296 SesiLogin)" | sort -u)
 R296L=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")
@@ -17489,6 +17504,54 @@ cek "§297 /stok/nilai kelima nilainya number" "V == 5" \
   "$(jq -r '[.[]|select(type=="number")]|length' <<<"$R297N")"
 cek "§297 kasir membaca /stok/nilai dengan kunci yang sama (agregat sebelum harga ditahan)" "V == 0" \
   "$(selisih296 "$(jq -r 'if type=="object" then keys[] else "BUKAN_OBJEK" end' <<<"$R297NK")" "$K297_NILAI")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §298 — STRUK PENJUALAN: kunci == kontrak, dan BIAYA tak bocor lewat POST
+# ═══════════════════════════════════════════════════════════════════════════
+# Tiga pintu memulangkan bentuk ini: `POST /penjualan` (kasir-saja), `GET
+# /penjualan/:id` (cetak ulang), dan perintah `penjualan` di `/sync`. Sampai
+# 2026-09-05 hanya yang KEDUA merakit bentuknya sendiri dan menahan biaya; dua
+# lainnya menyebar baris Drizzle mentah. Terukur pada SATU transaksi yang sama:
+# POST(kasir) totalHpp 4000 & hppSatuan 2000, GET(kasir) null & null,
+# GET(owner) 4000 & 2000 — pintu yang bocor justru yang `requireRole(cashier)`.
+# Statisnya `struk-penjualan-dto-utuh.test.ts`; `medan296`/`selisih296`/
+# `bocorkan` didefinisikan di §296.
+K298_SALE=$(medan296 SaleRow); K298_ITEM=$(medan296 SaleItemRow); K298_ATAS=$(medan296 SaleResult)
+# `$REISS105`, BUKAN `$KASIR`: §105 mengganti password kasir → token lama 401.
+# Shiftnya dipastikan terbuka lebih dulu; bila sudah, `/shift/buka` menolak dan
+# penolakan itu memang tak berarti apa-apa di sini.
+api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+MENU298=$(api "$REISS105" GET /menu | jq -r '[.[] | select(.tipe == "regular")][0].id')
+R298=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU298\",\"qty\":2}]}")
+ID298=$(jq -r '.sale.id // ""' <<<"$R298")
+G298K=$(api "$REISS105" GET "/penjualan/$ID298")
+G298O=$(api "$OWNER" GET "/penjualan/$ID298")
+cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 30 + SaleItemRow 16 + SaleResult 4)" "V == 50" \
+  "$(printf '%s\n%s\n%s\n' "$K298_SALE" "$K298_ITEM" "$K298_ATAS" | grep -c .)"
+cek "§298 premis: kasir berhasil membuat transaksi (ada sale.id & satu baris)" "V == 1" \
+  "$([ -n "$ID298" ] && [ "$(jq '.items|length' <<<"$R298")" -ge 1 ] && echo 1 || echo 0)"
+cek "§298 POST /penjualan kunci atas == SaleResult (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R298")" "$K298_ATAS")"
+cek "§298 POST .sale == SaleRow (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r '.sale|keys[]' <<<"$R298")" "$K298_SALE")"
+cek "§298 POST tiap baris .items == SaleItemRow (dua arah, gabungan)" "V == 0" \
+  "$(selisih296 "$(jq -r '[.items[]|keys[]]|unique|.[]' <<<"$R298")" "$K298_ITEM")"
+cek "§298 POST tiap baris membawa SEMUA 16 kunci (bukan cuma gabungannya)" "V == 1" \
+  "$(jq -r --argjson n "$(echo "$K298_ITEM" | grep -c .)" '[.items[]|(keys|length)==$n]|all|if . then 1 else 0 end' <<<"$R298")"
+# INTI TEMUAN: biaya ditahan di pintu yang kasir pakai tiap checkout.
+cek "§298 POST kasir: sale.totalHpp DITAHAN (null, bukan angka)" "V == 1" \
+  "$(jq -r 'if .sale.totalHpp == null then 1 else 0 end' <<<"$R298")"
+cek "§298 POST kasir: tiap items[].hppSatuan DITAHAN (null)" "V == 1" \
+  "$(jq -r '[.items[].hppSatuan]|all(. == null)|if . then 1 else 0 end' <<<"$R298")"
+cek "§298 GET /:id kasir atas transaksi yang sama: biaya juga ditahan" "V == 1" \
+  "$(jq -r 'if .sale.totalHpp == null and ([.items[].hppSatuan]|all(. == null)) then 1 else 0 end' <<<"$G298K")"
+# …dan gerbangnya memang GERBANG, bukan penghapus: manajemen tetap melihatnya.
+cek "§298 GET /:id owner: totalHpp ANGKA (> 0) — gerbang, bukan penghapus" "V == 1" \
+  "$(jq -r 'if (.sale.totalHpp|type) == "number" and .sale.totalHpp > 0 then 1 else 0 end' <<<"$G298O")"
+cek "§298 GET /:id owner: tiap items[].hppSatuan angka" "V == 1" \
+  "$(jq -r '[.items[].hppSatuan]|all(type == "number")|if . then 1 else 0 end' <<<"$G298O")"
+cek "§298 POST dan GET(kasir) berbentuk IDENTIK — satu penulis, dibuktikan dari kawat" "V == 0" \
+  "$(selisih296 "$(jq -r '[(keys[]),(.sale|keys[]|"sale."+.),(.items[0]|keys[]|"item."+.)]|.[]' <<<"$R298")" "$(jq -r '[(keys[]),(.sale|keys[]|"sale."+.),(.items[0]|keys[]|"item."+.)]|.[]' <<<"$G298K" | sort -u)")"
 
 if [ "$FAIL" -gt 0 ]; then
   echo
