@@ -197,6 +197,51 @@ describe("layar masuk memakai kalimat itu, tak mengendusnya", () => {
   });
 });
 
+describe("layar masuk PONSEL bercabang pada kode yang sama — bila repo itu ada", () => {
+  /*
+   * Ponsel tak bisa mengimpor `@kakarut/shared`, jadi `email_tak_dikenal` di
+   * sana adalah SALINAN literal — dan salinan yang menyimpang tak berbunyi:
+   * tombolnya cuma tak pernah muncul lagi. Yang mengikatnya ke sumber ada dua
+   * lapis: fikstur `status-kontrak-server.txt` (sumber `konst:SEBAB_LOGIN`,
+   * ditagih `status_cermin_server_test.dart` di ponsel) dan lengan ini, yang
+   * membaca berkasnya langsung bila repo ponsel ter-checkout di sebelah.
+   * Di CI repo ini repo ponsel tak ada → lewati, bukan merah.
+   */
+  const akar = new URL("../../../../kakarut-mobile/", import.meta.url);
+  const bacaPonsel = (p: string): string | null => {
+    try {
+      return readFileSync(fileURLToPath(new URL(p, akar)), "utf8");
+    } catch {
+      return null;
+    }
+  };
+
+  it("tombol 'Daftar' ponsel muncul karena KODE yang sama, membawa emailnya, dan tak menyalin kalimatnya", () => {
+    const login = bacaPonsel("lib/features/auth/login_page.dart");
+    const daftar = bacaPonsel("lib/features/auth/register_page.dart");
+    if (login == null || daftar == null) return;
+    const loginButa = butaKomentar(login);
+    // Kodenya persis nilai `SEBAB_LOGIN.takTerdaftar` — bukan tebakan ejaan.
+    expect(loginButa).toContain(`== '${SEBAB_LOGIN.takTerdaftar}'`);
+    expect(loginButa).toContain("RegisterPage(emailAwal:");
+    // Kalimatnya milik server; ponsel tak boleh mengendusnya untuk bercabang.
+    expect(loginButa).not.toContain(PESAN_LOGIN.takTerdaftar);
+    expect(loginButa).not.toMatch(/contains\(\s*['"][^'"]*terdaftar/);
+    // Layar daftar benar-benar membaca alamat yang dibawa.
+    expect(butaKomentar(daftar)).toContain("widget.emailAwal");
+  });
+
+  it("fikstur status ponsel memuat kode itu — jalur yang menagihnya di CI ponsel", () => {
+    const fikstur = bacaPonsel("test/fikstur/status-kontrak-server.txt");
+    if (fikstur == null) return;
+    for (const v of Object.values(SEBAB_LOGIN)) {
+      expect(fikstur.split("\n"), `konst:SEBAB_LOGIN|${v} hilang dari fikstur ponsel — regenerasi`).toContain(
+        `konst:SEBAB_LOGIN|${v}`,
+      );
+    }
+  });
+});
+
 describe("/lupa-password TIDAK ikut bicara", () => {
   const auth = baca(AUTH);
   const i = auth.indexOf('"/forgot-password"');

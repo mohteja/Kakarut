@@ -42,10 +42,10 @@ describe("acuan:status-mobile — pembangkit fikstur kontrak status", () => {
     expect(baris.length, "fikstur kosong = uji cermin di mobile jadi hampa").toBeGreaterThan(200);
   });
 
-  it("KETIGA sumbernya terwakili, bukan hanya pgEnum", () => {
+  it("KEEMPAT sumbernya terwakili, bukan hanya pgEnum", () => {
     // Kalau salah satu berhenti terbaca, fikstur menyusut dan uji di mobile
     // mulai menuduh kode yang benar — persis yang terjadi pada sapuan pertama.
-    for (const s of ["enum", "zod", "kode", "union"]) {
+    for (const s of ["enum", "zod", "kode", "union", "konst"]) {
       expect(sumber.has(s), `sumber "${s}" tak ada lagi di keluaran`).toBe(true);
     }
   });
@@ -57,6 +57,17 @@ describe("acuan:status-mobile — pembangkit fikstur kontrak status", () => {
     expect(nilai.has("bill_sudah_dibayar")).toBe(true); // union SebabPenjualanGagal
     expect(nilai.has("sedang_diproses")).toBe(true); // sebab: di rute
     expect(nilai.has("tunai")).toBe(true); // pgEnum metode_bayar
+    expect(nilai.has("email_tak_dikenal")).toBe(true); // konst:SEBAB_LOGIN
+  });
+
+  it("sumber `konst` memungut KODE-nya saja, bukan kalimat di objek sebelahnya", () => {
+    // `SEBAB_LOGIN` dan `PESAN_LOGIN` bertetangga di berkas yang sama dan
+    // berbentuk sama persis (`as const`); yang membedakannya isinya. Kalimat
+    // manusia yang ikut terpungut akan membuat fikstur status memuat prosa —
+    // dan pemindai ponsel mulai "membenarkan" perbandingan terhadap kalimat.
+    expect(baris).toContain("konst:SEBAB_LOGIN|email_tak_dikenal");
+    expect(baris).toContain("konst:SEBAB_LOGIN|password_salah");
+    expect(baris.filter((l) => l.startsWith("konst:PESAN_LOGIN|"))).toEqual([]);
   });
 
   it("pengupas komentarnya benar-benar mengupas — dan asersi ini BISA gagal", () => {

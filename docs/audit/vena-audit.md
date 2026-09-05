@@ -50,6 +50,108 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Layar masuk ponsel diam pada KODE penolakan yang sudah dikirim server — dan salinan literal yang akhirnya diikat ke sumbernya — ponsel + server — 2026-09-05
+
+**Vena.** Butir teratas antrean: "Ponsel: tombol Daftar di layar masuk belum
+membawa alamatnya" (lahir dari putaran `/login` menyebut alasannya,
+2026-09-03).
+
+**Populasi.** Empat kode `SEBAB_LOGIN` × tiga permukaan.
+
+| | server melempar | web bercabang | ponsel bercabang |
+| --- | --- | --- | --- |
+| `email_tak_dikenal` | ✓ | ✓ tautan "Daftar dengan email ini →" `?email=` | **✗** |
+| `akun_terhapus` | ✓ (jaring; tombstone diganti nama → jatuh ke `email_tak_dikenal`) | — | — |
+| `akun_nonaktif` | ✓ | — | — |
+| `password_salah` | ✓ | — | — |
+
+Diukur lewat HTTP terhadap server gerbang (2026-09-05): alamat tak dikenal →
+401 `{"sebab":"email_tak_dikenal"}`; password salah → `password_salah`; akun
+`is_active=false` → `akun_nonaktif` (cabangnya SEBELUM password — password
+apa pun); alamat cacat (`bukan-email`) → `email_tak_dikenal`; akun
+belum-verifikasi dengan password salah → `password_salah` (cabang 403 belum
+verifikasi baru sesudah password cocok). `ApiException.data` di ponsel sudah
+membawa badan itu utuh; `login_page.dart` menampilkan `e.message` lalu
+berhenti. Satu-satunya dari keempatnya yang bisa diselesaikan orangnya
+sendiri di layar itu — dan pembaca tersering adalah karyawan yang SUDAH
+diundang (undangan cuma baris `invitations`).
+
+**Temuan kedua, di gerbang.** `status_cermin_server_test.dart` (ponsel)
+menagih tiap `x == 'nilai'` ber-medan enum ke fikstur `status-kontrak-server`.
+Fikstur itu punya TIGA sumber (pgEnum, `z.enum`/`kode:`/`sebab:` literal di
+rute, union literal bernama di shared) — dan `SEBAB_LOGIN` lolos dari
+ketiganya: server melemparnya lewat `SEBAB_LOGIN.takTerdaftar` (bukan literal
+`sebab: "…"`), dan tipenya `(typeof X)[keyof typeof X]` (bukan union literal).
+Jadi ponsel yang menulis `sebab == 'email_tak_dikenal'` — hal yang BENAR —
+akan dituduh memakai nilai "yang tak ada di kontrak mana pun", dan jalan
+keluar termudahnya adalah mendaftarkannya di `milikPonsel`: pengecualian yang
+memutus ikatan ke sumber persis pada nilai yang paling butuh ikatan itu.
+
+### Yang dibangun
+
+- **Server** — `acuan-status-mobile.ts` sumber ke-4 `konst:<NAMA>`: objek
+  `export const X = {…} as const` di `packages/shared`, hanya nilai berbentuk
+  kode (`^[a-z][a-z0-9_]*$`) — `PESAN_LOGIN` yang bertetangga dan berbentuk
+  sama TIDAK ikut (kalimat manusia bukan kontrak mesin). Fikstur ponsel +4
+  baris. `status-satu-kontrak.test.ts`: KEEMPAT sumber terwakili,
+  `email_tak_dikenal` ada, `konst:PESAN_LOGIN|` nol. `login-beralasan.test.ts`
+  lengan lintas-repo (bila repo ponsel ada): `login_page.dart` memuat
+  `== '${SEBAB_LOGIN.takTerdaftar}'` (nilainya DIBACA dari shared, bukan
+  diketik), `RegisterPage(emailAwal:`, TIDAK memuat `PESAN_LOGIN.takTerdaftar`
+  maupun `contains('…terdaftar')`; `register_page.dart` membaca
+  `widget.emailAwal`; fikstur ponsel memuat keempat `konst:SEBAB_LOGIN|…`.
+- **Ponsel** — `login_page.dart`: `_sebab` dari `e.data?['sebab']`, tombol
+  "Daftar dengan email ini →" hanya bila `== 'email_tak_dikenal'`, membuka
+  `RegisterPage(emailAwal: alamat yang diketik)`; `_tamu` ikut mereset
+  `_sebab`. `register_page.dart`: `emailAwal` (trim → kolom email).
+  `test/sebab_login_ponsel_test.dart`: widget test (kode → tombol →
+  `RegisterPage` dengan kolom terisi; `password_salah` → tanpa tombol; kalimat
+  yang SAMA tanpa kode → tanpa tombol — bukti layarnya tak mengendus teks;
+  `emailAwal` terisi/kosong), statis, ikatan fikstur.
+
+### Detektor & bukti merah
+
+Asersi statis ditiru Python sebelum push; lengan server dijalankan vitest.
+Dipulihkan byte-per-byte.
+
+| | dicabut | tertuduh |
+| --- | --- | --- |
+| QQ | kode diganti `_error!.contains('tidak terdaftar')` | cermin ponsel: `login: tak bercabang pada kode`; lengan server: `expected … to contain "== 'email_tak_dikenal'"` |
+| RR | `widget.emailAwal` diabaikan di `initState` | `daftar: emailAwal tak dibaca` |
+| SS | baris `konst:SEBAB_LOGIN|email_tak_dikenal` dicabut dari fikstur | tiruan `status_cermin`: `_sebab == 'email_tak_dikenal'` asing; lengan server: `konst:SEBAB_LOGIN|email_tak_dikenal hilang dari fikstur ponsel — regenerasi` |
+
+Catatan jujur atas alat ukurnya: skrip bukti merah menilai lengan server
+lewat kode keluar, padahal perintahnya dipipakan ke `grep` (keluar 0) — skor
+otomatisnya "gagal menuduh" untuk QQ-server dan SS-server, sementara baris
+`AssertionError` yang tertangkap adalah persis tuduhan yang diharapkan.
+Yang dipercaya barisnya, bukan skornya; skripnya alat sekali pakai.
+
+### Batas yang diakui
+
+- Tak ada Flutter di mesin ini; widget test-nya (memompa `LoginPage` dan
+  `RegisterPage` sungguhan, termasuk `Image.asset`) adalah asersi yang belum
+  pernah dijalankan siapa pun sebelum CI — kalau CI merah, itu kabar dari
+  putaran ini sendiri.
+- Tiga kode lain (`akun_terhapus`, `akun_nonaktif`, `password_salah`) tetap
+  hanya kalimat di kedua klien — sama dengan web; tak ada tindakan yang bisa
+  ditawarkan layar untuk ketiganya.
+- `akun_terhapus` tak bisa diukur lewat HTTP: tombstone diganti nama
+  (`deleted:<id>:<email>`), dan alamat `hapus96@…` di DB gerbang sudah
+  didaftarkan ulang (→ `password_salah`). Cabangnya jaring, seperti ditulis
+  di `PESAN_LOGIN`.
+- Butir antrean "`/register` & `/resend-verification` masih netral" TIDAK
+  disentuh — itu keputusan pemilik, bukan pekerjaan.
+
+### Gerbang
+
+- Ponsel: commit `2715d68` di `claude`, PR #18. CI #44 (run 33971591264)
+  masih berjalan saat entri ini di-commit — verdiknya tercatat di PR #18 dan
+  distempel di sini pada commit berikutnya.
+- Server: typecheck hijau; vitest penuh **242 berkas / 3.012 uji hijau**
+  (3.009 + 3 lengan baru). verify-api & e2e tidak dijalankan — nol perubahan
+  rute/web.
+- **Tak ada rilis.**
+
 ## Sepuluh daftar ponsel yang dipotong server dan DIAM — satu rumah, sebelas pengakuan, tiga lencana yang berhenti berbohong — ponsel + cermin server — 2026-09-05
 
 **Vena.** Utang yang tercatat eksplisit di antrean Mobile sejak 2026-08-31:
@@ -11933,12 +12035,12 @@ berlaku di situ).
       Bukan lewat cakupan (70 tuduhan, semuanya sah) melainkan lewat ILUSI
       AWALAN: `["menu"]` tak pernah mengenai `["menu-riwayat-harga"]` —
       riwayat 3 → 4 baris di server, panelnya tetap 3
-- [ ] **Ponsel: tombol "Daftar" di layar masuk belum membawa alamatnya** —
-      `login_page.dart` sudah merender kalimat penolakan apa adanya (tak ada
-      yang salah di sana), tapi `sebab == "email_tak_dikenal"` belum dipakai
-      untuk membuka `RegisterPage` dengan emailnya terisi. Web sudah. Kecil,
-      dan sekarang aman dikerjakan sebab tak lagi menuntut menyalin kalimat
-      lintas repo
+- [x] ~~**Ponsel: tombol "Daftar" di layar masuk belum membawa alamatnya**~~ —
+      SELESAI 2026-09-05, lihat entri "Layar masuk ponsel diam pada KODE
+      penolakan" di atas. 4 kode × 3 permukaan: ponsel bercabang 0 → 1
+      (`email_tak_dikenal` → `RegisterPage(emailAwal:)`). Temuan di gerbang:
+      fikstur status BUTA terhadap objek `as const` di shared — sumber ke-4
+      `konst:` ditambahkan, literal ponselnya kini terikat dua arah
 - [ ] **`/register` & `/resend-verification` masih netral sementara `/login` di
       sebelahnya kini bicara** — ketimpangan yang lahir 2026-09-03 dan belum
       pernah ditanyakan ke pemilik. Keduanya permukaan enumerasi yang sama;
