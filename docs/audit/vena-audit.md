@@ -50,6 +50,64 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## RILIS 2026-09-05 — tujuh putaran tayang, dan clone satu-cabang yang dua kali membuat ref pelacaknya basi — web + ponsel — 2026-09-05
+
+- **Diminta pemilik**: *"ok rilis sekarang ke production, web dan ponsel
+  bersamaan"*. Aturan berdirinya terpenuhi oleh kalimat itu.
+
+- **Yang tayang**, sembilan commit di web + empat di ponsel:
+
+  | | commit merge | induk | CI |
+  | --- | --- | --- | --- |
+  | web → `production` | `fcf6c64` | `48532a3` + `33e99c3` | **#494 hijau**, termasuk build image + deploy Dokploy |
+  | ponsel → `Production` | `d606025` | `f429dba` + `bcbdc80` | **#42 hijau** |
+
+  Isinya: detail opname perlengkapan bertanggal (DTO +`waktu`/`oleh`) · lima
+  daftar lintas-hari bertanggal + ratchet · riwayat SO tabel+tanggal+saringan ·
+  Beli Perlengkapan tabel + berhalaman per faktur (**memutus ponsel**) · garis
+  waktu resep & harga · resep terkunci · ringkasan menu dibuang.
+
+- **Diukur dengan SHA dari `ls-remote`, bukan ref pelacak**: 18 dan 11 "commit
+  ekstra" di kedua cabang rilis semuanya commit merge lama — nol hotfix;
+  `git merge-tree` memulangkan pohon yang **byte-identik** dengan `claude` di
+  kedua repo. Gerbang tetap dijalankan di atas commit merge web yang persis
+  didorong: verify-api **3.550/0**, vitest **241/3.004**, invarian **27/27**,
+  Playwright **48**. CI #494 mengulang verify-api + e2e di runner-nya sendiri
+  dan hijau — konfirmasi independen.
+
+- **Dua push berselang tiga detik** (08:57:25 → 08:57:28). Jendela putus
+  Beli Perlengkapan tetap terbuka sampai APK di perangkat diperbarui — build
+  store belum ada di CI ponsel (`scripts/build-rilis.sh` manual). Selama
+  jendela itu APK lama menampilkan **keadaan galat**, bukan data yang salah
+  (mekanisme yang sama dengan rilis Permintaan Stok: `as List` atas `Map`
+  melempar, `FutureProvider` menangkapnya).
+
+- **Ref pelacak ponsel basi LAGI — dan kali ini sebabnya ketemu.** Merge
+  pertama `git merge --no-ff origin/claude` menjawab *"Already up to date"* dan
+  `git diff --stat origin/claude` **kosong** — konfirmasi palsu terhadap ref
+  `6cd7d88` yang basi. Yang membongkarnya baris **induk SHA** commit yang
+  dihasilkan (`a0ea392 6cd7d88` = merge lama), bukan diff-nya. Sebab
+  strukturalnya: clone ponsel adalah **clone satu-cabang** — `remote.origin.fetch`
+  hanya memetakan `Production`, jadi `git fetch origin claude` memang tak
+  pernah memperbarui `refs/remotes/origin/claude`. Itu alasan alarm palsu
+  rilis sebelumnya, yang waktu itu dicatat sebagai kebiasaan. Diulang dengan
+  SHA eksplisit `bcbdc80`; refspec-nya kini ditambah permanen. Kelasnya sama
+  dengan tiga temuan sehari sebelumnya: **memeriksa nama yang ada, bukan
+  apakah nama itu menunjuk ke tempat yang benar.**
+
+- **Kontainer didaur ulang tepat saat gerbang-merge pertama mulai.** Postgres
+  mati, seed gagal, dan skrip gerbang mencetak *"server hidup setelah 90s"*
+  padahal loop health-nya habis tanpa satu pun jawaban — baris yang berbohong.
+  Gerbang itu tak menguji apa pun. Skripnya kini **gagal keras** bila Postgres
+  mati atau server tak hidup; Postgres dihidupkan lewat `scripts/dev-db.sh`;
+  gerbang diulang dari nol. Tak ada yang didorong sebelum itu.
+
+- **Stempel changelog** dipasang untuk ketiga entri pada commit yang SAMA
+  dengan penghapusannya dari `BELUM_TAYANG`. Stempel ini ikut ke `production`
+  pada rilis berikutnya — pola yang sama dengan `278158e`.
+
+---
+
 ## Lembar detail opname perlengkapan tak menyebut waktu — dan DTO yang memang tak membawanya — web + server + ponsel(fikstur) — 2026-09-04
 
 Diminta pemilik sesudah laporan "diakui tak penuh" putaran sebelumnya:

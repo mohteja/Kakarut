@@ -31,6 +31,8 @@ tanpa akses repo server.
 berubah bentuk maupun hilang. `fromJson` yang mengabaikan kunci tak dikenal
 (`perlengkapan_repository.dart:525`) tetap jalan tanpa disentuh.
 
+**Sudah di-merge ke production.** Tayang lewat merge `fcf6c64` (CI #494); fikstur ponsel lewat merge `d606025` (CI #42).
+
 | medan | tipe | arti |
 | --- | --- | --- |
 | `waktu` | `string` (ISO) | stempel SESI — `MIN(waktu)` seluruh barisnya |
@@ -46,7 +48,6 @@ Lahir dari web: lembar detail opname perlengkapan tak menampilkan waktu sama
 sekali, sementara lembar bahan baku menampilkannya — dan DTO-nya memang tak
 membawanya.
 
-_Belum tayang._
 
 ---
 
@@ -55,6 +56,8 @@ _Belum tayang._
 🔴 **WAJIB** — memutus kode yang sudah ada. `perlengkapan_repository.dart`
 menulis `as List` pada balasannya; sesudah perubahan ini balasannya `Map`, jadi
 layar **Beli Perlengkapan** melempar saat runtime — bukan saat kompilasi.
+
+**Sudah di-merge ke production.** Server tayang lewat merge `fcf6c64` (CI #494, termasuk deploy); aplikasi lewat merge `d606025` di repo ponsel (CI #42). Keduanya didorong dalam selang tiga detik (08:57:25 → 08:57:28), sesuai syarat serentak di atas — tapi jendelanya belum benar-benar tertutup sampai APK di tiap perangkat diperbarui (build store belum ada di CI ponsel; `scripts/build-rilis.sh` manual); sampai itu, layar Beli Perlengkapan pada APK lama menampilkan keadaan galat (`as List` atas `Map` melempar, `FutureProvider` menangkapnya), bukan data yang salah.
 
 **Sudah dikerjakan di repo ponsel pada putaran yang sama** (cabang `claude`):
 `getBeli()` memulangkan `BeliPerlengkapanDaftar`, providernya membawa daftar +
@@ -124,6 +127,8 @@ ini perbedaan yang nyata di kode dan **nol kejadiannya hari ini**.
 
 🟢 **BARU** — pintu baru, tak ada yang berubah bentuknya. Aman diabaikan
 sampai layar Resep ponsel memang mau menampilkan riwayat.
+
+**Sudah di-merge ke production.** Tayang lewat merge `fcf6c64` (CI #494).
 
 ```
 GET /api/bahan/<id>/riwayat-resep          [owner/admin]
