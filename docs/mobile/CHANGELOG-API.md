@@ -25,6 +25,35 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ `StokMasukRow` & `StokMasukPage` kini ada di Lampiran A — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: tipe baris `GET
+> /api/produksi`, `GET /api/pembelian`, dan `GET /api/{mod}/faktur/:fakturId`
+> akhirnya **dideklarasikan** di `packages/shared` (jadi ikut Lampiran A dan
+> fikstur kunci ponsel). Sampai 2026-09-05 ia hidup sebagai DTO lokal halaman
+> web, dan itu berarti tak satu pun fikstur bisa menagihnya.
+
+Terukur lewat HTTP terhadap DB gerbang (237 baris, 2 rute): **55 kunci per
+baris**, 52 dideklarasikan web. Tiga yang dikirim sejak lama tanpa pernah
+dideklarasikan: `harga_tebakan` (bool — `total_harga` masih tebakan),
+`pengadaan` (`"produksi" | "beli"`), `qty_setara` (padanan `qty` dalam
+satuan beli, ditulis server; saudara `qty_teks`). Ponsel sudah membaca
+ketiganya.
+
+**Yang perlu dicek di ponsel — dan sudah dikerjakan di `kakarut-mobile`
+putaran yang sama:** `FakturRow.fromJson` dan `KirimanRow.fromJson` membaca
+`asal_cabang`, kunci yang **tidak pernah dikirim** `/produksi`, `/pembelian`,
+maupun `/penerimaan` (25 kunci, tak satu pun `asal_*`) — bacaan hantu, null
+selamanya; label "Transfer dari X" tak pernah tampil. Kini keduanya dicabut,
+dan arah baliknya dijaga (`kunci_hantu_test.dart`: tiap kunci yang dibaca
+ponsel harus ada di kontrak atau tercatat beralasan).
+
+Penjaga di server: `stok-masuk-row-utuh.test.ts` (kunci `select` + pengayaan
+`ambilBarisFaktur` == interface, dua arah) dan verify-api §295 (kunci baris
+HTTP == kontrak, dua arah).
+
+---
+
 ## 🟢 `GET /perlengkapan/opname/sesi/:sessionId` kini membawa `waktu` + `oleh`
 
 🟢 **BARU** — dua medan DITAMBAH pada balasan yang sudah ada; tak ada yang

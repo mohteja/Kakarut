@@ -17376,6 +17376,33 @@ cek "§294 tenant LAIN tak melihat faktur tenant ini" "V == 1" \
 cek "§294 kasir tak boleh membaca daftar ini → bukan 200" "V == 1" \
   "$([ "$(status_code "$REISS105" GET "/perlengkapan/beli")" != "200" ] && echo 1 || echo 0)"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §295 — BARIS PENGADAAN: kunci yang DIKIRIM == medan `StokMasukRow` di kontrak
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 tipe baris `/produksi` & `/pembelian` hidup sebagai DTO
+# lokal halaman web, jadi Lampiran A & fikstur ponsel tak pernah melihatnya:
+# 55 kunci per baris, 52 dideklarasikan (`harga_tebakan`, `pengadaan`,
+# `qty_setara` dikirim tanpa pernah dideklarasikan). Kini tipenya di shared dan
+# dijaga statis (`stok-masuk-row-utuh.test.ts`: select+pengayaan == interface).
+# Lengan ini menagih hal yang sama dari sisi yang tak bisa dibohongi pengurai:
+# balasan HTTP sungguhan atas DB gerbang, dua arah.
+KUNCI295=$(awk '/^export interface StokMasukRow \{/{f=1;next} f&&/^\}/{exit} f&&/^  [a-z_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u)
+R295P=$(api "$OWNER" GET "/produksi?per_page=200&branch_id=all")
+R295B=$(api "$OWNER" GET "/pembelian?per_page=200&branch_id=all")
+HTTP295=$(printf '%s\n%s' "$R295P" "$R295B" | jq -r '[.rows[]|keys[]]|unique|.[]' | sort -u)
+cek "§295 premis: kedua rute berbalasan baris (≥ 20 baris gabungan)" "V >= 20" \
+  "$(printf '%s\n%s' "$R295P" "$R295B" | jq -s 'map(.rows|length)|add')"
+cek "§295 premis: kontrak StokMasukRow terbaca dari types.ts (≥ 50 medan)" "V >= 50" \
+  "$(echo "$KUNCI295" | grep -c .)"
+cek "§295 tiap kunci yang DIKIRIM ada di kontrak (dikirim − kontrak = ∅)" "V == 0" \
+  "$(comm -23 <(echo "$HTTP295") <(echo "$KUNCI295") | tee /dev/stderr | grep -c . || true)"
+cek "§295 tiap medan KONTRAK benar-benar dikirim (kontrak − dikirim = ∅)" "V == 0" \
+  "$(comm -13 <(echo "$HTTP295") <(echo "$KUNCI295") | tee /dev/stderr | grep -c . || true)"
+cek "§295 ketiga kunci yang dulu tak dideklarasikan kini ada di kontrak" "V == 3" \
+  "$(echo "$KUNCI295" | grep -cx 'harga_tebakan\|pengadaan\|qty_setara')"
+cek "§295 tak ada baris yang membawa asal_cabang (kunci hantu yang ponsel baca)" "V == 0" \
+  "$(printf '%s\n%s' "$R295P" "$R295B" | jq -r '[.rows[]|select(has("asal_cabang"))]|length' | paste -sd+ | bc)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

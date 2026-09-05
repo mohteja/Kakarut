@@ -47,6 +47,9 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-05): tipe baris pengadaan masuk Lampiran A — nol
+  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## ⚪️ `StokMasukRow` & `StokMasukPage` kini ada di Lampiran A — tak ada perubahan di kawat",
   /*
    * PARUH "belum di-merge" KOSONG sejak 2026-08-31 — dan kosongnya bukan
    * kerapian. Entri "Angka BIAYA hanya untuk manajemen" tercantum di sini

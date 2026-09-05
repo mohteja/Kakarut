@@ -50,6 +50,110 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Baris pengadaan yang tipenya tak pernah dilihat siapa pun — 55 kunci, tiga yang tak dideklarasikan, dan bacaan hantu yang baru ketahuan dari arah sebaliknya — server + web + ponsel — 2026-09-05
+
+**Vena.** Butir antrean "`StokMasukPage`/`StokMasukRow` masih DTO lokal
+halaman" (lahir dari temuan `qty_teks`: dikirim sejak lama, tak pernah
+dideklarasikan, dirakit ulang di klien). Butir "`/register` &
+`/resend-verification` masih netral" di atasnya DILEWATI — itu keputusan
+pemilik, bukan pekerjaan; ditawarkan di laporan.
+
+**Populasi, diukur lewat HTTP** (owner, `per_page=200&branch_id=all`, DB
+gerbang): `/produksi` 107 baris, `/pembelian` 130 baris — **55 kunci per
+baris**, sama di kedua rute. Dibandingkan tiga deklarasi:
+
+| deklarasi | medan | selisih terhadap 55 yang dikirim |
+| --- | --- | --- |
+| `StokMasukRow` lokal web (`TambahStokPage.tsx`) | 52 | **3 dikirim tanpa dideklarasikan**: `harga_tebakan`, `pengadaan`, `qty_setara`; 0 hantu |
+| `FakturRow.fromJson` ponsel | 40 | **1 dibaca tapi TAK PERNAH dikirim**: `asal_cabang` |
+| Lampiran A / fikstur ponsel | 0 | tak pernah melihat tipenya sama sekali |
+
+`qty_setara` adalah saudara `qty_teks` — kelas yang sama, dua kali.
+`/penerimaan` diukur juga (owner, `branch_id=all`): 25 kunci per baris, tak
+satu pun `asal_*` — dan `KirimanRow.fromJson` ponsel membaca `asal_cabang` di
+sana pula. Dua bacaan hantu, dua label ("🚚 Dari stok X", "Transfer dari X")
+yang menunggu kabar yang tak akan datang; keduanya jatuh ke cabang lain diam-
+diam, jadi tak ada yang pernah salah TERLIHAT.
+
+**Temuan detektor.** Ratchet kunci ponsel (`kunci_kontrak_server_test`)
+hanya menagih SATU arah: kunci kontrak yang tak disentuh. Arah balik — kunci
+yang dibaca ponsel tapi tak ada di kontrak mana pun — tak pernah dijaga.
+Diukur: dari **1.123** bacaan `['kunci']` di `lib/`, **51 kunci berbeda** tak
+ada di fikstur: penyimpanan lokal ponsel (sync_queue, printer, sesi),
+dev/generik, dan **±37 balasan server yang DTO-nya belum pernah di shared**
+(`/stok/nilai`, `/laporan/bep`, ringkas beli perlengkapan, `BranchDto`/
+`CompanyDto` lokal, struk `/penjualan`, …) — kelas `StokMasukRow`, dan
+populasinya jauh lebih besar dari satu tipe. Dicatat sebagai vena berikutnya.
+
+### Yang dibangun
+
+- **Shared** — `StokMasukRow` (55 medan, tiga yang hilang diberi tipe dari
+  sumbernya: `harga_tebakan: boolean`, `pengadaan: "produksi" | "beli"`,
+  `qty_setara: string | null`) + `StokMasukPage` (`rows`, `total`, `page`,
+  `per_page`, `total_pengeluaran`, `ringkas: RingkasPengadaan`), di sebelah
+  `RingkasPengadaan`. Lampiran A disinkronkan (`sinkron:lampiran`, +139
+  baris).
+- **Web** — deklarasi lokal dicabut; `TambahStokPage`, `DokumenBelanjaModal`,
+  `DokumenKirimModal`, `FakturDetailPage` mengimpor dari `@kakarut/shared`.
+  Typecheck ketiga workspace hijau — nol pemakai yang berubah perilaku.
+- **Server, penjaga** — `stok-masuk-row-utuh.test.ts`: kunci `select` +
+  pengayaan (`return { ...r, … }`) `ambilBarisFaktur` diurai dengan
+  kedalaman kurung == medan interface, DUA ARAH (tak dideklarasikan / hantu),
+  PASANGAN (kunci karangan di select, medan karangan di interface, kunci di
+  komentar diabaikan). **verify-api §295**: kunci baris HTTP gabungan kedua
+  rute == kontrak (`awk` atas `types.ts`), dua arah, + tak ada baris yang
+  membawa `asal_cabang`.
+- **Ponsel** — fikstur kunci +61 baris; bacaan hantu `asal_cabang` dicabut di
+  `FakturRow`/`FakturGroup` dan `KirimanRow`/`KirimanGroup`; label pengadaan
+  memakai `g.cabang` (paritas web), penerimaan "Transfer stok"; 9 nama yang
+  belum disentuh dicatat beralasan di `kunci-belum-dibaca.txt` (rak default,
+  kolom audit/laporan harga, blok supplier dokumen belanja, id cabang
+  peminta — semuanya layar/dokumen web). **`kunci_hantu_test.dart`** (baru):
+  arah balik — tiap `['kunci']` yang dibaca `lib/` ada di kontrak atau tercatat
+  di `hantuDiketahui` (51 entri, tiga kelas beralasan); ratchet dua arah
+  (entri yang tak lagi dibaca / sudah masuk kontrak = basi); PASANGAN
+  (komentar & peta lokal diabaikan).
+- Changelog ponsel: entri ⚪️ (nol perubahan kawat) + `BELUM_TAYANG`.
+
+### Bukti merah (dipulihkan byte-per-byte)
+
+| | dicabut | tertuduh |
+| --- | --- | --- |
+| TT | `json['asal_cabang_nama']` ditambahkan ke `FakturRow` | `kunci_hantu` INTI: `liar: ['asal_cabang_nama']` |
+| UU | bacaan `['kotor']` diganti `['kotor_x']` | RATCHET `basi: ['kotor']` + INTI `liar: ['kotor_x']` |
+| VV | `supplier_bahan_telepon` dicabut dari `kunci-belum-dibaca` | `kunci_kontrak` INTI: `['supplier_bahan_telepon']` |
+| WW | `harga_tebakan: boolean;` dicabut dari interface | `stok-masuk-row-utuh`: `expected [ 'harga_tebakan' ] to deeply equal []` |
+| XX | sama, logika §295 dijalankan mandiri atas server hidup | `dikirim − kontrak: [harga_tebakan]` |
+
+**Yang jujur soal detektornya.** Bukti TT versi pertama memulihkan bacaan
+`asal_cabang` yang asli — dan `kunci_hantu` TIDAK menuduh, karena berkas
+fikstur berkunci NAMA dan `TransferStokFaktur` memang punya `asal_cabang`.
+Hantu historis putaran ini karena itu hanya tertangkap oleh pengukuran HTTP,
+bukan oleh uji yang lahir darinya; uji itu menangkap kelas yang lebih sempit
+(nama yang tak ada di kontrak MANA PUN). Menutup celahnya menuntut fikstur
+berpasangan `Dto|kunci` di sisi pembaca — dicatat di antrean, bukan
+diselesaikan diam-diam.
+
+### Batas yang diakui
+
+- Tak ada Flutter di mesin ini: asersi Dart ditiru Python; CI ponsel yang
+  menjalankannya.
+- §295 diuji merah secara MANDIRI (perintah `awk`/`jq`-nya dijalankan
+  terhadap server hidup dengan `types.ts` yang dimutasi), bukan lewat
+  `verify-api.sh` utuh — gerbang penuh menjalankannya hijau, merahnya
+  dibuktikan di luar.
+- 37-an DTO balasan yang belum di shared TIDAK dipindahkan putaran ini —
+  satu tipe per putaran adalah batas yang sengaja.
+
+### Gerbang
+
+- Server (DB nol → seed → verify-api → vitest → invarian; tanpa build/e2e —
+  perubahan web hanya impor tipe, typecheck ketiga workspace hijau):
+  **verify-api 3.556 / 0** (3.550 + 6 lengan §295), **vitest 243 berkas /
+  3.020 uji** (+1 berkas `stok-masuk-row-utuh`, +11 uji), **invarian 27 / 0**.
+- Ponsel: commit `aee7ad9`, **CI #46 hijau** (run 33972433656).
+- **Tak ada rilis.**
+
 ## Layar masuk ponsel diam pada KODE penolakan yang sudah dikirim server — dan salinan literal yang akhirnya diikat ke sumbernya — ponsel + server — 2026-09-05
 
 **Vena.** Butir teratas antrean: "Ponsel: tombol Daftar di layar masuk belum
@@ -12056,12 +12160,24 @@ berlaku di situ).
       di layar daftar tak tahu apa-apa. Pilihannya dua-duanya sah — dirapatkan
       ke `/login`, atau dibiarkan sebagai batas yang disengaja — tapi harus
       dipilih, bukan diwarisi
-- [ ] **`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman** — dideklarasikan
-      di `TambahStokPage.tsx`, bukan `packages/shared`, sehingga Lampiran A &
-      fikstur ponsel tak pernah melihatnya dan medan yang server kirim bisa
-      hilang dari tipenya diam-diam (`qty_teks` sudah membuktikannya: dikirim
-      sejak lama, tak pernah dideklarasikan, dirakit ulang di klien). ~40 kunci
-      kontrak sekaligus — putaran tersendiri
+- [x] ~~**`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman**~~ — SELESAI
+      2026-09-05, lihat entri "Baris pengadaan yang tipenya tak pernah dilihat
+      siapa pun" di atas. 55 kunci/baris terukur HTTP; 3 tak dideklarasikan
+      (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
+      (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
+      statis + §295, fikstur ponsel +61
+- [ ] **±37 balasan server yang DTO-nya belum pernah di shared** — terukur
+      2026-09-05 dari arah balik: 51 kunci yang dibaca ponsel tak ada di
+      fikstur mana pun; sesudah penyimpanan lokal & dev disisihkan, ±37 adalah
+      balasan server tanpa tipe bersama (`/stok/nilai`, `/laporan/bep`,
+      ringkas beli perlengkapan, `BranchDto`/`CompanyDto` lokal, struk
+      `/penjualan`, log terapkan-saran, …). Kelas `StokMasukRow`, populasi
+      jauh lebih besar. Daftarnya hidup di `kunci_hantu_test.dart`
+      (`hantuDiketahui`) dan hanya boleh menyusut — satu tipe per putaran
+- [ ] **Fikstur kunci ponsel berkunci NAMA, bukan `Dto|kunci`** — `asal_cabang`
+      lolos `kunci_hantu` karena `TransferStokFaktur` memilikinya; bacaan
+      `FakturRow` atasnya tetap hantu. Menutupnya menuntut pemindai yang tahu
+      DTO mana yang sedang diurai (nama kelas `fromJson` → pasangan fikstur)
 - [ ] **`rekapWindow` ditembakkan sekali PER BARIS** — `GET /shift/selisih`
       (dan kini `/selisih/ringkas`) memanggilnya untuk tiap shift kandidat, dan
       ia sendiri 2+ kueri. Terukur 2026-09-03: ~30 ms pada 39 kandidat, tumbuh

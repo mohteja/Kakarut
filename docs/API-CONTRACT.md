@@ -3923,6 +3923,145 @@ export interface RingkasPengadaan {
   belum_sampai: PasanganHitung;
 }
 
+/**
+ * BARIS PENGADAAN — satu bentuk untuk `GET /api/produksi`, `GET /api/pembelian`,
+ * dan `GET /api/{mod}/faktur/:fakturId` (kueri & pengayaannya satu fungsi,
+ * `ambilBarisFaktur` di `modules/produksi/routes.ts`).
+ *
+ * Sampai 2026-09-05 tipe ini hidup sebagai DTO LOKAL halaman
+ * (`apps/web/src/pages/produksi/TambahStokPage.tsx`), jadi Lampiran A dan
+ * fikstur kunci ponsel tak pernah melihatnya — medan yang server kirim bisa
+ * hilang dari tipenya diam-diam. Terukur lewat HTTP terhadap DB gerbang
+ * (237 baris, 2 rute): 55 kunci per baris, 52 dideklarasikan; `harga_tebakan`,
+ * `pengadaan`, `qty_setara` dikirim tanpa pernah dideklarasikan. Ponsel
+ * (`FakturRow.fromJson`) membaca 40 di antaranya — plus SATU yang tak pernah
+ * dikirim siapa pun (`asal_cabang`). Dijaga `stok-masuk-row-utuh.test.ts`
+ * (select + pengayaan == interface, dua arah) dan verify-api §295 (HTTP).
+ */
+export interface StokMasukRow {
+  id: string;
+  ingredient_id?: string;
+  bahan: string;
+  isi: number;
+  satuan: string;
+  /** satuan beli/kemasan (mis. "dus"); 1 satuan_beli = isi satuan */
+  satuan_beli?: string | null;
+  qty: number;
+  /**
+   * Teks qty siap-pakai dari server (`qtyTeks`), sudah memperhitungkan satuan
+   * beli & isi. Server mengirimnya sejak lama (`docs/API-CONTRACT.md`), tapi
+   * tipe ini tak pernah mendeklarasikannya dan layarnya merakit ulang
+   * `formatAngka(qty) + satuan` sendiri — medan ini ada persis untuk mencegah
+   * itu. Opsional karena baris lama di cache bisa belum membawanya.
+   */
+  qty_teks?: string | null;
+  /**
+   * `total_harga` masih TEBAKAN — belum pernah dilihat manusia (estimasi RAB,
+   * belanja otomatis, hasil skala saat realisasi melebihi rencana). Baris
+   * bertanda ini dikecualikan dari median harga acuan. Dikirim sejak lama
+   * (kontrak menyebutnya di prosa `GET /api/{mod}`), tak pernah dideklarasikan
+   * di tipe mana pun sampai 2026-09-05 — ponsel sudah membacanya.
+   */
+  harga_tebakan: boolean;
+  /** jalur pengadaan bahan — dasar `batch`/`batch_teks` (hanya `produksi`). */
+  pengadaan: "produksi" | "beli";
+  /**
+   * Padanan `qty` dalam satuan beli, ditulis SERVER (`qtyTeks().setara`);
+   * null bila bahan tak berkemasan. Saudara `qty_teks`, dan sama-sama tak
+   * pernah dideklarasikan sampai 2026-09-05.
+   */
+  qty_setara: string | null;
+  /**
+   * BERAPA KALI RESEP DIJALANKAN (`qty ÷ isi`) — null untuk bahan beli atau
+   * bahan tanpa ukuran batch. `qty` menjawab "jadinya berapa"; ini menjawab
+   * "berapa kali masak", yang justru itulah pekerjaannya.
+   */
+  batch?: number | null;
+  /** teks siap tampil dari server, mis. "3 batch × 700 ml"; null = tak relevan */
+  batch_teks?: string | null;
+  total_harga: number | null;
+  is_batch: boolean;
+  catatan: string | null;
+  waktu: string;
+  prod_date: string;
+  /** tanggal kedaluwarsa lot — terisi saat baris masuk stok (Tiba/Selesai) */
+  exp_date?: string | null;
+  /** masa simpan (hari) dari master bahan — default form exp saat Tiba */
+  masa_simpan_hari?: number;
+  /** lokasi produksi resep ("cabang" = dikerjakan kitchen/bar cabang) */
+  produksi_di?: "ck" | "cabang" | null;
+  /** divisi pelaksana resep produksi cabang — dasar badge Kitchen/Bar */
+  divisi_produksi?: "kitchen" | "bar" | null;
+  faktur_id: string | null;
+  no_faktur: string | null;
+  /** nomor dokumen otomatis (PB-/PR-), sama untuk semua baris satu faktur */
+  nomor?: string | null;
+  status: KonfirmasiStatus;
+  supplier: string | null;
+  tempat: string | null;
+  supplier_id: string | null;
+  storage_location_id: string | null;
+  /** RAK SIMPAN default (home) bahan di CK — untuk auto-file & pratinjau per rak */
+  default_storage_location_id?: string | null;
+  default_tempat?: string | null;
+  dibuat_oleh: string | null;
+  diubah_oleh: string | null;
+  /**
+   * Siapa yang MENERIMA baris ini. Untuk kiriman beralamat cabang satu-satunya
+   * pintu yang mengisinya adalah tombol Terima di Penerimaan Barang — jadi ini
+   * sekaligus bukti bahwa penerimaannya sah, bukan hasil ubah tahap manual.
+   */
+  diterima_oleh?: string | null;
+  diterima_pada?: string | null;
+  updated_at: string | null;
+  worker_id: string | null;
+  dikerjakan_oleh: string | null;
+  qty_dipesan: number | null;
+  alasan_tolak: string | null;
+  /** waktu Laporan Harga riil dibuat utk baris ini (jalur beli); null = belum */
+  laporan_harga_at?: string | null;
+  /** cabang baris (utk tampilan Kantor "semua cabang") */
+  branch_id?: string | null;
+  cabang?: string | null;
+  /** work-order CK: cabang tujuan pengiriman (null = bukan work-order) */
+  tujuan_branch_id?: string | null;
+  tujuan_cabang?: string | null;
+  /** transfer stok antar-cabang (kirim dari stok CK / kirim hasil) — bukan produksi baru */
+  asal_branch_id?: string | null;
+  /** dari Permintaan Tambah Stok (rencana menu); null = input langsung */
+  rencana_id?: string | null;
+  /** nomor dokumen permintaan (PM-xxxx) — identitas asal faktur */
+  permintaan_nomor?: string | null;
+  /** produksi dari permintaan: hasil masuk stok CK lalu PERLU DIKIRIM ke cabang ini */
+  untuk_branch_id?: string | null;
+  untuk_cabang?: string | null;
+  /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
+  dana_cair: number;
+  /** supplier UTAMA bahan baris ini (info "beli di mana" saat diproses) */
+  supplier_bahan?: string | null;
+  supplier_bahan_alamat?: string | null;
+  supplier_bahan_telepon?: string | null;
+}
+
+export interface StokMasukPage {
+  rows: StokMasukRow[];
+  /** Jumlah FAKTUR atas seluruh populasi tersaring — bukan panjang `rows`. */
+  total: number;
+  page: number;
+  per_page: number;
+  total_pengeluaran: number;
+  /**
+   * Ringkasan antrean, dihitung SERVER atas populasi yang sama dengan `total`.
+   *
+   * Wajib dari server, dan itu terukur: daftarnya berhalaman 20 dan server
+   * mengurutkan faktur yang belum selesai lebih dulu, jadi halaman pertama
+   * `/produksi` (total 61 faktur) memuat 20 faktur yang KEDUA PULUHNYA belum
+   * selesai. Ringkasan yang dijumlahkan dari `rows` karena itu akan selalu
+   * berbunyi "0 selesai" sampai orangnya menelusuri ke halaman terakhir.
+   */
+  ringkas: RingkasPengadaan;
+}
+
 export interface RingkasSelisihDto {
   /**
    * Jumlah yang menunggu keputusan, HASIL SARINGAN PENUH — tidak dipotong
