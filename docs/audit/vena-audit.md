@@ -138,8 +138,9 @@ Tiga temuan di balik angka itu:
 | EE | `blokir_jual_minus` dicabut dari `CompanyDto`; §296 mandiri atas server hidup | premis 33 ≠ 34; `.company == CompanyDto — nilai: 1`, stderr menyebut `blokir_jual_minus` |
 | FF | `jam_buka` dicabut dari `CabangDto`; §296 mandiri | 4 lengan merah (gabungan baris, tiap-baris-14, kasir, premis), dua menyebut `jam_buka` |
 
-**Yang jujur soal detektornya.** Tiga alat ukur putaran ini salah pada
-percobaan pertama, dan ketiganya ketahuan oleh lengan yang memang ada untuk itu:
+**Yang jujur soal detektornya.** Empat alat ukur putaran ini salah pada
+percobaan pertama, dan semuanya ketahuan oleh lengan yang memang ada untuk itu
+(yang keempat — log gerbang yang memotong dirinya — dicatat di bagian Gerbang):
 
 - Regex satu-penulis versi pertama `:\s*(?!z\.)` MUNDUR (`\s*` kosong) dan
   meloloskan `pb1_enabled: z.boolean()` sebagai penulis — lima baris zod di
@@ -174,8 +175,30 @@ percobaan pertama, dan ketiganya ketahuan oleh lengan yang memang ada untuk itu:
   DB nol → boot → seed → verify-api → vitest → invarian; tanpa build/e2e —
   nol perubahan kawat, web hanya alias tipe): typecheck ketiga workspace
   hijau (dibaca dari LOG-nya), **verify-api 3.567 / 0** (3.556 + 11 lengan
-  §296, kesebelasnya hijau di jalan penuh), **vitest 244 berkas / 3.030 uji**
-  (+1 berkas `sesi-cabang-dto-utuh`), **invarian 27 / 0**.
+  §296), **vitest 244 berkas / 3.030 uji** (+1 berkas
+  `sesi-cabang-dto-utuh`), **invarian 27 / 0** — commit `2355514`.
+- **Log gerbang itu ternyata memotong dirinya sendiri.** Saat menagih bukti
+  tertulis kesebelas lengan §296, `grep "§296"` memulangkan 1 dari 11: log
+  verify-api 231.786 byte, **231.667 di antaranya NUL**, dua baris tersisa.
+  Sebab: di dalam `$(…)`, `tee /dev/stderr` membuka ULANG `/dev/stderr` —
+  yang saat `> log 2>&1` adalah berkas log itu sendiri — dengan O_TRUNC; log
+  sebelum lengan itu terhapus, sisanya mendarat di offset lama sebagai berkas
+  jarang. Pola itu lahir di §295 (#93) dan saya salin ke §296. Verdik
+  3.567/0 tetap sah (penghitung PASS/FAIL hidup di memori; ringkasan
+  kegagalan dicetak sesudahnya), tapi klaim "kesebelasnya hijau di jalan
+  penuh" versi pertama baris ini bertumpu pada aritmetika 3.567 − 3.556,
+  bukan pada bukti tertulis — maka gerbangnya diulang. `tee -a` pun bukan
+  jawabannya: tak memotong, tapi baris diagnostiknya TERTIMPA tulisan stdout
+  berikutnya (offset fd induk tak maju pada O_APPEND) — ketahuan saat uji
+  penjaganya pertama ditulis dengan `-a`. Yang benar: `>&2` dari dalam
+  `$(…)` (deskripsi berkas yang sama) → helper `bocorkan`; ketiga situs
+  diganti. **`verify-api-log-utuh.test.ts`** (baru, 3 uji) MENJALANKAN ketiga
+  bentuk di bash sungguhan: tanpa `-a` → NUL, `-a` → tertimpa, `bocorkan` →
+  200 baris utuh dan berurutan; INTI: tak ada `tee [-a] /dev/stderr` di
+  skrip. Commit terpisah (perbaikan alat ukur, bukan bagian vena).
+- Gerbang ULANG sesudah perbaikan (jalan yang sama): typecheck hijau (tahap pertama), **verify-api 3.567 / 0** dengan log
+  UTUH (3.930 baris, 0 NUL — §295 6 lengan, §296 11 lengan tertulis), **vitest
+  245 berkas / 3.033 uji** (+1 berkas `verify-api-log-utuh`), **invarian 27 / 0**.
 - Ponsel: commit `dfe1e74`, **CI #50 hijau** (run 33974257848).
 - **Tak ada rilis.**
 

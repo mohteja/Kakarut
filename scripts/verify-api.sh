@@ -17386,6 +17386,19 @@ cek "§294 kasir tak boleh membaca daftar ini → bukan 200" "V == 1" \
 # dijaga statis (`stok-masuk-row-utuh.test.ts`: select+pengayaan == interface).
 # Lengan ini menagih hal yang sama dari sisi yang tak bisa dibohongi pengurai:
 # balasan HTTP sungguhan atas DB gerbang, dua arah.
+#
+# `bocorkan` (tulis selisih ke fd 2 yang DIWARISI, lalu hitung barisnya), BUKAN
+# `tee /dev/stderr`: saat skrip ini dijalankan `> log 2>&1` (gerbang),
+# `/dev/stderr` adalah berkas log itu sendiri. `tee` membukanya ULANG — tanpa
+# `-a` dengan O_TRUNC (seluruh log sebelum lengan ini terhapus; sisanya jadi
+# berkas jarang penuh NUL — terjadi di gerbang #95, 2026-09-05: 231.667 NUL
+# dari 231.786 byte, dua baris tersisa), dengan `-a` tak memotong tapi baris
+# diagnostiknya TERTIMPA tulisan stdout berikutnya (offset fd induk tak maju
+# pada O_APPEND). `>&2` di dalam `$(…)` memakai deskripsi berkas yang sama,
+# offsetnya bersama, urutannya benar. Penghitung PASS/FAIL hidup di memori,
+# jadi verdik gerbang #95 tetap sah; yang lenyap bukti tertulisnya. Dijaga
+# `verify-api-log-utuh.test.ts` (menjalankan ketiga bentuk di bash sungguhan).
+bocorkan() { local d; d=$(cat); [ -n "$d" ] && printf '%s\n' "$d" >&2; printf '%s\n' "$d" | grep -c . || true; }
 KUNCI295=$(awk '/^export interface StokMasukRow \{/{f=1;next} f&&/^\}/{exit} f&&/^  [a-z_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u)
 R295P=$(api "$OWNER" GET "/produksi?per_page=200&branch_id=all")
 R295B=$(api "$OWNER" GET "/pembelian?per_page=200&branch_id=all")
@@ -17395,9 +17408,9 @@ cek "§295 premis: kedua rute berbalasan baris (≥ 20 baris gabungan)" "V >= 20
 cek "§295 premis: kontrak StokMasukRow terbaca dari types.ts (≥ 50 medan)" "V >= 50" \
   "$(echo "$KUNCI295" | grep -c .)"
 cek "§295 tiap kunci yang DIKIRIM ada di kontrak (dikirim − kontrak = ∅)" "V == 0" \
-  "$(comm -23 <(echo "$HTTP295") <(echo "$KUNCI295") | tee /dev/stderr | grep -c . || true)"
+  "$(comm -23 <(echo "$HTTP295") <(echo "$KUNCI295") | bocorkan)"
 cek "§295 tiap medan KONTRAK benar-benar dikirim (kontrak − dikirim = ∅)" "V == 0" \
-  "$(comm -13 <(echo "$HTTP295") <(echo "$KUNCI295") | tee /dev/stderr | grep -c . || true)"
+  "$(comm -13 <(echo "$HTTP295") <(echo "$KUNCI295") | bocorkan)"
 cek "§295 ketiga kunci yang dulu tak dideklarasikan kini ada di kontrak" "V == 3" \
   "$(echo "$KUNCI295" | grep -cx 'harga_tebakan\|pengadaan\|qty_setara')"
 cek "§295 tak ada baris yang membawa asal_cabang (kunci hantu yang ponsel baca)" "V == 0" \
@@ -17420,7 +17433,7 @@ R296L=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/jso
 R296M=$(api "$OWNER" GET "/auth/me")
 R296C=$(api "$OWNER" GET "/cabang")
 R296CK=$(api "$REISS105" GET "/cabang")
-selisih296() { comm -3 <(printf '%s\n' "$1" | sort -u) <(printf '%s\n' "$2") | tee /dev/stderr | grep -c . || true; }
+selisih296() { comm -3 <(printf '%s\n' "$1" | sort -u) <(printf '%s\n' "$2") | bocorkan; }
 cek "§296 premis: kontrak terbaca dari types.ts (AuthUser 7 + CompanyDto 9 + SesiDto 3 + SesiLogin 1 + CabangDto 14)" "V == 34" \
   "$(printf '%s\n%s\n%s\n%s\n%s\n' "$K296_USER" "$K296_CO" "$K296_SESI" "$(medan296 SesiLogin)" "$K296_CAB" | grep -c .)"
 cek "§296 premis: owner punya company (bukan null) dan /cabang ≥ 2 baris" "V == 1" \
