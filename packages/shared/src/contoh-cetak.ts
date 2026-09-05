@@ -137,6 +137,11 @@ function contohBaris(
     qty_dipesan: qty,
     alasan_tolak: null,
     dana_cair: 0,
+    // Tiga kunci yang baru dideklarasikan `StokMasukRow` (vena #93): contoh
+    // dibeli, harganya sungguhan (bukan tebakan), dan bukan baris kiriman.
+    harga_tebakan: false,
+    pengadaan: "beli" as const,
+    qty_setara: null,
   };
 }
 

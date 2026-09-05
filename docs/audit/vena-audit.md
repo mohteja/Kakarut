@@ -50,6 +50,75 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Lencana yang gagal ≠ lencana nol — dan tiga provider di hulu yang membuat aturan itu menjaga keadaan yang tak pernah terjadi — ponsel — 2026-09-05
+
+**Vena.** Butir antrean Mobile "`shift_repository.dart:54` menelan galat jadi
+NOL" (ditemukan 2026-09-03 saat lencana selisih web). Dikerjakan selagi
+gerbang server vena sebelumnya berjalan — repo ponsel tak menyentuh pohon
+yang sedang diuji.
+
+**Populasi.** Provider yang MEMBERI MAKAN lencana: penerima
+`gagal: X.hasError` di `kasir_page`, `dashboard_page`, `dashboard_tim`
+dipetakan balik ke `ref.watch(P)`-nya → **7 provider**. Badannya diadu dengan
+`catch (`: **3 menelan** — `selisihMenungguProvider` (`catch (_) → 0`, kini
+`RingkasSelisih` nol), `ringkasKebersihanProvider` (`→ null`),
+`pesananDikerjakanProvider` (`→ 0`). Ketiganya punya konsumen yang PATUH
+(`badgeMerah(n, gagal: X.hasError)`) — kepatuhan di hilir menjaga `hasError`
+yang di hulu tak pernah bisa true. `galat_ditelan_test` tak menuduhnya:
+pemindainya hanya menghitung catch berbadan KOSONG, dan ketiganya berbadan
+`return`.
+
+**Diukur lewat HTTP** (2026-09-05, token kasir): `/shift/selisih/ringkas` →
+403, `/kebersihan/ringkas` → 403 — dan kedua ubinnya hanya tampil untuk
+manajemen (`kasir_page:1689`), jadi 403 itu memang bukan kabar untuk kasir.
+Yang ikut ditelan bersamanya: jaringan putus & server tumbang untuk OWNER,
+yang ubinnya tampil dan lencananya berbunyi "tak ada yang menunggu".
+
+### Yang dibangun
+
+- `selisihMenungguProvider`: gerbang PERAN (`isManajemen`, non-manajemen →
+  nol tanpa menyentuh jaringan — pola `pengajuanMenungguProvider`), tanpa
+  `try/catch`. `ringkasKebersihanProvider` & `pesananDikerjakanProvider`:
+  gerbang peran sudah ada, `try/catch` dicabut. Konsumen tak berubah — mereka
+  sudah benar.
+- **`test/lencana_menelan_galat_test.dart`** (baru): unit provider dengan
+  `ApiClient` palsu melempar + `AuthController` di-override memulangkan sesi
+  tetap — owner + API gagal → `AsyncError` (`throwsA(ApiException)`), kasir →
+  nol/null dengan **nol panggilan API**; statis — pemetaan `gagal: X.hasError`
+  → provider (premis ≥5, lima nama dipaku), badan tanpa `catch (`; PASANGAN
+  sintetis (menelan tertuduh; `catch` di komentar tidak).
+
+**Bukti merah** (Python meniru asersi statis, pulih byte-per-byte):
+YY `catch (_)` dipulihkan di `selisihMenungguProvider` →
+`menelan: ['selisihMenungguProvider']`; ZZ di `pesananDikerjakanProvider` →
+`menelan: ['pesananDikerjakanProvider']`.
+
+### Batas yang diakui
+
+- Unit provider-nya belum pernah dijalankan siapa pun sebelum CI (tak ada
+  Flutter di sini) — override `AuthController` dengan subkelas yang
+  `build()`-nya memulangkan sesi tetap adalah bentuk yang belum ada di repo.
+- "Server lama tanpa endpoint ringkas" (404) kini juga sampai ke lencana
+  sebagai `!` untuk manajemen — benar (rutenya tayang sejak 2026-09-03), dan
+  disebut supaya tak ada yang mengira itu regresi.
+- Pil `!` untuk owner saat jaringan putus tak dilihat merender: yang
+  dibuktikan adalah `AsyncError` sampai ke provider; jalur `hasError → "!"`
+  sudah diukur `lencana_gagal_test` (2026-08-27).
+
+### Gerbang
+
+- Ponsel: tiga commit di `claude`, PR #18 — `78a6a3e` **CI #47 merah**
+  (704 lolos, 3 gagal: ketiga lengan "API gagal → galat" TimeoutException 30
+  detik; API palsunya melempar seketika, yang menahan Riverpod 3 mengulang
+  provider gagal dengan backoff sehingga `.future` tak pernah selesai —
+  artefak harness, provider produksinya benar) → `ffb6781` **CI #48 merah**
+  (`flutter analyze`: `ProviderListenable` bukan kelas publik Riverpod 3 +
+  lint `unnecessary_underscores`) → `b7eebb2` **CI #49 hijau** (run
+  33973573090; uji membaca KEADAAN provider lewat `listen` + `hasError`,
+  bukan `.future`). Kode produksi identik di ketiga commit.
+- Server: dokumen saja (entri ini); tak ada gerbang kode.
+- **Tak ada rilis.**
+
 ## Baris pengadaan yang tipenya tak pernah dilihat siapa pun — 55 kunci, tiga yang tak dideklarasikan, dan bacaan hantu yang baru ketahuan dari arah sebaliknya — server + web + ponsel — 2026-09-05
 
 **Vena.** Butir antrean "`StokMasukPage`/`StokMasukRow` masih DTO lokal
@@ -148,9 +217,23 @@ diselesaikan diam-diam.
 ### Gerbang
 
 - Server (DB nol → seed → verify-api → vitest → invarian; tanpa build/e2e —
-  perubahan web hanya impor tipe, typecheck ketiga workspace hijau):
-  **verify-api 3.556 / 0** (3.550 + 6 lengan §295), **vitest 243 berkas /
-  3.020 uji** (+1 berkas `stok-masuk-row-utuh`, +11 uji), **invarian 27 / 0**.
+  perubahan web hanya impor tipe): **verify-api 3.556 / 0** (3.550 + 6
+  lengan §295), **vitest 243 berkas / 3.020 uji** (+1 berkas
+  `stok-masuk-row-utuh`, +11 uji), **invarian 27 / 0**.
+- **KOREKSI (ditulis putaran berikutnya, 2026-09-05).** Versi pertama baris
+  di atas berbunyi "typecheck ketiga workspace hijau" — itu SALAH. Gerbang
+  putaran ini melewatkan `build`, jadi tak ada tahap yang menjalankan `tsc`;
+  `typecheck` dijalankan terpisah di latar, dan yang dibaca adalah kode
+  keluar pembungkusnya (selalu 0), bukan lognya (`EXIT=1`). Yang merah:
+  `apps/web` — baris contoh `contohFakturBelanja` di
+  `packages/shared/src/contoh-cetak.ts` (dianotasi `FakturGroup` di web)
+  kehilangan tiga medan yang putaran ini sendiri tambahkan ke `StokMasukRow`
+  (`harga_tebakan`, `pengadaan`, `qty_setara`). Commit `a2b1fdd` ter-push
+  dengan typecheck web merah. Diperbaiki di commit dokumen putaran #94
+  (tiga medan ditambah ke baris contoh; `tsc` hijau di ketiga workspace),
+  dan skrip gerbang kini menjalankan `npm run typecheck` sebagai tahap
+  pertama yang GAGAL KERAS — supaya kelas "build dilewati, tsc ikut lewat"
+  tak terulang.
 - Ponsel: commit `aee7ad9`, **CI #46 hijau** (run 33972433656).
 - **Tak ada rilis.**
 
@@ -12166,14 +12249,19 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **±37 balasan server yang DTO-nya belum pernah di shared** — terukur
-      2026-09-05 dari arah balik: 51 kunci yang dibaca ponsel tak ada di
-      fikstur mana pun; sesudah penyimpanan lokal & dev disisihkan, ±37 adalah
-      balasan server tanpa tipe bersama (`/stok/nilai`, `/laporan/bep`,
-      ringkas beli perlengkapan, `BranchDto`/`CompanyDto` lokal, struk
-      `/penjualan`, log terapkan-saran, …). Kelas `StokMasukRow`, populasi
-      jauh lebih besar. Daftarnya hidup di `kunci_hantu_test.dart`
-      (`hantuDiketahui`) dan hanya boleh menyusut — satu tipe per putaran
+- [ ] **19 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+      bersama** — diukur 2026-09-05 dari DUA arah. Arah ponsel: 51 kunci yang
+      dibaca tak ada di fikstur mana pun (±37 balasan server). Arah web: dari
+      105 tipe berbeda yang dipakai `api<T>()`, **19 tak diekspor shared**
+      (`AuthState` 6×, `Kategori` 3×, `Karyawan` 3×, `SaleResult`, `BepResult`,
+      `Cabang`, `Company`, `CompanyStruk`/`CabangStruk`, `PenerimaanRow`,
+      `DanaEntri`, `StokAwalTersimpan`, `Tenant`, …) plus **47 pemanggilan
+      `api<{…}>` inline** yang bentuknya tak bernama sama sekali. Diadu HTTP:
+      `/cabang` 14 kunci, `/auth/me` 3 + `company` 9, `/laporan/bep` 8 —
+      **nol** medan kontrak untuk ketiganya. Kelas `StokMasukRow` pada rute
+      yang dibaca SETIAP sesi. Daftar ponselnya hidup di `kunci_hantu_test`
+      (`hantuDiketahui`) dan hanya boleh menyusut — satu-dua tipe per putaran,
+      mulai dari `/auth/me` + `/cabang` (sesi & cabang: dibaca semua klien)
 - [ ] **Fikstur kunci ponsel berkunci NAMA, bukan `Dto|kunci`** — `asal_cabang`
       lolos `kunci_hantu` karena `TransferStokFaktur` memilikinya; bacaan
       `FakturRow` atasnya tetap hantu. Menutupnya menuntut pemindai yang tahu
@@ -12194,12 +12282,11 @@ berlaku di situ).
       Stok Menu TAMPIL — mengalirkannya lewat helper membalik itu
 
 ### Mobile
-- [ ] **`shift_repository.dart:54` menelan galat jadi NOL** — provider yang
-      memberi makan lencana selisih kas berbunyi `catch (_) { return 0; }`,
-      jadi jaringan putus atau 403 terbaca sebagai "tak ada yang menunggu
-      keputusan". Aturan "lencana gagal ≠ lencana nol" sudah ditegakkan repo
-      itu sendiri lewat `badgeAsync`; pintu ini terlewat. Ditemukan saat
-      putaran lencana selisih di web (2026-09-03)
+- [x] ~~**`shift_repository.dart:54` menelan galat jadi NOL**~~ — SELESAI
+      2026-09-05, lihat entri "Lencana yang gagal ≠ lencana nol" di atas.
+      Populasi 7 provider lencana, **3 menelan** (selisih kas, kebersihan,
+      pesanan dikerjakan) — semuanya kini gerbang peran tanpa `try/catch`;
+      penjaga statis memetakan `gagal: X.hasError` → provider → badan
 - [x] ~~**Enum status dibandingkan sebagai teks**~~ — BERSIH dua arah, lihat
       entri di atas. 156 perbandingan / 41 nilai diadu dengan 297 baris
       kontrak server; artefaknya tautan mekanis yang selama ini tak ada
@@ -12320,7 +12407,12 @@ berlaku di situ).
       dulu memberi e2e sesi per-worker yang tak membakar kuota (sudah ditulis
       sebagai syarat di kepala `playwright.config.ts`), atau memakai akun
       manajemen kedua yang belum ada di seed
-- [ ] **Kuota login menahan spec e2e ke-11** — `/auth/login` 10 per 5 menit per
+- [x] ~~**Kuota login menahan spec e2e ke-11**~~ — DIBAYAR 2026-09-04 di
+      entri "Beli Perlengkapan dapat bentuk TABEL" (`globalSetup` login sekali
+      per akun untuk seluruh suite, token lewat berkas; suite kini dua login
+      berapa pun berkasnya). Butir ini tertinggal `[ ]` sesudahnya — ditutup
+      2026-09-05 saat antrean dibaca ulang; `workers` masih 1, dan menaikkannya
+      belum diukur. Semula: `/auth/login` 10 per 5 menit per
       (IP+email), cache sesi `e2e/util.ts` per-MODUL, tiap berkas spec satu
       proses; SEPULUH berkas sudah memakai akun owner, jadi berkas ke-11
       memerahkan berkas lain dengan 429. Sudah menggigit DUA putaran berturut
