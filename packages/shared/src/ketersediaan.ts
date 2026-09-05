@@ -138,6 +138,24 @@ export function jumlahFaktur(
 const EPS_QTY = 1e-6;
 
 /**
+ * Dua takaran yang SAMA — dalam batas toleransi di atas.
+ *
+ * Diekstrak 2026-09-04 saat jejak resep butuh membandingkan takaran lama dan
+ * baru. Versi pertamanya mengetik `Math.abs(a - b) > 1e-9` sendiri, dan itu
+ * persis kelas yang komentar `EPS_QTY` di atas sudah menyebut namanya: angka
+ * telanjang yang sudah tiga kali jadi bug di repo ini. `1e-9` juga LEBIH KECIL
+ * daripada derau float pada besaran yang dipakai praktik (ULP `qty/isi`
+ * terukur 3,7e-9 pada qty 10⁸), jadi ia akan melaporkan "takarannya berubah"
+ * untuk takaran yang tak seorang pun sentuh — riwayat yang penuh baris palsu.
+ *
+ * `<` STRIK, meniru pemakaian `EPS_QTY` di berkas ini: selisih sebesar satu
+ * unit kolom yang NYATA tetap terbaca sebagai perubahan.
+ */
+export function qtySama(a: number, b: number): boolean {
+  return Math.abs(a - b) < EPS_QTY;
+}
+
+/**
  * Bahan ini bergerak per KEMASAN UTUH, bukan eceran?
  *
  * Predikat tunggal yang dipakai `jumlahFaktur` (belanja) DAN pemeriksaan

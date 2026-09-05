@@ -8,12 +8,20 @@
  * persis bentuk cacat yang dijaga `konsep-satu-rumah.test.ts` di sisi server.
  */
 import { expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 export const BASE = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 export const KASIR_EMAIL = process.env.E2E_KASIR_EMAIL ?? "kasir@basooopa.id";
 export const KASIR_PASS = process.env.E2E_KASIR_PASS ?? "Kasir123!";
 export const OWNER_EMAIL = process.env.E2E_OWNER_EMAIL ?? "terahokiindonesia@gmail.com";
 export const OWNER_PASS = process.env.E2E_OWNER_PASS ?? "Basooopa123!";
+
+/**
+ * Tempat `globalSetup` menaruh sesi yang sudah dibeli sekali untuk seluruh
+ * suite. Dibaca `sesiApi` sebelum ia menyentuh jaringan.
+ */
+export const BERKAS_SESI =
+  process.env.E2E_SESI_FILE ?? new URL("../test-results/.sesi-e2e.json", import.meta.url).pathname;
 
 export async function login(page: Page, email: string, pass: string) {
   await page.goto("/login");
@@ -57,7 +65,34 @@ export async function tampak(l: Locator, ms = 5000) {
  * Terukur saat berkas ini ditulis: jalan 1 lolos 5/5, jalan 2 lolos 4/5,
  * jalan 3 lolos 3/5 — makin lama makin merah tanpa satu baris pun berubah.
  */
+/**
+ * Muat sesi yang sudah dibeli `globalSetup`, sekali per proses worker.
+ *
+ * Cache modul di bawah mati bersama worker-nya, dan Playwright MENYALAKAN
+ * ULANG worker tiap kali sebuah test gagal — jadi tanpa berkas ini satu
+ * kegagalan membuat tiap berkas spec sesudahnya membayar login lagi sampai
+ * kuotanya habis. Berkasnya hidup di luar proses, jadi ia selamat.
+ */
+let sudahMuatBerkas = false;
+function muatSesiBerkas() {
+  if (sudahMuatBerkas) return;
+  sudahMuatBerkas = true;
+  try {
+    const isi = JSON.parse(readFileSync(BERKAS_SESI, "utf8")) as Record<
+      string,
+      { token: string; user: unknown }
+    >;
+    for (const [email, sesi] of Object.entries(isi)) {
+      if (!sesiTersimpan.has(email)) sesiTersimpan.set(email, sesi);
+    }
+  } catch {
+    // Tak ada berkasnya (dijalankan tanpa globalSetup, mis. satu spec lewat
+    // `--grep`): jatuh ke jalur login biasa. Bukan galat.
+  }
+}
+
 export async function sesiApi(request: APIRequestContext, email: string, pass: string) {
+  muatSesiBerkas();
   const tersimpan = sesiTersimpan.get(email);
   if (tersimpan) return tersimpan;
   const masuk = await request.post(`${BASE}/api/auth/login`, { data: { email, password: pass } });

@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import type { SupplierKartu } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnSecondary, tdClass, thClass } from "../../components/ui";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggalJam } from "../../lib/format";
 import { STATUS_BELI } from "../produksi/TambahStokPage";
 
 /**
@@ -126,7 +126,10 @@ export function KartuSupplierPage() {
             {data.rows.map((r) => (
               <tr key={r.id} className="hover:bg-stone-50">
                 <td className={`${tdClass} whitespace-nowrap text-xs text-stone-500`}>
-                  {formatWaktu(r.waktu)}
+                  {/* Buku supplier membentang berbulan-bulan; server memotongnya
+                      di 500 dan mengatakannya. Baris tanpa tanggal di daftar
+                      seperti itu cuma jam yang tak menunjuk ke hari mana pun. */}
+                  {formatTanggalJam(r.waktu)}
                 </td>
                 <td className={`${tdClass} font-mono text-xs`}>{r.no_faktur ?? "—"}</td>
                 <td className={`${tdClass} font-medium`}>{r.bahan}</td>

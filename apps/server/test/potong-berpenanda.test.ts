@@ -164,13 +164,19 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "`potongLarik(c, rows, BATAS_OPNAME_PERLENGKAPAN)` — dan rute itu " +
         "dipaku gerbang 'rute yang memotong wajib mengumumkannya'.",
     },
-    "BATAS_BELI_PERLENGKAPAN + 1": {
+    "halaman?.perPage ?? BATAS_BELI_PERLENGKAPAN": {
       kelas: "sah",
       jumlah: 1,
       teks:
-        "Daftar pembelian perlengkapan. Sama: `GET /perlengkapan/beli` yang " +
-        "memanggil `potongLarik`. Urutannya menaruh yang butuh aksi di atas, " +
-        "jadi yang terpotong justru ekor riwayatnya — dan kini dikatakan.",
+        "Daftar pembelian perlengkapan, BERHALAMAN per faktur sejak " +
+        "2026-09-04 — bukan lagi `potongLarik` seperti kedua tetangganya di " +
+        "atas. Potongannya bukan klaim kelengkapan sebab balasannya membawa " +
+        "`total` (cacah FAKTUR atas seluruh populasi) di samping `rows`: " +
+        "klien tahu persis berapa yang tak ikut, dan `?? BATAS_...` hanya " +
+        "berlaku untuk pemanggil internal yang tak menyodorkan halaman. " +
+        "Terukur sebelum diubah: 53 baris = 26.132 byte untuk 14 faktur, dan " +
+        "plafon 200 BARIS yang lama ≈53 faktur — yang terpotong justru ekor " +
+        "riwayatnya, sebab urutannya menaruh yang butuh aksi di atas.",
     },
     "BATAS_KIRIMAN_PERLENGKAPAN + 1": {
       kelas: "sah",

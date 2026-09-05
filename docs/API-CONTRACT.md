@@ -320,6 +320,13 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   - **`atur` ditulis dalam TRANSAKSI YANG SAMA dengan komponennya.** Biaya per satuan bahan produksi lahir dari pasangan `(biaya resep ÷ isi) × overhead_x`, dan pembilang/penyebutnya tersimpan di tabel berbeda. Mengirim komponen lewat endpoint ini lalu takarannya lewat `PUT /api/bahan/:id` adalah DUA permintaan: bila yang kedua gagal, resep baru sudah mendarat dengan `isi` lama, dan HPP setiap menu yang memakai bahan itu ikut keliru sampai ada yang menyimpan ulang. Kirim keduanya di sini supaya keduanya berbagi satu nasib.
   - Hanya tiga nilai itu yang pindah, karena hanya ketiganya yang bisa membuat model biaya bertentangan dengan dirinya sendiri. Field master lain (satuan, stok minimum, lead time, foto) dan cara masak (`PUT /api/bahan/:id/langkah`) tetap lewat endpointnya masing-masing — kegagalannya menyisakan tampilan yang basi, bukan angka yang salah.
   - `atur` opsional; tanpa field itu perilakunya persis seperti sebelumnya.
+- `GET /api/bahan/:id/riwayat-resep` — **[owner/admin]** — res: `JejakBahanDto` = `{ rows: JejakBahanRow[] (terbaru dulu, maks 50), terpotong: bool }` — error: **404** — GARIS WAKTU satu bahan: perubahan resepnya DAN perubahan harga yang menggerakkan biayanya.
+  - `jenis` = `"buat"` (baris pembuka; `harga_lama` null) | `"resep"` (komponen/takaran/`isi`/`overhead_x` diubah — membawa `biaya_lama`/`biaya_baru`, yaitu biaya bahan per batch hasil hitung) | `"harga_sendiri"` (`harga_beli` TERSIMPAN bahan ini bergeser — membawa `harga_lama`/`harga_baru`) | `"harga_bahan"` (salah satu bahan PENYUSUN resep ini berubah harga di tempat lain — membawa `biaya_lama`/`biaya_baru` yang sudah dihitung ulang).
+  - `sebab` = dari pintu mana: `"buat"` | `"manual"` (`PUT /api/bahan/:id`, `POST /api/bahan/:id/harga`) | `"impor"` (`POST /api/bahan/import`) | `"resep"` (`PUT /api/bahan/:id/resep`) | `"laporan_harga"` (`POST /api/{pembelian,produksi}/laporan-harga/:fakturId`).
+  - **Baris `harga_bahan` disebar saat MENULIS, bukan dirakit saat membaca.** Susunan resep hari ini bukan jawaban dari "resep apa saja yang memakai bahan X tiga bulan lalu", jadi merakitnya saat membaca akan menulis ulang masa lalu tiap kali resepnya diubah. Satu tingkat saja: bahan penyusun langsung.
+  - **Simpan yang tak menggeser apa pun tidak menambah baris.** `PUT /api/bahan/:id/resep` mengirim seluruh formulir tiap kali tombol Simpan ditekan (ganti foto pun ikut mengirim komponennya); tanpa penyaring itu riwayatnya penuh baris yang tak menerangkan apa-apa.
+  - **`terpotong` medan, bukan header** — berbeda dari `GET /api/bahan/:id/pembelian` dan `GET /api/menu/:id/riwayat-harga` di sebelahnya, yang memakai `X-Kakarut-Terpotong` karena build ponsel lama membaca balasannya `as List`. Pintu ini baru dan belum punya klien yang harus dijaga.
+  - **Riwayat mulai dikumpulkan sejak fitur ini tayang.** Tak ada isian surut: `ingredient_components` ditulis hapus-lalu-sisip, jadi resep sebelum tanggal itu memang tak tersimpan di mana pun.
 - `GET /api/bahan/:id/langkah` — [any] — res: `BahanLangkahRow[]` (LANGKAH CARA MASAK urut, tiap langkah `{id, teks, foto_url|null}`; `[]` bila belum diatur/bahan non-produksi) — error: **404** — semua pelaksana produksi (kitchen/bar/tim) boleh baca, lintas divisi
 - `PUT /api/bahan/:id/langkah` — [owner/admin] — req: `{ langkah: [{teks: string(1..1000), foto_url?|null (max500)}] (max 30) = [] }` — **urutan array = urutan langkah** (replace-whole-list; kirim `[]` utk mengosongkan) — res: `BahanLangkahRow[]` terbaru — error: **400** bahan non-produksi/teks invalid, **404**, **409** (pengadaan berubah konkuren)
 - `DELETE /api/bahan/:id` — [owner/admin] — soft delete (= **arsipkan**; hilang dari semua daftar aktif, muncul di `GET /bahan?arsip=1`) — res: `{ ok: true }` — error: **404**, **409** masih dipakai menu aktif atau resep aktif lain
@@ -1447,14 +1454,18 @@ Laporan:
 - `POST /api/perlengkapan/stok-awal` — [owner/admin] — query: `branch_id?` — req: `{ items: [{supply_id:uuid, qty:number(≥0)}] (min1) }` — res: `{ ok, jumlah, diubah }` — error: **404**
 - `POST /api/perlengkapan/opname` — [any] — query: `branch_id?` — req: `{ items: [{supply_id:uuid, qty_fisik:number(≥0)}] (min1), catatan?|null (max300) }` — res: **201** `{session_id,nomor,...}` atau `{ session_id: null, ... }` bila tak ada selisih
 - `GET /api/perlengkapan/opname/riwayat` — [any] — query: `branch_id?` — res: daftar sesi (maks 100 + **`X-Kakarut-Terpotong`**)
-- `GET /api/perlengkapan/opname/sesi/:sessionId` — [any] — res: detail sesi — error: **404**
+- `GET /api/perlengkapan/opname/sesi/:sessionId` — [any] — res: detail sesi (`session_id`, `nomor`, `status`, `waktu`, `oleh`, `rows[]`) — `waktu`/`oleh` mengikuti aturan daftarnya (`MIN`), jadi daftar dan detail selalu menyebut jam & orang yang sama untuk satu sesi — error: **404**
 - `POST /api/perlengkapan/opname/sesi/:sessionId/acc` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/opname/sesi/:sessionId/tolak` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `DELETE /api/perlengkapan/opname/sesi/:sessionId` — [owner/admin] — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/permintaan-otomatis` — [owner/admin] — query: `branch_id?`, `rencana_id?` (tautkan faktur BP ke permintaan Tambah Stok dari Menu → tampil di `PermintaanStokRow.beli_perlengkapan`) — res: `PermintaanPerlengkapanOtomatisHasil` (seluruh item kurang jadi **SATU faktur BP multi-item** — lihat `beli_faktur`) — error: **400/404**
 - `GET /api/perlengkapan/kiriman` — [any] — query: `branch_id?` — res: daftar kiriman (maks 50 + **`X-Kakarut-Terpotong`**)
 - `POST /api/perlengkapan/kiriman/:id/terima` — [any] — query: `branch_id?` — res: hasil — error: **400/404**
-- `GET /api/perlengkapan/beli` — [any] — query: `branch_id?` (owner/admin; cashier/tim terkunci CK-nya) — res: `BeliPerlengkapanRow[]` (maks 200 + **`X-Kakarut-Terpotong`**; baris; kelompokkan per `faktur_id` — baris warisan `faktur_id=null` = faktur satu-item; `nomor` BP- per FAKTUR; kini juga memuat `diproses_oleh` (pemroses), `supplier_utama` (tempat beli — supplier langganan item), dan `harga_beli` master utk estimasi RAB). **Status pipeline paritas beli bahan baku**: `menunggu` (RAB) → `diproses` (sedang dibelanjakan) → `tiba` / `batal`. **Faktur yang PERMINTAANNYA SUDAH DIHAPUS TIDAK ditampilkan** (baris non-`tiba` yang `rencana_id`-nya hanya punya produksi ter-soft-delete) — konsisten dgn productions yang lenyap; status `batal` hanya tampil bila permintaannya masih ada (pembatalan sah). Baris `tiba` (stok nyata) selalu tampil.
+- `GET /api/perlengkapan/beli` — **[owner/admin]** — query: `branch_id?`, `page?` (≥1), `per_page?` (bawaan **20**, maks **200**) — res: `BeliPerlengkapanDaftar` = `{ rows, total, page, per_page, ringkas }` (baris; kelompokkan per `faktur_id` — baris warisan `faktur_id=null` = faktur satu-item; `nomor` BP- per FAKTUR; kini juga memuat `diproses_oleh` (pemroses), `supplier_utama` (tempat beli — supplier langganan item), dan `harga_beli` master utk estimasi RAB). **Status pipeline paritas beli bahan baku**: `menunggu` (RAB) → `diproses` (sedang dibelanjakan) → `tiba` / `batal`. **Faktur yang PERMINTAANNYA SUDAH DIHAPUS TIDAK ditampilkan** (baris non-`tiba` yang `rencana_id`-nya hanya punya produksi ter-soft-delete) — konsisten dgn productions yang lenyap; status `batal` hanya tampil bila permintaannya masih ada (pembatalan sah). Baris `tiba` (stok nyata) selalu tampil.
+  - **BERHALAMAN PER FAKTUR, bukan per baris** (sejak 2026-09-04). `per_page=20` berarti 20 FAKTUR, dan seluruh baris kedua puluh faktur itu ikut — jadi `rows.length` hampir selalu lebih besar daripada `per_page`, dan `total` mencacah FAKTUR. Mengiris per baris akan mengirim faktur yang terpotong di tengah: kartu berisi separuh itemnya, tanpa penanda. Klien yang menghitung "apakah masih ada sisa" WAJIB membandingkan **faktur unik yang diterima** dengan `total`, bukan `rows.length`.
+  - **`ringkas`** = `{ butuh_aksi, tiba, batal }`, dihitung server atas SELURUH populasi (bukan halaman berjalan). Ketiganya SALING LEPAS, jadi jumlahnya tepat `total` — invarian yang dipakai verify-api §294. `butuh_aksi` memuat `menunggu`, `diproses`, DAN `sebagian`.
+  - **Keadaan faktur ada LIMA** (`statusFakturBP` di `@kakarut/shared`): `menunggu` | `diproses` | `sebagian` | `tiba` | `batal`. Baris `batal` dibuang lebih dulu; hanya faktur yang SELURUH barisnya batal yang berakhir `batal`. `sebagian` = sebagian barangnya sudah tiba, sisanya belum. Sampai 2026-09-04 aturan ini diketik dua kali dan KEDUANYA BERBEDA — web memakai "tahap paling tertinggal" (empat keadaan), ponsel memakai bentuk lima-keadaan di atas; faktur [tiba, menunggu] karena itu berbunyi "Menunggu" di satu layar dan "Sebagian" di layar lain.
+  - **`X-Kakarut-Terpotong` TIDAK lagi dikirim** — pemotongan kini dinyatakan oleh `total` vs faktur yang diterima, medan yang tak bisa hilang di proxy mana pun.
 - `POST /api/perlengkapan/beli` — [owner/admin] — req **multi-item**: `{ items: [{supply_id:uuid, qty:number(>0), total_harga?:number(≥0)|null}] (1..100), ck_branch_id?:uuid|null, tujuan_branch_id?:uuid|null, catatan?|null }` (bentuk lama satu-item `{supply_id, qty, …}` tetap diterima) — res: **201** `{ faktur_id, nomor, ids[] }` — error: **400/404**
 - `POST /api/perlengkapan/beli/faktur/:fakturId/proses` — [owner/admin] — tandai faktur **diproses** (sedang dibelanjakan; pemroses tercatat) — hanya dari 'menunggu' — res: `{ ok, jumlah }` — error: **404**
 - `POST /api/perlengkapan/beli/faktur/:fakturId/tiba` — [owner/admin] — req: `{ items?: [{id:uuid, qty?:number(>0), total_harga?:number(≥0)|null}] }` — proses SEMUA baris 'menunggu'/'diproses' faktur (masuk stok CK PL- per baris + auto-kirim KP- per baris) — res: `{ faktur_id, jumlah_tiba, kiriman[] }` — error: **400/404**
@@ -2285,6 +2296,55 @@ export interface MenuPriceLogRow {
   /** nama pengubah; null bila akunnya sudah dihapus */
   oleh: string | null;
   created_at: string;
+}
+
+/**
+ * Jenis kejadian di garis waktu sebuah bahan (`GET /bahan/:id/riwayat-resep`).
+ *
+ * `harga_bahan` adalah yang membedakan garis waktu ini dari sekadar log tulis:
+ * ia mencatat kejadian yang ASALNYA bahan LAIN — salah satu bahan penyusun
+ * resep ini bergerak harganya, jadi biaya per batch resep ini ikut bergeser
+ * tanpa seorang pun menyentuh resepnya. Itu pertanyaan yang paling sering
+ * ditanyakan tentang layar Resep, dan sebelum tabel ini tak ada satu pun
+ * tempat yang bisa menjawabnya.
+ */
+export type JenisJejakBahan = "buat" | "resep" | "harga_sendiri" | "harga_bahan";
+
+/** Lewat pintu mana perubahannya masuk. */
+export type SebabJejakBahan = "buat" | "manual" | "impor" | "resep" | "laporan_harga";
+
+/** Satu baris riwayat resep & harga sebuah bahan. */
+export interface JejakBahanRow {
+  id: string;
+  jenis: JenisJejakBahan;
+  sebab: SebabJejakBahan;
+  /** kalimat siap tampil, mis. "Tepung: Rp 12.000 → Rp 12.500 (200 gr/batch)" */
+  detail: string;
+  /** harga_beli TERSIMPAN bahan ini; null bila kejadiannya tak menggesernya */
+  harga_lama: number | null;
+  harga_baru: number | null;
+  /** biaya bahan per batch HASIL HITUNG resep; null bila tak relevan */
+  biaya_lama: number | null;
+  biaya_baru: number | null;
+  /** nama pelaku; null bila akunnya sudah dihapus atau perubahannya dari sistem */
+  oleh: string | null;
+  created_at: string;
+}
+
+/**
+ * Balasan `GET /bahan/:id/riwayat-resep`.
+ *
+ * OBJEK, bukan larik telanjang — berbeda dari `riwayat-harga` di sebelahnya,
+ * dan bedanya bukan selera. Larik telanjang di sana dipertahankan karena build
+ * ponsel lama membacanya `as List`, dan penanda pemotongannya karena itu harus
+ * menumpang header. Pintu ini baru: belum ada klien yang perlu dijaga, jadi
+ * "daftarnya dipotong" ditulis sebagai medan yang tak bisa hilang di proxy
+ * mana pun.
+ */
+export interface JejakBahanDto {
+  rows: JejakBahanRow[];
+  /** true = masih ada yang lebih lama dari yang dikirim */
+  terpotong: boolean;
 }
 
 /** Ringkasan hasil POST /menu/terapkan-saran. */
@@ -4431,6 +4491,46 @@ export interface PermintaanPerlengkapanOtomatisHasil {
 export type BeliPerlengkapanStatus = "menunggu" | "diproses" | "tiba" | "batal";
 
 /** Satu BARIS faktur beli perlengkapan ke Central Kitchen (BP-). */
+/**
+ * Keadaan satu FAKTUR beli perlengkapan.
+ *
+ * Aturannya dan alasan kelima keadaannya ada di `beli-perlengkapan.ts`
+ * (`statusFakturBP`) — tipenya tinggal di sini supaya `types.ts` tetap bisa
+ * dibaca tanpa mengimpor apa pun, seperti `StatusPermintaan` di atasnya.
+ */
+export type StatusFakturBP = BeliPerlengkapanStatus | "sebagian";
+
+/** Tiga ember yang saling lepas — dasar invarian partisi `ringkas`. */
+export type EmberFakturBP = "butuh_aksi" | "tiba" | "batal";
+
+/**
+ * Ringkasan seluruh populasi faktur beli perlengkapan, bukan halaman berjalan.
+ *
+ * `Record`, bukan interface bermedan tangan — ember keempat yang lahir besok
+ * tak bisa lupa dihitung.
+ */
+export type RingkasBeliPerlengkapan = Record<EmberFakturBP, number>;
+
+/**
+ * Balasan `GET /perlengkapan/beli` — BERHALAMAN PER FAKTUR.
+ *
+ * `rows` tetap larik BARIS (bentuk tiap entri tak berubah sedikit pun), tapi
+ * halamannya diiris per FAKTUR: `per_page=20` berarti 20 faktur, dan seluruh
+ * baris kedua puluh faktur itu ikut. Mengiris per baris akan mengirim faktur
+ * yang terpotong di tengah — kartu berisi separuh itemnya, tanpa penanda.
+ *
+ * `ringkas` dihitung server atas SELURUH populasi, bukan halaman berjalan.
+ */
+export interface BeliPerlengkapanDaftar {
+  rows: BeliPerlengkapanRow[];
+  /** jumlah FAKTUR (bukan baris) di seluruh populasi */
+  total: number;
+  page: number;
+  /** dalam satuan FAKTUR */
+  per_page: number;
+  ringkas: RingkasBeliPerlengkapan;
+}
+
 export interface BeliPerlengkapanRow {
   id: string;
   /**
@@ -4593,6 +4693,14 @@ export interface OpnamePerlengkapanDetail {
   session_id: string;
   nomor: string | null;
   status: PenyesuaianStatus;
+  /**
+   * Stempel SESI (ISO) — `MIN(waktu)` seluruh barisnya, ATURAN YANG SAMA dengan
+   * `OpnamePerlengkapanSesiRow.waktu`: daftar dan detail tak boleh menyebut jam
+   * berbeda untuk satu sesi.
+   */
+  waktu: string;
+  /** Pencatat sesi — `MIN(nama)` seperti daftarnya; null bila tak ada pengguna. */
+  oleh: string | null;
   rows: {
     supply_id: string;
     nama: string;

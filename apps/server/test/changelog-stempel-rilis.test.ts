@@ -71,9 +71,22 @@ const BELUM_TAYANG = new Set([
   // penghapusan baris-baris ini. Menghapusnya terpisah dari memasang stempelnya
   // adalah cara berkas ini pernah salah selama empat hari.
   //
-  // belum di-merge (masih di cabang `claude`, ikut PR draft #225)
-  "## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya",
-  "## 🔴 `GET /rekomendasi/permintaan` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`",
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-09-04 — kedua entri
+  // (halaman dokumen faktur & `/rekomendasi/permintaan` berhalaman) tayang
+  // lewat merge `48532a3` / CI #493, dan ponselnya lewat `f429dba` / CI #37.
+  // Stempelnya dipasang pada commit yang SAMA dengan penghapusan baris ini;
+  // memisahkannya adalah cara berkas ini pernah salah selama empat hari.
+  //
+  // BELUM DI-MERGE (2026-09-04): pintu riwayat resep & harga. Aturan pemilik
+  // berlaku — tak ada yang tayang sampai ia meminta rilis. Stempelnya dipasang
+  // DAN baris ini dihapus pada commit yang sama dengan merge-nya.
+  // Aditif: dua medan (`waktu`, `oleh`) pada balasan yang sudah ada; ponsel
+  // mengurai rute ini lewat fromJson yang mengabaikan kunci tak dikenal.
+  // Belum tayang — aturan pemilik: tak ada rilis sampai diminta. Hapus dari
+  // sini begitu stempel "Sudah di-merge ke production." dipasang.
+  "## 🟢 `GET /perlengkapan/opname/sesi/:sessionId` kini membawa `waktu` + `oleh`",
+  "## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan",
+  "## 🔴 `GET /perlengkapan/beli` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

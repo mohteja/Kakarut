@@ -94,9 +94,14 @@ const PUTUSAN: Record<string, string> = {
   "stock_opnames.system_qty": "saldo terhitung dari baris yang sudah tersimpan",
   "supply_mutations.system_qty": "saldo terhitung dari baris yang sudah tersimpan",
   "productions.qty_dipesan": "salinan productions.qty (kolom yang sama persis)",
+  "ingredient_logs.biaya_lama":
+    "DIJAGA muatUang() di `bahan/jejak.ts` — yang TAK MUAT ditulis null, bukan dilempar: jejak tak boleh membatalkan peristiwa yang dicatatnya (satu resep patologis akan menggagalkan seluruh nota laporan harga)",
+  "ingredient_logs.biaya_baru": "DIJAGA muatUang() — lihat biaya_lama",
   // ── salinan / tujuan lebih lebar ────────────────────────────────────────
   "menu_price_logs.harga_baru": "salinan menus.harga_jual — numeric(12,2) ke numeric(12,2)",
   "menu_price_logs.harga_lama": "salinan menus.harga_jual — presisi sama",
+  "ingredient_logs.harga_lama": "salinan ingredients.harga_beli — kolomnya numeric(14,2) yang sama persis",
+  "ingredient_logs.harga_baru": "salinan ingredients.harga_beli — kolomnya numeric(14,2) yang sama persis",
   "menu_price_logs.mult_baru": "salinan menus.mult — numeric(7,3) ke numeric(7,3)",
   "menu_price_logs.mult_lama": "salinan menus.mult — presisi sama",
   "open_bill_items.harga_satuan": "dari menus.harga_jual numeric(12,2) ke kolom numeric(14,2) yang LEBIH LEBAR",

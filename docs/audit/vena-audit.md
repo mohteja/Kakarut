@@ -50,6 +50,1028 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Lembar detail opname perlengkapan tak menyebut waktu — dan DTO yang memang tak membawanya — web + server + ponsel(fikstur) — 2026-09-04
+
+Diminta pemilik sesudah laporan "diakui tak penuh" putaran sebelumnya:
+*"kerjakan sekalian lembar detail opname perlengkapan"*.
+
+### Yang diukur
+
+`OpnamePerlengkapanDetail` membawa `session_id`, `nomor`, `status`, `rows[]` —
+**tanpa `waktu`, tanpa `oleh`**. Jadi lembar detail perlengkapan bukan lupa
+merender; ia tak punya apa pun untuk dirender. Lembar bahan baku di sebelahnya
+menyebut keduanya. Ponsel mengurai rute ini (`perlengkapan_repository.dart:525`)
+lewat `fromJson` yang mengabaikan kunci tak dikenal → dua medan tambahan
+**aditif**, 🟢, bukan 🔴.
+
+### Keputusan yang menentukan: aturan detail = aturan daftar, di SQL yang sama
+
+`riwayatOpnamePerlengkapan` menghitung `MIN(waktu)` dan `MIN(users.nama)`.
+Detailnya kini menghitung `min(...) over ()` di kueri yang sama — bukan `Math.min`
+di JS atas baris yang sama. Hasilnya "hampir selalu" sama; dan "hampir" adalah
+celah tempat daftar dan detail mulai menyebut jam berbeda untuk satu sesi —
+kelas yang sudah dua kali dibayar repo ini (aturan status faktur; lencana
+permintaan). verify-api §84a menagih **`detail.waktu == daftar.waktu`** dan
+**`detail.oleh == daftar.oleh`** untuk sesi yang sama, bukan sekadar "ada".
+
+### Penjaga saya sendiri yang buta, dan ketahuan dari bukti merahnya
+
+Bukti merah II — `waktu: string;` dicabut dari DTO — **19 lolos**. Penjaganya
+mengiris `types.ts` 900 karakter dari awal interface; interface itu **609**
+karakter, jadi irisannya menembus ke `PerlengkapanMutasiDto` di bawahnya, yang
+juga punya `waktu: string;`. DTO yang kehilangan `waktu` tetap "mengandung"
+`waktu: string;` milik tetangganya.
+
+Kelas yang sama dengan tiga temuan hari sebelumnya — **memeriksa bahannya ADA
+di sekitar, bukan di tempatnya** — kali ini milik saya, dan tertangkap oleh
+disiplin yang sama: bukti merah yang gagal adalah temuan, bukan kejutan.
+Irisannya kini sampai kurung tutup interface-nya sendiri, plus asersi bahwa
+irisan itu tak memuat `export interface` kedua. II diulang → merah dengan
+kalimatnya sendiri.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut | penjaga yang harus menuduh |
+| --- | --- | --- |
+| II | `waktu: string;` dari DTO | **GAGAL** di percobaan pertama (irisan 900) → diperbaiki → menuduh |
+| JJ | `formatTanggalJam(data.waktu)` dari lembar perlengkapan | "lembar perlengkapan tak merender…" |
+| KK | service mengirim `waktu` sebagai teks Postgres mentah, **di server hidup** | cermin §84a: `ISO? 0`, `waktu ==? 0`; sesudah pulih keduanya `1` |
+
+KK sengaja mengubah BENTUK, bukan saatnya: sesi di fikstur berbaris tunggal,
+jadi menukar `min`→`max` tak akan terlihat. Yang menangkap mutasi bentuk itu
+justru asersi `detail == daftar` — karena daftarnya ISO.
+
+### Ponsel
+
+Fikstur `kunci-kontrak-server.txt` bertambah **tepat dua kunci**
+(`OpnamePerlengkapanDetail|waktu`, `|oleh`); fikstur status tak berubah.
+`waktu` (66 kali di lib/) dan `oleh` (12) sudah nama yang disentuh, jadi
+**tak butuh entri** di `kunci-belum-dibaca.txt` — dan cermin KELAS di
+`kunci-satu-kontrak` (dipasang sesudah CI ponsel #38) yang mengonfirmasinya di
+gerbang ini, bukan CI ponsel sesudah PR ditulis. Tak ada kode Dart yang berubah.
+
+### Cakupan yang DIAKUI tak penuh
+
+- Lengan peramban mengukur "tanggal BERTAMBAH sesudah lembar terbuka", bukan
+  "tanggal ada di dalam lembar" — sebab tabel di belakangnya sudah memuat
+  tanggal yang sama. Cukup untuk menuduh lembar yang diam; tak membedakan
+  lembar yang menyebut tanggal sesi LAIN.
+- `ditinjau_oleh` (ada di lembar bahan) tak ditambahkan: `supply_mutations` tak
+  mencatat siapa yang ACC/tolak. Itu putaran skema, bukan putaran ini.
+
+### Gerbang penuh ke-46 — merah di SATU tahap, lalu diperbaiki
+
+| | hasil |
+| --- | --- |
+| verify-api | **3.550 lolos / 0 gagal** (+4: §84a) |
+| vitest | **merah 1 uji** → `changelog-stempel-rilis`: entri 🟢 baru berbunyi "belum tayang" tapi belum didaftarkan di `BELUM_TAYANG` |
+| invarian | **27 sehat / 0 dilanggar** |
+| Playwright | **48 lolos / 0 gagal** |
+
+Perbaikannya satu berkas uji (registri changelog). Vitest diulang penuh:
+**241 berkas / 3.004 uji**, typecheck bersih. Ketiga tahap lain TIDAK diulang,
+dan itu dikatakan apa adanya: perbaikannya tak bisa menyentuh rute, verify-api,
+maupun peramban, jadi hasilnya berlaku atas sumber yang sama persis. Tak ada
+yang di-push sebelum vitest-nya hijau.
+
+## Daftar lintas-hari yang cuma menyebut JAM — lima berkas, satu pemformat, satu ratchet — web — 2026-09-04
+
+Ekor langsung dari putaran riwayat SO. Pemilik memilih "SO dulu, sisanya
+dilaporkan"; sesudah laporan pilahannya: **"semua lintas-hari sekalian"**.
+
+### Populasi, diukur
+
+**64 panggilan `formatWaktu` di 32 berkas.** 21 berkas sudah menyebut tanggal di
+suatu tempat. Dari 11 sisanya, yang **benar-benar daftar lintas-hari** ada di 5
+berkas; 5 lainnya terkurung hari dan **dibuktikan**, bukan diandaikan:
+
+| berkas | kenapa jam-saja BENAR |
+| --- | --- |
+| `kasir/RiwayatPage` | `tanggal` state + `<input type="date">` — daftar sehari |
+| `absen/AbsenPage` | `GET /absensi` bawaannya `tanggalDi(hari ini)`; "Masuk pukul …" konfirmasi sesaat |
+| `pengaturan/MejaPage`, `MejaStatusPanel` | keadaan meja hari ini |
+| `kasir/ReceiptModal` | kertasnya bertanggal — ia **memanggil** `waktuKertasWIB` (diperiksa: 1 panggilan, bukan cuma impor) |
+
+Yang paling mendorong putaran ini: **`BeliPerlengkapanPage` — tabelnya
+bertanggal, kartunya (bentuk BAWAAN) tidak**, dan itu dari putaran saya sendiri
+(`b130755`). Tanggalnya tinggal di `kolom-beli-perlengkapan.tsx`, berkas lain,
+jadi berkas halamannya sendiri tak punya satu pun pemformat tanggal.
+`PermintaanStokPage` punya belahan yang persis sama (`kolom-permintaan.tsx`
+bertanggal, kartunya tidak).
+
+### Yang dibangun
+
+- **`formatTanggalJam`** — "4 Sep 2026 · 18.42", dirakit dari dua pemformat yang
+  sudah ada (bukan `Intl` baru): bentuk tanggal & jam tetap satu sumber.
+- **Sepuluh situs, lima berkas** → `formatTanggalJam`: kartu + detail + **kepala
+  dokumen RAB yang DICETAK** di Beli Perlengkapan (kertas tanpa tanggal tak bisa
+  diarsipkan); kartu Permintaan Stok; kedua kolom Tempat Sampah; kolom Waktu
+  buku supplier; daftar sesi opname di tab Stok Perlengkapan; kepala lembar
+  detail opname bahan. Disunting **per situs**, dan `git diff --stat` menunjukkan
+  tepat `format.ts` + 6 berkas sumber.
+- **Ratchet `waktu-tanpa-tanggal.test.ts`** — tiap berkas yang memakai
+  `formatWaktu` tanpa satu pun pemformat tanggal wajib ada di `DIPUTUSKAN`
+  dengan alasannya; dua arah (entri basi merah); PASANGAN memaku kelima berkas
+  + tiga situs BP; penggolongnya dibuktikan pada masukan sintetis.
+- **Dua lengan peramban** yang bentuknya BEDA dari tabel SO: kartu BP (bentuk
+  bawaan, konteks peramban baru = localStorage kosong, dipastikan lewat tombol
+  "🗂 Kartu"), dan modal riwayat opname di tab Stok Perlengkapan (dua klik dari
+  `/stok`; tab-nya `useState`, jadi diklik, bukan `?tab=`). Harapannya dihitung
+  dari `waktu` server.
+
+### Yang DIUKUR lalu TIDAK dibangun
+
+- **Kepala lembar detail opname PERLENGKAPAN** tak menampilkan waktu sama
+  sekali — dan `OpnamePerlengkapanDetail` memang **tak membawa `waktu`/`oleh`**.
+  Menambahkannya berarti DTO + service + kontrak + fikstur ponsel; di luar
+  putaran web-saja ini. Dicatat, tak diam-diam dilewati.
+- **Lengan kedua sempat direncanakan Tempat Sampah, lalu Kartu Supplier** —
+  keduanya dibatalkan sesudah diukur: sampah cuma 1 baris dan itu lahir dari
+  e2e gerbang (penjualan yang dihapus spec lain), buku supplier 1 baris pada 1
+  dari 8 supplier berstempel jam verify-api. Premis yang bergantung urutan spec
+  lain adalah persis kelas cacat yang tiga kali menggigit lengan resep. Dipilih
+  daftar opname perlengkapan: 7 sesi dari seed, 2 di cabang bawaan.
+- `kolom-beli-perlengkapan.tsx:64` dan `kolom-permintaan.tsx:201` **tak
+  disentuh**: sudah bertanggal, dengan gaya dua-warna yang string
+  `formatTanggalJam` tak bisa tiru.
+
+### Perangkap lingkungan: kontainer didaur ulang di tengah putaran
+
+`uptime` 5 menit; Postgres, server, dan proses latar hilang; suntingan pohon
+kerja selamat (disk). Postgres dihidupkan lewat jalur resmi repo
+(`scripts/dev-db.sh`, `pg_ctl` atas `/tmp/kakarut-pgdata` yang selamat), bukan
+perintah karangan. Gejala pertamanya token login KOSONG — mudah disalahbaca
+sebagai kuota `/auth/login` habis; yang membedakan: `curl -i` memulangkan HTTP
+000 dan soket Postgres ditolak, bukan 429.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut | penjaga yang harus menuduh |
+| --- | --- | --- |
+| EE | satu situs kartu BP kembali `formatWaktu` | PASANGAN — "kembali memanggil formatWaktu" |
+| FF | entri `MejaPage` dicabut dari `DIPUTUSKAN` | INTI, menyebut namanya |
+| GG | entri PALSU `TempatSampahPage` ditambah | RATCHET — entri basi |
+| HH | `formatTanggalJam` memulangkan jam saja, **di peramban** | kedua lengan, menyebut `"4 Sep 2026"` untuk `BP-0014` dan `OP-0008` |
+
+HH yang paling berarti: ia membuktikan kedua lengan menangkap regresi pada
+PEMFORMATNYA, bukan sekadar bentuk kode di situs pemanggil.
+
+### Cakupan yang DIAKUI tak penuh
+
+- Ratchet-nya **per berkas** — satu berkas bisa punya satu situs bertanggal dan
+  satu daftar lintas-hari tanpa tanggal, dan ia tak akan melihatnya. Kasus nyata
+  yang melahirkannya justru tertangkap karena tanggalnya tinggal di berkas lain.
+- **Fikstur gerbang tetap satu hari** — yang dibuktikan: tanggalnya dirender dan
+  cocok dengan `waktu` server; bukan bahwa dua hari berbeda terbedakan.
+- Lembar detail opname perlengkapan tetap tanpa waktu (lihat di atas).
+
+### Gerbang penuh ke-45
+
+DB nol → seed → verify-api → regen jejak → vitest → invarian → reset batas laju
+→ Playwright:
+
+| | hasil |
+| --- | --- |
+| verify-api | **3.546 lolos / 0 gagal** |
+| vitest | **241 berkas / 2.997 uji** (+1 berkas, +5 uji — tepat ratchet-nya) |
+| invarian | **27 sehat / 0 dilanggar** |
+| Playwright | **48 lolos / 0 gagal** (46 + 2 lengan putaran ini) |
+
+Hijau di jalan pertama — tak ada yang di-push sebelum itu.
+
+## Riwayat SO tak pernah menyebut TANGGAL — dan penjaga yang menganggap `error` ADA sama dengan `error` DIPAKAI — web — 2026-09-04
+
+Diminta pemilik: *"riwayat SO bahan baku dan perlengkapan belum ada tanggal
+hari — juga ingin di buat tabel saja dengan kolom status"*. Bagian pertama
+CACAT, bukan selera.
+
+### Keadaan sebelumnya, diukur
+
+`OpnameRiwayatPage` merender `formatWaktu(s.waktu)` telanjang di kedua tab, dan
+`formatWaktu` di web memulangkan **jam dan menit saja**:
+
+```ts
+export function formatWaktu(iso: string): string {
+  return new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit", … }).format(…);
+}
+```
+
+Setiap sesi dari setiap hari karena itu terbaca sama — di halaman yang justru
+ada untuk menelusuri opname LAMA, dan yang sudah memasang spanduk *"yang lebih
+lama tidak ikut ditampilkan"*. Nol `formatTanggal*` di seluruh berkas.
+
+Tangkapan `error-context.md` dari lengan peramban pertama merekamnya apa
+adanya, sebelum satu baris pun diperbaiki:
+
+> `button "OP-0008 18.42 Owner Basooopa · 1 selisih Menunggu ACC"`
+
+**Aplikasi ponsel tidak punya cacat ini.** `formatWaktu` di
+`kakarut-mobile/lib/core/format.dart` memulangkan `dd/MM HH.mm`. Satu nama
+fungsi, dua klien, dua jawaban — dan yang diam hanya web. Kelas yang sama
+dengan aturan status faktur putaran lalu, hanya lebih tua.
+
+Populasi basis gerbang: 24 sesi opname bahan + 7 sesi opname perlengkapan
+(`supply_mutations` ber-`session_id`, tipe `koreksi`); lewat HTTP — yang
+terkurung cabang — 18 dan 2. Status terukur: bahan 11 menunggu / 6 disetujui /
+1 cocok; perlengkapan 1 menunggu / 1 ditolak.
+
+### Yang DIUKUR lalu TIDAK diubah
+
+Tiga hal diperiksa dan sengaja dibiarkan, supaya tak terbaca sebagai kelalaian:
+
+1. **Urutannya sudah benar.** Pemilik meminta "terbaru di atas"; kedua rute
+   sudah `desc` (`max(created_at)` di sisi bahan, `MIN(waktu)` di sisi
+   perlengkapan) dan dibuktikan lewat HTTP, bukan dibaca dari kode saja.
+2. **Dua bentuk kawat untuk medan yang sama.** `waktu` sisi bahan dikirim apa
+   adanya dari Postgres (`2026-09-04 11:42:19.803239+00`), sisi perlengkapan
+   sudah di-`toISOString()` (`2026-09-04T11:42:32.890Z`). Keduanya terurai
+   di V8 MAUPUN di `DateTime.tryParse` Dart (yang menerima spasi sebagai
+   pengganti `T`, dan offset dua-digit tanpa menit), jadi tak ada yang rusak
+   hari ini. Diseragamkan berarti memutus kontrak yang dibaca ponsel, tanpa
+   satu pun kegagalan yang menuntutnya.
+3. **`MIN(status)` di `riwayatOpnamePerlengkapan`** memulangkan status sesi
+   lewat urutan ABJAD (`disetujui` < `ditolak` < `menunggu`). Ia benar hari ini
+   **karena konstruksi**, bukan karena kebetulan: `setStatusOpnamePerlengkapan`
+   selalu mengubah SELURUH baris sesi, jadi status campur dalam satu sesi tak
+   bisa lahir. Yang rapuh bukan jawabannya melainkan alasannya — invarian itu
+   tak tertulis di mana pun.
+
+### Bukti merah yang GAGAL, dan apa yang ia buka
+
+Langkah "buktikan detektornya bisa menuduh" kali ini **tidak lolos**, dan itu
+temuan terpenting putaran ini.
+
+Saya mencabut penanganan galat sisi bahan — `<SpinnerAtauGalat>` dibuang,
+bacaan yang gagal jatuh ke tabel kosong ber-*"Belum ada riwayat opname bahan
+baku"* — lalu menjalankan seluruh sapuan `gagal-muat-bukan-kosong`. **Semuanya
+tetap hijau.**
+
+Sebabnya satu baris di `test/util/kueri-web.ts`:
+
+```ts
+if (k === "error" || k === "isError" || k === "isLoadingError") punyaGalat = true;
+…
+kelas: punyaGalat ? "GALAT" : …
+```
+
+Sebuah situs dinyatakan "sudah menangani galat" begitu `error:` muncul di
+DESTRUCTURING-nya. Apakah galat itu sampai ke mata tak pernah ditanyakan.
+
+Kelasnya persis yang baru saja ditutup di `kunci-satu-kontrak` beberapa jam
+sebelumnya: **gerbang yang memeriksa BAHANNYA ADA, bukan bahannya DIPAKAI.**
+Dua kali dalam satu hari, di dua gerbang yang tak saling kenal.
+
+Diukur sebelum diperbaiki: **93 situs** `useQuery` mengambil `error`, dan
+**nol** di antaranya membuangnya. Jadi yang dipasang RATCHET, bukan perbaikan —
+tak ada yang sedang salah, dan yang dijaga adalah bahwa besok pun tak ada.
+Batasnya ditulis: ia menuntut nama itu DISEBUT LAGI, bukan sampai ke JSX.
+Menuntut JSX akan menuduh palsu bentuk `if (error) return <p>Gagal</p>`, yang
+menangani galatnya dengan benar tanpa pernah menaruh namanya di dalam JSX.
+
+### Yang dibangun
+
+- **Tabel menggantikan kartu** (keputusan pemilik: "tabel saja"), lewat
+  `TabelResponsif` — jadi di layar sempit tiap baris tetap jadi kartu, dan
+  daftar yang bisa diklik tak berubah jadi daftar yang cuma bisa dipandang.
+- **Tanggal dan Jam di kolom sendiri-sendiri** (keputusan pemilik), lewat SATU
+  `selTanggal`/`selJam` yang dipakai kedua tab — dua salinan yang lahir kembar
+  lalu menjawab beda adalah bentuk yang sudah dua kali dibayar repo ini.
+- **Saringan status + pencarian**, keduanya hidup di **URL**: halaman ini
+  sering dimuat ulang sesudah ACC/tolak, dan saringan yang hilang saat refresh
+  membuat daftar yang tadinya TERSARING tiba-tiba terbaca sebagai daftar penuh.
+- Kepala kolom sisi perlengkapan berbunyi **"Selisih"**, bukan "Item": sisi itu
+  hanya mencatat baris berselisih, jadi angkanya menjawab pertanyaan yang
+  berbeda dari angka di tab sebelah.
+- Judul halaman jadi `<h1>`, bukan `<div>` tebal — tetangganya (Produksi,
+  Pembelian) memakai heading, dan pembaca layar tak punya cara lain menemukan
+  judul halaman ini.
+
+### Keputusan yang ditulis: pencarian yang MENGAKU cuma menjangkau sebagian
+
+Penyaringan dikerjakan **di klien**, atas potongan yang sudah dimuat (server
+memotong di 200 sesi bahan / 100 perlengkapan). Itu pilihan sadar — rutenya
+belum berhalaman, dan menambah parameter pencarian ke server berarti memutus
+kontrak yang dibaca ponsel.
+
+Tapi konsekuensinya dikatakan, bukan didiamkan: pada perusahaan yang riwayatnya
+melewati plafon, *"tidak ditemukan"* berarti *"tidak ada di 200 sesi
+terakhir"* — BUKAN *"tidak pernah ada"*. Dua kalimat itu menuntun ke keputusan
+yang berlawanan, dan yang kedua yang biasa disimpulkan orang. Spanduk
+pemotongan karena itu berubah bunyi begitu saringannya aktif.
+
+Keadaan kosongnya juga dibedakan: *"Tak ada sesi yang cocok dengan saringan
+ini"* ≠ *"Belum ada riwayat opname"*. Yang kedua adalah pernyataan tentang basis
+data, dan ia salah saat daftarnya sedang disaring.
+
+### Perangkap lingkungan yang memakan tiga jalan e2e
+
+Lengan peramban merah tiga kali berturut-turut dengan "element(s) not found",
+dan penyebabnya bukan produknya: **server men-cache `index.html` saat boot**.
+Disk sudah `index-74JzS0EZ.js`, yang tersaji masih `index-be7PRacq.js`, jadi
+peramban memuat aplikasi LAMA — kartu, bukan tabel. Itulah sebabnya skrip
+gerbang selalu build → **restart** → e2e, dan menjalankan e2e tanpa restart
+menguji bundel yang bukan yang baru saja diubah.
+
+Yang mendiagnosisnya `error-context.md`, bukan tebakan: ia merekam markup kartu
+lama apa adanya. Kebiasaan yang sama menyelamatkan putaran sebelumnya dari
+salah-diagnosis kuota login.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut | penjaga yang harus menuduh |
+| --- | --- | --- |
+| V | penanganan galat sisi bahan | **TAK ADA** — kebutaan yang membuka ratchet baru |
+| W | `selTanggal` kembali pakai `formatWaktu` | "kolom Tanggal membawa TANGGAL" (2 uji) |
+| X | kolom Status dicabut dari tab perlengkapan | "kedua tab punya Tanggal/Jam/Status" |
+| Y | spanduk berhenti mengaku pencariannya terpotong | "daftar terpotong mengaku" |
+| Z | satu `error:` diambil lalu dibuang | ratchet detektor baru — menyebut namanya |
+| AA | badge dapat keadaan kelima | "tiap keadaan bisa dicapai dari saringan" |
+| BB | `selTanggal` dicabut, **di peramban** | kedua lengan, menyebut `"4 Sep 2026"` |
+
+BB yang paling berarti: ia membuktikan lengan itu menangkap cacat yang PEMILIK
+laporkan, bukan sekadar bentuk kode yang saya sukai.
+
+### Ekor: penyaring yang ADA tapi hampir tak pernah menyaring
+
+Gerbang ke-42 hijau di tiga tahap dan merah di SATU lengan peramban —
+`resep-tampilan.spec.ts:262`, dengan sebab yang sama persis seperti dua putaran
+lalu: *"Resep tidak bisa diubah saat masih ada produksi berjalan"*. Perbaikan
+premis yang saya tulis putaran itu **tidak menahan**.
+
+Sebabnya bukan pemotongan (diukur: `/produksi?per_page=200` memulangkan 22
+baris / 15 faktur — jauh di bawah plafon). Sebabnya **cakupan cabang**:
+
+| | melihat produksi berjalan |
+| --- | --- |
+| penjaga 409 di `PUT /bahan/:id/resep` | **tanpa syarat cabang sama sekali** |
+| `GET /produksi` yang dipakai premis | **terkurung cabang** |
+
+Terukur lewat HTTP: tanpa `branch_id=all` premis melihat **10** bahan terkunci;
+dengan `branch_id=all` ia melihat **19** — persis angka SQL. Bahan yang dipilih
+gerbang ke-42 punya **6 produksi `rencana` di Central Kitchen**, dan ia termasuk
+sembilan yang tersembunyi.
+
+Jadi penyaring itu ADA, dijaga penjaga statis, dan **hampir tak pernah
+menyaring** — sebagian besar produksi memang terjadi di Central Kitchen, bukan
+di cabang bawaan. Penjaganya menuntut helper-nya *menyebut* `/produksi`; ia tak
+punya cara menanyakan apakah yang disebut itu menjawab pertanyaan yang SAMA
+dengan yang ditanyakan server.
+
+Dan begitu cakupan cabangnya benar, lengan yang sama merah LAGI — kali ini
+dengan sebab ketiga:
+
+> `Expected substring: "2000 → "` · `Received: "…daging uji66 2.000 → 7 gr…"`
+
+`inputValue()` memulangkan angka MENTAH; panelnya merender lewat `formatAngka`,
+yang mengelompokkan ribuan ala id-ID. Premisnya membandingkan keduanya
+LANGSUNG — hijau hanya selama takaran resep yang terpilih di bawah 1.000.
+Perbaikan `branch_id=all` menggeser pilihannya ke resep bertakaran 2.000, dan
+cacat yang sudah ada sejak lengan itu ditulis pun terbuka. Ditutup dengan
+memformat sisi harapannya memakai aturan yang sama, plus penjaga statis yang
+menolak perbandingan mentah kembali (bukti merah DD).
+
+Tiga kali berturut-turut premis lengan ini patah karena hal yang sama: **ia
+mengandaikan sesuatu tentang subjek yang tak pernah ia nyatakan** — mula-mula
+"resep pertama" (urutan Postgres), lalu "tak sedang diproduksi" (cabang yang
+salah), kini "takarannya kecil" (format yang tak sama). Tiap kali, subjeknya
+bergeser dan andaian yang tak tertulis itu jadi salah.
+
+**Itu kelas yang sama dengan dua temuan lain hari ini** — `kunci-satu-kontrak`
+yang menagih kesegaran bukan keputusan, dan `gagal-muat-bukan-kosong` yang
+menerima `error:` yang tak pernah dipakai. Tiga kali dalam satu hari, di tiga
+gerbang yang tak saling kenal: **penjaga yang memeriksa BAHANNYA ADA, bukan
+bahannya MENJAWAB.**
+
+Ditutup dua arah: premisnya memakai `branch_id=all` (mencerminkan kueri server),
+dan ia kini **berbunyi bila daftar produksinya terpotong** — plafon yang
+terlampaui membuat penyaringnya diam-diam kurang, dan diam adalah persis cara
+cacat ini bertahan dua putaran. Penjaga statisnya menuntut kedua hal itu; bukti
+merah CC: `branch_id=all` dicabut → penjaga menuduh dengan kalimatnya sendiri.
+
+### Cakupan yang DIAKUI tak penuh
+
+- **Fikstur gerbang hanya SATU HARI.** Seluruh sesi opname di basis uji lahir
+  di tanggal yang sama, jadi tak satu pun lengan di sini membuktikan bahwa dua
+  sesi dari HARI BERBEDA bisa dibedakan — yang dibuktikan cuma bahwa tanggalnya
+  dirender dan cocok dengan `waktu` dari server. Cacat aslinya hanya kelihatan
+  pada data lintas-hari, dan basis uji ini tak punya.
+- **~70 situs `formatWaktu` lain di web belum dipilah.** Sebagian memang benar
+  jam-saja (daftar sehari, mis. pesanan hari ini); sebagian daftar lintas-hari
+  seperti riwayat SO. Pemilik memilih "SO dulu, sisanya dilaporkan", jadi
+  daftarnya dilaporkan dan tak disentuh. Belum ada penjaga yang mencegah daftar
+  lintas-hari BARU lahir jam-saja.
+- **Ratchet `error` tak menuntut galatnya sampai ke mata**, hanya bahwa namanya
+  dipakai. Sebuah `const _ = sesiGagal;` akan memuaskannya. Itu batas yang
+  disengaja (lihat di atas), bukan yang terlewat.
+
+## Beli Perlengkapan dapat bentuk TABEL — dan dua klien yang sudah menjawab beda soal faktur yang sama — web + server + ponsel — 2026-09-04
+
+- **Diminta pemilik repo**: *"beli perlengkapan ingin ada tabel seperti
+  produksi"*. Dua keputusan diambil lebih dulu: **sakelar 🗂 Kartu ↔ ☰ Tabel**
+  (bukan penggantian seperti di Pengadaan), dan **rutenya sekalian berhalaman +
+  ubin ringkasan** — dengan konsekuensi bahwa ponsel wajib diperbaiki di
+  putaran yang sama.
+
+- **Keadaan sebelumnya, diukur lewat HTTP:** `GET /perlengkapan/beli`
+  memulangkan larik telanjang yang dipotong di **200 BARIS**. Terukur:
+  **53 baris = 26.132 byte untuk 14 faktur** — rata-rata **3,79 baris per
+  faktur**, jadi plafon 200 baris itu ≈**53 faktur**. Dan karena urutannya
+  menaruh yang butuh aksi di atas, yang lenyap justru **ekor riwayatnya** —
+  bagian yang paling mudah disalahbaca sebagai "tak pernah ada".
+
+- **HALAMAN DIIRIS PER FAKTUR, bukan per baris**, dan itu keputusan yang
+  menentukan seluruh bentuk kuerinya. `per_page=20` berarti 20 FAKTUR, dan
+  seluruh baris kedua puluh faktur itu ikut — jadi `rows.length` hampir selalu
+  lebih besar daripada `per_page`. Mengiris per baris akan mengirim faktur yang
+  terpotong di tengah: kartu berisi separuh itemnya, tanpa satu pun penanda.
+  Dibuktikan lewat HTTP: `per_page=3` × 5 halaman → **14 faktur unik, nol yang
+  terbelah, nol yang hilang**.
+
+### Temuan: dua klien yang menjawab BEDA soal faktur yang sama
+
+Aturan "status satu faktur" diketik **dua kali**, dan keduanya **berbeda**:
+
+| | aturan | keadaan |
+| --- | --- | --- |
+| web (`kelompokkanFaktur`) | "tahap paling tertinggal", `batal` tak pernah menang | **4** |
+| ponsel (`statusFaktur`) | buang baris `batal` dulu; campuran tiba → `sebagian` | **5** |
+
+Faktur berisi `[tiba, menunggu]` karena itu berbunyi **"Menunggu"** di web dan
+**"Sebagian"** di ponsel. Faktur yang sama, dua layar, dua jawaban, dan tak ada
+yang merah.
+
+**TERUKUR SEBELUM DIPUTUSKAN, dan angkanya mengubah cara ini dilaporkan:**
+pada basis gerbang, **14 faktur, 0** di antaranya menghasilkan jawaban berbeda
+— tak satu pun faktur bercampur tiba+belum (SQL yang menghitung kedua aturan
+berdampingan). Jadi ini perbedaan yang **nyata di kode dan nol kejadiannya hari
+ini**. Yang diperbaiki bukan angka yang sedang salah di layar siapa pun,
+melainkan dua aturan yang akan terus menjauh.
+
+**Yang menang aturan PONSEL**, dan alasannya bisa diperiksa: `sebagian` membawa
+informasi yang tak bisa diturunkan dari keempat keadaan lain. Web yang
+menyebutnya "Menunggu" tidak salah arah — keduanya menuntut pekerjaan — ia cuma
+kehilangan setengah kalimatnya. Rumah barunya
+`packages/shared/src/beli-perlengkapan.ts`, anggota ketiga keluarga
+`pengadaan.ts` / `permintaan-stok.ts`.
+
+**Tiga ember** (`butuh_aksi` / `tiba` / `batal`) saling lepas menurut
+konstruksi, jadi `ringkas` dijamin menjumlah tepat ke `total` — invarian yang
+jadi asersi PERTAMA §294.
+
+### Delapan hal yang ditemukan penjaga, bukan oleh saya
+
+Gerbang penuh pertama memerahkan **11 uji di 10 berkas**. Tak satu pun palsu.
+
+1. **`urutan-pemutus-seri` menuduh pemutus seri yang JUSTRU kunci grupnya
+   sendiri.** Kunci grup di sini `coalesce(faktur_id, id)` — ekspresi, tak
+   punya tabel untuk disematkan — sementara pemindainya hanya mengenal bentuk
+   `tabel.kolom` yang bisa ditulis ulang jadi `subkueri.kolom`. Vonisnya SERI
+   untuk kueri yang urutannya sudah menentukan. Komentar pemindainya sendiri
+   sudah menuliskan kenapa itu mahal: *"ia menyuruh orang menambahkan pemutus
+   seri kedua pada kunci yang sudah unik, dan yang berikutnya akan belajar
+   bahwa gerbang ini boleh ditawar."* Diperbaiki dengan mengajarinya satu
+   bentuk baru — kunci grup berupa pengenal telanjang yang dialiaskan ke medan
+   select lewat `<<kunci>>.as(…)` — **plus bukti merah DUA ARAH**: pemutus seri
+   dicabut → tetap SERI; medan lain yang kebetulan ada → tetap SERI.
+2. **`gagal-muat-bukan-kosong` menuduh bacaan yang SUDAH membaca galatnya —
+   dan ia benar.** Berkas itu punya `useQuery` kedua yang mendestrukturisasi
+   `data: items = []`; penganalisis alur berbasis NAMA menamainya `"data"`
+   (pola penugasan tak punya `.name`). Begitu saya menambahkan `const { data }`
+   di komponen utama, pemakaian yang satu terbaca sebagai pemakaian yang lain.
+   Yang salah bukan penjaganya melainkan penamaan saya: **dua hal berbeda
+   bernama sama dalam satu berkas**. Diganti `data: daftar`, dan berkasnya jadi
+   lebih terbaca (`daftar.ringkas`, `daftar.total`).
+3. **`jangkar-iris`**: uji baru saya merakit jalur berkasnya lewat interpolasi
+   (`${SRV}/modules/...`), jadi penelusurnya tak bisa menemukan satu pun sumber
+   — ujinya akan lolos sebagai "berjangkar tanpa sumber", persis kebutaan yang
+   penjaga itu ada untuk menolak. Ditulis literal.
+4. **`pemotongan-terungkap`** memaku `GET /perlengkapan/beli` sebagai rute yang
+   WAJIB memanggil `potongLarik`. Ia tak lagi memanggilnya — dan itu bukan
+   pencabutan penanda melainkan penggantiannya dengan yang lebih kuat: `total`
+   di dalam BADAN balasan, yang tak bisa hilang di proxy dan bisa menyebut
+   BERAPA yang tak ikut. Dikeluarkan dari daftar dengan alasan itu tertulis.
+5. **`potong-berpenanda`** menagih dua arah sekaligus: situs `.limit()` baru
+   yang belum diadjudikasi, DAN entri lama (`BATAS_BELI_PERLENGKAPAN + 1`) yang
+   situsnya sudah tak ada — "entri kuburan".
+6. **`kueri-terkurung-tenant`**: dua kueri baru memakai `and(...conds)` —
+   pengurungannya nyata tapi lewat variabel, jadi tak terbaca mekanis.
+   Didaftarkan dengan alasan yang bisa diperiksa, dan ditembak lewat HTTP di
+   §294 dengan token tenant kedua.
+7. **`batal-tak-ditagih`**: dua berkas baru membandingkan `"batal"` di luar
+   rumahnya. Keduanya sah — domainnya baris pembelian perlengkapan, bukan
+   pembatalan sajian di dapur — tapi harus DITULIS begitu.
+8. **`semai-sekali`**: `useEffect([page, totalPages])` penjepit nomor halaman,
+   bentuk yang sudah punya tiga saudara terdaftar.
+
+### Bukti merah
+
+| | mutasi | memerahkan |
+| --- | --- | --- |
+| L | `MAX(created_at)` → `MIN(...)` | penjaga "MAX bukan MIN" |
+| M | pemutus seri `asc(perFaktur.kunci)` dicabut | `urutan-pemutus-seri` |
+| N | baris dipulangkan urutan peta | "disusun ulang mengikuti kunciHalaman" |
+| O | web mengurut ulang halaman server | "halaman milik server" |
+| P | lencana kehilangan keadaan `sebagian` | "lencana kenal kelima keadaan" |
+| Q | ubin dirender walau bacaannya gagal | "tak dirender saat gagal" |
+
+Keenamnya dipulihkan **byte-per-byte** (`cmp`), plus bukti merah dua arah
+sintetis untuk aturan baru `urutan.ts`.
+
+### Cacat yang saya kirim sendiri: pemanggil KEDUA yang terlewat
+
+Yang paling mahal di putaran ini, dan seluruhnya perbuatan saya.
+
+Saya mengubah balasan rutenya dari larik jadi objek, memperbaiki HALAMANNYA,
+menulis penjaga statis untuknya, memperbarui ponselnya, dan **melewatkan
+pemanggil kedua**: lencana sidebar di `Layout.tsx`, yang menarik daftar yang
+sama lalu menyaringnya sendiri. `(bpNav ?? []).filter` melempar pada objek —
+dan karena lencana itu hidup di **Layout**, yang runtuh bukan halaman
+perlengkapan melainkan **setiap halaman aplikasi**. Gerbangnya merah di **19
+spec**, dan tak satu pun menyebut perlengkapan; yang terbaca di log cuma
+"elemen tak ditemukan".
+
+Kenapa penjaga statis putaran ini tak menangkapnya: **ia hanya membaca berkas
+yang saya SEBUT**. Penjaga yang daftar berkasnya saya tulis sendiri tak pernah
+bisa memberi tahu saya tentang berkas yang tak terlintas di pikiran saya. Yang
+menangkapnya lengan peramban — dan hanya sesudah tembok kuota login
+disingkirkan; sebelum itu kegagalannya tersamar 429.
+
+Ditutup **secara struktural**: sapuan yang mencari TIAP pemanggil rute ini di
+seluruh `apps/web/src` dan menuntut masing-masing mengetiknya
+`BeliPerlengkapanDaftar`. Sapuan itu sendiri sempat buta — versi pertamanya
+memindai baris demi baris dan hanya menemukan satu dari dua pemanggil, sebab
+yang satunya dipecah prettier jadi tiga baris. Premisnya ("sapuannya menemukan
+≥2") yang menangkap itu, bukan saya.
+
+Dan lencananya jadi lebih benar daripada sebelumnya: ia kini memakai
+`ringkas.butuh_aksi` dari server. Bentuk lamanya menyaring daftar yang dipotong
+200 baris, jadi pada perusahaan yang riwayatnya panjang lencananya **diam-diam
+berhenti bertambah** — cacat yang sudah hidup sebelum putaran ini dan tak
+pernah dilaporkan siapa pun.
+
+### Uji yang hijau karena UNTUNG — dan baru merah sekarang
+
+Lengan peramban dari putaran SEBELUMNYA (`resep-tampilan.spec.ts`, sudah
+ter-commit di `b97b64b` dan hijau di gerbang 37) merah di putaran ini dengan
+"✓ Tersimpan" tak muncul. Layarnya justru menampilkan kalimat yang BENAR:
+*"Resep tidak bisa diubah saat masih ada produksi berjalan"* (409).
+
+Produknya benar; premis ujinya yang salah, dan salahnya ada sejak lengan itu
+ditulis:
+
+> `bukaResepBerbahan()` mengambil `Object.keys(ringkas).find(count > 0)`, dan
+> `GET /bahan/resep-ringkas` adalah `GROUP BY` **TANPA `ORDER BY`** yang
+> diserialkan jadi objek JSON. "Resep pertama" karena itu adalah apa pun yang
+> kebetulan dipulangkan Postgres.
+
+Putaran ini menyisipkan baris ke `ingredients`, `ingredient_logs`, dan
+`supply_purchases`; tata letak fisiknya bergeser, pilihannya mendarat di resep
+yang punya produksi berjalan, dan uji yang MENYIMPAN resep menabrak penjaga
+yang memang seharusnya menolaknya.
+
+Dua cacat, dan menutup salah satu saja akan membuatnya kembali:
+**pilihannya tak menentu** (diurut sekarang), dan **subjeknya tak dijamin boleh
+disimpan** (kini disaring dengan cermin penjaga servernya: `GET /produksi`,
+himpunan status `rencana`/`dikerjakan` yang sama).
+
+Kelas yang layak dicatat: **merah yang pernah hijau adalah merah yang paling
+mahal untuk didiagnosis** — ia mengundang mencari penyebabnya di perubahan
+terakhir, padahal penyebabnya sudah tidur di sana sejak awal. Yang membuatnya
+tidur bukan kebetulan tunggal melainkan uji yang subjeknya berpindah sendiri;
+uji begitu tak bisa dipercaya saat merah MAUPUN saat hijau.
+
+### Utang yang akhirnya dibayar: kuota login Playwright
+
+Tembok yang tercatat di ledger ini **tiga putaran berturut-turut** akhirnya
+menggigit cukup keras untuk dibayar. Gerbang penuh putaran ini merah di
+**20 berkas spec berturut-turut** dengan kegagalan yang tak menyatakan apa pun
+soal produk — dan yang terlihat di log ("elemen tak ditemukan", 5 detik) BUKAN
+penyebab yang sebenarnya. Penyebabnya baru terbaca dari `error-context.md`
+yang tersimpan: **429, kuota login habis**, sejak kegagalan PERTAMA.
+
+Mekanismenya, dan bagian ini yang tak pernah saya lihat sebelumnya:
+
+> `util.ts` menyimpan sesi per email — tapi cache itu hidup di **modul**, dan
+> modul mati bersama worker-nya. **Playwright menyalakan ulang worker setiap
+> kali sebuah test gagal.** Jadi satu kegagalan membuat tiap berkas spec
+> sesudahnya membayar login lagi, sampai kuotanya habis dan sisanya merah
+> berjamaah. Bukan sepuluh login lalu berhenti — LONGSORAN.
+
+Sepuluh berkas memakai `OWNER_EMAIL`, tepat di plafon 10-per-5-menit bahkan
+tanpa longsoran. Yang sudah dicatat ledger sebagai "berkas ke-11 akan
+memerahkan yang lain" ternyata separuh cerita: yang benar-benar mahal adalah
+kegagalan PERTAMA, apa pun sebabnya.
+
+Diperbaiki dengan `globalSetup` Playwright yang login **sekali per akun untuk
+seluruh suite** lalu menulis tokennya ke berkas; `sesiApi` membacanya sebelum
+menyentuh jaringan. Berkasnya hidup di luar proses, jadi ia selamat dari
+penyalaan ulang worker. Sesudah ini suite memakai **dua login**, berapa pun
+jumlah berkas spec-nya dan berapa pun kali worker-nya restart.
+
+`globalSetup` sengaja **tidak melempar** saat kuotanya sudah habis sebelum
+suite mulai: menggagalkan seluruh jalan di tahap persiapan menyembunyikan spec
+mana yang sebenarnya terpengaruh. Tiap spec tetap melempar kalimatnya sendiri.
+
+### Cakupan yang DIAKUI tak penuh
+
+- Aturan status ponsel **tak bisa dijaga dari repo ini**. Yang dijamin: rumah
+  bersamanya ada, web memakainya, dan kontrak + changelog menuliskan bentuk
+  lima-keadaannya. Ponselnya sendiri sudah memakai aturan itu sejak lama — yang
+  berubah justru web.
+- Lengan peramban "satu baris = satu FAKTUR" memeriksa PREMISNYA lebih dulu
+  (`rows.length > total`), dan **gagal berbunyi bila fikstur tak punya faktur
+  multi-item** — tanpa itu asersinya benar secara hampa.
+- 18 situs pemanggil lama di `verify-api.sh` diubah **per-baris**, bukan lewat
+  regex berkas-penuh — pelajaran putaran tabel Permintaan Stok, tempat satu
+  `re.sub` menyentuh 865 situs sekaligus. Diperiksa dengan `diff`: **tepat 18
+  baris berubah**.
+
+### Ekor putaran ini: gerbang KESEGARAN bukan gerbang KEPUTUSAN
+
+Sesudah kedua repo di-push dan kedua PR ditulis, CI ponsel run #38 (commit
+fikstur putaran garis waktu, `4333bc9`) terbaca **MERAH**: `643 tests passed,
+1 failed`. Yang jatuh `kunci_kontrak_server_test.dart` — INTI — dengan dua
+nama: **`biaya_lama` dan `biaya_baru`**.
+
+Keduanya milik `JejakBahanRow`. Dari dua belas kunci DTO itu, **sepuluh** sudah
+terhitung "disentuh" lewat DTO lain — `harga_lama`/`harga_baru`/`sebab`/`oleh`/
+`created_at` dibaca `MenuPriceLogRow`, sisanya nama umum (`id` 66 kali di lib/,
+`rows` 12, `jenis` 9, `terpotong` 3, `detail` 2). Berkas keputusannya berkunci
+NAMA MEDAN, bukan pasangan `Dto|medan`. Yang tersisa dua, dan keduanya nama
+BARU sebab konsepnya baru: biaya per batch sebelum dan sesudah — justru inti
+pintunya.
+
+**Kenapa gerbang penuh di sini hijau seluruhnya.**
+`kunci-satu-kontrak.test.ts` menjangkau repo ponsel saat repo itu ada, tapi
+yang ia tagih hanya **kesegaran fikstur**: fikstur sama dengan keluaran
+pembangkit → hijau. Saya memang meregenerasi fiksturnya, jadi ia hijau. Yang
+menagih **keputusannya** ada di repo sebelah, dan repo sebelah hanya diuji CI-nya
+sendiri. Celah waktunya sempit dan mahal: kunci baru lolos gerbang penuh,
+ter-commit, ter-push, lalu memerahkan CI ponsel **sesudah** PR-nya ditulis.
+
+Kelasnya: **gerbang yang memeriksa alat ukur, bukan yang diukur.** Kesegaran
+fikstur adalah prasyarat keputusan, bukan penggantinya — dan selama keduanya
+tinggal di repo berbeda, yang hijau di sini tak menyatakan apa pun tentang yang
+di sana.
+
+Sudah terjadi **tiga kali** (CI ponsel #32, #33, #38), dan dua kali pertamanya
+sudah tercatat di ledger ini dengan kalimat "saya tak memeriksanya sebelum
+mendorong commit berikutnya" — diagnosis yang menyalahkan kebiasaan, padahal
+penyebabnya struktural. Ditutup dengan memindahkan **cermin asersinya** ke
+`kunci-satu-kontrak.test.ts`: bila repo ponsel ada, tiap kunci yang lib/-nya tak
+sentuh wajib sudah tercatat di `kunci-belum-dibaca.txt`. Bukti merah U: kedua
+baris keputusan dicabut → penjaga menyebut `biaya_baru`, `biaya_lama` persis
+seperti CI ponsel; dipulihkan byte-per-byte (`cmp`). Premisnya ikut dipaku
+(>100 berkas Dart, >500 kunci disentuh, `'nama'` terbaca) supaya sapuan yang
+rusak berbunyi, bukan lolos hampa. Bila repo ponsel tak ter-checkout — CI repo
+ini — ia melewati, bukan merah, sama seperti asersi kesegaran di sebelahnya.
+
+Yang tak ditutup, dan diakui: cermin ini hanya jalan **di mesin yang memuat
+kedua repo**. Di CI repo server ia diam. Itu memang tempat perubahan kontrak
+ditulis, jadi ia menjaga satu-satunya titik waktu yang penting — tapi seseorang
+yang mengubah `types.ts` tanpa repo ponsel di sebelahnya tetap tak akan diberi
+tahu.
+
+## Resep & harga punya GARIS WAKTU — dan penjaga yang saya putihkan sendiri tanpa sadar — web + server — 2026-09-04
+
+- **Diminta pemilik repo**: *"di resep di edit ataupun readonly ingin ada
+  riwayat perubahan resep dan perubahan harga resep walaupun yang berubah
+  harganya hanya 1 bahan"*.
+
+- **Asalnya satu pertanyaan yang tak terjawab di layar itu.** Satu putaran
+  sebelumnya pemilik bertanya soal kotak persetujuan harga: *"kalo yang di
+  centang ini apa ya?"* Kotak itu berbunyi "Rp 60.570 → Rp 50.350 — mengubah
+  HPP 7 menu", dan **tak ada satu pun tempat di Kakarut yang bisa menerangkan
+  dari mana Rp 60.570 datang atau kapan biaya resepnya bergeser ke Rp 50.350**.
+  Fitur ini jawaban atas pertanyaan itu, bukan penambahan yang berdiri sendiri.
+
+- **Keadaan sebelumnya, diukur:** `ingredient_components` ditulis
+  **hapus-lalu-sisip** tiap simpan (`bahan/routes.ts`), jadi takaran kemarin
+  lenyap tanpa bekas di seluruh basis data. `riwayatHargaBahan` yang sudah ada
+  hanya membaca faktur **beli** (`productions.tipe='beli'`), jadi untuk bahan
+  **produksi** — persis yang punya resep — isinya selalu kosong.
+
+- **Populasi (basis gerbang, SQL):** 230 bahan aktif (59 produksi / 171 beli),
+  17 resep berkomponen, 22 baris komponen, rata-rata **1,29** komponen per
+  resep (maks 2), 15 bahan mentah dipakai resep. **Fan-out** yang menentukan
+  biaya rancangan ini: rata-rata **1,47** resep per bahan mentah, **maksimum
+  4** — dan **1** resep bertingkat (komponen yang sendiri berjenis produksi),
+  jadi batas "satu tingkat" yang pemilik pilih benar-benar terlewati fikstur,
+  bukan cuma diklaim.
+
+- **Sapuan situs tulis:** 14 `.update/.insert(ingredients)` di `src/`, **11**
+  menyentuh `harga_beli`/`isi` — 9 di `modules/` (6 update + 3 insert, dua
+  berkas) dan 2 di `seed/`. Kesembilan lewat SATU pintu, `catatHargaBahan`.
+
+- **DETEKTOR PERTAMA SAYA BUTA, DAN ITU KETAHUAN SEBELUM DIPAKAI.** Sapuan
+  versi satu memakai jendela teks yang hanya melihat KE DEPAN dari
+  `.update(ingredients)`. Ia melaporkan 10 situs; yang benar 11. Yang hilang
+  `PUT /bahan/:id/resep`, tempat objeknya dirakit ke variabel `setAtur`
+  **sebelum** `.update` dipanggil — dan itu justru situs terpenting seluruh
+  putaran ini (jalur centang persetujuan harga). Jendela simetris menemukannya.
+  Pelajarannya masuk ke penjaga: `jejak-harga-bahan.test.ts` tidak memakai
+  jendela byte sama sekali, melainkan fungsi pembungkus TERLUAR dari pohon AST.
+
+- **Rancangannya: satu tabel, dan `ingredient_id` selalu berarti hal yang
+  sama** — "garis waktu SIAPA baris ini". Itu yang membuat pembacaannya satu
+  kueri tanpa join, termasuk untuk kejadian yang ASALNYA bahan lain: saat harga
+  sebuah bahan bergerak, penulisnya **menyebar** satu baris `harga_bahan` ke
+  tiap resep pemakainya, dengan biaya per batch yang sudah dihitung ulang.
+  Merakitnya saat MEMBACA ditolak, dan alasannya bisa diperiksa: susunan resep
+  hari ini bukan jawaban dari "resep apa saja yang memakai bahan X tiga bulan
+  lalu", jadi riwayatnya akan menulis ulang masa lalunya sendiri tiap kali
+  resepnya diubah.
+
+- **`catatHargaBahan` TAK BERGANTUNG URUTAN PANGGIL.** Ia menghitung ulang
+  biaya batch dari basis data, tapi harga bahan yang SEDANG berubah diambil
+  dari argumennya, bukan dari baris DB. Versi yang membaca dari DB bekerja
+  sempurna di lima situs dan diam-diam mencatat "Rp 0 → Rp 0" di situs yang
+  memanggilnya sebelum `UPDATE`-nya jalan — tanpa satu pun galat. Dijaga
+  penjaga statis, dan bukti merah H memerahkannya.
+
+- **Simpan yang TAK menggeser apa pun tidak menulis baris**, dan ini bukan
+  kerapian. Layar Resep mengirim SELURUH formulir tiap kali Simpan ditekan
+  (mengganti satu foto ikut mengirim komponen, takaran, dan overhead yang sama
+  persis). Tanpa penyaring itu, riwayat setahun berisi ratusan baris yang tak
+  menerangkan apa-apa dan perubahan takaran yang sungguhan tenggelam di
+  antaranya. Diuji lewat HTTP (§293), bukan dibaca dari kode.
+
+### Empat hal yang ditemukan penjaga, bukan oleh saya
+
+1. **PENJAGA TENANT SAYA PUTIHKAN SENDIRI — 9 situs kelas F jadi 6.**
+   `kueri-terkurung-tenant` mengelompokkan kueri yang pengurungan tenantnya
+   tak terbaca mekanis; `modules/bahan/routes.ts` terdaftar **9** situs yang
+   sudah dipilah tangan. Sesudah putaran ini: **6**, tanpa satu pun dari
+   ketiga kueri itu berubah. Sebabnya `catatHargaBahan(db, auth.company_id!, …,
+   [{ ingredientId: id, … }])` punya bentuk yang SAMA PERSIS dengan sebuah
+   verifikasi menurut `indukTerverifikasi` — callee Identifier, argumen memuat
+   tenant DAN nama kunci saringnya — padahal ia MENULIS jejak dan tak pernah
+   menolak apa pun. Komentar `indukTerverifikasi` sendiri sudah memperingatkan
+   kelas ini ("satu kueri ber-`and(...)` di mana pun dalam badan fungsi akan
+   memaafkan setiap kueri lain"); yang membuatnya terlihat bukan penalaran
+   melainkan **angka yang turun di gerbang**. Diperbaiki dengan daftar
+   `PENCATAT`, dan diberi bukti merahnya sendiri: pencatat sintetis → tetap
+   `F`, verifikasi sintetis berbentuk sama → tetap `C`.
+
+   Kalau saya cuma menurunkan angka terdaftar dari 9 ke 6 — yang paling mudah
+   dilakukan dan terlihat "hijau" — tiga kueri yang selama ini menagih
+   adjudikasi akan berhenti menagihnya, selamanya.
+
+2. **§293 saya menembak dengan TOKEN MATI.** `verify-api-token.test.ts`
+   menolak pemakaian `$KASIR` sesudah §105 (ganti password menaikkan
+   `token_version`). Asersi saya "kasir tak boleh membaca riwayat → bukan 200"
+   akan **lolos** dengan token mati — 401 juga bukan 200 — dan lolosnya tak
+   menyatakan apa pun tentang penjaga peran yang sedang diuji. Diganti
+   `$REISS105`.
+
+3. **Periksa-lalu-tulis tanpa penahan di `POST /laporan-harga/:fakturId`.**
+   Untuk menulis "dari berapa", saya menambahkan SELECT harga lama sebelum
+   UPDATE-nya — dan `lomba-tulis` langsung menuduhnya KLAIM_BUTA. Nyata: dua
+   laporan harga atas bahan yang sama bisa sama-sama membaca Rp 10, lalu
+   masing-masing menulis mediannya sendiri; yang kalah tertimpa, dan jejaknya
+   menyebut angka yang tak pernah jadi harga tersimpan. Ditutup `FOR UPDATE`
+   pada SELECT itu — barisnya toh akan di-UPDATE beberapa baris di bawah, jadi
+   kuncinya cuma diambil lebih awal.
+
+4. **`1e-9` telanjang, di berkas yang komentarnya sudah menyebut nama kelas
+   itu.** `packages/shared/src/ketersediaan.ts` menuliskan panjang-panjang
+   kenapa `EPS_QTY = 1e-6` dan bahwa konstanta toleransi telanjang "sudah tiga
+   kali jadi bug di repo ini". Perbandingan takaran saya mengetik `1e-9` — dan
+   `1e-9` LEBIH KECIL daripada derau float pada besaran yang dipakai praktik
+   (ULP `qty/isi` terukur 3,7e-9 pada qty 10⁸), jadi ia akan melaporkan
+   "takarannya berubah" untuk takaran yang tak seorang pun sentuh. Diekstrak
+   jadi `qtySama()` di `ketersediaan.ts`, memakai `EPS_QTY` yang sudah beralasan.
+
+### Dan satu regresi PUTARAN LALU yang baru ketahuan sekarang
+
+**"✓ Tersimpan" tak pernah bisa muncul sejak `15f7bfe`.** Putaran sebelumnya
+memutuskan (atas permintaan pemilik) bahwa simpan yang berhasil MENGUNCI
+kembali panel resep. Penanda hijau "✓ Tersimpan" berdiri di dalam blok
+`sedangUbah`, berdampingan dengan tombol Simpan — jadi begitu `onSuccess`
+memanggil `setMode("lihat")`, blok itu dilepas pada render yang SAMA dengan
+yang membuat penandanya layak tampil. Ia tak pernah terlihat sekali pun.
+
+Akibatnya bukan kosmetik: yang menyimpan resep tak mendapat konfirmasi apa
+pun — panelnya cuma terkunci, dan diamnya **tak bisa dibedakan dari simpan
+yang gagal tanpa suara**. Gerbang penuh putaran itu hijau seluruhnya; kedua
+potongan kodenya memang benar dibaca terpisah.
+
+Yang menemukannya lengan peramban putaran INI, yang menunggu "✓ Tersimpan"
+sebagai penanda bahwa simpanannya selesai sebelum menghitung baris riwayat.
+Perbaikannya: penandanya pindah ke blok mode BACA dan diikat ke resep yang
+BENAR-BENAR disimpan (`terakhirSimpan === dipilih.id`) — `simpan.isSuccess`
+telanjang bertahan sampai mutasi berikutnya, jadi tanda hijaunya akan menempel
+di panel resep LAIN yang diklik sesudahnya. Dijaga `resep-baca-dulu.test.ts`
+(letak penanda relatif terhadap kedua blok, plus ikatan idnya).
+
+Kelasnya layak dicatat: **dua perubahan yang masing-masing benar, yang saling
+meniadakan hanya pada urutan render**. Tak ada uji statis yang bisa
+menemukannya, dan itulah harga yang dibayar untuk punya lengan peramban.
+
+### Keputusan yang ditulis, bukan dibiarkan ditebak
+
+- **Angka jejak yang TAK MUAT ditulis `null`, bukan dilempar.** `biayaBatch`
+  bisa meluap secara aritmetika (takaran s/d `BATAS_QTY_RESEP` ≈10⁸ × harga s/d
+  `BATAS_UANG` ≈10¹² = 10²⁰, jauh di atas `numeric(14,2)`). Melempar salah, dan
+  salahnya bukan di jalur resep melainkan di **penyebaran**: satu laporan harga
+  nota menyentuh belasan bahan, dan satu resep patologis akan menggagalkan
+  seluruh nota — nota yang isinya benar, ditolak karena baris CATATAN-nya tak
+  muat. Jejak tak boleh punya kuasa membatalkan peristiwa yang dicatatnya.
+  Menjepit ke batas juga salah: ia menulis angka yang SALAH dan terbaca benar.
+- **owner/admin saja** (keputusan pemilik), sejalan dengan layar yang
+  memuatnya: angka biaya di halaman Resep memang sudah ditahan dari
+  tim/kitchen/bar, dan riwayat yang menyebut rupiah di tiap barisnya akan
+  membuka kembali persis yang ditutup di sana. Dijaga `requireRole` DAN
+  `bolehLihat` di panelnya — dua pagar, karena yang satu di server dan yang
+  lain menahan permintaan yang tak perlu dikirim.
+- **`terpotong` MEDAN, bukan header.** Kedua riwayat di sebelahnya
+  (`/bahan/:id/pembelian`, `/menu/:id/riwayat-harga`) memakai
+  `X-Kakarut-Terpotong` justru karena build ponsel lama membaca balasannya
+  `as List`. Pintu ini belum punya klien yang harus dijaga.
+- **`beli_perlengkapan` tak punya garis waktu di sini**, dan itu batas yang
+  sama seperti putaran tabel Permintaan Stok: `supplies` tabel yang berbeda,
+  dan resep tak pernah memakainya.
+- **Riwayat mulai dari nol saat tayang.** Tak ada isian surut dan tak mungkin
+  ada: resep sebelum tanggal itu tak tersimpan di mana pun. Panelnya
+  MENGATAKAN ini — daftar kosong yang diam terbaca sebagai "resep ini tak
+  pernah disentuh siapa pun".
+
+### Bukti merah
+
+| | mutasi | memerahkan |
+| --- | --- | --- |
+| E | pencatat dicabut dari `PUT /bahan/:id` | penjaga statis "tiap pintu menulis jejak" |
+| F | `kompLama` dipindah ke bawah `delete(ingredientComponents)` | "resep lama dibaca sebelum dihapus" |
+| G | laporan harga menulis `ingredientLogs` langsung | "hanya jejak.ts yang menyisipkan" + penjaga pintu |
+| H | fan-out membaca harga baru dari baris DB | "harga baru dari argumen, bukan DB" |
+| I | pencatat sintetis di sebelah kueri tak terkurung | kelas F → C (daftar `PENCATAT`) |
+
+Kelimanya dipulihkan **byte-per-byte** (`cmp`), dan harness-nya menolak mutasi
+yang jangkarnya cocok ≠ 1 kali — pelajaran putaran yang lalu, tempat
+`str.replace("", x, 1)` menyisipkan di posisi 0 dan merusak berkasnya.
+
+### Cakupan yang DIAKUI tak penuh
+
+- Penjaga statis memakai jendela sebesar **handler**, jadi dua tulisan dalam
+  satu handler yang hanya SATU dicatat tetap lolos. Yang menutupnya §293
+  verify-api, yang menghitung baris jejak yang benar-benar lahir dari tiap
+  pintu lewat HTTP sungguhan — termasuk pintu laporan harga nota, yang pada
+  jalan alami fikstur **tak pernah menyebar** (keempat bahan yang harganya
+  disegarkan di sana kebetulan tak dipakai resep mana pun; diperiksa SQL, bukan
+  diasumsikan). §293 karena itu membangun rantainya sendiri: bahan → resep →
+  nota → laporan harga, dan menuntut biaya batch 3.000 → 3.750 yang dihitung
+  tangan.
+- Sapuan situs tulis dibatasi `src/modules/`; dua situs `seed/` sengaja di
+  luar — fikstur, bukan peristiwa yang perlu diriwayatkan.
+
+## Resep dibuka TERKUNCI — dan "boleh mengubah" dipisahkan dari "sedang mengubah" — web — 2026-09-04
+
+- **Diminta pemilik repo**: *"resep ketika di klik ingin read only saja, dan
+  ingin ada tombol edit untuk admin dan owner"*.
+
+- **Keadaan sebelumnya**: panel detail resep langsung bisa diketik begitu
+  resepnya diklik. Satu klik nyasar di medan takaran cukup mengubah HPP
+  **setiap menu** yang memakai bahan itu — dan tak ada satu pun langkah sadar
+  di antara "membuka resep untuk melihat" dan "mengubah angkanya".
+
+- **Peran yang diminta SUDAH ADA**: `bolehUbah = role === "owner" || "admin"`
+  (`ResepPage.tsx:242`), persis dua peran yang pemilik sebut. Yang belum ada
+  tahap bacanya. Jadi putaran ini bukan menambah izin, melainkan **memisahkan
+  dua hal yang selama ini satu bendera**.
+
+- **DAN BENDERA ITU MENJAGA DUA HAL YANG BERBEDA** — ini bagian yang paling
+  mudah salah, dan yang dijaga penjaganya. `bolehUbah` menjaga afordansi
+  mengetik, TAPI JUGA kelihatan-tidaknya angka manajemen: kolom uang di daftar
+  (`kolomDaftarResep`), harga per satuan di tiap baris bahan, total bahan baku
+  sebelum overhead. Mengganti semuanya jadi `sedangUbah` akan membuat mode baca
+  ikut **menyembunyikan harga dari owner yang cuma ingin melihat** — mode baca
+  yang menyembunyikan justru yang ingin dilihat adalah mode baca yang orang
+  lewati. Yang berpindah ke `sedangUbah` hanya 12 `disabled` + tiga afordansi
+  (tambah bahan, hapus baris, peringatan takaran tak terbaca); yang menjaga
+  angka tetap `bolehUbah`.
+
+- **Dua cabang baca-saja SUDAH ADA dan tinggal dipakai ulang**: cara masak dan
+  unggah foto sudah punya render alternatif untuk peran `tim`
+  (`{bolehUbah ? <editor> : <tampilan>}`). Keduanya cukup diubah jadi
+  `sedangUbah ?` — owner/admin dalam mode baca kini memakai tampilan yang sama
+  persis dengan yang selama ini dilihat tim. **Nol markup baru** untuk dua
+  bagian terbesar panelnya.
+
+- **Keputusan pemilik, ditanyakan lebih dulu**: (a) keluar dari mode ubah
+  dengan ketikan yang belum disimpan → **konfirmasi dulu**; (b) sesudah Simpan
+  berhasil → **kembali ke tampilan baca**.
+
+  Konfirmasinya hanya muncul bila drafnya **memang berubah** — potretnya
+  diambil saat Edit ditekan, bukan saat draf disemai. Bedanya nyata: draf bisa
+  saja sudah berbeda dari server karena pembulatan saat disemai, dan bertanya
+  "buang perubahan?" kepada orang yang tak mengubah apa pun adalah cara
+  tercepat membuat konfirmasi itu ditekan tanpa dibaca.
+
+- **PINTU SAMPING ikut dijaga.** Tombol Batal bukan satu-satunya jalan keluar
+  dari mode ubah — mengklik resep lain juga. `bukaDetail` karena itu lewat
+  penjaga yang sama; tanpa itu ketikan hilang lewat pintu yang tak dijaga
+  sementara pintu depan dijaga rapi. Ini pola yang sama dengan cacat
+  "perbaikan cuma kena setengah layar" dua entri di atas, dan kali ini dicari
+  sebelum dikirim, bukan sesudah.
+
+- **Kesalahan premis di lengan e2e, ditemukan oleh merahnya sendiri.** Versi
+  pertama mengklik baris pertama tabel resep — dan gagal, sebab resep teratas
+  kebetulan **belum punya satu bahan pun**, jadi tak ada medan takaran untuk
+  diperiksa terkunci. Merahnya benar tapi menuduh fiturnya, padahal yang salah
+  pilihan fiksturnya. Diperbaiki dengan menurunkan premisnya dari server:
+  `/bahan/resep-ringkas` memulangkan peta `id → jumlah bahan`, dan yang dipakai
+  id pertama yang jumlahnya > 0.
+
+- **Batas irisan penjaga yang hampir menipu**: `butaKomentar` **mengosongkan**
+  komentar tanpa memendekkan berkasnya (posisi baris lain harus tetap), jadi
+  irisan `indexOf + 200` yang saya tulis pertama tak sampai ke `setMode` yang
+  cuma dua baris di bawahnya — terhalang blok penjelasan enam baris yang sudah
+  jadi spasi. Angka yang pas-pasan lolos hari ini lalu diam-diam berhenti
+  melihat apa pun begitu komentarnya tumbuh. Diperlebar, dan alasannya ditulis
+  di tempatnya.
+
+- **Empat bukti merah**, tiap satu dipulihkan byte-per-byte:
+
+  | | mutasi | gagal di |
+  | --- | --- | --- |
+  | A | bawaannya `"ubah"` (klik langsung bisa diketik) | bendera & bawaan |
+  | B | `sedangUbah` lupa memeriksa `bolehUbah` | bendera & bawaan |
+  | C | pintu samping tak dijaga | PINTU SAMPING |
+  | D | sesudah simpan tetap terbuka | terkunci lagi sesudah simpan |
+
+  B layak disebut: tanpa `bolehUbah`, peran non-manajemen bisa membuka mode
+  ubah lewat keadaan lokal — dan seluruh medan yang tadinya `disabled` karena
+  peran jadi bisa diketik. Server tetap menolaknya, tapi layar yang menawarkan
+  tombol yang selalu ditolak adalah layar yang berbohong.
+
+- **Gerbang penuh**: verify-api **3.517/0** (nol perubahan server), npm test
+  **237 berkas / 2.894 uji**, invarian **27/27**, Playwright **40 lolos**
+  (dari 38). Tanpa rilis.
+
+---
+
+## RILIS 2026-09-04 — tiga putaran tayang, dan satu alarm palsu yang saya bunyikan sendiri — web + ponsel — 2026-09-04
+
+- **Diminta pemilik**: *"rilis"*. Aturan berdirinya ("jangan dulu rilis apapun
+  ke production ataupun staging kalo saya belum minta rilis") karena itu
+  terpenuhi.
+
+- **Yang tayang**, tujuh commit di web + satu di ponsel:
+
+  | | commit | CI |
+  | --- | --- | --- |
+  | web → `production` | `48532a3` (merge) | **#493 hijau**, termasuk deploy |
+  | ponsel → `Production` | `f429dba` (merge) | **#37 hijau** |
+
+  Isinya: Menu & HPP bentuk ikon · detail faktur jadi halaman dokumen ber-URL ·
+  Permintaan Stok bentuk tabel + rutenya berhalaman · perbaikan tautan bentuk
+  kartu.
+
+- **Gerbang dijalankan pada HASIL MERGE, bukan cabang kerja** — `ci.yml`
+  sengaja tak memicu pada `pull_request`, dan repo ini sudah pernah melihat PR
+  yang masing-masing hijau menghasilkan kegagalan saat digabung. Hasil merge
+  web terbukti **byte-identik** dengan `claude` (`git diff --stat claude`
+  kosong), lalu digerbang ulang di atasnya: verify-api **3.517/0**, npm test
+  **236 berkas / 2.884 uji**, invarian **27/27**, Playwright **38 lolos**.
+
+- **Dua repo didorong dalam selang dua menit**, sesuai syarat serentak yang
+  ditulis putaran sebelumnya: `GET /rekomendasi/permintaan` berubah bentuk dan
+  ponsel membacanya dengan cast keras. **Jendelanya belum benar-benar tertutup
+  sampai APK di tiap perangkat diperbarui** — dan itu di luar kendali repo
+  mana pun. Yang terjadi pada APK lama selama jendela itu: layar Permintaan
+  Stok menampilkan **keadaan galat**, bukan data yang salah — `as List` atas
+  `Map` melempar, dan `FutureProvider` menangkapnya. Diperiksa dua arah: APK
+  baru melawan server lama juga melempar, bukan berbohong. Ditulis di stempel
+  changelog-nya.
+
+- **ALARM PALSU YANG SAYA BUNYIKAN SENDIRI, dan layak dicatat sebagai kelas.**
+  Di tengah rilis saya melaporkan — keras, dan sebagai temuan mendesak — bahwa
+  cabang `claude` repo ponsel "di-reset ke commit 25 Agustus dan commit saya
+  hilang". **Itu keliru.** Yang basi ref pelacak lokal: `git fetch origin
+  claude` hanya memperbarui `FETCH_HEAD`, **bukan**
+  `refs/remotes/origin/claude`, jadi `git log origin/claude` menjawab dari
+  salinan lama. `git ls-remote` — yang menanya remote-nya langsung —
+  menunjukkan `claude` ada di `6cd7d88` sejak awal.
+
+  Kelasnya: **menyimpulkan keadaan sistem lain dari cache lokal yang tak
+  pernah diperiksa kesegarannya**. Persis bentuk yang sama dengan cacat
+  `supBelum` di putaran sebelumnya (nama yang teresolusi ke tempat yang salah),
+  dan dengan "gerbang yang tak dibaca bukan gerbang". Yang membedakan: di sini
+  saya menemukannya dalam dua langkah, sebelum bertindak — `git push` menjawab
+  "Everything up-to-date", yang **bertentangan** dengan kesimpulan saya, dan
+  kontradiksi itu yang memaksa `ls-remote`. Petunjuk yang bertentangan dengan
+  hipotesis lebih murah daripada bukti yang mendukungnya.
+
+  Yang HARUS berbeda lain kali: `git ls-remote` (atau `git fetch --prune` yang
+  memperbarui ref pelacaknya) **sebelum** menyimpulkan apa pun tentang keadaan
+  cabang remote — bukan sesudah.
+
+- **Stempel changelog** dipasang untuk kedua entri pada commit yang SAMA dengan
+  penghapusannya dari `BELUM_TAYANG`; memisahkan keduanya adalah cara berkas
+  itu pernah salah selama empat hari.
+
+---
+
 ## Perbaikan yang cuma kena SETENGAH layar — dan dua gerbang yang setuju bahwa ia beres — web — 2026-09-04
 
 - **Kenapa entri ini ada**: pemilik repo meminta *"cek bug perbaikan baru"*.

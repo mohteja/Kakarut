@@ -113,6 +113,24 @@ export function formatTanggalRingkas(iso: string): string {
 }
 
 /**
+ * Tanggal DAN jam, mis. "11 Jul 2026 · 14.30" — untuk stempel yang dibaca di
+ * luar konteks harinya.
+ *
+ * `formatWaktu` memulangkan jam-menit saja, dan itu benar untuk daftar yang
+ * memang sehari (riwayat kasir bertanggal, absensi hari ini, keadaan meja).
+ * Di daftar yang membentang berhari-hari — riwayat opname, tempat sampah, buku
+ * supplier, kartu faktur — ia membuat setiap baris dari setiap hari terbaca
+ * sama ("14.32"), persis di halaman yang ada untuk menelusuri yang LAMA.
+ *
+ * Dirakit dari dua pemformat di atas, bukan `Intl` baru: bentuk tanggal dan
+ * jam tetap satu sumber. Ratchet `waktu-tanpa-tanggal.test.ts` menagih tiap
+ * berkas yang memakai `formatWaktu` tanpa pemformat tanggal untuk diputuskan.
+ */
+export function formatTanggalJam(iso: string): string {
+  return `${formatTanggalRingkas(iso)} · ${formatWaktu(iso)}`;
+}
+
+/**
  * Lama pengerjaan yang enak dibaca orang dapur, bukan angka detik mentah.
  *
  * Ambangnya dipilih dari cara orang benar-benar menyebut waktu di outlet:

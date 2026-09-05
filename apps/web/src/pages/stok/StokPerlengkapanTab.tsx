@@ -21,7 +21,7 @@ import {
   thClass,
 } from "../../components/ui";
 import { api, bacaTerpotong } from "../../lib/api";
-import { formatAngka, formatRupiah, formatWaktu } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggalJam } from "../../lib/format";
 import { KartuPerlengkapanModal } from "../perlengkapan/KartuPerlengkapanModal";
 
 /** Label aturan konsumsi: "⏱ 1 sachet / hari", "✋ manual (stock opname)". */
@@ -689,7 +689,9 @@ export function RiwayatOpnameModal({
                     {s.nomor}
                   </span>
                 )}
-                <span className="text-stone-600">{formatWaktu(s.waktu)}</span>
+                {/* Daftar sesi opname lintas-hari — spanduk "sesi terakhir" di
+                    atasnya sudah mengakui itu. Cermin `OpnameRiwayatPage`. */}
+                <span className="text-stone-600">{formatTanggalJam(s.waktu)}</span>
                 <span className="text-xs text-stone-500">
                   {s.jumlah_item} selisih{s.oleh ? ` · ${s.oleh}` : ""}
                 </span>

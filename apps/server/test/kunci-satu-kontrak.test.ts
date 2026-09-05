@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { kunciKontrak } from "../src/scripts/acuan-kunci-mobile";
 
@@ -78,5 +78,59 @@ describe("acuan:kunci-mobile — pembangkit fikstur kunci kontrak", () => {
       "fikstur di repo mobile basi — jalankan `npm run --silent acuan:kunci-mobile " +
         "-w @kakarut/server > ../kakarut-mobile/test/fikstur/kunci-kontrak-server.txt`",
     ).toEqual(baris);
+  });
+
+  it("KELAS: kunci yang ponsel tak sentuh sudah DIPUTUSKAN di repo mobile — bila repo itu ada", () => {
+    // Kesegaran fikstur BUKAN keputusan. Uji di atas hijau begitu fiksturnya
+    // diregenerasi; yang menagih keputusannya `kunci_kontrak_server_test.dart`
+    // — di repo SEBELAH, yang hanya jalan di CI-nya sendiri. Celah waktunya
+    // sempit dan mahal: kunci baru lolos di sini, ter-commit, ter-push, lalu
+    // memerahkan CI ponsel sesudah PR-nya ditulis. Sudah terjadi TIGA kali
+    // (CI ponsel #32, #33, #38 — yang terakhir `biaya_lama`/`biaya_baru` dari
+    // pintu riwayat resep). Cerminnya ditaruh di sini supaya jatuhnya di
+    // gerbang yang memang dijalankan saat kontraknya diubah.
+    const akar = new URL("../../../../kakarut-mobile/", import.meta.url);
+    let belumDibaca: string;
+    try {
+      belumDibaca = readFileSync(fileURLToPath(new URL("test/fikstur/kunci-belum-dibaca.txt", akar)), "utf8");
+    } catch {
+      return; // repo ponsel tak ter-checkout (CI repo ini) → lewati, bukan merah
+    }
+    const tercatat = new Set(
+      belumDibaca
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("#")),
+    );
+
+    // Sapuan lib/ ponsel, disalin PERSIS dari uji cermin di sana: tiap literal
+    // 'kunci', baca maupun tulis. Bentuk yang berbeda akan menuduh beda.
+    const disentuh = new Set<string>();
+    const dart = (dir: string): string[] =>
+      readdirSync(dir).flatMap((n) => {
+        const jalur = `${dir}/${n}`;
+        if (statSync(jalur).isDirectory()) return dart(jalur);
+        return jalur.endsWith(".dart") ? [jalur] : [];
+      });
+    const berkas = dart(fileURLToPath(new URL("lib", akar)));
+    for (const f of berkas) {
+      for (const m of readFileSync(f, "utf8").matchAll(/'([a-z][a-z0-9_]*)'/g)) disentuh.add(m[1]!);
+    }
+
+    // Premis: sapuan yang memulangkan sedikit tak menuduh siapa pun — ia hanya
+    // berhenti bisa menuduh, dan asersi di bawahnya lolos secara hampa.
+    expect(berkas.length, "lib/ ponsel terbaca terlalu tipis").toBeGreaterThan(100);
+    expect(disentuh.size, "sapuan lib ponsel rusak — regexnya atau jalurnya").toBeGreaterThan(500);
+    expect(disentuh.has("nama"), "kunci paling umum pun tak terbaca").toBe(true);
+
+    const kunci = new Set(baris.map((b) => b.split("|")[1]!));
+    const tanpaKeputusan = [...kunci].filter((k) => !disentuh.has(k) && !tercatat.has(k)).sort();
+    expect(
+      tanpaKeputusan,
+      "kunci kontrak BARU yang ponsel tak sentuh dan tak diputuskan. Urai kuncinya di " +
+        "fromJson yang memakainya, atau catat di kakarut-mobile/test/fikstur/kunci-belum-dibaca.txt " +
+        "dalam kelompok BERALASAN:\n" +
+        tanpaKeputusan.join("\n"),
+    ).toEqual([]);
   });
 });

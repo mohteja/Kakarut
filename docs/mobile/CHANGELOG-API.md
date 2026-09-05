@@ -25,6 +25,155 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 `GET /perlengkapan/opname/sesi/:sessionId` kini membawa `waktu` + `oleh`
+
+🟢 **BARU** — dua medan DITAMBAH pada balasan yang sudah ada; tak ada yang
+berubah bentuk maupun hilang. `fromJson` yang mengabaikan kunci tak dikenal
+(`perlengkapan_repository.dart:525`) tetap jalan tanpa disentuh.
+
+| medan | tipe | arti |
+| --- | --- | --- |
+| `waktu` | `string` (ISO) | stempel SESI — `MIN(waktu)` seluruh barisnya |
+| `oleh` | `string \| null` | pencatat sesi — `MIN(nama)`; null bila tak ada pengguna |
+
+**Aturannya SAMA PERSIS dengan `GET /perlengkapan/opname/riwayat`** — bukan
+kebetulan, melainkan dijaga: verify-api §84 menagih `detail.waktu == daftar.waktu`
+dan `detail.oleh == daftar.oleh` untuk sesi yang sama. Kalau layar detail di
+ponsel kelak menampilkan jam sesi, baca medan ini — jangan merakitnya dari
+`rows[]`, yang tak membawa waktu per baris.
+
+Lahir dari web: lembar detail opname perlengkapan tak menampilkan waktu sama
+sekali, sementara lembar bahan baku menampilkannya — dan DTO-nya memang tak
+membawanya.
+
+_Belum tayang._
+
+---
+
+## 🔴 `GET /perlengkapan/beli` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`
+
+🔴 **WAJIB** — memutus kode yang sudah ada. `perlengkapan_repository.dart`
+menulis `as List` pada balasannya; sesudah perubahan ini balasannya `Map`, jadi
+layar **Beli Perlengkapan** melempar saat runtime — bukan saat kompilasi.
+
+**Sudah dikerjakan di repo ponsel pada putaran yang sama** (cabang `claude`):
+`getBeli()` memulangkan `BeliPerlengkapanDaftar`, providernya membawa daftar +
+faktur terkelompok, dan layarnya menyebut kalau daftarnya dipotong. Entri ini
+tetap 🔴 supaya urutan rilisnya tak salah dibaca.
+
+```
+GET /api/perlengkapan/beli?page=1&per_page=20
+  → 200 { "rows": BeliPerlengkapanRow[], "total": 14, "page": 1,
+          "per_page": 20,
+          "ringkas": { "butuh_aksi": 4, "tiba": 5, "batal": 5 } }
+```
+
+**Bentuk tiap entri `rows[]` TIDAK berubah** — tak ada medan yang hilang, tak
+ada yang berganti nama. Yang berubah hanya pembungkusnya.
+
+### BERHALAMAN PER FAKTUR — dan ini jebakannya
+
+`per_page` menghitung **FAKTUR**, `rows` berisi **BARIS**. `per_page=20`
+berarti 20 faktur, dan seluruh baris kedua puluh faktur itu ikut — jadi
+`rows.length` hampir selalu lebih besar daripada `per_page`. Terukur di basis
+uji: **53 baris untuk 14 faktur** (rata-rata 3,79 baris/faktur).
+
+Akibatnya untuk klien: **jangan** menyalin `terpotong => rows.length < total`
+dari `PermintaanStokDaftar`. Di sini ia berkata "utuh" untuk daftar yang
+dipotong dan "terpotong" untuk daftar yang utuh, tergantung berapa item per
+faktur. Yang benar: cacah **faktur unik** (`faktur_id ?? id`) lalu bandingkan
+dengan `total`.
+
+Mengiris per baris ditolak dengan sengaja: ia akan mengirim faktur yang
+terpotong di tengah — kartu berisi separuh itemnya, tanpa penanda apa pun.
+
+**Kenapa.** Rutenya dulu memotong di **200 BARIS** dengan
+`X-Kakarut-Terpotong`. Pada 3,79 baris/faktur, plafon itu ≈53 faktur — dan
+karena urutannya menaruh yang butuh aksi di atas, yang lenyap justru **ekor
+riwayatnya**. Ia tumbuh seumur usaha buka, dan tak ada galat yang akan muncul.
+
+**`X-Kakarut-Terpotong` tidak lagi dikirim** untuk pintu ini.
+
+### `ringkas` — tiga ember, dijamin menjumlah ke `total`
+
+`{ butuh_aksi, tiba, batal }`, dihitung server atas **seluruh populasi**, bukan
+halaman berjalan. Ketiganya saling lepas menurut konstruksi.
+
+### Keadaan faktur kini LIMA, dan ponsel yang menang
+
+Aturannya pindah ke `@kakarut/shared` (`statusFakturBP`). Sampai putaran ini
+web dan ponsel memakai aturan yang **berbeda**:
+
+| | aturan | keadaan |
+| --- | --- | --- |
+| web | "tahap paling tertinggal" | 4 |
+| ponsel | buang `batal` dulu; campuran tiba → `sebagian` | **5** |
+
+Faktur berisi `[tiba, menunggu]` karena itu berbunyi **"Menunggu"** di web dan
+**"Sebagian"** di ponsel — faktur yang sama, dua layar, dua jawaban. Yang
+menang aturan ponsel: `sebagian` membawa informasi yang tak bisa diturunkan
+dari keempat keadaan lain. **Tak ada yang berubah di sisi ponsel** — bentuk
+lima-keadaannya justru yang diadopsi web.
+
+Terukur sebelum diputuskan: pada basis uji, **14 faktur, 0** di antaranya
+menghasilkan jawaban berbeda (tak satu pun faktur bercampur tiba+belum). Jadi
+ini perbedaan yang nyata di kode dan **nol kejadiannya hari ini**.
+
+
+## 🟢 `GET /bahan/:id/riwayat-resep` — garis waktu resep & harga satu bahan
+
+🟢 **BARU** — pintu baru, tak ada yang berubah bentuknya. Aman diabaikan
+sampai layar Resep ponsel memang mau menampilkan riwayat.
+
+```
+GET /api/bahan/<id>/riwayat-resep          [owner/admin]
+  → 200 { "rows": JejakBahanRow[], "terpotong": false }
+```
+
+`JejakBahanRow` = `{ id, jenis, sebab, detail, harga_lama, harga_baru,
+biaya_lama, biaya_baru, oleh, created_at }`. `detail` sudah berupa **kalimat
+siap tampil** (mis. `"Tepung: Rp 12.000 → Rp 12.500 (250 gr/batch)"`), jadi
+klien tak perlu merangkainya sendiri — itu disengaja: kalimatnya menyebut nama
+bahan **pada saat kejadian**, dan merangkainya saat render membuat bahan yang
+kelak diubah namanya menulis ulang masa lalunya sendiri.
+
+**Empat `jenis`:**
+
+| `jenis` | artinya | medan yang terisi |
+| --- | --- | --- |
+| `buat` | baris pembuka bahan ini | `harga_baru` (dan `harga_lama` null) |
+| `resep` | komponen / takaran / `isi` / `overhead_x` diubah | `biaya_lama`, `biaya_baru` |
+| `harga_sendiri` | `harga_beli` TERSIMPAN bahan ini bergeser | `harga_lama`, `harga_baru` |
+| `harga_bahan` | salah satu bahan PENYUSUN resep ini berubah harga **di tempat lain** | `biaya_lama`, `biaya_baru` |
+
+`harga_bahan` adalah alasan pintu ini ada. Biaya per batch sebuah resep
+bergerak tanpa siapa pun menyentuh resepnya — laporan harga nota menyegarkan
+harga acuan ke median riwayat pembelian, impor CSV daftar harga supplier
+menimpanya, atau seseorang menyuntingnya di halaman Bahan. Sebelum ini tak ada
+satu pun tempat yang bisa menjawab "kenapa harga resep saya berubah".
+
+**`sebab`** menyebut pintunya: `"buat"` | `"manual"` | `"impor"` | `"resep"` |
+`"laporan_harga"`.
+
+**`terpotong` medan, bukan header.** Berbeda dari `GET /bahan/:id/pembelian`
+dan `GET /menu/:id/riwayat-harga` di sebelahnya, yang memakai
+`X-Kakarut-Terpotong` justru karena build ponsel lama membaca balasannya
+`as List`. Pintu ini belum punya klien yang harus dijaga, jadi penandanya
+ditulis sebagai medan yang tak bisa hilang di proxy mana pun. Batasnya **50
+baris terbaru**, angka yang sama dengan kedua riwayat di sebelahnya.
+
+**Riwayat mulai dikumpulkan sejak fitur ini tayang.** Tak ada isian surut, dan
+itu bukan kelalaian: `ingredient_components` ditulis hapus-lalu-sisip, jadi
+resep sebelum tanggal tayang memang tak tersimpan di mana pun. Layar yang
+menampilkannya wajib mengatakan ini — daftar kosong yang diam terbaca sebagai
+"resep ini tak pernah disentuh siapa pun".
+
+**Simpan yang tak menggeser apa pun tidak menambah baris.** `PUT
+/bahan/:id/resep` mengirim seluruh formulir tiap kali Simpan ditekan (ganti
+foto pun ikut mengirim komponennya), jadi tanpa penyaring itu riwayat setahun
+berisi ratusan baris yang tak menerangkan apa-apa.
+
+
 ## 🔴 `GET /rekomendasi/permintaan` bukan lagi array telanjang — kini `{ rows, total, page, per_page, ringkas }`
 
 🔴 **WAJIB** — dan ini satu-satunya entri yang benar-benar MEMATAHKAN kode yang
@@ -75,6 +224,8 @@ BERSAMAAN. APK lama + server baru = layar Permintaan Stok gagal; APK baru +
 server lama = `rows` kosong. Keduanya masih di cabang kerja masing-masing dan
 belum dirilis.
 
+
+**Sudah di-merge ke production.** Server tayang lewat merge `48532a3` (CI #493); aplikasi lewat merge `f429dba` di repo ponsel (CI #37). Keduanya didorong dalam selang dua menit, sesuai syarat serentak di atas — tapi jendelanya belum benar-benar tertutup sampai APK di tiap perangkat diperbarui; sampai itu, layar Permintaan Stok pada APK lama menampilkan keadaan galat (bukan data yang salah).
 ---
 
 ## `GET /{produksi|pembelian}/faktur/:fakturId` — SATU faktur pengadaan, tanpa menyisir daftarnya
@@ -121,6 +272,8 @@ punya layar "buka satu faktur dari nomornya". Kalau iya, rute ini
 menggantikan pola "tarik daftar lalu cari di klien" yang tak bisa benar untuk
 faktur di halaman ke-4.
 
+
+**Sudah di-merge ke production.** Tayang lewat merge `48532a3` (CI #493).
 ---
 
 ## `401` dari `POST /auth/login` kini menyebut ALASAN penolakannya (`error` + `sebab`)

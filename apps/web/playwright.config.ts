@@ -23,6 +23,14 @@ export default defineConfig({
    * data uji yang terpisah per worker — pekerjaan tersendiri, bukan setelan.
    */
   workers: 1,
+  /*
+   * SATU LOGIN PER AKUN untuk seluruh suite — lihat `e2e/global-setup.ts`.
+   *
+   * Tanpa ini, cache sesi di `util.ts` mati bersama worker-nya, dan Playwright
+   * menyalakan ulang worker tiap kali sebuah test gagal: satu kegagalan
+   * membakar kuota login dan seluruh sisa suite memerah dengan 429.
+   */
+  globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     headless: true,

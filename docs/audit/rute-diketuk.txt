@@ -39,6 +39,7 @@ GET /api/bahan/:id/detail
 GET /api/bahan/:id/langkah
 GET /api/bahan/:id/pembelian
 GET /api/bahan/:id/resep
+GET /api/bahan/:id/riwayat-resep
 GET /api/bahan/:id/supplier
 GET /api/bahan/resep-ringkas
 GET /api/cabang

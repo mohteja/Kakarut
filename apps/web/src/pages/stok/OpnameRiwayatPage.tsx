@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import {
+  cocokCariOpname,
+  lolosSaringanStatus,
+  SARINGAN_STATUS_OPNAME_BAHAN,
+  SARINGAN_STATUS_OPNAME_PERLENGKAPAN,
+} from "@kakarut/shared";
 import type {
   OpnamePerlengkapanDetail,
   OpnamePerlengkapanSesiRow,
@@ -9,13 +15,31 @@ import type {
   OpnameSesiStatus,
   PenyesuaianStatus,
 } from "@kakarut/shared";
+import { TabelResponsif } from "../../components/TabelResponsif";
 import { ErrorText, Spinner, SpinnerAtauGalat } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { api, bacaTerpotong } from "../../lib/api";
-import { formatAngka, formatWaktu } from "../../lib/format";
+import { formatAngka, formatTanggalJam } from "../../lib/format";
+import { kolomOpnameBahan, kolomOpnamePerlengkapan } from "./kolom-opname";
 
 type JenisOpname = "bahan" | "perlengkapan";
+
+/**
+ * Label saringan status — SATU peta untuk kedua tab.
+ *
+ * Tipenya `Record<OpnameSesiStatus, string>` dan bukan `Record<string, string>`
+ * dengan sengaja: sisi perlengkapan (`PenyesuaianStatus`) adalah bagian dari
+ * keempat keadaan sisi bahan, jadi peta ini menutupi keduanya, DAN TypeScript
+ * memerahkan berkas ini begitu server menambah keadaan kelima. Peta longgar
+ * akan diam, lalu memajang `undefined` di daftar pilihan.
+ */
+const LABEL_SARING: Record<OpnameSesiStatus, string> = {
+  cocok: "Semua cocok",
+  menunggu: "Menunggu ACC",
+  disetujui: "Disetujui",
+  ditolak: "Ditolak",
+};
 
 /** Badge status ACC sesi opname. */
 function StatusBadge({ status, jumlahSelisih }: { status: OpnameSesiStatus; jumlahSelisih: number }) {
@@ -142,7 +166,10 @@ function DetailSheet({ sessionId, onClose }: { sessionId: string; onClose: () =>
                   </span>
                 )}
                 <span>
-                  {formatWaktu(data.waktu)} · {data.oleh ?? "—"}
+                  {/* Lembar detail sesi LAMA — jam tanpa tanggal di sini
+                      tak menunjuk ke hari mana pun. Tabelnya sudah bertanggal
+                      sejak putaran lalu; lembar detailnya sempat tertinggal. */}
+                  {formatTanggalJam(data.waktu)} · {data.oleh ?? "—"}
                   {data.catatan && ` · ${data.catatan}`}
                 </span>
               </div>
@@ -384,6 +411,13 @@ function DetailSheetPerl({ sessionId, onClose }: { sessionId: string; onClose: (
                     {data.nomor}
                   </span>
                 )}
+                {/* Sejajar dengan lembar bahan baku: sesi LAMA yang dibuka
+                    dari riwayat harus menyebut harinya. Sampai putaran ini
+                    lembar ini tak menampilkan waktu sama sekali — DTO-nya
+                    memang tak membawanya. */}
+                <span>
+                  {formatTanggalJam(data.waktu)} · {data.oleh ?? "—"}
+                </span>
               </div>
               <StatusBadgePerl status={data.status} jumlah={data.rows.length} />
             </div>
@@ -486,6 +520,24 @@ export function OpnameRiwayatPage() {
   const [detailPerl, setDetailPerl] = useState<string | null>(null);
 
   /*
+   * Saringan status & kata kunci hidup di URL, bukan di `useState`.
+   *
+   * Halaman ini dibuka dari beberapa tempat dan sering dimuat ulang setelah
+   * ACC/tolak. Saringan yang hilang saat halamannya di-refresh membuat owner
+   * mengulang penyaringan yang sama berkali-kali — dan, lebih buruk, membuat
+   * daftar yang tadinya tersaring tiba-tiba terbaca sebagai daftar penuh.
+   * Di URL, ia juga bisa ditautkan: "lihat SO yang masih menunggu ACC".
+   */
+  const saring = params.get("status") ?? "semua";
+  const cari = params.get("q") ?? "";
+  const setParamTunggal = (kunci: string, nilai: string, bawaan: string) => {
+    const b = new URLSearchParams(params);
+    if (nilai === bawaan) b.delete(kunci);
+    else b.set(kunci, nilai);
+    setParams(b, { replace: true });
+  };
+
+  /*
    * KEDUA riwayat dipotong server (200 sesi bahan, 100 sesi perlengkapan), dan
    * halaman ini justru yang dipakai menelusuri opname LAMA. Daftar yang habis
    * di layar tanpa penanda terbaca sebagai "tak ada opname sebelum ini" —
@@ -509,18 +561,56 @@ export function OpnameRiwayatPage() {
       }),
     enabled: tab === "perlengkapan",
   });
+
+  /*
+   * Penyaringan dikerjakan DI KLIEN, atas potongan yang sudah dimuat.
+   *
+   * Itu pilihan sadar — rutenya belum berhalaman, dan menambah parameter
+   * pencarian ke server berarti memutus kontrak yang dibaca aplikasi ponsel.
+   * Tapi konsekuensinya harus DIKATAKAN, bukan didiamkan: pada perusahaan yang
+   * riwayatnya melewati plafon, "tidak ditemukan" berarti "tidak ada di 200
+   * sesi terakhir" — BUKAN "tidak pernah ada". Dua kalimat itu menuntun ke
+   * keputusan yang berlawanan, dan yang kedua yang biasa disimpulkan orang.
+   * Spanduknya di bawah karena itu berubah bunyi saat saringannya aktif.
+   */
+  const adaSaringan = saring !== "semua" || cari.trim() !== "";
+  const barisBahan = (sesi ?? []).filter(
+    (s) => lolosSaringanStatus(s.status, saring) && cocokCariOpname(s, cari),
+  );
+  const barisPerl = (sesiPerl ?? []).filter(
+    (s) => lolosSaringanStatus(s.status, saring) && cocokCariOpname(s, cari),
+  );
+
   const spanduk = (n: number, apa: string) => (
     <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
       Menampilkan <b>{n} {apa} terakhir</b>. Yang <b>lebih lama</b> tidak ikut ditampilkan di
       sini.
+      {adaSaringan && (
+        <>
+          {" "}
+          Saringan &amp; pencarian di halaman ini <b>hanya menjangkau {n} sesi itu</b> — yang
+          tak ketemu belum tentu tak ada.
+        </>
+      )}
     </div>
   );
 
   const gantiTab = (t: JenisOpname) => {
     setDetail(null);
     setDetailPerl(null);
-    setParams(t === "perlengkapan" ? { tab: "perlengkapan" } : {}, { replace: true });
+    /* Saringan status IKUT dibuang saat pindah tab. Keempat keadaan sisi bahan
+       tak sama dengan ketiga keadaan sisi perlengkapan: `cocok` tak ada di
+       sana, jadi membawanya menyeberang akan mengosongkan daftar dengan
+       saringan yang tak bisa dilihat pemakainya di daftar pilihan mana pun. */
+    const b = new URLSearchParams();
+    if (t === "perlengkapan") b.set("tab", "perlengkapan");
+    if (cari.trim() !== "") b.set("q", cari);
+    setParams(b, { replace: true });
   };
+
+  const opsiSaring = tab === "bahan"
+    ? SARINGAN_STATUS_OPNAME_BAHAN
+    : SARINGAN_STATUS_OPNAME_PERLENGKAPAN;
 
   return (
     <div className="flex min-h-screen flex-col bg-stone-100">
@@ -528,7 +618,10 @@ export function OpnameRiwayatPage() {
         <Link to="/" className="text-2xl text-stone-500" aria-label="Kembali">
           ←
         </Link>
-        <div className="flex-1 text-base font-bold text-stone-800">Riwayat Stock Opname</div>
+        {/* HEADING sungguhan, bukan div tebal. Halaman layar-penuh di sebelahnya
+            (Produksi, Pembelian) memakai <h1>, dan pembaca layar tak punya cara
+            lain menemukan judul halaman ini. */}
+        <h1 className="flex-1 text-base font-bold text-stone-800">Riwayat Stock Opname</h1>
       </header>
 
       {/* Tab: opname bahan baku vs perlengkapan — riwayat digabung di sini */}
@@ -551,77 +644,76 @@ export function OpnameRiwayatPage() {
         </button>
       </div>
 
+      {/* Pencarian + saringan status */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-stone-200 bg-white px-3 py-2">
+        <input
+          type="search"
+          value={cari}
+          onChange={(e) => setParamTunggal("q", e.target.value, "")}
+          placeholder="Cari nomor, nama, catatan…"
+          aria-label="Cari riwayat opname"
+          className="min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+        />
+        <select
+          value={saring}
+          onChange={(e) => setParamTunggal("status", e.target.value, "semua")}
+          aria-label="Saring status"
+          className="rounded-lg border border-stone-300 px-2 py-1.5 text-sm"
+        >
+          {opsiSaring.map((s) => (
+            <option key={s} value={s}>
+              {s === "semua" ? "Semua status" : LABEL_SARING[s]}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <main className="flex-1 space-y-2 p-3">
         {tab === "bahan" ? (
           sesiGagal ? (
             <SpinnerAtauGalat error={sesiGagal} apa="Riwayat opname bahan baku" />
           ) : isLoading ? (
             <Spinner />
-          ) : (sesi ?? []).length === 0 ? (
-            <div className="py-10 text-center text-sm text-stone-400">
-              Belum ada riwayat opname bahan baku.
-            </div>
           ) : (
             <>
-            {terpotong !== null && spanduk(terpotong, "sesi opname bahan")}
-            {(sesi ?? []).map((s) => (
-              <button
-                key={s.session_id}
-                onClick={() => setDetail(s.session_id)}
-                className="flex w-full items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-4 text-left"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {s.nomor && (
-                      <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
-                        {s.nomor}
-                      </span>
-                    )}
-                    <span className="font-semibold text-stone-800">{formatWaktu(s.waktu)}</span>
-                  </div>
-                  <div className="truncate text-sm text-stone-500">
-                    {s.oleh ?? "—"} · {s.jumlah_item} bahan
-                    {s.catatan ? ` · ${s.catatan}` : ""}
-                  </div>
-                </div>
-                <StatusBadge status={s.status} jumlahSelisih={s.jumlah_selisih} />
-              </button>
-            ))}
+              {terpotong !== null && spanduk(terpotong, "sesi opname bahan")}
+              <TabelResponsif
+                kolom={kolomOpnameBahan((r) => (
+                  <StatusBadge status={r.status} jumlahSelisih={r.jumlah_selisih} />
+                ))}
+                data={barisBahan}
+                kunci={(r) => r.session_id}
+                minLebar="min-w-[52rem]"
+                onKlikBaris={(r) => setDetail(r.session_id)}
+                kosong={
+                  adaSaringan
+                    ? "Tak ada sesi opname bahan baku yang cocok dengan saringan ini."
+                    : "Belum ada riwayat opname bahan baku."
+                }
+              />
             </>
           )
         ) : sesiPerlGagal ? (
           <SpinnerAtauGalat error={sesiPerlGagal} apa="Riwayat opname perlengkapan" />
         ) : loadingPerl ? (
           <Spinner />
-        ) : (sesiPerl ?? []).length === 0 ? (
-          <div className="py-10 text-center text-sm text-stone-400">
-            Belum ada riwayat opname perlengkapan.
-          </div>
         ) : (
           <>
-          {terpotongPerl !== null && spanduk(terpotongPerl, "sesi opname perlengkapan")}
-          {(sesiPerl ?? []).map((s) => (
-            <button
-              key={s.session_id}
-              onClick={() => setDetailPerl(s.session_id)}
-              className="flex w-full items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-4 text-left"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  {s.nomor && (
-                    <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">
-                      {s.nomor}
-                    </span>
-                  )}
-                  <span className="font-semibold text-stone-800">{formatWaktu(s.waktu)}</span>
-                </div>
-                <div className="truncate text-sm text-stone-500">
-                  {s.oleh ?? "—"} · {s.jumlah_item} selisih
-                </div>
-              </div>
-              <StatusBadgePerl status={s.status} jumlah={s.jumlah_item} />
-            </button>
-          ))}
+            {terpotongPerl !== null && spanduk(terpotongPerl, "sesi opname perlengkapan")}
+            <TabelResponsif
+              kolom={kolomOpnamePerlengkapan((r) => (
+                <StatusBadgePerl status={r.status} jumlah={r.jumlah_item} />
+              ))}
+              data={barisPerl}
+              kunci={(r) => r.session_id}
+              minLebar="min-w-[44rem]"
+              onKlikBaris={(r) => setDetailPerl(r.session_id)}
+              kosong={
+                adaSaringan
+                  ? "Tak ada sesi opname perlengkapan yang cocok dengan saringan ini."
+                  : "Belum ada riwayat opname perlengkapan."
+              }
+            />
           </>
         )}
       </main>

@@ -11,7 +11,7 @@ import {
 } from "../components/ui";
 import { TabelResponsif } from "../components/TabelResponsif";
 import { api, bacaTerpotong } from "../lib/api";
-import { formatRupiah, formatWaktu } from "../lib/format";
+import { formatRupiah, formatTanggalJam } from "../lib/format";
 
 const JENIS: Record<SampahRow["jenis"], { label: string; cls: string }> = {
   penjualan: { label: "Penjualan", cls: "bg-orange-100 text-orange-700" },
@@ -124,7 +124,10 @@ export function TempatSampahPage() {
               kelasSel: "max-w-xs truncate font-medium",
               sel: (r) => r.label,
             },
-            { judul: "Waktu", sel: (r) => formatWaktu(r.waktu) },
+            /* Kedua stempel BERTANGGAL: tempat sampah adalah daftar lintas-hari
+               menurut definisinya — yang dihapus pekan lalu berdampingan dengan
+               yang dihapus tadi pagi, dan "14.32" saja tak membedakan keduanya. */
+            { judul: "Waktu", sel: (r) => formatTanggalJam(r.waktu) },
             { judul: "Dibuat oleh", sel: (r) => r.dibuat_oleh ?? "—" },
             {
               judul: "Dihapus oleh",
@@ -133,7 +136,7 @@ export function TempatSampahPage() {
                 <span className="font-medium text-red-600">{r.dihapus_oleh ?? "—"}</span>
               ),
             },
-            { judul: "Dihapus pada", sel: (r) => formatWaktu(r.dihapus_pada) },
+            { judul: "Dihapus pada", sel: (r) => formatTanggalJam(r.dihapus_pada) },
             {
               judul: "Total",
               kanan: true,

@@ -648,6 +648,55 @@ export interface MenuPriceLogRow {
   created_at: string;
 }
 
+/**
+ * Jenis kejadian di garis waktu sebuah bahan (`GET /bahan/:id/riwayat-resep`).
+ *
+ * `harga_bahan` adalah yang membedakan garis waktu ini dari sekadar log tulis:
+ * ia mencatat kejadian yang ASALNYA bahan LAIN — salah satu bahan penyusun
+ * resep ini bergerak harganya, jadi biaya per batch resep ini ikut bergeser
+ * tanpa seorang pun menyentuh resepnya. Itu pertanyaan yang paling sering
+ * ditanyakan tentang layar Resep, dan sebelum tabel ini tak ada satu pun
+ * tempat yang bisa menjawabnya.
+ */
+export type JenisJejakBahan = "buat" | "resep" | "harga_sendiri" | "harga_bahan";
+
+/** Lewat pintu mana perubahannya masuk. */
+export type SebabJejakBahan = "buat" | "manual" | "impor" | "resep" | "laporan_harga";
+
+/** Satu baris riwayat resep & harga sebuah bahan. */
+export interface JejakBahanRow {
+  id: string;
+  jenis: JenisJejakBahan;
+  sebab: SebabJejakBahan;
+  /** kalimat siap tampil, mis. "Tepung: Rp 12.000 → Rp 12.500 (200 gr/batch)" */
+  detail: string;
+  /** harga_beli TERSIMPAN bahan ini; null bila kejadiannya tak menggesernya */
+  harga_lama: number | null;
+  harga_baru: number | null;
+  /** biaya bahan per batch HASIL HITUNG resep; null bila tak relevan */
+  biaya_lama: number | null;
+  biaya_baru: number | null;
+  /** nama pelaku; null bila akunnya sudah dihapus atau perubahannya dari sistem */
+  oleh: string | null;
+  created_at: string;
+}
+
+/**
+ * Balasan `GET /bahan/:id/riwayat-resep`.
+ *
+ * OBJEK, bukan larik telanjang — berbeda dari `riwayat-harga` di sebelahnya,
+ * dan bedanya bukan selera. Larik telanjang di sana dipertahankan karena build
+ * ponsel lama membacanya `as List`, dan penanda pemotongannya karena itu harus
+ * menumpang header. Pintu ini baru: belum ada klien yang perlu dijaga, jadi
+ * "daftarnya dipotong" ditulis sebagai medan yang tak bisa hilang di proxy
+ * mana pun.
+ */
+export interface JejakBahanDto {
+  rows: JejakBahanRow[];
+  /** true = masih ada yang lebih lama dari yang dikirim */
+  terpotong: boolean;
+}
+
 /** Ringkasan hasil POST /menu/terapkan-saran. */
 export interface TerapkanSaranHasil {
   diperbarui: number;
@@ -2792,6 +2841,46 @@ export interface PermintaanPerlengkapanOtomatisHasil {
 export type BeliPerlengkapanStatus = "menunggu" | "diproses" | "tiba" | "batal";
 
 /** Satu BARIS faktur beli perlengkapan ke Central Kitchen (BP-). */
+/**
+ * Keadaan satu FAKTUR beli perlengkapan.
+ *
+ * Aturannya dan alasan kelima keadaannya ada di `beli-perlengkapan.ts`
+ * (`statusFakturBP`) — tipenya tinggal di sini supaya `types.ts` tetap bisa
+ * dibaca tanpa mengimpor apa pun, seperti `StatusPermintaan` di atasnya.
+ */
+export type StatusFakturBP = BeliPerlengkapanStatus | "sebagian";
+
+/** Tiga ember yang saling lepas — dasar invarian partisi `ringkas`. */
+export type EmberFakturBP = "butuh_aksi" | "tiba" | "batal";
+
+/**
+ * Ringkasan seluruh populasi faktur beli perlengkapan, bukan halaman berjalan.
+ *
+ * `Record`, bukan interface bermedan tangan — ember keempat yang lahir besok
+ * tak bisa lupa dihitung.
+ */
+export type RingkasBeliPerlengkapan = Record<EmberFakturBP, number>;
+
+/**
+ * Balasan `GET /perlengkapan/beli` — BERHALAMAN PER FAKTUR.
+ *
+ * `rows` tetap larik BARIS (bentuk tiap entri tak berubah sedikit pun), tapi
+ * halamannya diiris per FAKTUR: `per_page=20` berarti 20 faktur, dan seluruh
+ * baris kedua puluh faktur itu ikut. Mengiris per baris akan mengirim faktur
+ * yang terpotong di tengah — kartu berisi separuh itemnya, tanpa penanda.
+ *
+ * `ringkas` dihitung server atas SELURUH populasi, bukan halaman berjalan.
+ */
+export interface BeliPerlengkapanDaftar {
+  rows: BeliPerlengkapanRow[];
+  /** jumlah FAKTUR (bukan baris) di seluruh populasi */
+  total: number;
+  page: number;
+  /** dalam satuan FAKTUR */
+  per_page: number;
+  ringkas: RingkasBeliPerlengkapan;
+}
+
 export interface BeliPerlengkapanRow {
   id: string;
   /**
@@ -2954,6 +3043,14 @@ export interface OpnamePerlengkapanDetail {
   session_id: string;
   nomor: string | null;
   status: PenyesuaianStatus;
+  /**
+   * Stempel SESI (ISO) — `MIN(waktu)` seluruh barisnya, ATURAN YANG SAMA dengan
+   * `OpnamePerlengkapanSesiRow.waktu`: daftar dan detail tak boleh menyebut jam
+   * berbeda untuk satu sesi.
+   */
+  waktu: string;
+  /** Pencatat sesi — `MIN(nama)` seperti daftarnya; null bila tak ada pengguna. */
+  oleh: string | null;
   rows: {
     supply_id: string;
     nama: string;

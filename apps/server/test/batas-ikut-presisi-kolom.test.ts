@@ -135,6 +135,10 @@ const TAK_DIKLAIM: Record<string, string> = {
   "companies.diskon_maks_persen": "persen — batas bisnis 100",
   "companies.food_cost_maks": "persen — batas bisnis 100",
   "ingredients.overhead_x": "pengali biaya — batas bisnis 1000",
+  "ingredient_logs.harga_lama": "salinan ingredients.harga_beli (presisi sama)",
+  "ingredient_logs.harga_baru": "salinan ingredients.harga_beli (presisi sama)",
+  "ingredient_logs.biaya_lama": "hasil hitungan `biayaBatch` — lihat `luapan-turunan`",
+  "ingredient_logs.biaya_baru": "hasil hitungan `biayaBatch` — lihat `luapan-turunan`",
 };
 
 /**

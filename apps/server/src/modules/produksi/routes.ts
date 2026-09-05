@@ -83,6 +83,7 @@ import {
   toMenuDto,
 } from "../menu/service";
 import { autoFileRakCabang } from "../penyimpanan/autoFile";
+import { catatHargaBahan, type UbahHargaBahan } from "../bahan/jejak";
 import {
   catatHasilIdempoten,
   clientRefField,
@@ -2810,15 +2811,75 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           // median → acuan) sampai HPP seluruh menu hanyut naik.
           if (!perbaruiAcuan) return;
           const acuanBaru = await hitungAcuanBaru(tx, auth.company_id!, byId, target);
+          const idAcuan = [...acuanBaru.keys()];
+          /*
+           * Harga SEBELUM disegarkan, dibaca sekali untuk seluruh nota.
+           *
+           * Pintu inilah yang paling sering menggerakkan HPP tanpa seorang pun
+           * merasa mengubah harga: melaporkan harga nota menyegarkan acuan ke
+           * MEDIAN riwayat pembelian, dan akibatnya menyebar ke tiap resep yang
+           * memakai bahan itu. "Kenapa harga resep berubah padahal saya tak
+           * menyentuh resepnya" hampir selalu berujung ke sini.
+           */
+          const sebelum =
+            idAcuan.length > 0
+              ? await tx
+                  .select({
+                    id: ingredients.id,
+                    nama: ingredients.nama,
+                    satuan: ingredients.satuan,
+                    hargaBeli: ingredients.hargaBeli,
+                    isi: ingredients.isi,
+                  })
+                  .from(ingredients)
+                  .where(
+                    and(
+                      eq(ingredients.companyId, auth.company_id!),
+                      inArray(ingredients.id, idAcuan),
+                    ),
+                  )
+                  /*
+                   * `FOR UPDATE`, dan bukan sekadar demi jejaknya.
+                   *
+                   * Membaca harga lama lalu menimpanya adalah periksa-lalu-
+                   * tulis: dua laporan harga yang menyentuh bahan yang sama
+                   * bisa sama-sama membaca Rp 10, lalu masing-masing menulis
+                   * hasil mediannya sendiri. Yang kalah tak hilang — ia
+                   * tertimpa — dan jejaknya berbunyi "Rp 10 → Rp 15" untuk
+                   * angka yang tak pernah jadi harga tersimpan. Kunci ini
+                   * menahan yang kedua sampai transaksi pertama tutup, jadi
+                   * mediannya dihitung ulang di atas keadaan yang benar.
+                   *
+                   * Barisnya memang akan di-UPDATE beberapa baris di bawah,
+                   * jadi kuncinya tak menambah baris yang dipegang — cuma
+                   * memindahkan saat pengambilannya lebih awal.
+                   */
+                  .for("update")
+              : [];
+          const sebelumById = new Map(sebelum.map((b) => [b.id, b]));
+          const ubah: UbahHargaBahan[] = [];
           for (const [ingredientId, { isi, acuan }] of acuanBaru) {
             if (acuan == null) continue;
+            const hargaBaru = Math.round(acuan * isi);
             await tx
               .update(ingredients)
-              .set({ hargaBeli: Math.round(acuan * isi), updatedAt: new Date() })
+              .set({ hargaBeli: hargaBaru, updatedAt: new Date() })
               .where(
                 and(eq(ingredients.id, ingredientId), eq(ingredients.companyId, auth.company_id!)),
               );
+            const lama = sebelumById.get(ingredientId);
+            if (!lama) continue;
+            ubah.push({
+              ingredientId,
+              nama: lama.nama,
+              satuan: lama.satuan,
+              hargaLama: lama.hargaBeli,
+              hargaBaru,
+              isiLama: lama.isi,
+              isiBaru: lama.isi,
+            });
           }
+          await catatHargaBahan(tx, auth.company_id!, auth.sub, "laporan_harga", ubah);
         });
         return c.json({ ok: true, jumlah: target.size });
       },

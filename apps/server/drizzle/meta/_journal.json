@@ -743,6 +743,13 @@
       "when": 1788302383855,
       "tag": "0105_optimal_lockjaw",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1788492874427,
+      "tag": "0106_outstanding_night_nurse",
+      "breakpoints": true
     }
   ]
 }

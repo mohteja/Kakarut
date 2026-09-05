@@ -66,6 +66,8 @@ import { grafPanggilan } from "./util/panggilan";
 const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
   ["modules/produksi/routes.ts", { situs: 5, alasan:
     "kunci `inArray` lahir dari baris yang SUDAH terkurung (`byId`, `rows`, `kirimMap`, `batchByProd`); sisanya menulis ke `productions.id` hasil select ber-`conds` yang memuat companyId. ENAM situs `.where(and(...conds))` KELUAR dari daftar ini sejak graf panggilan bisa membuktikannya: `conds` parameter `tahapSebagian`/`tahapSeluruhFaktur`, dan satu-satunya situs panggilnya (:1653) mengoper kondisi ber-`eq(productions.companyId, auth.company_id!)` — kelas P. SITUS KELIMA (2026-09-03): subkueri agregat `per_faktur` yang memberi makan medan `ringkas` memakai `.where(and(...conds))` yang SAMA PERSIS dengan kueri `total` dan kueri kunci halaman di handler yang sama — `conds` dirakit beberapa baris di atasnya dan memuat `eq(productions.companyId, auth.company_id!)`; kalau ia bocor, `total` dan daftarnya sudah bocor lebih dulu" }],
+  ["modules/perlengkapan/service.ts", { situs: 2, alasan:
+    "DUA kueri berhalaman `GET /perlengkapan/beli` (2026-09-04): subkueri agregat `per_faktur` dan kueri kunci halamannya yang membaca `.from(perFaktur)`. Keduanya memakai `.where(and(...conds))` — `conds` dirakit belasan baris di atasnya dan DIMULAI dengan `eq(supplyPurchases.companyId, companyId)`, jadi pengurungannya nyata tapi tak terbaca mekanis (variabel, bukan literal di tempat). `conds` yang SAMA memberi makan kueri `ringkas`, kueri kunci halaman, DAN kueri barisnya: kalau salah satu bocor, ketiganya bocor bersama dan itu terlihat. Ditembak lewat HTTP: verify-api §294 memakai token tenant kedua (`$UJI260`) dan menuntut NOL overlap kunci faktur dengan tenant pertama — premisnya dibuktikan asersi di atasnya yang menunjukkan tenant pertama MEMANG melihat isinya" }],
   ["modules/rekomendasi/routes.ts", { situs: 2, alasan:
     "DUA subkueri berkorelasi `EXISTS (SELECT 1 FROM supply_purchases sp …)` di dalam agregat `agregat_rencana` (`GET /permintaan`, 2026-09-03). Keduanya ditulis sebagai templat `sql` mentah — jadi tak terbaca mekanis — dan keduanya MEMBAWA `sp.company_id = ${auth.company_id!}` inline di `WHERE`-nya, di samping korelasi `sp.rencana_id = productions.rencana_id`. Induknya sendiri terkurung: `condPermintaan` memuat `eq(productions.companyId, auth.company_id!)` dan dipakai kueri agregat, kueri kunci halaman, DAN kueri barisnya. Kalau salah satu bocor, daftarnya sudah bocor lebih dulu. Ditembak lewat HTTP: verify-api §292 memakai token tenant kedua (`$UJI260`, dibuat §260) dan menuntut NOL overlap `rencana_id` dengan tenant pertama — premisnya dibuktikan asersi di atasnya yang menunjukkan tenant pertama MEMANG melihat isinya" }],
   ["modules/bahan/routes.ts", { situs: 9, alasan:
@@ -219,6 +221,34 @@ describe("tiap kueri terkurung perusahaannya", () => {
     expect(k).toHaveLength(2);
     expect(kelas(k[0], isi)).toBe("C");
     expect(kelas(k[1], isi), "situs kedua meminjam lingkup situs pertama").toBe("F");
+  });
+
+  it("DETEKTOR TERBUKTI: PENCATAT tak bisa memutihkan kueri di sebelahnya", () => {
+    /*
+     * Bentuk yang benar-benar terjadi 2026-09-04. `catatHargaBahan(db,
+     * auth.company_id!, …, [{ ingredientId: id, … }])` punya bentuk yang sama
+     * persis dengan sebuah verifikasi — callee Identifier, argumen memuat
+     * tenant DAN nama kunci saringnya — tapi ia MENULIS jejak, tak pernah
+     * menolak apa pun. Tanpa daftar `PENCATAT`, kehadirannya menurunkan
+     * `modules/bahan/routes.ts` dari 9 situs kelas F ke 6, dan tiga kueri yang
+     * selama ini menagih adjudikasi berhenti menagihnya — tanpa satu pun dari
+     * ketiganya berubah.
+     */
+    const pencatat = `
+      async function h(c) {
+        await catatHargaBahan(db, auth.company_id!, auth.sub, "manual", [{ ingredientId: id }]);
+        const r = await db.delete(t).where(eq(t.ingredientId, id));
+      }
+    `;
+    const kp = semuaKueri([{ nama: "modules/palsu/routes.ts", isi: pencatat }]);
+    expect(kp).toHaveLength(1);
+    expect(kelas(kp[0], pencatat), "pencatat memutihkan kueri di sebelahnya").toBe("F");
+
+    // PASANGANNYA: verifikasi sungguhan dengan bentuk yang sama TETAP diakui —
+    // kalau tidak, "F" di atas cuma berarti detektornya berhenti melihat.
+    const verif = pencatat.replace("catatHargaBahan(db, auth.company_id!, auth.sub, \"manual\", [{ ingredientId: id }])", "pastikanBahan(id, auth.company_id!)");
+    const kv = semuaKueri([{ nama: "modules/palsu/routes.ts", isi: verif }]);
+    expect(kelas(kv[0], verif)).toBe("C");
   });
 
   it("tiap kueri kelas F sudah dipilah tangan", () => {
