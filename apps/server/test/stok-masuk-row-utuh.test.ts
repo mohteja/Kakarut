@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { butaKomentar } from "../src/scripts/buta-komentar";
+import { kunciObjek, medanInterface } from "./kunci-sumber";
 
 /**
  * `StokMasukRow` DI SHARED == BARIS YANG BENAR-BENAR DIBANGUN `ambilBarisFaktur`.
@@ -24,34 +25,6 @@ const AKAR = fileURLToPath(new URL("../../../", import.meta.url));
 const RUTE = "apps/server/src/modules/produksi/routes.ts";
 const TIPE = "packages/shared/src/types.ts";
 
-/** Kunci tingkat-1 sebuah objek literal, mulai dari `{` di posisi `awal`. */
-function kunciObjek(src: string, awal: number): string[] {
-  const keluar: string[] = [];
-  let d = 0;
-  let i = awal;
-  let mulaiBaris = -1;
-  for (; i < src.length; i += 1) {
-    const c = src[i];
-    if (c === "{" || c === "(" || c === "[") {
-      d += 1;
-      if (d === 1) mulaiBaris = i + 1;
-    } else if (c === "}" || c === ")" || c === "]") {
-      d -= 1;
-      if (d === 0) break;
-    } else if (c === "\n" && d === 1) {
-      mulaiBaris = i + 1;
-    } else if (d === 1 && mulaiBaris >= 0) {
-      // awal sebuah properti: `nama:` di kedalaman 1
-      const m = /^\s*(\w+)\s*:/.exec(src.slice(mulaiBaris, i + 1));
-      if (m && src[i] === ":") {
-        keluar.push(m[1]);
-        mulaiBaris = -1;
-      }
-    }
-  }
-  return keluar;
-}
-
 /** Kunci yang dibangun `ambilBarisFaktur`: `const select = {…}` + pengayaan `return { ...r, … }`. */
 export function kunciBarisFaktur(src: string): string[] {
   const buta = butaKomentar(src);
@@ -68,24 +41,6 @@ export function kunciBarisFaktur(src: string): string[] {
   if (ret < 0) throw new Error("pengayaan `return {` tak ditemukan");
   const dariPengayaan = kunciObjek(badan, badan.indexOf("{", ret));
   return [...new Set([...dariSelect, ...dariPengayaan])].sort();
-}
-
-/** Medan sebuah interface di types.ts. */
-export function medanInterface(src: string, nama: string): string[] {
-  const buta = butaKomentar(src);
-  const m = new RegExp(`export interface ${nama}\\s*\\{`).exec(buta);
-  if (!m) throw new Error(`interface ${nama} tak ditemukan`);
-  const awal = m.index + m[0].length - 1;
-  let d = 0;
-  let i = awal;
-  for (; i < buta.length; i += 1) {
-    if (buta[i] === "{") d += 1;
-    else if (buta[i] === "}") {
-      d -= 1;
-      if (d === 0) break;
-    }
-  }
-  return [...buta.slice(awal, i).matchAll(/^\s+(\w+)\??:/gm)].map((x) => x[1]).sort();
 }
 
 describe("StokMasukRow == baris yang dibangun ambilBarisFaktur", () => {

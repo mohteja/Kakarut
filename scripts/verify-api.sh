@@ -17403,6 +17403,47 @@ cek "§295 ketiga kunci yang dulu tak dideklarasikan kini ada di kontrak" "V == 
 cek "§295 tak ada baris yang membawa asal_cabang (kunci hantu yang ponsel baca)" "V == 0" \
   "$(printf '%s\n%s' "$R295P" "$R295B" | jq -r '[.rows[]|select(has("asal_cabang"))]|length' | paste -sd+ | bc)"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §296 — SESI & CABANG: kunci yang DIKIRIM == kontrak (SesiLogin, SesiDto,
+#        AuthUser, CompanyDto, CabangDto)
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 tak satu pun medan sesi maupun baris `/cabang` ada di
+# Lampiran A: `SesiLogin` hidup di auth/session.ts, web mengetik ulang
+# `AuthState` tanpa `blokir_jual_minus`, `Cabang` diketik di BranchContext,
+# dan bentuk `company` dirakit di DUA tempat (companyDto + inline `/auth/me`).
+# Statisnya dijaga `sesi-cabang-dto-utuh.test.ts`; lengan ini menagih dari
+# kawat: balasan HTTP sungguhan, dua arah, seluruh baris.
+medan296() { awk -v N="$1" 'BEGIN{re="^export interface " N "( extends [A-Za-z, ]+)? \\{"} $0 ~ re {f=1;next} f&&/^\}/{exit} f&&/^  [a-z0-9_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u; }
+K296_USER=$(medan296 AuthUser); K296_CO=$(medan296 CompanyDto); K296_SESI=$(medan296 SesiDto); K296_CAB=$(medan296 CabangDto)
+K296_LOGIN=$(printf '%s\n%s\n' "$K296_SESI" "$(medan296 SesiLogin)" | sort -u)
+R296L=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")
+R296M=$(api "$OWNER" GET "/auth/me")
+R296C=$(api "$OWNER" GET "/cabang")
+R296CK=$(api "$REISS105" GET "/cabang")
+selisih296() { comm -3 <(printf '%s\n' "$1" | sort -u) <(printf '%s\n' "$2") | tee /dev/stderr | grep -c . || true; }
+cek "§296 premis: kontrak terbaca dari types.ts (AuthUser 7 + CompanyDto 9 + SesiDto 3 + SesiLogin 1 + CabangDto 14)" "V == 34" \
+  "$(printf '%s\n%s\n%s\n%s\n%s\n' "$K296_USER" "$K296_CO" "$K296_SESI" "$(medan296 SesiLogin)" "$K296_CAB" | grep -c .)"
+cek "§296 premis: owner punya company (bukan null) dan /cabang ≥ 2 baris" "V == 1" \
+  "$([ "$(jq -r '.company|type' <<<"$R296M")" = object ] && [ "$(jq 'length' <<<"$R296C")" -ge 2 ] && echo 1 || echo 0)"
+cek "§296 /auth/login kunci atas == SesiLogin {token,user,company,branch} (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R296L")" "$K296_LOGIN")"
+cek "§296 /auth/me kunci atas == SesiDto {user,company,branch} (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R296M")" "$K296_SESI")"
+cek "§296 /auth/me .user == AuthUser (dua arah — iat/exp JWT tak bocor)" "V == 0" \
+  "$(selisih296 "$(jq -r '.user|keys[]' <<<"$R296M")" "$K296_USER")"
+cek "§296 /auth/me .company == CompanyDto (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r '.company|keys[]' <<<"$R296M")" "$K296_CO")"
+cek "§296 /auth/login .company == /auth/me .company — satu penulis, dibuktikan dari kawat" "V == 0" \
+  "$(selisih296 "$(jq -r '.company|keys[]' <<<"$R296L")" "$(jq -r '.company|keys[]' <<<"$R296M" | sort -u)")"
+cek "§296 pb1_rate & diskon_maks_persen angka JSON (kontrak: number), blokir_jual_minus boolean" "V == 1" \
+  "$(jq -r '.company|if (.pb1_rate|type)=="number" and (.diskon_maks_persen|type)=="number" and (.blokir_jual_minus|type)=="boolean" then 1 else 0 end' <<<"$R296M")"
+cek "§296 tiap baris /cabang == CabangDto (dua arah, gabungan seluruh baris)" "V == 0" \
+  "$(selisih296 "$(jq -r '[.[]|keys[]]|unique|.[]' <<<"$R296C")" "$K296_CAB")"
+cek "§296 tiap baris /cabang membawa SEMUA 14 kunci (bukan cuma gabungannya)" "V == 1" \
+  "$(jq -r --argjson n "$(echo "$K296_CAB" | grep -c .)" '[.[]|(keys|length)==$n]|all|if . then 1 else 0 end' <<<"$R296C")"
+cek "§296 kasir pun membaca /cabang dengan kunci yang sama (rute semua peran)" "V == 0" \
+  "$(selisih296 "$(jq -r 'if type=="array" then [.[]|keys[]]|unique|.[] else "BUKAN_LARIK" end' <<<"$R296CK")" "$K296_CAB")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

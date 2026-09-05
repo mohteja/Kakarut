@@ -25,6 +25,41 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Sesi & cabang kini ada di Lampiran A: `SesiLogin`, `SesiDto`, `CompanyDto`, `CabangDto` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: bentuk `POST
+> /api/auth/login` (dan tiap pintu lain yang memulangkan sesi baru —
+> `/register` saat akun aktif, `/onboarding/*`), `GET /api/auth/me`, dan baris
+> `GET /api/cabang` akhirnya **dideklarasikan** di `packages/shared`, jadi
+> ikut Lampiran A dan fikstur kunci ponsel. Sampai 2026-09-05 tak satu pun
+> medannya ada di kontrak: `SesiLogin` hidup di server saja, web mengetik
+> ulang sesinya sendiri, ponsel mengurai `CompanyDto`/`BranchDto` lokal.
+
+Terukur lewat HTTP terhadap DB gerbang (owner): `/auth/login` **4 kunci
+atas** (`token`, `user`, `company`, `branch`), `/auth/me` 3 (tanpa `token`),
+`.user` 7 (= `AuthUser`), `.company` **9**, `/cabang` 31 baris × **14 kunci**.
+Ponsel sudah membaca semuanya kecuali tiga: `slug`, `blokir_jual_minus`
+(company) dan `central_kitchen_id` (cabang).
+
+**Satu hal yang layak dicek di ponsel, bukan wajib:** `company.blokir_jual_minus`
+(boolean) dikirim sejak lama "supaya kasir bisa MEMPERINGATKAN sebelum tombol
+Bayar" — penegakannya tetap di server (`POST /penjualan` menolak bila stok
+minus dan setelan ini hidup). Terukur 2026-09-05: **tak satu klien pun** (web
+maupun ponsel) membaca medan ini; peringatan yang dijanjikan belum pernah
+dibuat di mana pun. Ponsel mencatatnya sebagai "belum dibaca, beralasan";
+kalau kelak peringatan itu dibuat, bacalah dari sini — bukan dari tebakan.
+
+Yang juga dipaku putaran ini di server: bentuk `company` kini punya **satu
+penulis** (`companyDto`); sampai 2026-09-05 `GET /auth/me` merakit objek yang
+sama sendiri, sembilan medan yang tetap sinkron hanya karena kebetulan.
+
+Penjaga di server: `sesi-cabang-dto-utuh.test.ts` (literal `companyDto` ==
+`CompanyDto`, literal `GET /cabang` == `CabangDto`, satu penulis company di
+seluruh `apps/server/src`, web memakai tipe kontrak) dan verify-api §296
+(kunci `/auth/login`, `/auth/me`, `/cabang` == kontrak, dua arah, seluruh baris).
+
+---
+
 ## ⚪️ `StokMasukRow` & `StokMasukPage` kini ada di Lampiran A — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: tipe baris `GET

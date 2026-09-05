@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import jwt from "jsonwebtoken";
-import type { AuthUser } from "@kakarut/shared";
+import type { AuthUser, CompanyDto, SesiLogin } from "@kakarut/shared";
 import { env } from "../../config/env";
 import { db } from "../../db/client";
 import { branches, companies, memberships, users } from "../../db/schema";
@@ -8,7 +8,14 @@ import { branches, companies, memberships, users } from "../../db/schema";
 type UserRow = typeof users.$inferSelect;
 type CompanyRow = typeof companies.$inferSelect;
 
-function companyDto(co: CompanyRow) {
+/**
+ * SATU-SATUNYA penulis bentuk `company` yang dilihat klien. `GET /auth/me`
+ * sempat merakit objek yang sama sendiri (dua penulis satu bentuk — cara
+ * sebuah medan hilang dari salah satunya tanpa suara); kini ia memanggil
+ * fungsi ini. Bentuknya dipaku `CompanyDto` di shared dan dijaga
+ * `sesi-cabang-dto-utuh.test.ts` + verify-api §296.
+ */
+export function companyDto(co: CompanyRow): CompanyDto {
   return {
     id: co.id,
     nama: co.nama,
@@ -24,12 +31,8 @@ function companyDto(co: CompanyRow) {
   };
 }
 
-export interface SesiLogin {
-  token: string;
-  user: AuthUser;
-  company: ReturnType<typeof companyDto> | null;
-  branch: { id: string; nama: string } | null;
-}
+// `SesiLogin` kini di `@kakarut/shared` (Lampiran A) — satu bentuk untuk
+// server, web, dan ponsel; sampai 2026-09-05 ia hidup di sini saja.
 
 /**
  * Bangun sesi login (token JWT + user + company + branch) untuk seorang user.

@@ -50,6 +50,135 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Sesi & cabang — bentuk yang dibaca SETIAP klien pada SETIAP sesi: nol medan di kontrak, dua penulis satu bentuk, dan setelan yang dikirim "supaya kasir memperingatkan" tanpa satu klien pun membacanya — server + web + ponsel — 2026-09-05
+
+**Vena.** Butir antrean "19 tipe lokal web + 47 `api<{…}>` inline", diambil
+dari ujung yang ditunjuk butirnya sendiri: `/auth/me` + `/cabang` — sesi dan
+cabang, dibaca semua klien pada tiap sesi. Butir "`/register` &
+`/resend-verification` masih netral" di atasnya tetap DILEWATI (keputusan
+pemilik; ditawarkan di laporan).
+
+**Populasi, diukur lewat HTTP** (owner dan kasir, DB gerbang):
+
+| rute | kunci yang dikirim | deklarasi SEBELUM putaran ini |
+| --- | --- | --- |
+| `POST /auth/login` | 4 atas: `token`, `user`, `company`, `branch` | `SesiLogin` lokal di `auth/session.ts`; web `AuthState` lokal — **tanpa `blokir_jual_minus`**; ponsel `AuthState.toJson` lokal |
+| `GET /auth/me` | 3 atas; `.user` 7 (= `AuthUser`, iat/exp JWT tak bocor); `.company` **9** | objek `company` **dirakit ulang inline** di handler — penulis kedua |
+| `GET /cabang` | 31 baris × **14** kunci, sama untuk kasir | web `Cabang` lokal (`BranchContext.tsx`); ponsel `BranchDto` lokal |
+| Lampiran A / fikstur ponsel | — | **0 medan** untuk company, sesi, cabang |
+
+Tiga temuan di balik angka itu:
+
+1. **Dua penulis satu bentuk.** `companyDto` (dipakai `buatSesi` → login,
+   register, onboarding) dan objek inline di `GET /auth/me` menulis sembilan
+   medan yang sama — sinkron hanya karena kebetulan; medan yang ditambah di
+   satu tempat hilang dari yang lain tanpa suara. Kini satu: `companyDto`,
+   diekspor dan diketik `CompanyDto`.
+2. **`blokir_jual_minus` — dikirim, tak dibaca siapa pun.** Komentar di
+   `companyDto`: "Kasir perlu tahu setelan ini untuk MEMPERINGATKAN sebelum
+   tombol Bayar ditekan; penegakannya tetap di server." Diadu ke seluruh klien:
+   web hanya MENULISNYA di `PerusahaanPage` (pengaturan), `AuthState`-nya
+   bahkan tak mendeklarasikannya; ponsel tak menyentuh namanya sama sekali.
+   Server menegakkan di `penjualan/service.ts` — jadi kasir baru tahu saat
+   Bayar ditolak. Peringatan yang dijanjikan medan itu belum pernah dibuat di
+   mana pun → antrean, dengan medannya kini bernama di kontrak.
+3. **Ponsel: 14 entri `hantuDiketahui` adalah kelas ini** (`user`/`company`/
+   `branch`/`token` sesi tersimpan, lima medan cabang, lima medan perusahaan)
+   — semuanya kini di kontrak dan ratchet menuntut pencabutannya (51 → 37).
+   Tiga nama kontrak baru yang ponsel tak sentuh: `slug` (ponsel mengenali
+   perusahaan lewat `id`), `blokir_jual_minus` (temuan 2), dan
+   `central_kitchen_id` — ponsel memilih CK lewat `tipe == 'central_kitchen'`
+   (`beli_perlengkapan_page`, `kasir_providers`), bukan tautan pemasok
+   cabang; pada perusahaan ber-CK lebih dari satu daftar CK di ponsel belum
+   menyempit ke pemasok cabang ini. Ketiganya dicatat beralasan.
+
+### Yang dibangun
+
+- **shared**: `CompanyDto` (9), `BranchRingkas` (2), `SesiDto` {user, company,
+  branch}, `SesiLogin extends SesiDto` {token}, `CabangDto` (14) — komentar
+  medan dipertahankan dari deklarasi web. Lampiran A disinkronkan (+79 baris).
+- **server**: `companyDto` diekspor, diketik `CompanyDto`; `GET /auth/me`
+  memanggilnya dan memulangkan `const sesi: SesiDto`; `GET /cabang` memetakan
+  `(r): CabangDto`; `SesiLogin` lokal dicabut. Nol perubahan kawat.
+- **web**: `export type AuthState = SesiLogin;` dan `export type Cabang =
+  CabangDto;` — 6 + 1 situs pemakai tak berubah; typecheck hijau.
+- **`apps/server/test/sesi-cabang-dto-utuh.test.ts`** (baru, 7 uji): literal
+  `return {…}` `companyDto` == `CompanyDto` dua arah; literal `rows.map((r):
+  CabangDto => ({…}))` == `CabangDto` dua arah; **SATU penulis** — kelima kunci
+  khas company (`pb1_enabled`, `pb1_rate`, `diskon_maks_persen`,
+  `blokir_jual_minus`, `logo_url`) hanya boleh muncul sebagai properti di
+  `companyDto` di seluruh `apps/server/src` (buta komentar, skema zod
+  dikecualikan); `SesiDto`/`SesiLogin`/`BranchRingkas` persis; web memakai tipe
+  kontrak; PASANGAN (kunci karangan di literal, komentar, medan karangan di
+  kontrak, penulis kedua sintetis vs zod). Pengurai `kunciObjek`/
+  `medanInterface` pindah ke **`test/kunci-sumber.ts`** — mengimpor dari berkas
+  `.test.ts` mendaftarkan suite-nya dua kali; `medanInterface` kini mengenal
+  `extends`.
+- **verify-api §296** (11 lengan): premis kontrak terbaca (34 medan) + owner
+  ber-company + `/cabang` ≥ 2; kunci atas `/auth/login` == `SesiLogin`,
+  `/auth/me` == `SesiDto`, `.user` == `AuthUser`, `.company` == `CompanyDto`
+  (semua dua arah); `login.company == me.company` (satu penulis, dari kawat);
+  `pb1_rate`/`diskon_maks_persen` angka & `blokir_jual_minus` boolean; tiap
+  baris `/cabang` == `CabangDto` dua arah DAN tiap baris membawa semua 14;
+  kasir membaca `/cabang` dengan kunci yang sama.
+- Changelog ponsel: entri ⚪️ (nol perubahan kawat; menyebut `blokir_jual_minus`
+  sebagai "layak dicek, bukan wajib"), terdaftar `BELUM_TAYANG`.
+- **Ponsel `dfe1e74`** (PR #18): fikstur kunci +29; `hantuDiketahui` −14;
+  `kunci-belum-dibaca.txt` +2 kelompok beralasan (+ catatan `slug`). Nol
+  perubahan kode produksi ponsel.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut / dimutasi | tuduhan |
+| --- | --- | --- |
+| AA | `blokir_jual_minus: co.blokirJualMinus,` dicabut dari literal `companyDto` | `di CompanyDto tapi tak pernah dibangun — hantu: expected [ 'blokir_jual_minus' ]`; premis 8 < 9; satu-penulis 4 ≠ 5 |
+| BB | objek inline company dihidupkan lagi di `GET /auth/me` | satu-penulis: `expected [ …(10) ] to deeply equal [ …(5) ]` |
+| CC | web mengetik ulang `interface AuthState` | `to match /^export type AuthState = SesiLogin;/m` |
+| DD | `medan_hantu: string;` di `CabangDto` | `di CabangDto tapi tak pernah dikirim /cabang — hantu: [ 'medan_hantu' ]` |
+| EE | `blokir_jual_minus` dicabut dari `CompanyDto`; §296 mandiri atas server hidup | premis 33 ≠ 34; `.company == CompanyDto — nilai: 1`, stderr menyebut `blokir_jual_minus` |
+| FF | `jam_buka` dicabut dari `CabangDto`; §296 mandiri | 4 lengan merah (gabungan baris, tiap-baris-14, kasir, premis), dua menyebut `jam_buka` |
+
+**Yang jujur soal detektornya.** Tiga alat ukur putaran ini salah pada
+percobaan pertama, dan ketiganya ketahuan oleh lengan yang memang ada untuk itu:
+
+- Regex satu-penulis versi pertama `:\s*(?!z\.)` MUNDUR (`\s*` kosong) dan
+  meloloskan `pb1_enabled: z.boolean()` sebagai penulis — lima baris zod di
+  `company/routes.ts` tertuduh (10 ≠ 5) dan PASANGAN ikut merah (3 ≠ 2).
+  Diperbaiki `:(?!\s*z\.)`; PASANGAN kini memuat lengan zod sintetis.
+- `awk` §296 versi pertama memakai kelas `[a-z_]+` — `pb1_enabled`/`pb1_rate`
+  (ada angka) tak terbaca: premis 32 ≠ 34 dan `.company == CompanyDto` merah
+  palsu 2. §295 memakai kelas yang sama dan aman hanya karena `StokMasukRow`
+  tak punya angka; lengan dua-arahnya akan menyingkapkan medan berangka
+  sebagai "dikirim − kontrak". Tak diubah putaran ini — dicatat, bukan
+  diselesaikan diam-diam.
+- Saringan `grep` saya atas keluaran uji lintas-repo hanya memperlihatkan
+  `blokir_jual_minus` sebagai kunci tanpa keputusan; `central_kitchen_id`
+  tersembunyi di baris yang tersaring. Cermin Python (`cermin_hantu.py`)
+  menyingkapkannya sebelum push — dan itu satu-satunya sebab ia dicatat.
+
+### Batas yang diakui
+
+- Nol perubahan kawat → gerbang tanpa build/e2e (web hanya alias tipe). Kali
+  ini `npm run typecheck` adalah tahap PERTAMA gerbang dan gagal keras —
+  pelajaran koreksi #93.
+- Peringatan `blokir_jual_minus` di kasir TIDAK dibangun putaran ini: satu
+  tipe per putaran adalah batas yang sengaja; medannya kini bernama di kontrak
+  dan butir antreannya menyebut kedua klien.
+- Tak ada Flutter di mesin ini: kedua uji Dart ditiru Python; CI ponsel yang
+  menjalankannya.
+- 16 tipe lokal web + 47 `api<{…}>` inline lainnya tetap di antrean.
+
+### Gerbang
+
+- Server (`gerbang-dto.sh`: **typecheck sebagai tahap pertama, gagal keras** →
+  DB nol → boot → seed → verify-api → vitest → invarian; tanpa build/e2e —
+  nol perubahan kawat, web hanya alias tipe): typecheck ketiga workspace
+  hijau (dibaca dari LOG-nya), **verify-api 3.567 / 0** (3.556 + 11 lengan
+  §296, kesebelasnya hijau di jalan penuh), **vitest 244 berkas / 3.030 uji**
+  (+1 berkas `sesi-cabang-dto-utuh`), **invarian 27 / 0**.
+- Ponsel: commit `dfe1e74`, **CI #50 hijau** (run 33974257848).
+- **Tak ada rilis.**
+
 ## Lencana yang gagal ≠ lencana nol — dan tiga provider di hulu yang membuat aturan itu menjaga keadaan yang tak pernah terjadi — ponsel — 2026-09-05
 
 **Vena.** Butir antrean Mobile "`shift_repository.dart:54` menelan galat jadi
@@ -12249,19 +12378,33 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **19 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
-      bersama** — diukur 2026-09-05 dari DUA arah. Arah ponsel: 51 kunci yang
-      dibaca tak ada di fikstur mana pun (±37 balasan server). Arah web: dari
-      105 tipe berbeda yang dipakai `api<T>()`, **19 tak diekspor shared**
-      (`AuthState` 6×, `Kategori` 3×, `Karyawan` 3×, `SaleResult`, `BepResult`,
-      `Cabang`, `Company`, `CompanyStruk`/`CabangStruk`, `PenerimaanRow`,
-      `DanaEntri`, `StokAwalTersimpan`, `Tenant`, …) plus **47 pemanggilan
-      `api<{…}>` inline** yang bentuknya tak bernama sama sekali. Diadu HTTP:
-      `/cabang` 14 kunci, `/auth/me` 3 + `company` 9, `/laporan/bep` 8 —
-      **nol** medan kontrak untuk ketiganya. Kelas `StokMasukRow` pada rute
-      yang dibaca SETIAP sesi. Daftar ponselnya hidup di `kunci_hantu_test`
-      (`hantuDiketahui`) dan hanya boleh menyusut — satu-dua tipe per putaran,
-      mulai dari `/auth/me` + `/cabang` (sesi & cabang: dibaca semua klien)
+- [ ] **16 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+      bersama** — diukur 2026-09-05 dari DUA arah; putaran #95 membayar
+      ujungnya: `AuthState`/`Company` (→ `SesiLogin`/`CompanyDto`) dan
+      `Cabang` (→ `CabangDto`), jadi `/auth/login`, `/auth/me`, `/cabang` kini
+      di Lampiran A dan `hantuDiketahui` ponsel 51 → 37. Sisa arah web: dari
+      105 tipe yang dipakai `api<T>()`, **16 tak diekspor shared** (`Kategori`
+      3×, `Karyawan` 3×, `SaleResult`, `BepResult`, `CompanyStruk`/
+      `CabangStruk`, `PenerimaanRow`, `DanaEntri`, `StokAwalTersimpan`,
+      `Tenant`, …) plus **47 pemanggilan `api<{…}>` inline** tanpa nama.
+      Diadu HTTP: `/laporan/bep` 8 kunci — nol medan kontrak (ponsel: 6 entri
+      `hantuDiketahui` kelas `/laporan/bep`). Satu-dua tipe per putaran;
+      berikutnya `/laporan/bep` (`BepResult`) atau `/stok/nilai` (5 entri
+      hantu ponsel) — keduanya sudah bernama di `hantuDiketahui`
+- [ ] **`company.blokir_jual_minus` dikirim untuk peringatan kasir yang tak
+      pernah dibuat** — komentar `companyDto`: "supaya kasir bisa
+      MEMPERINGATKAN sebelum tombol Bayar"; terukur 2026-09-05 tak satu klien
+      pun membacanya (web hanya menulisnya di `PerusahaanPage`; ponsel tak
+      menyentuh namanya). Penegakan server (`penjualan/service.ts`) baru
+      terasa saat Bayar ditolak. Bangun peringatannya di kasir web + ponsel
+      (tanda pada baris keranjang yang stoknya minus saat setelan hidup), atau
+      berhenti mengirim medan yang tak dibaca. Medannya kini bernama di
+      kontrak (`CompanyDto`), ponsel mencatatnya beralasan
+- [ ] **Ponsel memilih CK lewat `tipe`, bukan `central_kitchen_id`** —
+      `beli_perlengkapan_page:674` dan `kasir_providers:69` menyaring
+      `tipe == 'central_kitchen'`; pada perusahaan ber-CK lebih dari satu,
+      daftar CK di ponsel tak menyempit ke pemasok cabang ini (web memakai
+      tautannya). Tercatat beralasan di `kunci-belum-dibaca.txt`
 - [ ] **Fikstur kunci ponsel berkunci NAMA, bukan `Dto|kunci`** — `asal_cabang`
       lolos `kunci_hantu` karena `TransferStokFaktur` memilikinya; bacaan
       `FakturRow` atasnya tetap hantu. Menutupnya menuntut pemindai yang tahu

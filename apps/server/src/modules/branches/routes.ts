@@ -1,3 +1,4 @@
+import type { CabangDto } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -118,7 +119,7 @@ export const cabangRoutes = new Hono<AppEnv>()
       // jadi undian tiap query kalau tak dipatok.
       .orderBy(asc(branches.createdAt), asc(branches.id));
     return c.json(
-      rows.map((r) => ({
+      rows.map((r): CabangDto => ({
         id: r.id,
         nama: r.nama,
         alamat: r.alamat,

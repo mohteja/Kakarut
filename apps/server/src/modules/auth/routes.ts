@@ -28,8 +28,8 @@ import { catatTakDicoba, emailTerkonfigurasi, kirimEmailDiam } from "../mail/ser
 import { suratReset, suratResetTeks, suratVerifikasi, suratVerifikasiTeks } from "../mail/surat";
 import { autoTerimaUndanganEmail } from "../onboarding/service";
 import { GUEST } from "../../seed/guest";
-import { buatSesi } from "./session";
-import { PESAN_LOGIN, SEBAB_LOGIN, type SebabLogin } from "@kakarut/shared";
+import { buatSesi, companyDto } from "./session";
+import { PESAN_LOGIN, SEBAB_LOGIN, type CompanyDto, type SebabLogin, type SesiDto } from "@kakarut/shared";
 
 /**
  * Penolakan masuk yang membawa SEBAB terstruktur, bukan cuma kalimat.
@@ -888,24 +888,15 @@ export const authRoutes = new Hono<AppEnv>()
    */
   .get("/me", requireAuth, async (c) => {
     const auth = c.get("auth");
-    let company = null;
+    let company: CompanyDto | null = null;
     if (auth.company_id) {
       const [co] = await db.select().from(companies).where(eq(companies.id, auth.company_id));
-      if (co) {
-        company = {
-          id: co.id,
-          nama: co.nama,
-          slug: co.slug,
-          logo_url: co.logoUrl,
-          pb1_enabled: co.pb1Enabled,
-          pb1_rate: co.pb1Rate,
-          diskon_maks_persen: co.diskonMaksPersen,
-          blokir_jual_minus: co.blokirJualMinus,
-          timezone: co.timezone,
-        };
-      }
+      // Satu penulis bentuk `company` (`companyDto`) — sampai 2026-09-05 objeknya
+      // dirakit ulang di sini, sembilan medan yang harus tetap sinkron dengan
+      // `buatSesi` hanya karena kebetulan.
+      if (co) company = companyDto(co);
     }
-    let branch: { id: string; nama: string } | null = null;
+    let branch: SesiDto["branch"] = null;
     if (auth.branch_id) {
       const [b] = await db
         .select({ id: branches.id, nama: branches.nama })
@@ -913,5 +904,6 @@ export const authRoutes = new Hono<AppEnv>()
         .where(eq(branches.id, auth.branch_id));
       branch = b ?? null;
     }
-    return c.json({ user: auth, company, branch });
+    const sesi: SesiDto = { user: auth, company, branch };
+    return c.json(sesi);
   });

@@ -23,6 +23,82 @@ export interface AuthUser {
   branch_id: string | null;
 }
 
+/**
+ * PERUSAHAAN SEBAGAIMANA DILIHAT KLIEN — bagian `company` dari sesi
+ * (`POST /auth/login`, `/register` bila akunnya sudah aktif, `/onboarding/*`,
+ * `GET /auth/me`). Sampai 2026-09-05 bentuk ini dirakit di DUA tempat
+ * (`companyDto` di `auth/session.ts` dan objek inline di `GET /auth/me`),
+ * dideklarasikan lokal di web (`AuthState`), dan diurai ponsel tanpa satu
+ * fikstur pun bisa menagihnya — terukur: 9 medan dikirim, nol di Lampiran A.
+ */
+export interface CompanyDto {
+  id: string;
+  nama: string;
+  slug: string;
+  logo_url: string | null;
+  pb1_enabled: boolean;
+  pb1_rate: number;
+  diskon_maks_persen: number;
+  /**
+   * Setelan "tolak jual saat stok minus". Dikirim supaya kasir bisa
+   * MEMPERINGATKAN sebelum tombol Bayar; penegakannya tetap di server
+   * (`penjualan/service.ts`). Terukur 2026-09-05: tak satu klien pun membaca
+   * medan ini — peringatan yang dijanjikan belum pernah dibuat (antrean vena).
+   */
+  blokir_jual_minus: boolean;
+  timezone: string;
+}
+
+/** Cabang tempat sesi ini terikat — identitasnya saja. */
+export interface BranchRingkas {
+  id: string;
+  nama: string;
+}
+
+/** Bentuk `GET /auth/me`: sesi tanpa token. */
+export interface SesiDto {
+  user: AuthUser;
+  /** null bila user belum punya perusahaan → klien mengarahkan ke onboarding. */
+  company: CompanyDto | null;
+  branch: BranchRingkas | null;
+}
+
+/** Bentuk `POST /auth/login` dan tiap pintu lain yang memulangkan sesi baru. */
+export interface SesiLogin extends SesiDto {
+  token: string;
+}
+
+/**
+ * Satu baris `GET /cabang` — cabang milik perusahaan, semua peran.
+ * Sampai 2026-09-05 dideklarasikan lokal di web (`Cabang` di BranchContext)
+ * dan diurai ponsel (`BranchDto`) tanpa tipe bersama: 14 medan dikirim, nol
+ * di Lampiran A.
+ */
+export interface CabangDto {
+  id: string;
+  nama: string;
+  alamat: string | null;
+  telepon: string | null;
+  /**
+   * store = outlet penjualan; central_kitchen = dapur produksi pengirim;
+   * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
+   */
+  tipe: "store" | "central_kitchen" | "kantor";
+  /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
+  central_kitchen_id: string | null;
+  /** struk per cabang: footer + tampil/tidaknya alamat & telepon cabang */
+  receipt_footer: string | null;
+  receipt_show_alamat: boolean;
+  /** titik maps + radius absen — absen hanya diterima dalam radius ini */
+  latitude: number | null;
+  longitude: number | null;
+  radius_absen_m: number;
+  /** jam operasional cabang "HH:MM" (null bila belum diatur) */
+  jam_buka: string | null;
+  jam_tutup: string | null;
+  is_active: boolean;
+}
+
 /** Profil akun sendiri (semua peran): identitas + kode/QR absen. */
 export interface ProfilDto {
   nama: string;
