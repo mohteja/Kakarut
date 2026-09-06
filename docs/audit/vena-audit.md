@@ -50,6 +50,157 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Peringatan yang dijanjikan `blokir_jual_minus` — dan cek per-menu yang komentar servernya sendiri sudah bilang tak setara — server + web + ponsel — 2026-09-06
+
+**Vena.** Butir antrean **KEPUTUSAN PEMILIK 2026-09-05** ("bangun peringatannya"),
+diperkuat dua keputusan hari ini: **rute pracek seluruh keranjang**, dan
+**tombol Bayar tetap bisa ditekan**.
+
+**Populasi, diukur lewat HTTP** (DB gerbang, sebelum perubahan):
+
+| yang diukur | angka |
+| --- | --- |
+| menu dengan bahan pembatas | **57 dari 57** |
+| bahan pembatas unik | 31 |
+| **kelompok menu yang BERBAGI satu bahan pembatas** | **12 kelompok, 38 dari 57 menu (dua pertiga)** |
+| klien yang MEMBACA `blokir_jual_minus` | web **0** (5 kemunculan, semuanya di halaman yang MENULISnya), ponsel **0** |
+
+**Temuan 1 — peringatan yang sudah ada BUKAN peringatan yang dijanjikan.**
+Kedua klien punya peringatan stok, dan keduanya PER MENU: web `⚠ Stok habis /
+Stok hanya sisa N — pesanan Q` (`KasirPage.tsx:1384`), ponsel `⚠️ Melebihi sisa
+stok (N)` (`kasir_page.dart:3443`). Komentar gerbangnya sendiri, tepat di atas
+`if`-nya, sudah menyatakan itu tak setara sejak lama: *"Memeriksa 'sisa porsi
+menu' di layar tak setara: dua menu berbeda bisa memperebutkan bahan yang sama
+dalam satu struk, dan hanya jumlah inilah yang tahu."*
+
+Dibuktikan dari kawat, bukan dikutip:
+
+```
+keranjang  20 "Premium Basooopa B" (sisa porsi 26)  ✓ di bawah porsinya
+         + 20 "Favorit Set 1"      (sisa porsi 40)  ✓ di bawah porsinya
+→ peringatan per-menu KEDUA klien: DIAM
+→ POST /penjualan: 400 "Stok tidak cukup: Baso aci jando (sisa 80 butir, butuh 100)"
+```
+
+Setelan dimatikan, keranjang yang sama: **201 diterima**, saldo bahan → **−20**.
+Jadi gerbangnya memang gerbang, dan diamnya layar memang buta.
+
+**Temuan 2 — nada peringatannya tak pernah berubah.** Setelan mati atau
+menyala, kalimatnya sama. Saat menyala, "Stok habis" bukan nasihat melainkan
+ramalan penolakan — dan tak ada yang mengatakannya, sebab tak satu klien pun
+membaca medannya.
+
+**Temuan 3 — dua penulis untuk satu kalimat penolakan.** `penjualan/service.ts`
+dan `open-bill/routes.ts` merakit ulang `Stok tidak cukup: <nama> (sisa X <sat>,
+butuh Y)` masing-masing. Kelas yang sama dengan `strukPenjualan` (#97) dan
+`companyRow` (#99) — dan sejak ada pracek, dua salinan berarti ramalan yang bisa
+berbeda kata dari vonisnya.
+
+**Temuan 4, tentang GERBANGNYA SENDIRI, dan ini yang paling luas akibatnya.**
+Server menyajikan SPA dari `apps/web/dist` (`serveStatic`), dan `npm run e2e`
+milik web hanyalah `playwright test` — **ia tak membangun apa pun**. Ketahuan
+saat spec kasir gagal padahal kodenya benar: yang dibuka peramban `dist/`
+bertanggal **sehari sebelumnya**. Artinya tahap e2e tiap putaran bisa HIJAU
+sambil menguji kode yang bukan kode yang dikirim. Sepupu koreksi #93 (gerbang
+melewatkan `build`), tapi akibatnya berbeda dan belum pernah ditulis siapa pun.
+
+### Yang dibangun
+
+- **shared**: `CekStokResult` (4 medan) + `BahanKurangDto` (5). `akan_ditolak`
+  sengaja BUKAN `kurang.length > 0` — komentarnya menjelaskan kenapa.
+- **`penjualan/stok-keranjang.ts`** (baru): `pesanStokKurang` (satu penulis
+  kalimat, dipakai TIGA situs), `kebutuhanKeranjang` (satu perakit keranjang →
+  bahan), `gerbangBerlaku` (satu predikat gerbang, dipakai `createSale` DAN
+  pracek — inilah yang membuat ramalannya bisa dipercaya).
+- **`POST /penjualan/cek-stok`** `[cashier]`, badan irisan sempit `SaleBody`,
+  tak menulis apa pun. Setelan MATI → `akan_ditolak:false` tapi `kurang` tetap
+  dihitung; `open_bill_id` → `akan_ditolak:false` (cermin gerbangnya).
+  Biaya terukur: **15 ms median**, berbanding 11 ms untuk `/menu/ketersediaan`
+  yang klien sudah panggil.
+- **web**: query ter-debounce + blok dua nada di atas tombol Bayar, memakai
+  `.pesan` SERVER apa adanya; banner `gagalCek` cermin `gagalSisa`. Tombol
+  Bayar tak pernah dimatikan.
+- **ponsel**: `CompanyInfo.blokirJualMinus` (fromJson **dan** toJson — sesi
+  dipersist), `CekStokResult`/`BahanKurangDto`, `cekStokProvider`,
+  `_PeringatanKeranjang` dua nada, galat pracek dinyatakan.
+- **`test:e2e` kini membangun web lebih dulu** + **`e2e-bundel-segar.test.ts`**
+  yang memaku itu, dengan premis "server memang menyajikan dari `dist`" dan
+  "`npm run e2e` memang tak membangun".
+- **`cek-stok-satu-aritmetika.test.ts`** (7 uji) + **§300** (14 lengan).
+- Kontrak + Lampiran A + changelog ponsel **🟢 rute baru** + `BELUM_TAYANG`;
+  fikstur kunci ponsel **+9**; `blokir_jual_minus` DICABUT dari
+  `kunci-belum-dibaca.txt`, persis seperti instruksi yang sudah tertulis di
+  barisnya sendiri.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | mutasi | tuduhan |
+| --- | --- | --- |
+| HHH | kalimat inline dikembalikan ke `open-bill` | `dirakit di luar stok-keranjang.ts: 2 ≠ 1` + `tak memakai perakit bersama` |
+| III | pracek menjawab dari `kurang.length > 0` saja | `to contain 'gerbangBerlaku({'` |
+| JJJ | `blokir_jual_minus` dicabut dari `CekStokResult` | `kontrak terbaca terlalu tipis: 3 ≠ 4` |
+| KKK | pracek memeriksa PER BARIS (maks), bukan per keranjang | **4 lengan §300**, termasuk `RAMALAN == VONIS` dan `akan_ditolak` |
+| NNN | `test:e2e` dikembalikan ke bentuk yang tak membangun | `tidak membangun web lebih dulu` |
+
+**Yang jujur soal detektornya — dan §300 sendiri yang cacat lebih dulu.**
+Bukti merah KKK pada jalan PERTAMA hanya menuduh 2 lengan, dan lengan
+`akan_ditolak` — yang paling inti — tetap HIJAU. Sebabnya urutan §300: lengan
+"setelan mati → 201" berdiri di depan, dan checkout itu MENGHABISKAN bahan yang
+baru saja diukur, jadi lengan sesudahnya tak lagi menguji keranjang
+dua-baris-berebut-satu-bahan melainkan keranjang yang tiap barisnya sendirian
+sudah melebihi. Seluruh lengan yang tak menulis dipindah ke depan, yang
+men-checkout ke paling belakang; sesudah itu KKK menuduh **4 lengan**. Detektor
+yang benar dengan urutan yang salah menuduh separuh — dan separuhnya yang
+hilang justru yang menjadi alasan venanya ada.
+
+### Batas yang diakui
+
+- **Tak ada lengan peramban putaran ini.** Spec-nya ditulis dan DICABUT:
+  `pilihMeja` menggantung sesudah `masukLewatSesi` (kombinasi yang tak satu spec
+  pun pernah lalui — yang memakai `pilihMeja` memakai layar `login`), dan
+  mengejarnya lebih jauh menukar anggaran satu vena dengan satu spec. Masuk
+  antrean dengan gejalanya tertulis. Yang menahan klaim "kalimat server sampai
+  ke layar" karena itu penjaga STATIS, bukan DOM sungguhan — dan itu batas yang
+  nyata, bukan formalitas.
+- **Pracek berjalan DI LUAR transaksi**: ramalan, bukan janji. Gerbang
+  sesungguhnya tetap di dalam `db.transaction` dengan `tx`, dan itu tak diubah.
+- **Jalur sinkron offline tak punya pracek sama sekali**, dan gerbangnya memang
+  sengaja dilewati (`transaksiSusulan`) — makanannya sudah disajikan. Saat
+  offline, peringatan per-baris tetap satu-satunya pertahanan.
+- **Bayar tidak pernah dimatikan** (keputusan pemilik).
+- `createSale` TIDAK memakai `kebutuhanKeranjang`: kebutuhannya ditumpuk di
+  dalam gelung yang juga menghitung harga & HPP. Yang menyatukan ketiganya satu
+  lapis di bawah (`tambahKebutuhanBahan`), dan penjaganya memaku rantai itu utuh.
+- Tak ada Flutter di sini: perubahan Dart diuji CI-nya; cermin Python (19
+  asersi) dijalankan lebih dulu.
+
+### Gerbang
+
+- Server: typecheck hijau, **verify-api 3.620 / 0** dengan log utuh (3.983
+  baris, 235.850 byte, **0 NUL**), **vitest 251 berkas / 3.087 uji**,
+  **invarian 27 / 0**, **e2e 48 lolos** (1,4 mnt) — dan untuk pertama kalinya
+  atas bundel yang benar-benar BARU DIBANGUN.
+- **DUA jalan merah sebelum yang ketiga hijau, dan KEEMPAT penjaga yang
+  menuduh bekerja dengan benar — tak satu pun tuduhan palsu.**
+  Jalan I (6 uji, 4 berkas): (1) `blokir-jual-minus.test.ts` memaku syarat
+  gerbang dan pemakaian `tambahKebutuhanBahan` pada ALAMAT lamanya — ditulis
+  ulang ke rumah barunya, dan diperketat jadi DUA LAPIS (predikatnya menyebut
+  kedua pengecualian, DAN pemanggilnya benar-benar mengoper keduanya). (2)
+  `cakupan-rute` menuduh rute baru yang belum tercatat diketuk;
+  `rute-diketuk.txt` diregenerasi dari jejak jalan yang sama. (3) `jangkar-iris`
+  — penjaga yang menjaga penjaga — menuduh dua jangkar `indexOf` di uji BARU-ku
+  yang bersumber dari isi `package.json`, bukan dari berkas sumber; asersinya
+  ditulis ulang jadi satu pola. Yang salah cara asersiku, bukan penjaganya.
+  Jalan II (1 uji): (4) `sesi-cabang-dto-utuh` menuduh `blokir_jual_minus:` di
+  balasan pracek sebagai penulis bentuk `company` KEDUA. Tabrakan nama, kelas
+  `TABRAKAN_NAMA` #96 — pracek memulangkan SATU setelan, bukan bentuk company.
+  Pengecualiannya dicatat SEMPIT (satu berkas, satu kunci, wajib di dalam
+  penangan `cek-stok`) dan dibuktikan dua arah: medan khas KEDUA yang menyelinap
+  ke balasan itu tetap tertuduh (OOO), dan pengecualian yang jadi basi ikut
+  merah (PPP).
+- Ponsel: commit `2b1c3fa`, **CI #55**.
+- **Tak ada rilis.**
+
 ## `GET /company` — arah yang tak pernah diperiksa: gerbang yang memaku "bentuk balasan disebut penulisnya" hanya menanyakan ADANYA kunci, dan empat kunci masuk tanpa berubah warna — server + web + ponsel — 2026-09-06
 
 **Vena.** Butir antrean "12 → 11 tipe lokal web". `GET /api/company` adalah
@@ -13018,12 +13169,32 @@ berlaku di situ).
       Penjaga KELAS di `bep-nilai-dto-utuh` menangkap kelasnya lewat nama
       hantu ponsel; yang belum ada: aturan statis "interface yang dipulangkan
       `c.json` harus di `types.ts`" — menuntut informasi tipe, bukan regex
-- [ ] **Peringatan `blokir_jual_minus` DIBANGUN di kasir** — KEPUTUSAN
-      PEMILIK 2026-09-05. Tanda pada baris keranjang yang stoknya minus saat
-      setelan hidup, di kasir web DAN ponsel, supaya kasir tahu SEBELUM
-      menekan Bayar alih-alih sesudah ditolak server (`penjualan/service.ts`).
-      Medannya sudah bernama di kontrak (`CompanyDto`) sejak #95 dan tercatat
-      beralasan di ponsel — dua repo, vena tersendiri
+- [x] ~~**Peringatan `blokir_jual_minus` DIBANGUN di kasir**~~ — SELESAI
+      2026-09-06, lihat entri di atas. Ternyata bukan "tambah tanda":
+      peringatan per-menu SUDAH ada di kedua klien dan komentar servernya
+      sendiri sudah menyatakan itu tak setara. Terukur: 38 dari 57 menu berbagi
+      bahan pembatas; keranjang 20+20 membuat kedua layar DIAM lalu ditolak.
+      Dibayar dengan rute pracek seluruh keranjang yang memakai aritmetika yang
+      SAMA dengan gerbangnya (§300, ramalan == vonis byte per byte)
+- [ ] **Lengan PERAMBAN untuk peringatan keranjang belum ada** — spec-nya
+      ditulis dan dicabut 2026-09-06: `pilihMeja` menggantung sesudah
+      `masukLewatSesi`, kombinasi yang tak satu spec pun pernah lalui (yang
+      memakai `pilihMeja` memakai layar `login`). Yang menahan klaim "kalimat
+      server sampai ke layar" karena itu penjaga STATIS, bukan DOM sungguhan.
+      Perbaikannya mungkin di `util.ts` (menunggu daftar meja termuat sesudah
+      sesi ditanam), bukan di spec-nya
+- [ ] **`jangkar-iris` tak mengenali sumber non-`.ts`** — ia menagih tiap
+      jangkar `indexOf` di berkas uji ada di berkas SUMBER yang uji itu baca,
+      dan uji yang membaca `package.json` (atau JSON/`.sql` lain) tak pernah
+      bisa memenuhinya. Terukur 2026-09-06 pada `e2e-bundel-segar.test.ts`;
+      diakali dengan menulis asersinya tanpa `indexOf`. Melebarkan pemindainya
+      ke sumber non-TS adalah vena alat ukur tersendiri
+- [ ] **Sapuan berkunci-NAMA menuduh konsep yang kebetulan senama** — sudah
+      DUA kali dalam dua putaran: `TABRAKAN_NAMA: pb1Rate` (#99) dan
+      `blokir_jual_minus` di balasan pracek (#100), keduanya diselesaikan
+      dengan pengecualian beralasan per-situs. Polanya berulang cukup sering
+      untuk layak punya rumah bersama — sebuah pembantu "kunci ini milik bentuk
+      X, bukan bentuk Y" — alih-alih satu peta ad-hoc di tiap penjaga
 - [ ] **Ponsel memilih CK lewat `tipe`, bukan `central_kitchen_id`** —
       `beli_perlengkapan_page:674` dan `kasir_providers:69` menyaring
       `tipe == 'central_kitchen'`; pada perusahaan ber-CK lebih dari satu,

@@ -9,6 +9,7 @@ import { db } from "../../db/client";
 import { KOLOM_SALE } from "../../db/kolom-publik";
 import { branches, companies, saleItems, sales, shifts, users } from "../../db/schema";
 import { bolehLihatBiaya, qtyDitagih, waktuKertas } from "@kakarut/shared";
+import type { CekStokResult } from "@kakarut/shared";
 import { opsiKertasDariQuery, responsSlip } from "../print/kertas";
 import {
   branchUntukTulis,
@@ -25,6 +26,9 @@ import {
 } from "../sync/idempoten";
 import { refundSajian } from "./refund";
 import { strukPenjualan } from "./struk";
+import { gerbangBerlaku, kebutuhanKeranjang, pesanStokKurang } from "./stok-keranjang";
+import { loadKatalog } from "../menu/service";
+import { bahanKurang } from "../stok/service";
 import { createSale, PenjualanGagal } from "./service";
 
 export const SaleBody = z.object({
@@ -65,9 +69,95 @@ export const SaleBody = z.object({
     .max(500),
 }).strict();
 
+/**
+ * Badan pracek — IRISAN SEMPIT `SaleBody`, sengaja bukan `SaleBody` sendiri.
+ *
+ * Yang dibutuhkan aritmetika stok hanya menu, jumlah, dan basis dine-in;
+ * memaksa klien mengirim `metode_bayar`/`uang_diterima`/`client_ref` untuk
+ * sekadar BERTANYA akan membuat pracek dipanggil terlambat — atau tidak sama
+ * sekali. `open_bill_id` ikut karena ia MENGUBAH JAWABAN (gerbangnya lewat di
+ * jalur itu), bukan karena perhitungannya butuh.
+ */
+const CekStokBody = z.object({
+  branch_id: z.string().uuid().optional(),
+  is_dine_in: z.boolean().default(false),
+  open_bill_id: z.string().uuid().optional(),
+  items: z
+    .array(
+      z.object({
+        menu_id: z.string().uuid(),
+        qty: z.number().positive().max(BATAS_QTY_BARIS),
+        is_dine_in: z.boolean().optional(),
+      }),
+    )
+    .min(1)
+    .max(500),
+}).strict();
+
 export const penjualanRoutes = new Hono<AppEnv>()
   // Transaksi POS HANYA peran kasir (owner/admin/tim tak boleh menjual —
   // manajemen memantau lewat Riwayat/Laporan, tak meng-input transaksi).
+  /**
+   * PRACEK STOK SELURUH KERANJANG — menjawab pertanyaan yang benar-benar
+   * dihadapi kasir sebelum menekan Bayar: "keranjang INI muat atau tidak?"
+   *
+   * `GET /menu/ketersediaan` menjawab pertanyaan yang MIRIP tapi bukan itu —
+   * "menu ini bisa dibuat berapa porsi lagi" — dan keduanya berbeda persis
+   * saat dua baris memperebutkan satu bahan. Komentar gerbangnya di
+   * `service.ts` sudah menyatakannya sejak lama; yang belum ada sampai
+   * 2026-09-06 adalah pintu untuk MENANYAKANNYA. Terukur pada DB gerbang:
+   * 38 dari 57 menu berbagi bahan pembatas dengan menu lain (12 kelompok), dan
+   * keranjang 20 PBB + 20 FS1 membuat kedua klien diam sebelum ditolak.
+   *
+   * TIDAK MENULIS APA PUN, dan sengaja TIDAK memakai transaksi: ia RAMALAN,
+   * bukan janji. Gerbang yang sesungguhnya tetap di dalam `db.transaction`
+   * milik `createSale` dengan `tx` — saldo yang dibaca di luar transaksi
+   * penulisan adalah saldo dunia lain, dan itu tak berubah oleh rute ini.
+   *
+   * Peran `cashier` sama dengan `POST /penjualan`: pracek tak boleh lebih
+   * longgar daripada pintu yang diramalnya.
+   */
+  .post("/cek-stok", requireRole("cashier"), zValidator("json", CekStokBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    const branchId = await branchUntukTulis(
+      c,
+      body.branch_id,
+      "Kasir hanya boleh transaksi di cabangnya",
+    );
+    const [company] = await db
+      .select({ blokirJualMinus: companies.blokirJualMinus })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    if (!company) throw new HTTPException(404, { message: "Perusahaan tidak ditemukan" });
+
+    const katalog = await loadKatalog(db, auth.company_id!);
+    const butuh = kebutuhanKeranjang(katalog, body.items, body.is_dine_in);
+    // `db`, bukan `tx` — dan itu KONSEKUEN dengan sifatnya sebagai ramalan.
+    // `bahanKurang` memakai `hitungSaldoCabang`, aturan saldo yang sama dengan
+    // layar Stok dan dengan gerbangnya; yang berbeda hanya waktunya.
+    const kurang = await bahanKurang(db, auth.company_id!, branchId, butuh);
+    const akanDitolak =
+      gerbangBerlaku({
+        blokirJualMinus: company.blokirJualMinus,
+        openBillId: body.open_bill_id,
+      }) && kurang.length > 0;
+    return c.json({
+      blokir_jual_minus: company.blokirJualMinus,
+      akan_ditolak: akanDitolak,
+      // Kekurangannya dihitung SEKALIPUN setelannya mati: kasir tetap berhak
+      // tahu bahwa keranjang ini akan membuat saldo minus. Yang berubah oleh
+      // setelan adalah `akan_ditolak`, bukan angkanya.
+      kurang: kurang.map((k) => ({
+        ingredient_id: k.ingredient_id,
+        nama: k.nama,
+        satuan: k.satuan,
+        saldo: k.saldo,
+        butuh: k.butuh,
+      })),
+      pesan: kurang.length > 0 ? pesanStokKurang(kurang) : null,
+    } satisfies CekStokResult);
+  })
   .post("/", requireRole("cashier"), zValidator("json", SaleBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");

@@ -203,6 +203,7 @@ POST /api/penerimaan/anomali/tutup
 POST /api/pengajuan
 POST /api/penjualan
 POST /api/penjualan/:id/refund
+POST /api/penjualan/cek-stok
 POST /api/penyimpanan
 POST /api/perlengkapan
 POST /api/perlengkapan/:id/harga

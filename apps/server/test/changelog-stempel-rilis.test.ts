@@ -47,6 +47,9 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-06): rute pracek stok keranjang — bentuk lama tak
+  // berubah; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟢 Rute BARU `POST /api/penjualan/cek-stok` — kasir bisa tahu keranjangnya akan ditolak SEBELUM menekan Bayar",
   // BELUM DI-MERGE (2026-09-06): baris perusahaan masuk Lampiran A — nol
   // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
   "## ⚪️ `GET /company` akhirnya bernama: `CompanyRow` (22 kunci) — tak ada perubahan di kawat",

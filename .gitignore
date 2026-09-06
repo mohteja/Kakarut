@@ -6,5 +6,8 @@ dist/
 apps/server/uploads/
 apps/server/backups/
 apps/web/test-results/
+# …dan yang lahir saat Playwright dijalankan dari AKAR repo, bukan dari
+# apps/web (config-nya beda, dan artefaknya mendarat di sini).
+test-results/
 apps/web/playwright-report/
 .DS_Store

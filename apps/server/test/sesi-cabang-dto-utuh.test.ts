@@ -122,7 +122,40 @@ describe("CompanyDto / SesiDto / SesiLogin / CabangDto == bentuk yang dibangun s
       sumber[f.slice(AKAR.length)] = readFileSync(f, "utf8");
     }
     expect(Object.keys(sumber).length, "sapuan server tipis").toBeGreaterThan(100);
-    const situs = situsPenulisCompany(sumber);
+    /*
+     * TABRAKAN NAMA, dicatat beralasan — bukan asersi yang dilonggarkan.
+     *
+     * Sapuan ini berkunci NAMA MEDAN, jadi ia menuduh siapa pun yang menulis
+     * `blokir_jual_minus:`. Sejak 2026-09-06 `POST /penjualan/cek-stok`
+     * memulangkan SETELAN itu sebagai satu medan `CekStokResult` — supaya kasir
+     * tahu kekurangan yang dilaporkan itu nasihat atau ramalan penolakan. Itu
+     * BUKAN bentuk `company` kedua: tak ada `pb1_rate`, `logo_url`, atau kunci
+     * khas lain di sebelahnya.
+     *
+     * Pengecualiannya SEMPIT dengan sengaja — satu berkas, satu kunci, dan
+     * situsnya wajib berada di dalam penangan `cek-stok`. Penulis company
+     * sungguhan yang muncul di berkas itu tetap tertangkap, dan begitu pula
+     * medan khas KEDUA yang menyelinap ke balasan pracek. Kelas yang sama
+     * dengan `TABRAKAN_NAMA` di `bep-nilai-dto-utuh.test.ts` (vena #96), dan
+     * pelajaran yang sama: pemindai yang menuduh yang benar berhenti dipercaya
+     * secepat pemindai yang diam.
+     */
+    const PRACEK = "apps/server/src/modules/penjualan/routes.ts";
+    const iPracek = butaKomentar(sumber[PRACEK]).indexOf('.post("/cek-stok"');
+    expect(iPracek, "penangan cek-stok tak ditemukan — pengecualian di bawah basi").toBeGreaterThan(0);
+    const barisPracek = butaKomentar(sumber[PRACEK]).slice(0, iPracek).split("\n").length;
+
+    const semua = situsPenulisCompany(sumber);
+    const situs = semua.filter((x) => {
+      const [berkas, baris, kunci] = x.split(":");
+      return !(berkas === PRACEK && kunci === "blokir_jual_minus" && Number(baris) > barisPracek);
+    });
+    // Pengecualiannya WAJIB masih dipakai: yang basi melebarkan izin diam-diam.
+    expect(
+      semua.length - situs.length,
+      "pengecualian tabrakan nama `blokir_jual_minus` di cek-stok sudah basi — cabut",
+    ).toBe(1);
+
     // Tepat lima: satu per kunci khas, semuanya di companyDto. Penulis kedua
     // (kelas `GET /auth/me` sebelum 2026-09-05) menambah situs di berkas lain.
     expect(situs.map((s) => s.split(":")[0])).toEqual(Array(KUNCI_KHAS_COMPANY.length).fill(SESI));

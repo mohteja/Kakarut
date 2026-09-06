@@ -2,13 +2,13 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
   dibatalkanDapur,
-  formatAngkaId,
   hitungPb1,
   penandaSajian,
   qtyEfektif,
   type SaleItemInput,
   type SebabPenjualanGagal,
 } from "@kakarut/shared";
+import { gerbangBerlaku, pesanStokKurang } from "./stok-keranjang";
 import { db } from "../../db/client";
 import {
   branches,
@@ -569,18 +569,24 @@ export async function createSale(params: CreateSaleParams) {
      * Saldo dibaca dengan `tx`, bukan `db`: keputusan ini menentukan sebuah
      * penulisan, dan saldo dari luar transaksi adalah saldo dunia lain.
      */
-    if (company.blokirJualMinus && !params.openBillId && !params.transaksiSusulan) {
+    if (
+      gerbangBerlaku({
+        blokirJualMinus: company.blokirJualMinus,
+        openBillId: params.openBillId,
+        transaksiSusulan: params.transaksiSusulan,
+      })
+    ) {
       const kurang = await bahanKurang(tx, params.companyId, params.branchId, konsumsi);
       if (kurang.length > 0) {
         // Ditulis untuk KASIR yang sedang berdiri di depan tamu: sebut
         // bahannya, sisanya, dan berapa yang kurang — bukan "stok tidak
         // cukup" yang tak bisa ditindaklanjuti siapa pun.
-        throw new HTTPException(400, {
-          message:
-            `Stok tidak cukup: ${kurang
-              .map((k) => `${k.nama} (sisa ${formatAngkaId(k.saldo)} ${k.satuan}, butuh ${formatAngkaId(k.butuh)})`)
-              .join("; ")}`,
-        });
+        //
+        // Kalimatnya dirakit `pesanStokKurang`, bukan di sini: sejak
+        // 2026-09-06 `POST /penjualan/cek-stok` memulangkan kalimat yang SAMA
+        // sebelum Bayar ditekan, dan ramalan yang berbeda kata dari vonisnya
+        // adalah ramalan yang tak bisa dipercaya kasir.
+        throw new HTTPException(400, { message: pesanStokKurang(kurang) });
       }
     }
 

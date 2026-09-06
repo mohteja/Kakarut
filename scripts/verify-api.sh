@@ -17673,6 +17673,94 @@ cek "§299 /forgot-password TETAP netral: email dikenal & tidak dijawab identik"
 cek "§299 /forgot-password tak membawa medan sebab sama sekali" "V == 0" \
   "$(api "" POST /auth/forgot-password "{\"email\":\"$OWNER_EMAIL\"}" | jq '[paths|.[0]]|map(select(.=="sebab"))|length')"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §300 — PRACEK STOK: ramalan yang dihitung oleh yang menghakimi
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-06 satu-satunya bahan peringatan kasir adalah
+# `GET /menu/ketersediaan`, yang menjawab PER MENU. Komentar gerbangnya sendiri
+# di `penjualan/service.ts` sudah menyatakan itu tak setara: "dua menu berbeda
+# bisa memperebutkan bahan yang sama dalam satu struk, dan hanya jumlah inilah
+# yang tahu." Terukur pada DB gerbang: 38 dari 57 menu berbagi bahan pembatas
+# (12 kelompok), dan keranjang 20 PBB + 20 FS1 membuat KEDUA klien diam sebelum
+# ditolak. `POST /penjualan/cek-stok` menjawab untuk SELURUH keranjang, dengan
+# `kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku` yang sama.
+#
+# Lengan terpenting di sini nomor 4 (dua baris berebut satu bahan, disusun dari
+# ketersediaan HIDUP — bukan angka yang diketik) dan nomor 5 (kalimat ramalan
+# diadu byte-per-byte dengan kalimat vonis).
+K300=$(medan296 CekStokResult)
+cek "§300 premis: kontrak CekStokResult terbaca dari types.ts (4 medan)" "V == 4" \
+  "$(echo "$K300" | grep -c .)"
+
+api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+KET300=$(api "$REISS105" GET /menu/ketersediaan)
+JUAL300=$(api "$REISS105" GET /menu | jq -r '[.[]|select(.aktif != false)|.id]')
+# Dua menu dari SATU kelompok bahan pembatas, keduanya masih bisa dijual dan
+# sisa porsinya ≥ 2 — syarat supaya "60% porsi masing-masing" tetap bilangan
+# bulat yang MASIH DI BAWAH porsinya sendiri.
+PASANG300=$(jq -c --argjson jual "$JUAL300" '
+  [ .[] | select(.porsi != null and .porsi >= 2 and (.menu_id as $m | $jual | index($m))) ]
+  | group_by(.pembatas.ingredient_id) | map(select(length >= 2)) | .[0] // []
+  | .[0:2] | map({menu_id, porsi, per: .pembatas.qty_per_porsi, saldo: .pembatas.saldo, bahan: .pembatas.nama})
+' <<<"$KET300")
+cek "§300 premis: ada DUA menu terjual yang berbagi satu bahan pembatas" "V == 2" \
+  "$(jq 'length' <<<"$PASANG300")"
+M300A=$(jq -r '.[0].menu_id // ""' <<<"$PASANG300")
+M300B=$(jq -r '.[1].menu_id // ""' <<<"$PASANG300")
+# 60% porsi masing-masing: tiap baris SENDIRI lolos cek per-menu, gabungannya
+# menuntut ±120% saldo. Inilah bentuk yang selama ini lolos tanpa suara.
+Q300A=$(jq -r '(.[0].porsi * 0.6) | ceil' <<<"$PASANG300")
+Q300B=$(jq -r '(.[1].porsi * 0.6) | ceil' <<<"$PASANG300")
+ITEMS300="[{\"menu_id\":\"$M300A\",\"qty\":$Q300A},{\"menu_id\":\"$M300B\",\"qty\":$Q300B}]"
+cek "§300 premis: TIAP baris di bawah sisa porsinya sendiri (cek per-menu DIAM)" "V == 1" \
+  "$(jq -r --argjson a "$Q300A" --argjson b "$Q300B" 'if (.[0].porsi >= $a and .[1].porsi >= $b) then 1 else 0 end' <<<"$PASANG300")"
+cek "§300 premis: …tapi gabungannya MELEBIHI saldo bahan yang mereka perebutkan" "V == 1" \
+  "$(jq -r --argjson a "$Q300A" --argjson b "$Q300B" 'if (($a * .[0].per) + ($b * .[1].per)) > .[0].saldo then 1 else 0 end' <<<"$PASANG300")"
+
+# URUTANNYA DISENGAJA: seluruh lengan yang TAK MENULIS lebih dulu, dan lengan
+# yang benar-benar men-checkout (201) paling akhir. Percobaan pertama menaruh
+# lengan "setelan mati → 201" di depan, dan checkout itu MENGHABISKAN bahan yang
+# baru saja diukur — jadi lengan berikutnya tak lagi menguji keranjang
+# dua-baris-berebut-satu-bahan, melainkan keranjang yang tiap barisnya sendirian
+# sudah melebihi. Bukti merah KKK-lah yang menyingkapnya: ia tetap hijau di
+# lengan `akan_ditolak` yang seharusnya ikut merah.
+
+# ── setelan MENYALA: ramalan, lalu vonis (TAK ADA yang tertulis: POST-nya ditolak) ──
+api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
+CS300ON=$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"items\":$ITEMS300}")
+cek "§300 kunci balasan == CekStokResult (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$CS300ON")" "$K300")"
+cek "§300 setelan MENYALA: akan_ditolak true untuk keranjang yang cek per-menu diamkan" "V == 1" \
+  "$(jq -r 'if (.blokir_jual_minus == true and .akan_ditolak == true) then 1 else 0 end' <<<"$CS300ON")"
+VONIS300=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}" | jq -r '.error // .message // ""')
+cek "§300 INTI: kalimat RAMALAN == kalimat VONIS, byte per byte" "V == 1" \
+  "$([ -n "$VONIS300" ] && [ "$(jq -r '.pesan // ""' <<<"$CS300ON")" = "$VONIS300" ] && echo 1 || echo 0)"
+cek "§300 …dan vonisnya memang 400, bukan sukses yang kebetulan berpesan" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}")"
+
+# ── open bill: gerbangnya SENGAJA lewat, jadi pracek tak boleh menjanjikan tolak ──
+CS300OB=$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"open_bill_id\":\"00000000-0000-4000-8000-000000000000\",\"items\":$ITEMS300}")
+cek "§300 open bill: akan_ditolak FALSE walau kurang (cermin gerbangnya)" "V == 1" \
+  "$(jq -r 'if (.akan_ditolak == false and (.kurang|length) >= 1) then 1 else 0 end' <<<"$CS300OB")"
+
+# ── peran: pracek tak boleh lebih longgar daripada pintu yang diramalnya ──
+cek "§300 owner DITOLAK di pracek, persis seperti di POST /penjualan" "V == 1" \
+  "$(A=$(status_code_body "$OWNER" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"items\":$ITEMS300}");
+     B=$(status_code_body "$OWNER" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}");
+     [ "$A" = "$B" ] && [ "$A" != 200 ] && echo 1 || echo 0)"
+cek "§300 badan ketat: kunci tak dikenal ditolak 400 (bukan dibuang diam-diam)" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"kunci_karangan\":1,\"items\":$ITEMS300}")"
+
+# ── setelan MATI, PALING AKHIR sebab lengan terakhirnya benar-benar menulis ──
+api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
+CS300OFF=$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"items\":$ITEMS300}")
+cek "§300 setelan MATI: blokir_jual_minus false & akan_ditolak false" "V == 1" \
+  "$(jq -r 'if (.blokir_jual_minus == false and .akan_ditolak == false) then 1 else 0 end' <<<"$CS300OFF")"
+cek "§300 setelan MATI: kekurangan TETAP dihitung & disebut namanya" "V == 1" \
+  "$(jq -r 'if ((.kurang|length) >= 1 and (.pesan|type) == "string" and ((.kurang[0].nama//"")|length) > 0) then 1 else 0 end' <<<"$CS300OFF")"
+cek "§300 setelan MATI: keranjang yang SAMA benar-benar diterima (201) — gerbang, bukan penghapus" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

@@ -890,6 +890,66 @@ export interface MenuStokDto {
   pembatas: MenuStokPembatas | null;
 }
 
+/**
+ * Satu bahan yang TAK CUKUP untuk sebuah keranjang — bentuk yang sama dengan
+ * yang dipakai gerbang `blokir_jual_minus` saat menolak, jadi apa yang dipracek
+ * dan apa yang ditolak menyebut angka yang sama.
+ */
+export interface BahanKurangDto {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  /** saldo cabang saat dipracek */
+  saldo: number;
+  /** kebutuhan SELURUH keranjang atas bahan ini, bukan satu baris */
+  butuh: number;
+}
+
+/**
+ * Jawaban pracek stok atas SELURUH KERANJANG (`POST /api/penjualan/cek-stok`).
+ *
+ * KENAPA RUTE INI ADA, dan kenapa `MenuStokDto` tak cukup. Sampai 2026-09-06
+ * satu-satunya bahan peringatan kasir adalah `GET /menu/ketersediaan`, yang
+ * menjawab PER MENU. Komentar gerbangnya sendiri di `penjualan/service.ts`
+ * sudah menyatakan itu tak setara: "dua menu berbeda bisa memperebutkan bahan
+ * yang sama dalam satu struk, dan hanya jumlah inilah yang tahu."
+ *
+ * Terukur lewat HTTP pada DB gerbang, 2026-09-06: dari 57 menu, 38 (dua
+ * pertiga) berbagi bahan pembatas dengan menu lain — 12 kelompok. Keranjang
+ * 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa porsi 40)
+ * membuat KEDUA klien diam — tiap baris di bawah porsinya sendiri — sementara
+ * `POST /penjualan` menolak dengan "Stok tidak cukup: Baso aci jando (sisa 80
+ * butir, butuh 100)". Kasir berdiri di depan tamu dengan layar yang bersih.
+ *
+ * Rute ini menjawab dengan ARITMETIKA YANG SAMA dengan gerbangnya
+ * (`kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku`), bukan dengan
+ * salinan yang kebetulan cocok hari ini.
+ */
+export interface CekStokResult {
+  /**
+   * Setelan perusahaan saat pracek dijalankan. Klien memerlukannya untuk tahu
+   * apakah kekurangan di bawah ini NASIHAT (setelan mati: pesanan tetap
+   * diterima, saldo boleh minus) atau RAMALAN PENOLAKAN.
+   */
+  blokir_jual_minus: boolean;
+  /**
+   * `true` bila `POST /penjualan` atas keranjang INI akan ditolak. Bukan
+   * sekadar `kurang.length > 0`: gerbangnya sengaja DILEWATI untuk open bill
+   * (barangnya sudah dimasak) dan sinkron offline, jadi pracek yang mengabaikan
+   * itu akan menjanjikan penolakan yang tak akan terjadi.
+   */
+  akan_ditolak: boolean;
+  /** kosong bila cukup; selalu dihitung, bahkan saat setelannya mati */
+  kurang: BahanKurangDto[];
+  /**
+   * Kalimat yang PERSIS SAMA dengan pesan penolakan server (`pesanStokKurang`),
+   * atau `null` bila cukup. Dikirim jadi kalimat, bukan dirakit ulang klien:
+   * dua perakit akan menyimpang, dan yang dibaca kasir harus sama dengan yang
+   * akan ia terima bila tetap menekan Bayar.
+   */
+  pesan: string | null;
+}
+
 /** Satu baris rencana penambahan stok dari menu: target porsi per menu. */
 export interface RencanaMenuItem {
   menu_id: string;

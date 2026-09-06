@@ -25,6 +25,57 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Rute BARU `POST /api/penjualan/cek-stok` — kasir bisa tahu keranjangnya akan ditolak SEBELUM menekan Bayar
+
+> Bentuk lama tidak berubah sama sekali. Yang bertambah: satu rute BACA
+> (`POST`, tapi tak menulis apa pun) yang menjawab **kecukupan stok SELURUH
+> keranjang** — pertanyaan yang `GET /menu/ketersediaan` tak bisa jawab.
+
+**Kenapa rute baru, padahal ketersediaan sudah ada.** `/menu/ketersediaan`
+menjawab PER MENU: "menu ini bisa dibuat berapa porsi lagi". Yang dihadapi
+kasir adalah "keranjang INI muat atau tidak", dan keduanya menyimpang persis
+saat dua baris memperebutkan satu bahan. Terukur lewat HTTP 2026-09-06:
+**38 dari 57 menu** berbagi bahan pembatas dengan menu lain (12 kelompok), dan
+keranjang 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa
+porsi 40) membuat peringatan `⚠️ Melebihi sisa stok` **diam sepenuhnya**
+sebelum `POST /penjualan` menolak: *"Stok tidak cukup: Baso aci jando (sisa 80
+butir, butuh 100)"*.
+
+```
+POST /api/penjualan/cek-stok        [cashier]
+req { branch_id?, is_dine_in, open_bill_id?, items:[{menu_id, qty, is_dine_in?}] }
+res { blokir_jual_minus, akan_ditolak, kurang:[{ingredient_id,nama,satuan,saldo,butuh}], pesan|null }
+```
+
+Tiga hal yang menentukan cara memakainya:
+
+- **`akan_ditolak` ≠ `kurang.length > 0`.** Ia mencerminkan gerbang server, yang
+  sengaja DILEWATI untuk open bill (barangnya sudah dimasak) dan untuk sinkron
+  offline. Pakai `akan_ditolak` untuk nada peringatan; `kurang` tetap terisi di
+  kedua keadaan dan tetap berguna sebagai nasihat.
+- **`pesan` dipakai APA ADANYA.** Ia dirakit perakit yang sama dengan pesan
+  penolakan `POST /penjualan` — verify-api §300 membandingkan keduanya byte per
+  byte dari kawat. Merakit ulang kalimatnya di klien melahirkan kalimat kedua
+  yang akan menyimpang.
+- **RAMALAN, bukan janji.** Dijalankan di luar transaksi; stok bisa bergerak
+  sebelum Bayar. Server tetap penghakim tunggal, dan **tombol Bayar tidak boleh
+  dimatikan** oleh jawaban ini (keputusan pemilik 2026-09-06).
+
+**Kerja di ponsel: SUDAH DIKERJAKAN** pada commit pasangan rilis ini —
+`CekStokResult`/`BahanKurangDto` di `kasir_models.dart`, `cekStokProvider`, dan
+blok peringatan dua nada di atas tombol Bayar. `CompanyInfo` kini juga mengurai
+**`blokir_jual_minus`** dari sesi (medan yang server kirim sejak lama dan nol
+klien baca sampai hari ini).
+
+**Batas yang perlu diketahui:** jalur **offline** tak punya pracek sama sekali,
+dan gerbang server memang tak berlaku untuk transaksi susulan — makanannya
+sudah disajikan, menolaknya hanya akan menghapus penjualan sungguhan dari
+pembukuan. Saat offline, peringatan per-baris `⚠️ Melebihi sisa stok` tetap
+satu-satunya pertahanan, dan ia hanya sebaik data ketersediaan terakhir yang
+sempat terunduh.
+
+---
+
 ## ⚪️ `GET /company` akhirnya bernama: `CompanyRow` (22 kunci) — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: baris perusahaan yang

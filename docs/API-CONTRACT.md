@@ -457,6 +457,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > `open_bill_item_id` terkirim.** Pastikan lewat pengujian di sisi klien, bukan
 > lewat respons server.
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
+- `POST /api/penjualan/cek-stok` — **[cashier only]** — req `{ branch_id?: uuid, is_dine_in: bool=false, open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool}] (min 1, max 500) }` (`.strict()`) — res: **`CekStokResult`** = `{ blokir_jual_minus, akan_ditolak, kurang: BahanKurangDto[], pesan: string|null }`. **PRACEK kecukupan stok SELURUH KERANJANG sebelum Bayar; tidak menulis apa pun.** Ada sejak 2026-09-06 karena `GET /api/menu/ketersediaan` menjawab pertanyaan yang BERBEDA — "menu ini bisa dibuat berapa porsi lagi", bukan "keranjang ini muat atau tidak" — dan keduanya menyimpang persis saat dua baris memperebutkan satu bahan. Terukur pada DB gerbang: **38 dari 57 menu** berbagi bahan pembatas dengan menu lain (12 kelompok); keranjang 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa porsi 40) membuat kedua klien DIAM sebelum `POST /api/penjualan` menolaknya. Dihitung `kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku` — fungsi yang SAMA dengan gerbangnya — dan `pesan` dirakit perakit yang sama dengan pesan penolakan, jadi ramalan dan vonis berbunyi identik (dijaga verify-api §300, dibandingkan byte per byte dari kawat). `akan_ditolak` MENCERMINKAN gerbangnya, bukan sekadar `kurang.length > 0`: ia `false` saat setelan `blokir_jual_minus` mati, dan `false` untuk `open_bill_id` (gerbangnya sengaja lewat di sana — barangnya sudah dimasak). `kurang` tetap dihitung dalam kedua keadaan itu. **RAMALAN, bukan janji** — dijalankan di luar transaksi, jadi stok bisa bergerak sebelum Bayar; gerbang sesungguhnya tetap di dalam transaksi `createSale` — error: **400** badan tak sah, **403** peran selain kasir / kasir di luar cabang, **404** perusahaan tak ada
 - `GET /api/penjualan/:id` — [any] — res: **`SaleResult`** — bentuk yang SAMA PERSIS dengan `POST /api/penjualan` (satu penulis, `strukPenjualan`; dijaga verify-api §298 dari kawat, dua arah). Biaya ditahan untuk non-manajemen, sama seperti di POST — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
 - `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, client_ref?: uuid, device_id?: string|null, items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini)
@@ -2538,6 +2539,66 @@ export interface MenuStokDto {
   porsi: number | null;
   /** bahan pembatas porsi; null bila porsi null (tak terbatas) */
   pembatas: MenuStokPembatas | null;
+}
+
+/**
+ * Satu bahan yang TAK CUKUP untuk sebuah keranjang — bentuk yang sama dengan
+ * yang dipakai gerbang `blokir_jual_minus` saat menolak, jadi apa yang dipracek
+ * dan apa yang ditolak menyebut angka yang sama.
+ */
+export interface BahanKurangDto {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  /** saldo cabang saat dipracek */
+  saldo: number;
+  /** kebutuhan SELURUH keranjang atas bahan ini, bukan satu baris */
+  butuh: number;
+}
+
+/**
+ * Jawaban pracek stok atas SELURUH KERANJANG (`POST /api/penjualan/cek-stok`).
+ *
+ * KENAPA RUTE INI ADA, dan kenapa `MenuStokDto` tak cukup. Sampai 2026-09-06
+ * satu-satunya bahan peringatan kasir adalah `GET /menu/ketersediaan`, yang
+ * menjawab PER MENU. Komentar gerbangnya sendiri di `penjualan/service.ts`
+ * sudah menyatakan itu tak setara: "dua menu berbeda bisa memperebutkan bahan
+ * yang sama dalam satu struk, dan hanya jumlah inilah yang tahu."
+ *
+ * Terukur lewat HTTP pada DB gerbang, 2026-09-06: dari 57 menu, 38 (dua
+ * pertiga) berbagi bahan pembatas dengan menu lain — 12 kelompok. Keranjang
+ * 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa porsi 40)
+ * membuat KEDUA klien diam — tiap baris di bawah porsinya sendiri — sementara
+ * `POST /penjualan` menolak dengan "Stok tidak cukup: Baso aci jando (sisa 80
+ * butir, butuh 100)". Kasir berdiri di depan tamu dengan layar yang bersih.
+ *
+ * Rute ini menjawab dengan ARITMETIKA YANG SAMA dengan gerbangnya
+ * (`kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku`), bukan dengan
+ * salinan yang kebetulan cocok hari ini.
+ */
+export interface CekStokResult {
+  /**
+   * Setelan perusahaan saat pracek dijalankan. Klien memerlukannya untuk tahu
+   * apakah kekurangan di bawah ini NASIHAT (setelan mati: pesanan tetap
+   * diterima, saldo boleh minus) atau RAMALAN PENOLAKAN.
+   */
+  blokir_jual_minus: boolean;
+  /**
+   * `true` bila `POST /penjualan` atas keranjang INI akan ditolak. Bukan
+   * sekadar `kurang.length > 0`: gerbangnya sengaja DILEWATI untuk open bill
+   * (barangnya sudah dimasak) dan sinkron offline, jadi pracek yang mengabaikan
+   * itu akan menjanjikan penolakan yang tak akan terjadi.
+   */
+  akan_ditolak: boolean;
+  /** kosong bila cukup; selalu dihitung, bahkan saat setelannya mati */
+  kurang: BahanKurangDto[];
+  /**
+   * Kalimat yang PERSIS SAMA dengan pesan penolakan server (`pesanStokKurang`),
+   * atau `null` bila cukup. Dikirim jadi kalimat, bukan dirakit ulang klien:
+   * dua perakit akan menyimpang, dan yang dibaca kasir harus sama dengan yang
+   * akan ia terima bila tetap menekan Bayar.
+   */
+  pesan: string | null;
 }
 
 /** Satu baris rencana penambahan stok dari menu: target porsi per menu. */
