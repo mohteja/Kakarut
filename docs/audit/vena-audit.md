@@ -50,6 +50,131 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Tiga belas keadaan, satu jawaban — dan servernya sendiri sudah menamai ketiga belasnya untuk log internal — server + web + ponsel — 2026-09-05
+
+**Vena.** Butir teratas antrean, dan sejak kemarin bukan lagi pertanyaan:
+**KEPUTUSAN PEMILIK 2026-09-05** — `/register` & `/resend-verification`
+dirapatkan ke `/login`. Butirnya menggantung dua putaran sebagai "harus
+dipilih, bukan diwarisi"; ditanyakan dengan biayanya lebih dulu, dan pemilik
+memilih membuka.
+
+**Populasi, diukur lewat HTTP** (DB gerbang, sebelum perubahan):
+
+| pintu | keadaan | jawaban BERBEDA |
+| --- | --- | --- |
+| `POST /auth/register` | 7 (baru · balapan · terhapus · nonaktif · terverifikasi+pw benar · terverifikasi+pw salah · ada-belum-verifikasi) | **2** (netral, dan sesi bila pw cocok) |
+| `POST /auth/resend-verification` | 6 (tak dikenal · terhapus · nonaktif · terverifikasi · kirim · jarak menahan) | **1** |
+
+**Yang membuat ini vena, bukan sekadar "tambah medan".** Servernya SUDAH
+menamai tiap keadaan — dan menuliskannya, ke `email_percobaan` lewat
+`catatTakDicoba` dengan kosakata `SebabTakDicoba` (`akun_terhapus`,
+`akun_nonaktif`, `akun_terverifikasi`, `email_tak_dikenal`,
+`balapan_pendaftaran`, `jarak_kirim_ulang`). Hanya kliennya yang dibutakan.
+Komentar di jalur jarak kirim ulang bahkan menuliskan akibatnya sendiri:
+*"Dari luar keadaan ini tak bisa dibedakan dari 'terkirim' … barisnya inilah
+satu-satunya tempat orang bisa melihat bahwa surat yang ditunggu memang tak
+pernah berangkat."* Kosakata kontraknya karena itu MEMAKAI ULANG nama yang
+sudah ada, bukan menciptakan yang kedua — tiga di antaranya bahkan bernilai
+identik dengan `SEBAB_LOGIN`.
+
+**Perangkap yang ikut terbongkar, di KEDUA klien.** Layar daftar web
+(`SignupPage`) dan ponsel (`register_page`) mendorong ke layar kode **tanpa
+syarat** untuk tiap balasan tanpa sesi — termasuk akun yang sudah aktif atau
+dinonaktifkan. Orangnya lalu menunggu surat yang secara struktural tak akan
+berangkat. Ini kelas yang sama dengan yang sudah pernah menggigit pemilik repo
+sendiri selama dua hari (lihat `pesan-verifikasi.ts`), dan komentar berkas itu
+menyebut kendalanya apa adanya: *"akun aktif + password SALAH memang tak boleh
+dibedakan dari email baru (anti-enumerasi)"*. Kendala itulah yang dicabut
+keputusan ini; komentarnya diperbarui, tidak dibiarkan basi.
+
+### Yang dibangun
+
+- **shared**: `SEBAB_DAFTAR` (7) + `PESAN_DAFTAR` — kembaran
+  `SEBAB_LOGIN`/`PESAN_LOGIN`. `as const`, jadi sumber ke-4 fikstur status
+  (`konst:`, lahir di vena #92) memungutnya otomatis: fikstur ponsel +7.
+- **server**: `kirimKodeVerifikasi` memulangkan `{ terkirim, dev? }` alih-alih
+  hanya bantuan dev — tanpa itu pemanggil tak bisa membedakan "terkirim" dari
+  "ditahan jaraknya", persis keadaan yang komentarnya keluhkan. Kedua rantai
+  menetapkan `sebab`; balasannya membawa `sebab` + `PESAN_DAFTAR[sebab]`.
+  **Status tetap 200, `ok` tetap `true`** — yang berubah kalimat + `sebab`,
+  persis pola `/login` yang tetap 401. Klien lama tak berubah perilakunya.
+- **web**: `DaftarResult.sebab`; `SignupPage` bercabang — tiga sebab menahan
+  layar kode, `akun_terverifikasi` menawarkan **"Masuk dengan email ini →"**.
+  Cerminnya dilengkapi: `LoginPage` kini MEMBACA `?email=` (arah sebaliknya
+  sudah ada sejak #92), tanpa itu tautannya mendarat di formulir kosong.
+- **ponsel `0c1bfee`**: `kSebabTanpaKode` (4) menahan layar kode; kalimat
+  server dipakai apa adanya; tombol "Masuk dengan email ini →".
+  `jarak_kirim_ulang` SENGAJA di luar himpunan itu — kode lamanya masih
+  berlaku, jadi layar kode memang tempat yang benar.
+- **`sebab-daftar-utuh.test.ts`** (baru, 8 uji): kosakata berpasangan satu-satu
+  dengan kalimatnya (dua arah, tanpa kalimat kembar); tiga nilai memakai ulang
+  `SEBAB_LOGIN`; **tiap keadaan yang DICATAT ke log internal juga sampai ke
+  klien**; kedua balasan memakai `PESAN_DAFTAR`, bukan kalimat rakitan;
+  `/forgot-password` dipastikan TIDAK ikut; web bercabang pada KODE bukan
+  kalimat; KELAS lintas-repo (literal ponsel == kosakata, dan
+  `jarak_kirim_ulang` tak menutup layar kode); PASANGAN.
+- **verify-api §299** (13 lengan): kesembilan keadaan dari kawat, status 200 &
+  `ok` tetap, tiap `sebab` yang dipulangkan ada di kosakata kontrak, dan dua
+  lengan yang memaku `/forgot-password` TETAP netral.
+- Kontrak + changelog ponsel **🟡** (bentuknya bertambah; kerja ponsel ada dan
+  disebut) + `BELUM_TAYANG`.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut / dimutasi | tuduhan |
+| --- | --- | --- |
+| SS | `sebab = SEBAB_DAFTAR.nonaktif` dicabut dari satu lengan `/resend-verification` | `dicatat ke log internal tapi klien tak diberi tahu: [ 'akun_nonaktif' ]` |
+| TT | satu entri dicabut dari `PESAN_DAFTAR` | pasangan kosakata↔kalimat: 6 ≠ 7 |
+| UU | `akun_nonaktif` diganti `akun_di_nonaktifkan` di `SEBAB_DAFTAR` | nilai `/login` ≠ `/daftar`; DAN literal ponsel tak memuatnya |
+| VV | web kembali mencocokkan `res.message ===` | `layar daftar mencocokkan kalimat, bukan kode` |
+| WW | `jarak_kirim_ulang` dimasukkan `kSebabTanpaKode` ponsel | `kode lamanya masih berlaku` |
+
+**Yang jujur soal detektornya, dan ini yang paling berharga dari putaran ini.**
+Bukti merah SS **TIDAK menuduh pada percobaan pertama**. Pengurai versi
+pertama menilai "apakah `sebab` ditetapkan" lewat jendela ±6 baris di sekitar
+pencatatan — dan penetapan milik lengan TETANGGA masuk jendela itu, jadi
+mencabut satu lengan tetap hijau. Uji yang hijau karena jendelanya bocor
+adalah persis kelas yang seluruh vena ini bongkar, satu lapis di atas.
+Diganti pemenggalan PER LENGAN rantai `if/else if/else`, dan PASANGAN-nya kini
+memuat bentuk tetangga itu sebagai kasus eksplisit. Baru sesudah itu SS
+menuduh dengan namanya.
+
+### Batas yang diakui
+
+- **Enumerasi akun kini terbuka di pintu yang TAK butuh password** — lebih
+  murah daripada di `/login`, dan penahannya hanya batas laju
+  (`batasRegister` 20/IP/jam, `batasVerifikasiKirim`). Keputusan pemilik,
+  ditulis di kontrak dan di komentar rutenya supaya tak ada yang
+  "memperbaikinya" balik tanpa tahu apa yang ia batalkan.
+- `/forgot-password` TIDAK ikut, dan itu batas yang disengaja: ia bisa
+  ditembak tanpa modal apa pun. Dipaku dua lengan §299 + spec peramban.
+- Tak ada Flutter di sini: perubahan ponsel diuji CI-nya; cermin Python
+  dijalankan lebih dulu.
+- Layar daftar web belum punya lengan peramban untuk cabang baru ini — spec
+  `pos/lupa-password` menyentuh alur lain. Dicatat, tak diklaim.
+
+### Gerbang
+
+- Server (`gerbang-sebab.sh`: typecheck → DB nol → boot → seed → verify-api →
+  vitest → invarian → **e2e**): typecheck hijau, **verify-api 3.603 / 0**
+  (3.588 + 13 lengan §299, minus dua lengan lama yang ditulis ulang) dengan log
+  UTUH (3.966 baris, 0 NUL), **vitest 248 berkas / 3.062 uji** (+1 berkas
+  `sebab-daftar-utuh`), **invarian 27 / 0**, **e2e 48 lolos**.
+- **Jalan PERTAMA gerbang ini MERAH — 9 kegagalan, dan ketiganya tuduhan yang
+  tepat.** (1) TIGA lengan lama memaku netralitas yang keputusan pemilik justru
+  cabut: `PASANGAN §284: balasannya TETAP identik`, `PASANGAN §285: password
+  SALAH → balasan identik dengan email yang belum pernah ada`, dan `§213 …
+  pesannya IDENTIK di ketiganya`. Ketiganya DITULIS ULANG, bukan dihapus:
+  bentuk balasannya harus tetap sama (kunci & status), bedanya HANYA
+  `sebab`+`message`, dan keduanya dari kosakata kontrak — kalau ada yang lain
+  berbeda, itu kebocoran baru yang bukan bagian dari keputusan siapa pun.
+  (2) LIMA lengan §299 kena `batasRegister` 20/IP/jam: komentar skripnya
+  sendiri sudah memperingatkan ia "berjalan TEPAT DI TEPI kuota itu", dan §299
+  menambah empat pendaftaran. Diberi `X-Forwarded-For` sendiri — pola yang
+  §284/§285 sudah pakai untuk alasan yang sama persis.
+- Ponsel: commit `0c1bfee`, **CI #53 hijau** (run 33999760583).
+- **Tak ada rilis.**
+
 ## Struk kasir: bentuk yang tak pernah ditulis siapa pun, biaya yang bocor lewat pintu kasir, dan tiga sapuan yang buta terhadap satu-satunya pulau camelCase — server + web + ponsel — 2026-09-05
 
 **Vena.** Dipilih pemilik dari empat tawaran: "struk kasir ke kontrak". Butir
@@ -12676,13 +12801,14 @@ berlaku di situ).
       (`email_tak_dikenal` → `RegisterPage(emailAwal:)`). Temuan di gerbang:
       fikstur status BUTA terhadap objek `as const` di shared — sumber ke-4
       `konst:` ditambahkan, literal ponselnya kini terikat dua arah
-- [ ] **`/register` & `/resend-verification` DIRAPATKAN ke `/login`** —
-      KEPUTUSAN PEMILIK 2026-09-05 (ditanyakan sesudah menggantung dua
-      putaran). Keduanya menyebut sebab terstruktur seperti `/login`, dengan
-      `sebab` berpasangan satu-satu dengan kalimatnya. Konsekuensinya ditulis
-      di kontrak apa adanya: enumerasi akun melebar ke pintu yang TAK butuh
-      password, tak seperti `/login`. Menyentuh rute, kontrak, changelog,
-      ponsel — vena tersendiri
+- [x] ~~**`/register` & `/resend-verification` DIRAPATKAN ke `/login`**~~ —
+      SELESAI 2026-09-05, lihat entri "Tiga belas keadaan, satu jawaban" di
+      atas. Butirnya menggantung dua putaran sebagai keputusan pemilik;
+      ditanyakan dengan biayanya lebih dulu, dijawab "rapatkan", dikerjakan
+      hari itu juga. 13 keadaan → 13 sebab; kosakata memakai ulang
+      `SEBAB_LOGIN` (3 nilai identik). Temuan di jalan: servernya sudah
+      menamai ketiga belasnya untuk log internal, dan KEDUA layar daftar
+      mendorong ke layar kode tanpa syarat
 - [x] ~~**`StokMasukPage`/`StokMasukRow` masih DTO lokal halaman**~~ — SELESAI
       2026-09-05, lihat entri "Baris pengadaan yang tipenya tak pernah dilihat
       siapa pun" di atas. 55 kunci/baris terukur HTTP; 3 tak dideklarasikan
@@ -12711,6 +12837,15 @@ berlaku di situ).
       ketujuhnya bernama di kontrak dan tercatat "belum dibaca" di ponsel,
       jadi biayanya kini terlihat. Komentar `kolom-publik.ts` sendiri sudah
       menyatakan ini butuh pengukurannya sendiri
+- [ ] **Layar daftar web belum punya lengan peramban untuk cabang baru** —
+      `SignupPage` kini bercabang pada tiga sebab (menahan layar kode) dan
+      menawarkan "Masuk dengan email ini →"; yang menjaganya penjaga STATIS +
+      §299, bukan peramban. Spec `pos`/`lupa-password` menyentuh alur lain.
+      Kelas yang sama dengan butir `/pembelian` di bawah, dan penahannya sama:
+      kuota login e2e
+- [ ] **`DaftarResult` masih tipe lokal web** — ia kini membawa `sebab`
+      (`SebabDaftar` dari kontrak), tapi bentuknya sendiri belum di
+      `types.ts`; satu dari 12 yang tersisa di butir DTO di atas
 - [ ] **Pemindai `bentuk-balasan` berlingkup SATU FUNGSI** — ATURAN A memaku
       `MAKS_UTANG = 0` ("balasan tak boleh dibentuk `returning()` telanjang"),
       tapi `test/util/bentuk-balasan.ts:46-49` tak mengikuti nilai balik

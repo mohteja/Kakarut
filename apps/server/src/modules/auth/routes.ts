@@ -29,7 +29,16 @@ import { suratReset, suratResetTeks, suratVerifikasi, suratVerifikasiTeks } from
 import { autoTerimaUndanganEmail } from "../onboarding/service";
 import { GUEST } from "../../seed/guest";
 import { buatSesi, companyDto } from "./session";
-import { PESAN_LOGIN, SEBAB_LOGIN, type CompanyDto, type SebabLogin, type SesiDto } from "@kakarut/shared";
+import {
+  PESAN_DAFTAR,
+  PESAN_LOGIN,
+  SEBAB_DAFTAR,
+  SEBAB_LOGIN,
+  type CompanyDto,
+  type SebabDaftar,
+  type SebabLogin,
+  type SesiDto,
+} from "@kakarut/shared";
 
 /**
  * Penolakan masuk yang membawa SEBAB terstruktur, bukan cuma kalimat.
@@ -247,7 +256,7 @@ async function kirimKodeVerifikasi(
   email: string,
   nama: string,
   baseUrl: string,
-): Promise<{ kode: string; url: string } | undefined> {
+): Promise<{ terkirim: boolean; dev?: { kode: string; url: string } }> {
   const kode = kodeVerifikasi();
   /*
    * DUA JALAN MASUK UNTUK SATU PENERBITAN — kode 6 angka DAN tautan 64-hex.
@@ -342,7 +351,7 @@ async function kirimKodeVerifikasi(
      * ditunggu memang tak pernah berangkat.
      */
     await catatTakDicoba("verifikasi-email", email, "jarak_kirim_ulang");
-    return undefined;
+    return { terkirim: false };
   }
   /*
    * KEGAGALANNYA TAK DIPULANGKAN KE PEMINTA, dan itu keputusan, bukan
@@ -367,9 +376,9 @@ async function kirimKodeVerifikasi(
     "verifikasi-email",
   );
   if (!(await emailTerkonfigurasi()) && process.env.NODE_ENV !== "production") {
-    return { kode, url };
+    return { terkirim: true, dev: { kode, url } };
   }
-  return undefined;
+  return { terkirim: true };
 }
 
 export const authRoutes = new Hono<AppEnv>()
@@ -464,6 +473,26 @@ export const authRoutes = new Hono<AppEnv>()
       .from(users)
       .where(eq(users.email, email));
     let dev: { kode: string; url: string } | undefined;
+    /*
+     * SEBAB DISEBUTKAN — kelanjutan keputusan pemilik yang membuka `/login`
+     * (2026-09-03), diminta untuk pintu ini pada 2026-09-05 sesudah biayanya
+     * disampaikan. Yang ganjil dan jadi pemicunya: rantai di bawah SUDAH
+     * menamai tiap keadaan dan menuliskannya lewat `catatTakDicoba` — hanya
+     * kliennya yang dibutakan, dan komentar di `kirimKodeVerifikasi` bahkan
+     * menyebut akibatnya ("satu-satunya tempat orang bisa melihat bahwa surat
+     * yang ditunggu memang tak pernah berangkat").
+     *
+     * BIAYANYA, ditulis supaya tak ada yang membatalkannya tanpa tahu: pintu
+     * ini TAK BUTUH PASSWORD, jadi enumerasi di sini lebih murah daripada di
+     * `/login` — siapa pun yang tahu sebuah alamat bisa tahu apakah ia punya
+     * akun. Penahannya `batasRegister` (20/IP/jam) dan
+     * `batasVerifikasiKirim`, bukan lagi kerahasiaan jawabannya.
+     *
+     * TIDAK ikut berubah: `/forgot-password` tetap netral (dipaku
+     * `lupa-password.spec.ts`), dan statusnya tetap 200 — yang berubah
+     * kalimat + `sebab`, persis pola `/login` yang tetap 401.
+     */
+    let sebab: SebabDaftar = SEBAB_DAFTAR.kodeDikirim;
     if (!existing) {
       const passwordHash = bcrypt.hashSync(password, 10);
       /*
@@ -494,13 +523,25 @@ export const authRoutes = new Hono<AppEnv>()
           if (bentrokUnikPada(e, "users_email_unique")) return null;
           throw e;
         });
-      if (user) dev = await kirimKodeVerifikasi(user.id, email, nama, appBaseUrl(c));
-      else await catatTakDicoba("verifikasi-email", email, "balapan_pendaftaran");
+      if (user) {
+        const kirim = await kirimKodeVerifikasi(user.id, email, nama, appBaseUrl(c));
+        dev = kirim.dev;
+        sebab = kirim.terkirim ? SEBAB_DAFTAR.kodeDikirim : SEBAB_DAFTAR.jarakKirimUlang;
+      } else {
+        await catatTakDicoba("verifikasi-email", email, "balapan_pendaftaran");
+        // Yang kalah balapan tak menulis apa pun — tapi kode dari PEMENANGNYA
+        // memang sedang berangkat ke alamat itu, jadi "dikirim ulang" adalah
+        // kalimat yang benar bagi orang yang menunggunya.
+        sebab = SEBAB_DAFTAR.kodeDikirimUlang;
+      }
     } else if (existing.deletedAt) {
       await catatTakDicoba("verifikasi-email", email, "akun_terhapus");
+      sebab = SEBAB_DAFTAR.terhapus;
     } else if (!existing.isActive) {
       await catatTakDicoba("verifikasi-email", email, "akun_nonaktif");
+      sebab = SEBAB_DAFTAR.nonaktif;
     } else if (existing.emailVerifiedAt) {
+      sebab = SEBAB_DAFTAR.terverifikasi;
       // Sudah terverifikasi: jalannya MASUK, bukan verifikasi ulang. Tak ada
       // surat yang berguna untuk dikirim — tapi keputusannya dicatat, sebab
       // dari luar ia tampak persis seperti pendaftaran yang berhasil.
@@ -554,7 +595,8 @@ export const authRoutes = new Hono<AppEnv>()
        *
        * Yang dihapus cuma perangkapnya.
        */
-      await kirimKodeVerifikasi(existing.id, email, existing.nama, appBaseUrl(c));
+      const kirim = await kirimKodeVerifikasi(existing.id, email, existing.nama, appBaseUrl(c));
+      sebab = kirim.terkirim ? SEBAB_DAFTAR.kodeDikirimUlang : SEBAB_DAFTAR.jarakKirimUlang;
     }
     // Respons NETRAL & IDENTIK untuk email baru maupun yang sudah terdaftar →
     // menutup total celah enumerasi akun (di produksi dev_verify_kode tak pernah
@@ -562,9 +604,8 @@ export const authRoutes = new Hono<AppEnv>()
     // klik tautan verifikasi di email dulu (mengaktifkan akun).
     return c.json({
       ok: true,
-      message:
-        "Jika email valid, kami telah mengirim KODE verifikasi 6 digit. Cek email Anda " +
-        `dan masukkan kodenya (berlaku ${VERIFIKASI_MENIT} menit).`,
+      sebab,
+      message: PESAN_DAFTAR[sebab],
       // Ikut dipulangkan di sini supaya layar kode langsung menampilkan hitung
       // mundurnya: pendaftaran BARU SAJA mengirim kode, jadi tombol "kirim
       // ulang" yang tampak siap ditekan akan ditolak diam-diam oleh jaraknya.
@@ -848,6 +889,8 @@ export const authRoutes = new Hono<AppEnv>()
       const { email } = c.req.valid("json");
       const [user] = await db.select().from(users).where(eq(users.email, email));
       let dev: { kode: string; url: string } | undefined;
+      // Sebab disebutkan sejak 2026-09-05 — alasan & biayanya di `/register`.
+      let sebab: SebabDaftar = SEBAB_DAFTAR.kodeDikirimUlang;
       /*
        * EMPAT CABANG DIAM, dan keempatnya dulu tak meninggalkan jejak apa pun.
        * Yang terakhir paling mahal: sekali `emailVerifiedAt` terisi, alamat ini
@@ -856,14 +899,23 @@ export const authRoutes = new Hono<AppEnv>()
        */
       if (!user) {
         await catatTakDicoba("verifikasi-email", email, "email_tak_dikenal");
+        sebab = SEBAB_DAFTAR.takTerdaftar;
       } else if (user.deletedAt) {
         await catatTakDicoba("verifikasi-email", email, "akun_terhapus");
+        sebab = SEBAB_DAFTAR.terhapus;
       } else if (!user.isActive) {
         await catatTakDicoba("verifikasi-email", email, "akun_nonaktif");
+        sebab = SEBAB_DAFTAR.nonaktif;
       } else if (user.emailVerifiedAt) {
         await catatTakDicoba("verifikasi-email", email, "akun_terverifikasi");
+        sebab = SEBAB_DAFTAR.terverifikasi;
       } else {
-        dev = await kirimKodeVerifikasi(user.id, email, user.nama, appBaseUrl(c));
+        const kirim = await kirimKodeVerifikasi(user.id, email, user.nama, appBaseUrl(c));
+        dev = kirim.dev;
+        // Inilah keadaan yang komentar `jarak_kirim_ulang` sebut "tak bisa
+        // dibedakan dari terkirim": kini bisa, dan `retry_after_detik` di
+        // sebelahnya menyebut sisa jedanya.
+        sebab = kirim.terkirim ? SEBAB_DAFTAR.kodeDikirimUlang : SEBAB_DAFTAR.jarakKirimUlang;
       }
       /*
        * `retry_after_detik` dipulangkan SELALU dan nilainya TETAP — email yang
@@ -873,6 +925,8 @@ export const authRoutes = new Hono<AppEnv>()
        */
       return c.json({
         ok: true,
+        sebab,
+        message: PESAN_DAFTAR[sebab],
         retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
         ...(dev ? { dev_verify_kode: dev.kode, dev_verify_url: dev.url } : {}),
       });

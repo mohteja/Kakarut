@@ -17,10 +17,13 @@
  * SEBELUM layar ini — `/register` dengan password yang cocok kini memulangkan
  * sesi, dan orangnya langsung dimasukkan.
  *
- * Maka kalimat di sini kembali satu arah. Satu-satunya keadaan yang masih tak
- * terwakili — akun aktif + password SALAH — memang tak boleh dibedakan dari
- * email baru (anti-enumerasi), dan pemegangnya punya jalan yang selalu ada di
- * bawah layar: "Sudah punya akun? Masuk".
+ * Maka kalimat di sini kembali satu arah — dan sejak 2026-09-05 ia dipakai
+ * HANYA untuk keadaan yang memang mengirim kode. Paragraf ini dulu berbunyi
+ * "akun aktif + password SALAH memang tak boleh dibedakan dari email baru
+ * (anti-enumerasi)"; pemilik repo mencabut kendala itu pada tanggal tersebut,
+ * sesudah biayanya disampaikan. `/register` kini menyebut `sebab`, dan
+ * `SignupPage` bercabang atasnya: akun aktif → kalimat servernya + tautan
+ * "Masuk dengan email ini", bukan layar kode untuk kode yang takkan datang.
  *
  * Ditaruh di satu berkas karena bentuk "tiga salinan yang pelan-pelan
  * menyimpang" sudah menggigit di jalur yang sama: `VerifikasiEmailPage`

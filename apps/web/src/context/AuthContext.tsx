@@ -1,3 +1,4 @@
+import type { SebabDaftar } from "@kakarut/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
@@ -19,6 +20,12 @@ import { hapusLokal } from "../lib/simpanan";
  */
 export interface DaftarResult {
   ok: boolean;
+  /**
+   * KODE keadaan — sejak 2026-09-05 kedua pintu menyebutkannya (keputusan
+   * pemilik; sebelumnya tiga belas keadaan dijawab satu kalimat netral).
+   * Yang bercabang WAJIB memakai ini, bukan mencocokkan `message`.
+   */
+  sebab?: SebabDaftar;
   message?: string;
   /** Hanya di dev (email belum diatur) — kode verifikasi 6 digit langsung. */
   dev_verify_kode?: string;

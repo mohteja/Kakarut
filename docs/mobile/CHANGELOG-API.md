@@ -25,6 +25,52 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 `/register` & `/resend-verification` kini MENYEBUT sebabnya — tiga belas keadaan berhenti dijawab satu kalimat
+
+🟡 **PERLU DICEK** — bentuknya BERTAMBAH (`sebab`, `message`), tak ada yang
+hilang atau berubah tipe. Status tetap **200**, `ok` tetap `true`,
+`retry_after_detik` tetap. Aplikasi yang mengabaikan medan baru tetap jalan
+persis seperti sekarang — tapi ia akan terus menampilkan layar kode untuk
+keadaan yang tak mengirim kode, dan itulah yang perlu dicek.
+
+**Yang berubah.** Kedua pintu memulangkan `sebab` (kode untuk mesin) dan
+`message` (kalimat untuk manusia). Tujuh nilai, kosakata `SEBAB_DAFTAR` —
+ketiganya yang keadaannya sama dengan `/login` bernilai SAMA:
+
+| `sebab` | artinya | ada kode yang berangkat? |
+| --- | --- | --- |
+| `kode_dikirim` | akun baru dibuat | ya |
+| `kode_dikirim_ulang` | akun sudah ada & belum terverifikasi | ya |
+| `jarak_kirim_ulang` | jarak 120 detik belum lewat | **tidak** — kode LAMA masih berlaku |
+| `email_tak_dikenal` | tak ada akun (hanya `/resend-verification`) | tidak |
+| `akun_terhapus` | akun sudah dihapus | tidak |
+| `akun_nonaktif` | dinonaktifkan admin | tidak |
+| `akun_terverifikasi` | sudah aktif — jalannya MASUK | tidak |
+
+**Kerja di ponsel — sudah dikerjakan di `kakarut-mobile` putaran yang sama.**
+Sampai 2026-09-05 layar daftar mendorong ke layar kode **tanpa syarat**,
+termasuk untuk akun yang sudah aktif atau dinonaktifkan — menyuruh orang
+menunggu surat yang secara struktural tak akan berangkat. Kini
+`kSebabTanpaKode` (empat nilai) menahan layar kode dan kalimat servernya
+ditampilkan apa adanya; `akun_terverifikasi` menawarkan **"Masuk dengan email
+ini →"**, cermin tombol "Daftar dengan email ini" yang layar masuk sudah punya.
+`jarak_kirim_ulang` **tidak** termasuk: kode lamanya masih berlaku, jadi layar
+kode memang tempat yang benar.
+
+**KEPUTUSAN SADAR PEMILIK REPO**, kelanjutan keputusan `/login` (2026-09-03),
+dan biayanya lebih besar di sini: pintu ini **tak butuh password**, jadi siapa
+pun yang tahu sebuah alamat bisa tahu apakah alamat itu punya akun. Penahannya
+kini hanya batas laju. `POST /auth/forgot-password` **TIDAK ikut** dan tetap
+netral. Yang bercabang wajib memakai `sebab`, bukan mencocokkan `message` —
+kalimatnya bisa diperbaiki kapan saja.
+
+Penjaga di server: `sebab-daftar-utuh.test.ts` (kosakata berpasangan satu-satu
+dengan kalimatnya; tiga nilai memakai ulang `SEBAB_LOGIN`; **tiap keadaan yang
+DICATAT ke log internal juga sampai ke klien**; `/forgot-password` dipastikan
+tak ikut) dan verify-api §299 (13 lengan dari kawat).
+
+---
+
 ## 🟡 Struk penjualan bernama di Lampiran A — dan BIAYA berhenti terkirim ke kasir lewat `POST /penjualan`
 
 🟡 **PERLU DICEK** — ini perubahan **di kawat**, bukan sekadar penamaan tipe

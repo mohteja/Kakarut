@@ -11668,8 +11668,14 @@ DR213=$(balap213 3 "" /auth/register "{\"nama\":\"Daftar 213\",\"email\":\"$R213
 cek "INTI: 3 pendaftaran beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DR213")"
 cek "INTI: semuanya 200 — tak ada 409 yang membocorkan email mana yang ada" "V == 3" \
   "$(kode213 "$DR213" 200)"
-cek "…dan pesannya IDENTIK di ketiganya (kontrak anti-enumerasi)" "V == 1" \
-  "$(cat "$DR213"/b* | jq -s '[.[]|.message]|unique|length')"
+# Asersi ini DULU berbunyi "pesannya IDENTIK di ketiganya (kontrak
+# anti-enumerasi)". Netralitas itu dicabut KEPUTUSAN PEMILIK 2026-09-05: ketiga
+# balasan kini menyebut `sebab`, dan yang menang balapan berbeda dari yang
+# kalah. Yang tetap dijaga — dan itu maksud aslinya — TAK ADA 409 dan tak ada
+# kalimat karangan: tiap balasan memakai kosakata kontrak.
+sebab213(){ cat "$1"/b* | jq -r '.sebab // empty' 2>/dev/null | grep -cx 'kode_dikirim\|kode_dikirim_ulang\|jarak_kirim_ulang' || true; }
+cek "…dan ketiganya memakai kosakata kontrak (bukan kalimat rakitan)" "V == 3" \
+  "$(sebab213 "$DR213")"
 
 # ── PASANGAN: jalur BERURUTAN tak berubah perilakunya ──────────────────────
 # Terjemahan galat tak boleh menggeser jawaban yang selama ini benar.
@@ -16535,13 +16541,22 @@ cek "§284 barisnya BARU dan menyebut percobaan, bukan keputusan diam" "V == 1" 
       tak_dicoba\|akun_*|tak_dicoba\|jarak_kirim_ulang|TAK-ADA-BARIS) false;; *) true;; esac \
       && echo 1 || echo 0)"
 
-# ENUMERASI TETAP TERTUTUP — asersi yang MENAHAN pengetatan di atas. Balasan
-# untuk email yang sudah ada harus tetap sama persis dengan balasan untuk email
-# baru; `dev_verify_kode` dibuang lebih dulu karena ia memang hanya ada di dev.
-BADAN284A=$(echo "$R284A" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
-BADAN284B=$(echo "$R284B" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
-cek "PASANGAN §284: balasannya TETAP identik (enumerasi tak dibuka)" "V == 1" \
+# ENUMERASI: asersi ini DULU berbunyi "balasannya TETAP identik (enumerasi tak
+# dibuka)" dan MENAHAN pengetatan di atas. KEPUTUSAN PEMILIK 2026-09-05
+# mencabut netralitas itu — biayanya disampaikan lebih dulu (pintu ini tak
+# butuh password, jadi enumerasi di sini lebih murah daripada di `/login`).
+# Yang menggantikannya BUKAN penghapusan: bentuk balasannya harus tetap SAMA
+# (kunci yang sama, status yang sama) dan bedanya HANYA `sebab` + `message`,
+# keduanya dari kosakata kontrak. Kalau yang berbeda selain itu — panjang
+# larik, medan tambahan, status — itu kebocoran baru yang bukan bagian dari
+# keputusan siapa pun.
+BADAN284A=$(echo "$R284A" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url, .sebab, .message)')
+BADAN284B=$(echo "$R284B" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url, .sebab, .message)')
+cek "PASANGAN §284: bedanya HANYA sebab+message — sisanya identik" "V == 1" \
   "$([ "$BADAN284A" = "$BADAN284B" ] && [ -n "$BADAN284A" ] && echo 1 || echo 0)"
+cek "PASANGAN §284: kedua sebabnya dari kosakata kontrak" "V == 2" \
+  "$(printf '%s\n%s\n' "$(echo "$R284A" | jq -r '.sebab // empty')" "$(echo "$R284B" | jq -r '.sebab // empty')" \
+     | grep -cx 'kode_dikirim\|kode_dikirim_ulang\|jarak_kirim_ulang\|email_tak_dikenal\|akun_terhapus\|akun_nonaktif\|akun_terverifikasi')"
 cek "PASANGAN §284: daftar ulang tak membocorkan kode, di dev sekalipun" "V == 1" \
   "$(echo "$R284B" | jq '(.dev_verify_kode == null) | if . then 1 else 0 end')"
 
@@ -16603,11 +16618,14 @@ cek "§285 …dan balasannya berkata akun sudah aktif" "V == 1" \
 cek "§285 …dan keputusan 'tak dikirimi' tetap tercatat" "V == 1" \
   "$([ "$(jejak284 "$E285")" = "tak_dicoba|akun_terverifikasi" ] && echo 1 || echo 0)"
 
-# (b) PASSWORD SALAH → NETRAL, identik dengan email yang belum pernah ada.
-# Inilah yang menahan pengetatan di atas: yang dibocorkan /register harus TEPAT
-# SAMA dengan yang dibocorkan /login — keberadaan akun hanya terungkap kepada
-# pemegang password yang benar. Kalau balasan ini berbeda dari email baru,
-# celah enumerasi yang dijaga susah payah terbuka kembali lewat pintu baru.
+# (b) PASSWORD SALAH → kini MENYEBUT bahwa akunnya sudah terdaftar & aktif.
+# Asersi di bawah DULU menuntut balasan ini identik dengan email yang belum
+# pernah ada, dengan alasan "yang dibocorkan /register harus TEPAT SAMA dengan
+# yang dibocorkan /login". KEPUTUSAN PEMILIK 2026-09-05 mencabut syarat itu:
+# kedua pintu daftar kini menyebut sebabnya, dan biayanya (enumerasi di pintu
+# tanpa password) disampaikan lebih dulu. Yang diuji sekarang justru
+# PEMBEDAANNYA — dan bahwa statusnya tetap 200, sehingga yang berubah hanya
+# badan, bukan bentuk protokolnya.
 R285S=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
   -H "$XFF284" -d "{\"nama\":\"Uji 285\",\"email\":\"$E285\",\"password\":\"PasswordSalah999!\"}")
 E285X="baru285.$(date +%s)@contoh.id"
@@ -16615,8 +16633,11 @@ R285X=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/
   -H "$XFF284" -d "{\"nama\":\"Uji 285x\",\"email\":\"$E285X\",\"password\":\"Rahasia123!\"}")
 BADAN285S=$(echo "$R285S" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
 BADAN285X=$(echo "$R285X" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
-cek "PASANGAN §285: password SALAH → balasan identik dengan email yang belum pernah ada" "V == 1" \
-  "$([ "$BADAN285S" = "$BADAN285X" ] && [ -n "$BADAN285S" ] && echo 1 || echo 0)"
+cek "PASANGAN §285: password SALAH → akun_terverifikasi; email BARU → kode_dikirim" "V == 1" \
+  "$([ "$(echo "$R285S" | jq -r '.sebab // empty')" = "akun_terverifikasi" ] &&
+     [ "$(echo "$R285X" | jq -r '.sebab // empty')" = "kode_dikirim" ] && echo 1 || echo 0)"
+cek "PASANGAN §285: …dan bedanya HANYA sebab+message (bentuknya tetap sama)" "V == 1" \
+  "$([ "$(echo "$BADAN285S" | jq -Sc 'del(.sebab, .message)')" = "$(echo "$BADAN285X" | jq -Sc 'del(.sebab, .message)')" ] && echo 1 || echo 0)"
 cek "PASANGAN §285: password salah tak dapat sesi maupun kode" "V == 1" \
   "$(echo "$R285S" | jq '((.token == null) and (.dev_verify_kode == null)) | if . then 1 else 0 end')"
 
@@ -17552,6 +17573,69 @@ cek "§298 GET /:id owner: tiap items[].hppSatuan angka" "V == 1" \
   "$(jq -r '[.items[].hppSatuan]|all(type == "number")|if . then 1 else 0 end' <<<"$G298O")"
 cek "§298 POST dan GET(kasir) berbentuk IDENTIK — satu penulis, dibuktikan dari kawat" "V == 0" \
   "$(selisih296 "$(jq -r '[(keys[]),(.sale|keys[]|"sale."+.),(.items[0]|keys[]|"item."+.)]|.[]' <<<"$R298")" "$(jq -r '[(keys[]),(.sale|keys[]|"sale."+.),(.items[0]|keys[]|"item."+.)]|.[]' <<<"$G298K" | sort -u)")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §299 — /register & /resend-verification MENYEBUT SEBABNYA (keputusan pemilik)
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 kedua pintu membalas SATU jawaban untuk tiga belas keadaan,
+# padahal servernya sendiri sudah menamai tiap keadaan lewat `catatTakDicoba`.
+# Pemilik meminta keduanya dirapatkan ke `/login`; biayanya (enumerasi akun di
+# pintu yang TAK butuh password) disampaikan lebih dulu dan pilihannya tetap.
+# Statisnya `sebab-daftar-utuh.test.ts`. Emailnya berakhiran @example.com dan
+# unik per jalan supaya tak menabrak akun uji lain.
+# IP SENDIRI. `batasRegister` berkuota 20/IP/jam dan skrip ini sudah memakai
+# hampir semuanya — komentar di kepala `daftar_verif` sudah memperingatkannya
+# ("berjalan TEPAT DI TEPI kuota itu"), dan §299 versi pertama menabraknya:
+# KELIMA lengan yang menyentuh `/register` dijawab 429 sementara lengan
+# `/resend-verification` di sebelahnya hijau. Pola `X-Forwarded-For` ini
+# dipinjam dari §284/§285, yang sudah memakainya untuk alasan yang sama.
+XFF299="X-Forwarded-For: 203.0.113.99"
+reg299() { curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -H "$XFF299" -d "$1"; }
+rs299() { curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' -H "$XFF299" -d "$1"; }
+E299="vena299-$(date +%s)@example.com"
+R299A=$(reg299 "{\"nama\":\"Uji 299\",\"email\":\"$E299\",\"password\":\"Rahasia299!\"}")
+cek "§299 email BARU → sebab kode_dikirim" "V == 1" \
+  "$(jq -r 'if .sebab == "kode_dikirim" then 1 else 0 end' <<<"$R299A")"
+cek "§299 balasan daftar membawa message yang tak berpagar 'Jika email valid'" "V == 1" \
+  "$(jq -r 'if (.message|type)=="string" and (.message|test("Jika email valid")|not) then 1 else 0 end' <<<"$R299A")"
+# Daftar ULANG alamat yang sama: kodenya BARU saja dikirim, jadi jaraknya menahan.
+R299B=$(reg299 "{\"nama\":\"Uji 299\",\"email\":\"$E299\",\"password\":\"Rahasia299!\"}")
+cek "§299 daftar ULANG (jarak menahan) → jarak_kirim_ulang, bukan 'kode dikirim'" "V == 1" \
+  "$(jq -r 'if .sebab == "jarak_kirim_ulang" then 1 else 0 end' <<<"$R299B")"
+cek "§299 akun TERVERIFIKASI + password salah → akun_terverifikasi" "V == 1" \
+  "$(jq -r 'if .sebab == "akun_terverifikasi" then 1 else 0 end' \
+     <<<"$(reg299 "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"SalahSekali299!\"}")")"
+cek "§299 akun TERVERIFIKASI + password BENAR tetap memulangkan SESI (tak berubah)" "V == 1" \
+  "$(jq -r 'if (.token|type)=="string" and .sudah_aktif == true then 1 else 0 end' \
+     <<<"$(reg299 "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")")"
+cek "§299 kirim ulang: email TAK DIKENAL → email_tak_dikenal" "V == 1" \
+  "$(jq -r 'if .sebab == "email_tak_dikenal" then 1 else 0 end' \
+     <<<"$(rs299 "{\"email\":\"tak-ada-299@example.com\"}")")"
+cek "§299 kirim ulang: akun TERVERIFIKASI → akun_terverifikasi" "V == 1" \
+  "$(jq -r 'if .sebab == "akun_terverifikasi" then 1 else 0 end' \
+     <<<"$(rs299 "{\"email\":\"$OWNER_EMAIL\"}")")"
+cek "§299 kirim ulang: belum verifikasi & jarak menahan → jarak_kirim_ulang + retry_after" "V == 1" \
+  "$(jq -r 'if .sebab == "jarak_kirim_ulang" and (.retry_after_detik|type)=="number" then 1 else 0 end' \
+     <<<"$(rs299 "{\"email\":\"$E299\"}")")"
+cek "§299 statusnya TETAP 200 & ok tetap true — yang berubah kalimat + sebab" "V == 1" \
+  "$([ "$(status_code_body "" POST /auth/resend-verification "{\"email\":\"$OWNER_EMAIL\"}")" = "200" ] &&
+     [ "$(jq -r '.ok' <<<"$(rs299 "{\"email\":\"$OWNER_EMAIL\"}")")" = "true" ] && echo 1 || echo 0)"
+# Tiap sebab yang dipulangkan HARUS ada di kosakata kontrak — kalimat bebas
+# ketikan akan pelan-pelan jadi prosa yang tak bisa dicabangkan siapa pun.
+KOSA299=$(awk '/^export const SEBAB_DAFTAR = \{/{f=1;next} f&&/^\} as const;/{exit} f&&/:/{gsub(/.*: *"/,"");gsub(/",?$/,"");print}' packages/shared/src/constants.ts | sort -u)
+cek "§299 premis: kosakata SEBAB_DAFTAR terbaca dari shared (7 nilai)" "V == 7" "$(echo "$KOSA299" | grep -c .)"
+cek "§299 tiap sebab yang dipulangkan ada di kosakata kontrak" "V == 0" \
+  "$(comm -23 <(printf '%s\n' \
+      "$(jq -r '.sebab // empty' <<<"$R299A")" "$(jq -r '.sebab // empty' <<<"$R299B")" \
+      "$(jq -r '.sebab // empty' <<<"$(rs299 "{\"email\":\"$OWNER_EMAIL\"}")")" \
+      | sort -u) <(printf '%s\n' "$KOSA299") | bocorkan)"
+# `/forgot-password` TIDAK ikut — netralitasnya keputusan terpisah, dan itulah
+# yang membuat "dirapatkan ke /login" berhenti di dua pintu, bukan tiga.
+cek "§299 /forgot-password TETAP netral: email dikenal & tidak dijawab identik" "V == 1" \
+  "$([ "$(api "" POST /auth/forgot-password "{\"email\":\"$OWNER_EMAIL\"}" | jq -S 'del(.dev_reset_url)|keys')" \
+     = "$(api "" POST /auth/forgot-password '{"email":"tak-ada-299b@example.com"}' | jq -S 'del(.dev_reset_url)|keys')" ] && echo 1 || echo 0)"
+cek "§299 /forgot-password tak membawa medan sebab sama sekali" "V == 0" \
+  "$(api "" POST /auth/forgot-password "{\"email\":\"$OWNER_EMAIL\"}" | jq '[paths|.[0]]|map(select(.=="sebab"))|length')"
 
 if [ "$FAIL" -gt 0 ]; then
   echo
