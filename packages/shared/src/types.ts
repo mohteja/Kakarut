@@ -23,6 +23,56 @@ export interface AuthUser {
   branch_id: string | null;
 }
 
+/** Mode aplikasi yang diturunkan dari `plan` — Lite menyembunyikan fitur Pro. */
+export type ModeCompany = "lite" | "pro";
+
+/**
+ * BARIS PERUSAHAAN sebagaimana dipulangkan `GET /api/company` — [any], jadi
+ * KASIR pun menerimanya utuh (terukur 2026-09-06: kuncinya identik dengan
+ * owner).
+ *
+ * BERBEDA dari `CompanyDto`, dan bedanya bukan kebetulan: `CompanyDto` adalah
+ * bagian `company` dari SESI (9 medan, snake_case, dirakit `companyDto`),
+ * sedangkan yang ini baris tabel apa adanya — camelCase, 21 kolom
+ * (`KOLOM_COMPANY`) + `mode` yang diturunkan dari `plan`. Keduanya hidup
+ * berdampingan hari ini; menyatukannya perubahan kawat tersendiri.
+ *
+ * Sampai 2026-09-06 bentuk ini tak pernah dideklarasikan di kontrak, dan web
+ * mengetiknya ulang TIGA kali — `Company` (15 medan, PerusahaanPage),
+ * `CompanyStruk` (6, ReceiptModal), `CompanyMode` (1, useCompanyMode) —
+ * masing-masing memilih medan yang ia butuhkan sendiri. Ponsel mencatat lima
+ * kuncinya sebagai hantu dan sengaja membaca DUA ejaan
+ * (`json['logoUrl'] ?? json['logo_url']`) "agar setelan struk tak diam-diam
+ * kosong bila server berubah bentuk" — pertahanan yang lahir justru karena
+ * bentuknya tak pernah bernama.
+ */
+export interface CompanyRow {
+  id: string;
+  nama: string;
+  metodeHpp: MetodeHpp;
+  slug: string;
+  alamat: string | null;
+  telepon: string | null;
+  logoUrl: string | null;
+  timezone: string;
+  pb1Enabled: boolean;
+  pb1Rate: number;
+  receiptFooter: string | null;
+  receiptShowAlamat: boolean;
+  diskonMaksPersen: number;
+  blokirJualMinus: boolean;
+  /** target omzet bulanan; `null` = belum diatur */
+  targetPenjualan: number | null;
+  foodCostMaks: number;
+  plan: string;
+  planExpiresAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** DITURUNKAN dari `plan` (`modeDariPlan`), bukan kolom tabel. */
+  mode: ModeCompany;
+}
+
 /**
  * PERUSAHAAN SEBAGAIMANA DILIHAT KLIEN — bagian `company` dari sesi
  * (`POST /auth/login`, `/register` bila akunnya sudah aktif, `/onboarding/*`,

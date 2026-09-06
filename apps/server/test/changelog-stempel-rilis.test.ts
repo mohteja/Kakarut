@@ -47,6 +47,9 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-06): baris perusahaan masuk Lampiran A — nol
+  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## ⚪️ `GET /company` akhirnya bernama: `CompanyRow` (22 kunci) — tak ada perubahan di kawat",
   // BELUM DI-MERGE (2026-09-05): kedua pintu daftar menyebut sebabnya
   // (keputusan pemilik); menunggu rilis berikutnya bersama cabang `claude`.
   "## 🟡 `/register` & `/resend-verification` kini MENYEBUT sebabnya — tiga belas keadaan berhenti dijawab satu kalimat",

@@ -50,6 +50,144 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## `GET /company` — arah yang tak pernah diperiksa: gerbang yang memaku "bentuk balasan disebut penulisnya" hanya menanyakan ADANYA kunci, dan empat kunci masuk tanpa berubah warna — server + web + ponsel — 2026-09-06
+
+**Vena.** Butir antrean "12 → 11 tipe lokal web". `GET /api/company` adalah
+balasan yang HAMPIR TIAP LAYAR web tarik (query key `["company"]`), dan bentuknya
+tak pernah dideklarasikan siapa pun.
+
+**Populasi, diukur lewat HTTP** (DB gerbang, sebelum perubahan):
+
+| yang diukur | angka |
+| --- | --- |
+| kunci yang benar-benar dikirim `GET /company` | **22** |
+| kunci yang §273 paku (`has($k)`, satu arah) | **18** |
+| kunci yang MASUK tanpa satu asersi pun berubah warna | **4** (`alamat`, `telepon`, `logoUrl`, `planExpiresAt`) |
+| kunci yang diterima KASIR (rute `[any]`) | **22** — identik dengan owner |
+| salinan bentuk ini yang diketik ulang web | **3** (`Company` 15 medan · `CompanyStruk` 6 · `CompanyMode` 1) |
+| medan yang ponsel baca dari 22 | **11**; lima di antaranya tercatat sebagai HANTU |
+
+**Yang membuat ini vena, dan bukan "pindahkan satu tipe".** Lengan §273 judulnya
+*"bentuk balasan disebut penulisnya"* — arm yang seluruh tujuannya adalah
+mencegah bentuk balasan menggantung tanpa penulis. Ia memakai `has($k)` atas
+daftar 18 nama yang **diketik di skrip verifikasinya sendiri**, dan komentar di
+atasnya hanya membayangkan PENCABUTAN. Arah sebaliknya — kunci yang bertambah —
+tak pernah ada yang memeriksanya, dan empat kunci lewat begitu saja. Gerbang
+yang menjaga satu arah dari dua arah bukan gerbang yang separuh kuat; ia
+menerbitkan kesan sudah diperiksa atas hal yang tak pernah diperiksa.
+
+**Temuan kedua, dan ini yang paling halus dari putaran ini: sebuah penjaga yang
+lulus KARENA SEBAB YANG SALAH.** `zona-waktu-satu-suara.test.ts` menahan
+pasangan "server membaca `companies.timezone`, web mematok WIB" dengan melarang
+kata `timezone` **di mana pun** di `company/routes.ts`. Larangan itu hijau
+selama bertahun-bulan — bukan karena zonanya tak dikirim (ia SELALU dikirim,
+`GET /company` memulangkannya sejak dulu), melainkan karena `{ ...row }` tak
+pernah menyebut satu nama kolom pun. Larangan sekata menjaga EJAAN, bukan
+kelakuan. Begitu bentuk balasannya ditulis kolom demi kolom, ia menuduh jalur
+BACA yang tak berubah apa-apa. Diperbaiki jadi menunjuk permukaan TULIS: kata
+itu boleh muncul TEPAT di perakit balasan `companyRow`, dan terlarang di zod
+`PatchBody`/`ModeBody` maupun tiap `.set({…})` — plus asersi bahwa perakitnya
+memang masih mengirimnya, supaya "berhenti mengirim zona" pun tertagih.
+
+**Temuan ketiga, dari kegagalan gerbangku sendiri: urutan definisi di
+`verify-api.sh` tak dijaga apa pun.** Dua kali dalam putaran ini, dan keduanya
+menyamar (rinciannya di bagian Gerbang). Bash mengikat nama fungsi saat
+DIJALANKAN; skrip ini satu berkas lurus 17.000-an baris yang seksinya rutin
+menumpang pembantu seksi lain. Tak ada satu pun uji yang bisa melihat kelas itu.
+
+### Yang dibangun
+
+- **shared**: `CompanyRow` (22 medan, camelCase apa adanya) + `ModeCompany`.
+  Komentarnya menyatakan bedanya dari `CompanyDto` — yang kedua bagian
+  `company` dari SESI (9 medan, snake_case); yang ini baris tabelnya. Keduanya
+  hidup berdampingan; menyatukannya perubahan kawat tersendiri.
+- **server**: `companyRow(row)` — satu-satunya penulis bentuk `GET /company`,
+  kolom demi kolom. Anotasi `CompanyRow` LANGSUNG menemukan ketidakcocokan
+  nyata: `planExpiresAt` bertipe `Date | null` di Drizzle, `string | null` di
+  kawat. Sebar polos (`{ ...row }`) menyerahkan konversinya ke kebetulan
+  serialisasi `c.json`; sekarang ketiga stempel waktu dipetakan `iso()`.
+- **web**: ketiga salinan jadi `Pick<CompanyRow, …>`, dan `CabangStruk` —
+  deklarasi KEEMPAT untuk balasan yang tipenya sudah ada sejak vena #95 —
+  jadi `Pick<CabangDto, …>`. Nol perubahan perilaku; yang berubah, penggantian
+  nama di kontrak kini tertagih penyusun.
+- **ponsel `8f7d591`**: nol baris `lib/`. Fikstur +22 kunci +2 nilai union;
+  `hantuDiketahui` **41 → 36**; sebelas medan yang ponsel tak baca dicatat
+  dalam tiga kelompok beralasan. Pertahanan dua ejaan di `kasir_models.dart`
+  (`json['logoUrl'] ?? json['logo_url']`) DIBIARKAN — ia menahan hal lain.
+- **`company-row-utuh.test.ts`** (baru, 6 uji): literal `companyRow` ==
+  `CompanyRow` dua arah (PREMIS menyebut keempat kunci yang menyelinap masuk);
+  stempel waktu DIPETAKAN, bukan disebar; satu perakit (`modeDariPlan(` tepat
+  sekali); web memakai tipe kontrak, tak mendeklarasikan ulang; PASANGAN.
+- **§273 dua arah** — `medan296 CompanyRow` + `selisih296`, owner DAN kasir.
+- **`verify-api-log-utuh.test.ts` +3 uji**: tiap pembantu yang TERJANGKAU dari
+  tingkat atas — langsung maupun lewat badan pembantu lain — sudah dinyatakan
+  lebih dulu.
+- Kontrak + Lampiran A + changelog ponsel **⚪️** (nol perubahan kawat) +
+  `BELUM_TAYANG`.
+
+### Bukti merah (dipulihkan byte-per-byte, `cmp`)
+
+| | dicabut / dimutasi | tuduhan |
+| --- | --- | --- |
+| XX | `planExpiresAt` dicabut dari `CompanyRow` | `21 ≠ 22`; `dibangun tapi tak ada di CompanyRow: [ 'planExpiresAt' ]` |
+| YY | stempel waktu disebar, bukan dipetakan | `to match /createdAt: iso\(row\.createdAt\),/` |
+| ZZ | web mendeklarasikan ulang `interface CabangStruk` | `not to match /interface CabangStruk\b/` |
+| AAA | perakit `company` kedua di `menu/service.ts` | `dirakit di lebih dari satu tempat: 2 ≠ 1` |
+| BBB | `timezone` masuk zod `PatchBody` | `menyentuh timezone DI LUAR perakit balasan` |
+| CCC | `.set({ timezone: … })` tanpa lewat zod | tuduhan yang sama — jalur tulis kedua |
+| DDD | `companyRow` berhenti mengirim zona | `berhenti mengirim zona — itu perubahan kawat` |
+| FFF | `bocorkan` dikembalikan ke §295 | `bocorkan terjangkau dari selisih296 di baris 15448, baru dinyatakan di 17475` |
+| GGG | `medan296` dikembalikan ke §296 | `medan296 dipanggil di baris 15444, baru dinyatakan di 17502` |
+
+**Yang jujur soal detektornya.** Versi PERTAMA penjaga urutan-definisi
+**TIDAK menuduh** (bukti merah EEE). Ia mengecualikan pemanggilan di dalam
+badan fungsi dengan alasan yang benar secara umum — bash mengikat saat
+dipanggil, jadi urutan pembacaan tak mengikat — dan justru karena itu diam pada
+`bocorkan`, satu-satunya kasus yang melahirkannya: yang dipanggil §273 adalah
+`selisih296` (sudah ada), yang dipakai BADANNYA belum. Diganti penutupan
+transitif. Cacat kedua di pemindai yang sama: jangkar kanannya `[\s)]`, jadi
+`… | bocorkan; }` tak terbaca sebagai pemanggilan sama sekali. Dua kebutaan
+berurutan pada penjaga yang panjangnya 30 baris.
+
+### Batas yang diakui
+
+- **Lebar balasannya tidak disempitkan.** Kasir tetap menerima `targetPenjualan`,
+  `foodCostMaks`, `plan`, `planExpiresAt`. Yang diperbaiki putaran ini
+  bentuknya yang tak bernama dan gerbangnya yang searah; penyempitan
+  `[any]` → peran manajemen adalah perubahan kawat tersendiri, dicatat di
+  kontrak apa adanya alih-alih diubah diam-diam.
+- **`CompanyRow` dan `CompanyDto` masih dua bentuk untuk satu perusahaan**,
+  satu camelCase satu snake_case. Penyeragamannya memecah kedua klien; vena
+  tersendiri.
+- **Ponsel tak punya gerbang Lite/Pro sama sekali** — terukur: `mode`, `plan`,
+  `isActive` nol kali dibaca di seluruh `lib/`. Bukan cacat kontrak; pembedaan
+  yang belum pernah dibawa ke sana. Masuk antrean, tercatat di changelog.
+- Penjaga urutan-definisi hanya melihat gaya rumah `nama() {` di kolom 0, dan
+  hanya `verify-api.sh`. Skrip lain di `scripts/` belum ikut.
+- Tak ada Flutter di sini: perubahan ponsel diuji CI-nya; cermin Python lebih dulu.
+
+### Gerbang
+
+- Server (typecheck → DB nol → boot → seed → verify-api → vitest → invarian →
+  e2e): typecheck hijau, **verify-api 3.606 / 0** (3.603 + 3 lengan §273)
+  dengan log UTUH (3.969 baris, 234.718 byte, **0 NUL**), **vitest 249 berkas /
+  3.074 uji**, **invarian 27 / 0**, **e2e 48 lolos** (1,5 mnt).
+- **Jalan PERTAMA merah, 2 lengan + 2 berkas vitest — keempatnya tuduhan yang
+  tepat, dan tak satu pun soal `CompanyRow` itu sendiri.** (1) Pemindahan
+  `medan296`/`selisih296` ke kepala berkas ikut mengangkat `R296M=$(api
+  "$OWNER" …)` — penugasan yang DIJALANKAN saat itu juga, sebelum `$OWNER`
+  lahir; dengan `set -u` seluruh skrip mati di baris 159 dan verifikasi
+  BERHENTI ADA sambil tetap memulangkan berkas log. (2) `bocorkan` masih tinggal
+  di §295 sementara §273 menjangkaunya lewat `selisih296` — pipa ke fungsi yang
+  belum ada memulangkan teks kosong, `float("")` melempar, dan `cek` melapor
+  `nilai: , harusnya: V == 0`, yang terbaca seperti selisih kunci. (3)
+  `zona-waktu-satu-suara` — penjaga yang lulus karena sebab yang salah, di atas.
+  (4) `bep-nilai-dto-utuh` menuduh `TABRAKAN_NAMA: pb1Rate` sebagai BASI, persis
+  pada putaran yang alasannya sendiri ramalkan (*"DTO-nya belum di shared"* —
+  sekarang sudah).
+- Ponsel: commit `8f7d591`, **CI #54 hijau** (run 34001053420).
+- **Tak ada rilis.**
+
 ## Tiga belas keadaan, satu jawaban — dan servernya sendiri sudah menamai ketiga belasnya untuk log internal — server + web + ponsel — 2026-09-05
 
 **Vena.** Butir teratas antrean, dan sejak kemarin bukan lagi pertanyaan:
@@ -12815,19 +12953,39 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **12 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
-      bersama** — diukur ulang 2026-09-05 SESUDAH #97. Angka "15" sebelumnya
-      terlalu besar: sapuan `api<T>` memungut `Record`/`Pick` (bawaan TS) dan
-      `AuthState`/`Cabang` yang sejak #95 sudah jadi ALIAS ke tipe kontrak.
-      Yang benar-benar lokal 12, dan tiga di antaranya dibayar #97
-      (`SaleResult` + dua bentuk bersarangnya). Sisa: `Kategori` 3×,
-      `Karyawan` 3×, `SistemStatus` 2×, `CompanyStruk`/`CabangStruk`,
-      `KaryawanRow`, `Company`, `PenerimaanRow`, `DanaEntri`,
-      `StokAwalTersimpan`, `Tenant`, `CompanyMode`, `DaftarResult` — plus 47
-      `api<{…}>` inline tanpa nama. Berikutnya `CompanyStruk`/`CabangStruk`
-      (`ReceiptModal.tsx`, tetangga yang baru saja dibongkar) atau `Company`
-      (`GET /company` — row ORM camelCase, 18 kunci menurut §273; ponsel
-      mencatat 5 di antaranya sebagai hantu)
+- [ ] **8 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+      bersama** — diukur ulang 2026-09-06 SESUDAH #99. Angka "15" pada
+      pengukuran pertama terlalu besar: sapuan `api<T>` memungut `Record`/`Pick`
+      (bawaan TS) dan `AuthState`/`Cabang` yang sejak #95 sudah jadi ALIAS.
+      Dari 12 yang benar-benar lokal, #97 membayar tiga (`SaleResult` + dua
+      bentuk bersarangnya) dan #99 membayar empat (`Company`, `CompanyStruk`,
+      `CompanyMode` → `Pick<CompanyRow, …>`; `CabangStruk` → `Pick<CabangDto,
+      …>`). Sisa **8**: `Kategori` 3×, `Karyawan` 3×, `SistemStatus` 2×,
+      `KaryawanRow`, `PenerimaanRow`, `DanaEntri`, `StokAwalTersimpan`,
+      `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
+      Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
+      sama persis dengan `Company` di #99)
+- [ ] **Ponsel tak punya gerbang Lite/Pro sama sekali** — terukur 2026-09-06:
+      `mode`, `plan`, `isActive` nol kali dibaca di seluruh `lib/`, dan tak ada
+      konsep `isPro` di sana. Web memakainya untuk menyembunyikan fitur
+      multi-lokasi (CK/cabang/kantor). Bukan cacat kontrak — pembedaan yang
+      belum pernah dibawa ke ponsel; yang perlu diputuskan lebih dulu: apakah
+      ponsel MEMANG harus membedakannya, atau memang cukup satu tampilan
+- [ ] **`GET /company` `[any]`: kasir menerima 22 kunci, termasuk
+      `targetPenjualan`/`foodCostMaks`/`plan`/`planExpiresAt`** — terukur
+      2026-09-06 dan dicatat apa adanya di kontrak, bukan diubah diam-diam.
+      Menyempitkannya ke peran manajemen perubahan kawat tersendiri; kelas yang
+      sama dengan gerbang biaya `strukPenjualan` di #97, dan bedanya di sini
+      tak ada yang membuktikan kliennya butuh medan-medan itu
+- [ ] **Satu perusahaan, dua bentuk: `CompanyRow` camelCase vs `CompanyDto`
+      snake_case** — keduanya di kontrak sejak #99, dan berdampingan itulah
+      yang membuat `kasir_models.dart` menerima DUA ejaan untuk medan yang
+      sama. Penyeragamannya memecah kedua klien sekaligus: vena tersendiri,
+      dengan changelog 🔴
+- [ ] **Penjaga urutan-definisi hanya melihat `verify-api.sh`** — kelasnya
+      (bash mengikat nama saat DIJALANKAN) berlaku sama untuk `scripts/*.sh`
+      lain, dan pemindainya hanya mengenali gaya rumah `nama() {` di kolom 0.
+      Lahir #99 sesudah dua kegagalan berturut-turut di satu putaran
 - [ ] **Balasan refund `{ok, nominal, total_lama, total_baru}` tanpa DTO** —
       satu-satunya sisa alasan entri hantu `nominal` di ponsel
       (`kasir_repository.dart:232`). Kecil, dan pasangannya `SaleResult` sudah

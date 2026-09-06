@@ -277,7 +277,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## 5. `/api/company` — Pengaturan perusahaan (`modules/company/routes.ts`)
 
-- `GET /api/company` — [any] — res: row company + `{ mode: "lite"|"pro" }` — error: **404**
+- `GET /api/company` — [any] — res: **`CompanyRow`** (22 kunci, **camelCase** — baris tabel apa adanya: 21 kolom `KOLOM_COMPANY` + `mode` yang DITURUNKAN dari `plan`). Bernama di Lampiran A sejak 2026-09-06; sebelumnya "row company" tanpa tipe, dan web mengetiknya ulang **tiga kali** dengan pilihan medan yang berbeda-beda. **BEDA dari `CompanyDto`**, dan bedanya disengaja: `CompanyDto` adalah bagian `company` dari SESI (9 medan, snake_case); yang ini baris tabelnya. `[any]` berarti **kasir menerima seluruh 22 kunci**, termasuk `targetPenjualan`, `foodCostMaks`, `plan`, `planExpiresAt` (terukur 2026-09-06: kuncinya identik dengan owner) — dicatat apa adanya, bukan diubah diam-diam. Stempel waktunya ISO 8601 `string` (`createdAt`, `updatedAt`, `planExpiresAt|null`). Dijaga verify-api §273 **dua arah** terhadap kontraknya — sampai 2026-09-06 §273 hanya memeriksa 18 nama dengan `has()`, jadi empat kunci (`alamat`, `telepon`, `logoUrl`, `planExpiresAt`) sempat masuk tanpa terlihat — error: **404**
 - `POST /api/company/mode` — [owner] — req: `{ mode: "lite"|"pro" }` — res: `{ ok, mode, lokasi_baru: string[] }` — error: **400** (tak bisa ke Lite bila >1 cabang aktif)
 - `PATCH /api/company` — [owner/admin] — req: `{ nama?, alamat?|null, telepon?|null, logo_url?|null, pb1_enabled?: bool, pb1_rate?: number(0..100), receipt_footer?|null (max 200), receipt_show_alamat?: bool, target_penjualan?|null (≥0), diskon_maks_persen?: number(0..100), metode_hpp?: "average"|"fifo", food_cost_maks?: number(0..100) }` — res: row company terupdate. `food_cost_maks` = ambang food cost sehat (%) — menu di atasnya ditandai di daftar Menu & muncul di Analisis Harga (default **40**).
 
@@ -1671,6 +1671,56 @@ export interface AuthUser {
   company_id: string | null;
   role: UserRole | null;
   branch_id: string | null;
+}
+
+/** Mode aplikasi yang diturunkan dari `plan` — Lite menyembunyikan fitur Pro. */
+export type ModeCompany = "lite" | "pro";
+
+/**
+ * BARIS PERUSAHAAN sebagaimana dipulangkan `GET /api/company` — [any], jadi
+ * KASIR pun menerimanya utuh (terukur 2026-09-06: kuncinya identik dengan
+ * owner).
+ *
+ * BERBEDA dari `CompanyDto`, dan bedanya bukan kebetulan: `CompanyDto` adalah
+ * bagian `company` dari SESI (9 medan, snake_case, dirakit `companyDto`),
+ * sedangkan yang ini baris tabel apa adanya — camelCase, 21 kolom
+ * (`KOLOM_COMPANY`) + `mode` yang diturunkan dari `plan`. Keduanya hidup
+ * berdampingan hari ini; menyatukannya perubahan kawat tersendiri.
+ *
+ * Sampai 2026-09-06 bentuk ini tak pernah dideklarasikan di kontrak, dan web
+ * mengetiknya ulang TIGA kali — `Company` (15 medan, PerusahaanPage),
+ * `CompanyStruk` (6, ReceiptModal), `CompanyMode` (1, useCompanyMode) —
+ * masing-masing memilih medan yang ia butuhkan sendiri. Ponsel mencatat lima
+ * kuncinya sebagai hantu dan sengaja membaca DUA ejaan
+ * (`json['logoUrl'] ?? json['logo_url']`) "agar setelan struk tak diam-diam
+ * kosong bila server berubah bentuk" — pertahanan yang lahir justru karena
+ * bentuknya tak pernah bernama.
+ */
+export interface CompanyRow {
+  id: string;
+  nama: string;
+  metodeHpp: MetodeHpp;
+  slug: string;
+  alamat: string | null;
+  telepon: string | null;
+  logoUrl: string | null;
+  timezone: string;
+  pb1Enabled: boolean;
+  pb1Rate: number;
+  receiptFooter: string | null;
+  receiptShowAlamat: boolean;
+  diskonMaksPersen: number;
+  blokirJualMinus: boolean;
+  /** target omzet bulanan; `null` = belum diatur */
+  targetPenjualan: number | null;
+  foodCostMaks: number;
+  plan: string;
+  planExpiresAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** DITURUNKAN dari `plan` (`modeDariPlan`), bukan kolom tabel. */
+  mode: ModeCompany;
 }
 
 /**

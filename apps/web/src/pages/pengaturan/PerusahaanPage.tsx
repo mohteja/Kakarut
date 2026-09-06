@@ -1,4 +1,4 @@
-import { angkaDari, teksAngka } from "@kakarut/shared";
+import { angkaDari, teksAngka, type CompanyRow } from "@kakarut/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ImageUpload } from "../../components/ImageUpload";
@@ -15,23 +15,30 @@ import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 
-interface Company {
-  id: string;
-  nama: string;
-  alamat: string | null;
-  telepon: string | null;
-  logoUrl: string | null;
-  pb1Enabled: boolean;
-  pb1Rate: number;
-  diskonMaksPersen: number;
-  blokirJualMinus: boolean;
-  plan: string;
-  mode: "lite" | "pro";
-  receiptFooter: string | null;
-  receiptShowAlamat: boolean;
-  metodeHpp: "average" | "fifo";
-  foodCostMaks: number;
-}
+/**
+ * Medan `GET /company` yang halaman ini pakai — bentuknya milik kontrak
+ * (`CompanyRow`). Sampai 2026-09-06 lima belas medannya diketik ulang di
+ * sini; `Pick` membuat penggantian nama di kontrak tertagih penyusun alih-alih
+ * diam-diam berhenti cocok.
+ */
+type Company = Pick<
+  CompanyRow,
+  | "id"
+  | "nama"
+  | "alamat"
+  | "telepon"
+  | "logoUrl"
+  | "pb1Enabled"
+  | "pb1Rate"
+  | "diskonMaksPersen"
+  | "blokirJualMinus"
+  | "plan"
+  | "mode"
+  | "receiptFooter"
+  | "receiptShowAlamat"
+  | "metodeHpp"
+  | "foodCostMaks"
+>;
 
 /** Kartu Mode Lite/Pro: penjelasan + tombol upgrade (modal) / turun ke Lite. */
 function KartuMode({ company }: { company: Company }) {

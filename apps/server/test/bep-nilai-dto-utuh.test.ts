@@ -153,10 +153,12 @@ describe("BepResult / NilaiStokRingkas == bentuk yang dibangun; shared di luar t
       // tempat lain.
       charsPerLine: "receipt.ts:ReceiptOptions (opsi cetak) ≠ printer_settings.dart, penyimpanan LOKAL ponsel",
       feedLines: "receipt.ts:ReceiptOptions (opsi cetak) ≠ printer_settings.dart, penyimpanan LOKAL ponsel",
-      // `pb1Rate` di ReceiptData/BonData adalah tarif yang DITURUNKAN klien
-      // untuk kertas (`tarifPb1Struk`); yang ponsel baca adalah row camelCase
-      // `GET /company`, yang DTO-nya belum di shared — kelas NilaiStokRingkas.
-      pb1Rate: "receipt.ts/bon-tagihan.ts (tarif turunan utk kertas) ≠ row camelCase GET /company, DTO belum di shared",
+      // `pb1Rate` PERNAH berdiri di sini, dengan alasan yang menyebut sendiri
+      // kapan ia kedaluwarsa: "yang ponsel baca adalah row camelCase `GET
+      // /company`, yang DTO-nya belum di shared". DTO itu lahir 2026-09-06
+      // (`CompanyRow`), ponsel mencabut kelima entri hantunya, dan ratchet di
+      // bawah menuduh entri ini pada putaran yang sama — persis kelakuan yang
+      // dijanjikan komentar `diskon`/`subtotal` di atas.
     };
     for (const k of Object.keys(TABRAKAN_NAMA)) {
       expect(hantu, `TABRAKAN_NAMA basi: ${k} tak lagi hantu di ponsel — cabut`).toContain(k);

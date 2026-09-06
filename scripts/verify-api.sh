@@ -143,6 +143,35 @@ status_code_body() { # status_code_body <token> <method> <path> <json-body>
   printf '%s' "${out##*$'\n'}"
 }
 
+# ── Pembantu KONTRAK: medan sebuah interface di types.ts, dan selisih dua
+# himpunan kunci (dua arah). Dipakai §273, §296, §297, §298, §299 — karena itu
+# dinyatakan DI SINI, bukan di seksi yang pertama memerlukannya. Versi pertama
+# hidup di dalam §296 dan §273 di atasnya memanggil fungsi yang belum ada.
+#
+# HANYA DUA FUNGSI ini yang naik ke sini, dan batas itu disengaja. Pemindahan
+# pertama (2026-09-06) ikut mengangkat `K296_*`/`R296*` — penugasan yang
+# DIJALANKAN saat itu juga dan memanggil `$OWNER`, yang baru lahir di "== 1.
+# Login" jauh di bawah. Dengan `set -u` seluruh skrip mati di baris 159 sebelum
+# satu lengan pun jalan: bukan satu seksi merah, melainkan verifikasi yang
+# BERHENTI ADA sambil tetap memulangkan log. Pembantu di kepala berkas ini
+# boleh MEMBACA berkas, tak boleh menembak API.
+# Kelas medannya `[a-zA-Z0-9_]` — camelCase IKUT. Sampai 2026-09-05 ia
+# `[a-z0-9_]`, dan itu aman hanya selama kontraknya serba snake_case; `SaleRow`
+# (30 medan camelCase) langsung menyingkapkannya: premis §298 memulangkan 14
+# dari 50. Kebutaan yang sama ada di tiga sapuan kunci ponsel, ditutup pada
+# putaran yang sama.
+medan296() { awk -v N="$1" 'BEGIN{re="^export interface " N "( extends [A-Za-z, ]+)? \\{"} $0 ~ re {f=1;next} f&&/^\}/{exit} f&&/^  [a-zA-Z0-9_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u; }
+# `bocorkan` MENGHITUNG barisnya (itu yang dibaca `cek`, yang mem-float-kan
+# nilainya) dan MENUMPAHKAN isinya ke fd 2 supaya selisihnya kelihatan di log.
+# Ia lahir di dalam §295 dan tinggal di sana sampai 2026-09-06, padahal
+# `selisih296` di bawah menyalurkan ke dalamnya dan §273 — 2.000 baris LEBIH
+# AWAL — memanggil `selisih296`. Bentuk gagalnya menyesatkan: pipa ke fungsi
+# yang belum ada memulangkan teks kosong, `float("")` melempar, dan `cek`
+# melaporkan "nilai: , harusnya: V == 0" — terbaca seperti selisih kunci,
+# padahal soal urutan definisi.
+bocorkan() { local d; d=$(cat); [ -n "$d" ] && printf '%s\n' "$d" >&2; printf '%s\n' "$d" | grep -c . || true; }
+selisih296() { comm -3 <(printf '%s\n' "$1" | sort -u) <(printf '%s\n' "$2") | bocorkan; }
+
 # pastikanHadir <token> [keterangan] — pastikan pemegang token TERCATAT HADIR
 # di cabangnya, dari keadaan awal MANA PUN.
 #
@@ -15405,6 +15434,21 @@ for K273 in id nama slug plan timezone pb1Enabled pb1Rate metodeHpp \
   cek "GET /company tetap membawa \`$K273\`" "V == 1" \
     "$(echo "$CO273" | jq --arg k "$K273" 'if has($k) then 1 else 0 end')"
 done
+# ARAH SEBALIKNYA — dan ia LUPUT selama ini. Gelang di atas memakai `has($k)`:
+# ia menangkap kunci yang DICABUT, tak pernah yang DITAMBAH, dan komentar di
+# atasnya hanya membayangkan pencabutan. Terukur 2026-09-06: balasannya sudah
+# membawa 22 kunci, EMPAT lebih banyak daripada 18 yang dipaku di sini
+# (`alamat`, `telepon`, `logoUrl`, `planExpiresAt`) — masuk tanpa satu asersi
+# pun berubah warna. Sejak putaran ini bentuknya bernama (`CompanyRow`) dan
+# dipaku DUA ARAH terhadap kontraknya, bukan terhadap daftar yang diketik di
+# skrip ini.
+K273C=$(medan296 CompanyRow)
+cek "§273 premis: kontrak CompanyRow terbaca dari types.ts (22 medan)" "V == 22" \
+  "$(echo "$K273C" | grep -c .)"
+cek "§273 kunci GET /company == CompanyRow (DUA ARAH — arah yang dulu luput)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$CO273")" "$K273C")"
+cek "§273 kasir menerima kunci yang SAMA (rute [any])" "V == 0" \
+  "$(selisih296 "$(api "$REISS105" GET "/company" | jq -r 'keys[]')" "$K273C")"
 
 # ATURAN B lewat HTTP: tak satu pun rahasia muncul di balasan yang paling
 # mungkin membocorkannya — sesi login, dan kartu perusahaan.
@@ -17429,7 +17473,6 @@ cek "§294 kasir tak boleh membaca daftar ini → bukan 200" "V == 1" \
 # offsetnya bersama, urutannya benar. Penghitung PASS/FAIL hidup di memori,
 # jadi verdik gerbang #95 tetap sah; yang lenyap bukti tertulisnya. Dijaga
 # `verify-api-log-utuh.test.ts` (menjalankan ketiga bentuk di bash sungguhan).
-bocorkan() { local d; d=$(cat); [ -n "$d" ] && printf '%s\n' "$d" >&2; printf '%s\n' "$d" | grep -c . || true; }
 KUNCI295=$(awk '/^export interface StokMasukRow \{/{f=1;next} f&&/^\}/{exit} f&&/^  [a-z_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u)
 R295P=$(api "$OWNER" GET "/produksi?per_page=200&branch_id=all")
 R295B=$(api "$OWNER" GET "/pembelian?per_page=200&branch_id=all")
@@ -17457,19 +17500,12 @@ cek "§295 tak ada baris yang membawa asal_cabang (kunci hantu yang ponsel baca)
 # dan bentuk `company` dirakit di DUA tempat (companyDto + inline `/auth/me`).
 # Statisnya dijaga `sesi-cabang-dto-utuh.test.ts`; lengan ini menagih dari
 # kawat: balasan HTTP sungguhan, dua arah, seluruh baris.
-# Kelas medannya `[a-zA-Z0-9_]` — camelCase IKUT. Sampai 2026-09-05 ia
-# `[a-z0-9_]`, dan itu aman hanya selama kontraknya serba snake_case; `SaleRow`
-# (30 medan camelCase) langsung menyingkapkannya: premis §298 memulangkan 14
-# dari 50. Kebutaan yang sama ada di tiga sapuan kunci ponsel, ditutup pada
-# putaran yang sama.
-medan296() { awk -v N="$1" 'BEGIN{re="^export interface " N "( extends [A-Za-z, ]+)? \\{"} $0 ~ re {f=1;next} f&&/^\}/{exit} f&&/^  [a-zA-Z0-9_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u; }
 K296_USER=$(medan296 AuthUser); K296_CO=$(medan296 CompanyDto); K296_SESI=$(medan296 SesiDto); K296_CAB=$(medan296 CabangDto)
 K296_LOGIN=$(printf '%s\n%s\n' "$K296_SESI" "$(medan296 SesiLogin)" | sort -u)
 R296L=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")
 R296M=$(api "$OWNER" GET "/auth/me")
 R296C=$(api "$OWNER" GET "/cabang")
 R296CK=$(api "$REISS105" GET "/cabang")
-selisih296() { comm -3 <(printf '%s\n' "$1" | sort -u) <(printf '%s\n' "$2") | bocorkan; }
 cek "§296 premis: kontrak terbaca dari types.ts (AuthUser 7 + CompanyDto 9 + SesiDto 3 + SesiLogin 1 + CabangDto 14)" "V == 34" \
   "$(printf '%s\n%s\n%s\n%s\n%s\n' "$K296_USER" "$K296_CO" "$K296_SESI" "$(medan296 SesiLogin)" "$K296_CAB" | grep -c .)"
 cek "§296 premis: owner punya company (bukan null) dan /cabang ≥ 2 baris" "V == 1" \

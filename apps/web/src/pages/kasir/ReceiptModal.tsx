@@ -1,7 +1,14 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { qtyDitagih, tarifPb1Struk } from "@kakarut/shared";
-import type { MetodeBayar, OrderSlipData, ReceiptData, SaleResult as SaleResultDto } from "@kakarut/shared";
+import type {
+  CabangDto,
+  CompanyRow,
+  MetodeBayar,
+  OrderSlipData,
+  ReceiptData,
+  SaleResult as SaleResultDto,
+} from "@kakarut/shared";
 
 const METODE_LABEL: Record<MetodeBayar, string> = {
   tunai: "Tunai",
@@ -38,24 +45,25 @@ function catatanBaris(it: { catatan: string | null; qtyRefund: number }): string
   return it.catatan ? `${it.catatan} · ${ket}` : ket;
 }
 
-/** Baris companies dari GET /company (camelCase Drizzle) — field yg dipakai struk */
-interface CompanyStruk {
-  nama: string;
-  alamat: string | null;
-  telepon: string | null;
-  pb1Rate: number;
-  receiptFooter: string | null;
-  receiptShowAlamat: boolean;
-}
+/**
+ * Medan `GET /company` yang struk pakai — bentuknya milik kontrak
+ * (`CompanyRow`, camelCase apa adanya).
+ */
+type CompanyStruk = Pick<
+  CompanyRow,
+  "nama" | "alamat" | "telepon" | "pb1Rate" | "receiptFooter" | "receiptShowAlamat"
+>;
 
-/** Cabang dari GET /cabang — struk memakai alamat/telepon & footer PER CABANG */
-interface CabangStruk {
-  id: string;
-  alamat: string | null;
-  telepon: string | null;
-  receipt_footer: string | null;
-  receipt_show_alamat: boolean;
-}
+/**
+ * Cabang dari `GET /cabang` — struk memakai alamat/telepon & footer PER
+ * CABANG. Bentuknya SUDAH di kontrak sejak 2026-09-05 (`CabangDto`, vena
+ * sesi & cabang); sampai 2026-09-06 berkas ini masih mengetiknya ulang —
+ * deklarasi keempat untuk balasan yang tipenya sudah ada.
+ */
+type CabangStruk = Pick<
+  CabangDto,
+  "id" | "alamat" | "telepon" | "receipt_footer" | "receipt_show_alamat"
+>;
 
 export function ReceiptModal({
   data,

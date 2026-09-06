@@ -25,6 +25,43 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ `GET /company` akhirnya bernama: `CompanyRow` (22 kunci) — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: baris perusahaan yang
+> `GET /api/company` pulangkan akhirnya **dideklarasikan** di `types.ts`,
+> jadi ikut Lampiran A dan fikstur kunci ponsel. Kuncinya **camelCase** —
+> baris tabel apa adanya — dan tetap begitu.
+
+Terukur lewat HTTP (DB gerbang): **22 kunci**, dan rutenya `[any]` sehingga
+**kasir menerimanya utuh** (kuncinya identik dengan owner). Dua hal yang layak
+diketahui tim ponsel:
+
+- **`CompanyRow` ≠ `CompanyDto`.** Yang kedua adalah bagian `company` dari SESI
+  (9 medan, **snake_case**, dari `/auth/login` & `/auth/me`). Yang ini baris
+  tabel dari `/company` (22 medan, **camelCase**). Keduanya hidup berdampingan;
+  jangan menukarnya.
+- **Pertahanan dua ejaan di `kasir_models.dart` boleh tetap.** Ia membaca
+  `json['logoUrl'] ?? json['logo_url']` "agar setelan struk tak diam-diam
+  kosong bila server berubah bentuk" — pertahanan yang lahir justru karena
+  bentuknya tak pernah bernama. Sekarang bernama, dan penyeragaman ejaan (bila
+  kelak dilakukan) jadi perubahan kawat tersendiri yang akan diumumkan.
+
+**Kerja di ponsel: TIDAK ADA.** Lima entri hantu (`logoUrl`, `pb1Enabled`,
+`pb1Rate`, `receiptFooter`, `receiptShowAlamat`) berhenti jadi hantu karena
+kuncinya kini di fikstur; sebelas kunci yang ponsel tak baca dicatat beralasan.
+
+**Satu catatan yang mungkin berguna:** terukur 2026-09-06, ponsel **tidak punya
+gerbang Lite/Pro sama sekali** — `mode`, `plan`, `isActive` nol kali dibaca di
+seluruh `lib/`. Web memakainya untuk menyembunyikan fitur multi-lokasi. Bukan
+cacat kontrak; dicatat sebagai pembedaan yang belum pernah dibawa ke ponsel.
+
+Penjaga di server: `company-row-utuh.test.ts` (literal `companyRow` == kontrak
+dua arah; satu perakit; stempel waktu dipetakan; web memakai tipe kontrak) dan
+**verify-api §273 yang kini DUA ARAH** — sampai putaran ini ia memakai
+`has($k)` atas 18 nama, jadi empat kunci sempat masuk tanpa terlihat.
+
+---
+
 ## 🟡 `/register` & `/resend-verification` kini MENYEBUT sebabnya — tiga belas keadaan berhenti dijawab satu kalimat
 
 🟡 **PERLU DICEK** — bentuknya BERTAMBAH (`sebab`, `message`), tak ada yang
