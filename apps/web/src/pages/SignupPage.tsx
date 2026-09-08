@@ -4,6 +4,7 @@ import { btnPrimary, inputClass, InputPassword } from "../components/ui";
 import { Logo } from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { tulisLokal } from "../lib/simpanan";
+import { SEBAB_DAFTAR } from "@kakarut/shared";
 import { PESAN_DAFTAR, PESAN_SUDAH_AKTIF } from "../lib/pesan-verifikasi";
 
 /**
@@ -42,6 +43,8 @@ export function SignupPage() {
   const [sent, setSent] = useState(false);
   const [devKode, setDevKode] = useState<string | null>(null);
   const [sudahAktif, setSudahAktif] = useState(false);
+  /** `akun_terverifikasi`: tawarkan Masuk, jangan layar kode. */
+  const [sudahTerdaftar, setSudahTerdaftar] = useState(false);
   const navigate = useNavigate();
 
   const terlaluPendek = password.length > 0 && password.length < 8;
@@ -51,6 +54,7 @@ export function SignupPage() {
     e.preventDefault();
     if (password.length < 8 || password !== konfirmasi) return;
     setError(null);
+    setSudahTerdaftar(false);
     setLoading(true);
     try {
       const res = await register(nama, email, password);
@@ -66,6 +70,23 @@ export function SignupPage() {
           () => navigate(res.user.is_super_admin ? "/superadmin" : "/kasir", { replace: true }),
           1200,
         );
+        return;
+      }
+      /*
+       * TIGA KEADAAN YANG TAK MENGIRIM KODE — dan sampai 2026-09-05 ketiganya
+       * mendarat di layar "cek email Anda", menyuruh orang menunggu surat yang
+       * secara struktural tak akan berangkat. Server kini menyebut `sebab`
+       * (keputusan pemilik), jadi layarnya bisa berhenti menebak. Cermin
+       * `LoginPage`, yang menawarkan "Daftar dengan email ini →" pada
+       * `email_tak_dikenal`.
+       */
+      if (
+        res.sebab === SEBAB_DAFTAR.terverifikasi ||
+        res.sebab === SEBAB_DAFTAR.nonaktif ||
+        res.sebab === SEBAB_DAFTAR.terhapus
+      ) {
+        setError(res.message ?? "Pendaftaran tidak dilanjutkan");
+        setSudahTerdaftar(res.sebab === SEBAB_DAFTAR.terverifikasi);
         return;
       }
       setSent(true);
@@ -195,7 +216,17 @@ export function SignupPage() {
               {tidakCocok && <p className="mt-1 text-xs text-red-600">Password tidak sama.</p>}
             </div>
             {error && (
-              <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+              <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+                {sudahTerdaftar && (
+                  <Link
+                    to={`/login?email=${encodeURIComponent(email)}`}
+                    className="mt-1 block font-semibold underline"
+                  >
+                    Masuk dengan email ini →
+                  </Link>
+                )}
+              </div>
             )}
             <button
               type="submit"

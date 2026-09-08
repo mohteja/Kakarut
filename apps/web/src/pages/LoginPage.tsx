@@ -15,7 +15,14 @@ export function LoginPage() {
   // Dilempar ke sini oleh `api()` karena 401? Katakan sebabnya (lib/pesan-sesi.ts).
   const [params] = useSearchParams();
   const sesiBerakhir = params.get(PARAM_SESI) === NILAI_SESI_BERAKHIR;
-  const [email, setEmail] = useState("");
+  /*
+   * `?email=` — sisi kedua dari cermin yang sudah ada. `SignupPage` membaca
+   * parameter yang sama dari tautan "Daftar dengan email ini →" di halaman
+   * INI; sejak 2026-09-05 `SignupPage` menawarkan "Masuk dengan email ini →"
+   * pada `akun_terverifikasi`, dan tanpa baris ini tautan itu mendarat di
+   * formulir kosong — orangnya mengetik ulang alamat yang baru saja ia ketik.
+   */
+  const [email, setEmail] = useState(() => params.get("email")?.trim().toLowerCase() ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sebabTolak, setSebabTolak] = useState<string | null>(null);

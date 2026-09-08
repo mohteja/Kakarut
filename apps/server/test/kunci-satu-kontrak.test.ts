@@ -114,13 +114,19 @@ describe("acuan:kunci-mobile — pembangkit fikstur kunci kontrak", () => {
       });
     const berkas = dart(fileURLToPath(new URL("lib", akar)));
     for (const f of berkas) {
-      for (const m of readFileSync(f, "utf8").matchAll(/'([a-z][a-z0-9_]*)'/g)) disentuh.add(m[1]!);
+      // camelCase IKUT tersapu (huruf pertama tetap wajib kecil, supaya
+      // literal UI seperti 'Cabang ' atau 'TOTAL' tak ikut). Sampai
+      // 2026-09-05 kelasnya `[a-z][a-z0-9_]*` dan balasan `/penjualan` —
+      // satu-satunya pulau camelCase di kontrak — LOLOS seluruhnya: 16 nama
+      // (`isDineIn`, `hargaSatuan`, `qtyRefund`, …) tak pernah tersapu ratchet
+      // mana pun. Terukur saat pelebaran ini: disentuh 651 → 687.
+      for (const m of readFileSync(f, "utf8").matchAll(/'([a-z][a-zA-Z0-9_]*)'/g)) disentuh.add(m[1]!);
     }
 
     // Premis: sapuan yang memulangkan sedikit tak menuduh siapa pun — ia hanya
     // berhenti bisa menuduh, dan asersi di bawahnya lolos secara hampa.
     expect(berkas.length, "lib/ ponsel terbaca terlalu tipis").toBeGreaterThan(100);
-    expect(disentuh.size, "sapuan lib ponsel rusak — regexnya atau jalurnya").toBeGreaterThan(500);
+    expect(disentuh.size, "sapuan lib ponsel rusak — regexnya atau jalurnya").toBeGreaterThan(650);
     expect(disentuh.has("nama"), "kunci paling umum pun tak terbaca").toBe(true);
 
     const kunci = new Set(baris.map((b) => b.split("|")[1]!));

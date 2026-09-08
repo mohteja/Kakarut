@@ -1,30 +1,14 @@
+import type { SesiLogin } from "@kakarut/shared";
 import { bacaLokal, hapusLokal, tulisLokal } from "./simpanan";
 import { NILAI_SESI_BERAKHIR, PARAM_SESI } from "./pesan-sesi";
 import { tokenSudahMati } from "./umurToken";
 
-export interface AuthState {
-  token: string;
-  user: {
-    sub: string;
-    email: string;
-    nama: string;
-    is_super_admin: boolean;
-    company_id: string | null;
-    role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar" | null;
-    branch_id: string | null;
-  };
-  company: {
-    id: string;
-    nama: string;
-    slug: string;
-    logo_url: string | null;
-    pb1_enabled: boolean;
-    pb1_rate: number;
-    diskon_maks_persen: number;
-    timezone: string;
-  } | null;
-  branch: { id: string; nama: string } | null;
-}
+/**
+ * Sesi = `SesiLogin` milik kontrak (Lampiran A). Sampai 2026-09-05 bentuknya
+ * diketik ulang di sini — dan versi ini TAK punya `blokir_jual_minus` yang
+ * server kirim sejak lama.
+ */
+export type AuthState = SesiLogin;
 
 /** Kunci sesi di localStorage — dipantau lintas tab (event `storage`). */
 export const AUTH_STORAGE_KEY = "kakarut.auth";

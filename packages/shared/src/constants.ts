@@ -86,6 +86,64 @@ export const SEBAB_LOGIN = {
 
 export type SebabLogin = (typeof SEBAB_LOGIN)[keyof typeof SEBAB_LOGIN];
 
+/**
+ * SEBAB yang dipulangkan `POST /auth/register` dan
+ * `POST /auth/resend-verification` — kembaran `SEBAB_LOGIN`, lahir dari
+ * KEPUTUSAN PEMILIK 2026-09-05 (lihat kalimat panjang di `auth/routes.ts`).
+ *
+ * Sampai hari itu kedua pintu membalas SATU jawaban untuk tiga belas keadaan.
+ * Yang ganjil: servernya sendiri sudah menamai keadaan itu satu per satu dan
+ * menuliskannya — ke `email_percobaan` lewat `catatTakDicoba`, kosakata
+ * `SebabTakDicoba`. Komentar di jalur jarak kirim ulang bahkan menyebut
+ * akibatnya: *"Dari luar keadaan ini tak bisa dibedakan dari 'terkirim' …
+ * barisnya inilah satu-satunya tempat orang bisa melihat bahwa surat yang
+ * ditunggu memang tak pernah berangkat."* Nilai di bawah karena itu MEMAKAI
+ * ULANG nama yang sudah ada, bukan menciptakan kosakata kedua untuk keadaan
+ * yang sama — tiga di antaranya bahkan identik dengan `SEBAB_LOGIN`.
+ *
+ * Statusnya TETAP 200 dan `ok` tetap `true`: yang berubah kalimat + `sebab`,
+ * persis seperti `/login` yang tetap 401 pada keempat sebabnya. Klien lama
+ * yang tak membaca `sebab` tak berubah perilakunya sama sekali.
+ */
+export const SEBAB_DAFTAR = {
+  /** akun BARU dibuat, kode verifikasi dikirim */
+  kodeDikirim: "kode_dikirim",
+  /**
+   * Akun sudah ada dan belum terverifikasi → kodenya dikirim ULANG. Termasuk
+   * jalur balapan pendaftaran (dua permintaan beremail sama; yang kalah tak
+   * menulis apa pun, tapi kode dari pemenangnya memang sedang berangkat).
+   */
+  kodeDikirimUlang: "kode_dikirim_ulang",
+  /**
+   * Kodenya TIDAK berangkat — jarak 120 detik per akun belum lewat. Kode lama
+   * masih berlaku; `retry_after_detik` menyebut sisanya.
+   */
+  jarakKirimUlang: "jarak_kirim_ulang",
+  /** tak ada baris `users` untuk alamat ini (hanya `/resend-verification`) */
+  takTerdaftar: "email_tak_dikenal",
+  terhapus: "akun_terhapus",
+  nonaktif: "akun_nonaktif",
+  /** sudah terverifikasi — jalannya MASUK, bukan verifikasi ulang */
+  terverifikasi: "akun_terverifikasi",
+} as const;
+
+export type SebabDaftar = (typeof SEBAB_DAFTAR)[keyof typeof SEBAB_DAFTAR];
+
+/** Kalimat untuk manusia, berpasangan satu-satu dengan `SEBAB_DAFTAR`. */
+export const PESAN_DAFTAR: Record<SebabDaftar, string> = {
+  [SEBAB_DAFTAR.kodeDikirim]:
+    "Kami telah mengirim KODE verifikasi 6 digit. Cek email Anda dan masukkan kodenya.",
+  [SEBAB_DAFTAR.kodeDikirimUlang]:
+    "Email ini sudah pernah didaftarkan tapi belum diverifikasi — kami kirim ulang kodenya. Cek email Anda.",
+  [SEBAB_DAFTAR.jarakKirimUlang]:
+    "Kode terakhir baru saja dikirim dan masih berlaku — cek email Anda, termasuk folder spam. Tunggu sebentar sebelum minta kode baru.",
+  [SEBAB_DAFTAR.takTerdaftar]: "Email tidak terdaftar — periksa ejaannya, atau daftar dulu",
+  [SEBAB_DAFTAR.terhapus]: "Akun ini sudah dihapus",
+  [SEBAB_DAFTAR.nonaktif]:
+    "Akun ini dinonaktifkan — hubungi pemilik atau admin usaha Anda",
+  [SEBAB_DAFTAR.terverifikasi]: "Email ini sudah terdaftar dan aktif — silakan masuk",
+};
+
 export const PESAN_LOGIN = {
   /**
    * Tak ada baris `users` untuk alamat ini. Dua sebab nyata di sistem ini, dan

@@ -1,3 +1,4 @@
+import type { CompanyRow, ModeCompany } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
 import { BATAS_UANG } from "../../lib/batas-angka";
 import { and, eq, isNull } from "drizzle-orm";
@@ -10,8 +11,59 @@ import { branches, companies } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
 
+/** Baris `companies` sebagaimana dipilih `KOLOM_COMPANY` (superset aman). */
+type BarisCompany = typeof companies.$inferSelect;
+
+/**
+ * SATU-SATUNYA PENULIS bentuk `GET /company`.
+ *
+ * Stempel waktunya DIPETAKAN, bukan disebar: Drizzle memulangkan `Date` dan
+ * `c.json` kebetulan menyerialisasinya jadi ISO — kontraknya menyebut
+ * `string`, jadi konversinya ditulis alih-alih diserahkan ke kebetulan itu.
+ * Anotasi `CompanyRow`-lah yang menemukan ketidakcocokannya saat fungsi ini
+ * ditulis; sebar polos lolos begitu saja.
+ *
+ * Kenapa perlu penulis sendiri padahal `KOLOM_COMPANY` sudah eksplisit: §273
+ * memaku 18 kunci dengan `has($k)` — SEARAH. Ia menangkap kunci yang dicabut,
+ * tak pernah yang ditambah, dan empat kunci (`alamat`, `telepon`, `logoUrl`,
+ * `planExpiresAt`) sudah masuk tanpa satu asersi pun berubah warna. Bentuk
+ * yang ditulis di satu tempat membuat penambahan berikutnya tertagih
+ * penyusun, bukan menunggu ada yang memperhatikan.
+ */
+export function companyRow(row: BarisCompany): CompanyRow {
+  return {
+    id: row.id,
+    nama: row.nama,
+    metodeHpp: row.metodeHpp,
+    slug: row.slug,
+    alamat: row.alamat,
+    telepon: row.telepon,
+    logoUrl: row.logoUrl,
+    timezone: row.timezone,
+    pb1Enabled: row.pb1Enabled,
+    pb1Rate: row.pb1Rate,
+    receiptFooter: row.receiptFooter,
+    receiptShowAlamat: row.receiptShowAlamat,
+    diskonMaksPersen: row.diskonMaksPersen,
+    blokirJualMinus: row.blokirJualMinus,
+    targetPenjualan: row.targetPenjualan,
+    foodCostMaks: row.foodCostMaks,
+    plan: row.plan,
+    planExpiresAt: row.planExpiresAt === null ? null : iso(row.planExpiresAt),
+    isActive: row.isActive,
+    createdAt: iso(row.createdAt),
+    updatedAt: iso(row.updatedAt),
+    mode: modeDariPlan(row.plan),
+  };
+}
+
+/** Stempel waktu jadi ISO 8601 — ditulis, bukan diserahkan ke serialisasi. */
+function iso(t: Date | string): string {
+  return t instanceof Date ? t.toISOString() : t;
+}
+
 /** Mode aplikasi diturunkan dari plan: 'pro' = multi-lokasi, selainnya Lite. */
-export function modeDariPlan(plan: string): "lite" | "pro" {
+export function modeDariPlan(plan: string): ModeCompany {
   return plan === "pro" ? "pro" : "lite";
 }
 
@@ -45,7 +97,7 @@ export const companyRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     if (!row) throw new HTTPException(404, { message: "Perusahaan tidak ditemukan" });
-    return c.json({ ...row, mode: modeDariPlan(row.plan) });
+    return c.json(companyRow(row));
   })
   // Ganti mode Lite ↔ Pro. Upgrade ke Pro memprovisikan tata lokasi baku
   // (Central Kitchen + Cabang 2 + Kantor) SEKALI — idempoten via cek CK.

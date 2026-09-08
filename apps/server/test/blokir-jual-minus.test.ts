@@ -60,10 +60,27 @@ describe("dua jalur yang SENGAJA dilewati gerbang", () => {
      *     sungguhan, sebab antrean klien menandai perintah yang ditolak server
      *     sebagai `gagal` dan tak pernah mengirimnya lagi.
      */
+    /*
+     * SYARATNYA PINDAH RUMAH 2026-09-06 — dan uji ini merah karenanya, bukan
+     * hampa. Kondisinya kini `gerbangBerlaku` di
+     * `modules/penjualan/stok-keranjang.ts`, sebab `POST /penjualan/cek-stok`
+     * harus memakai predikat yang SAMA: pracek yang menjawab dari
+     * `kurang.length > 0` saja akan menjanjikan penolakan yang tak akan terjadi
+     * di kedua jalur ini.
+     *
+     * Klaimnya tak berubah sedikit pun; yang berubah alamatnya, dan sekarang ia
+     * dipaku DUA LAPIS — predikatnya menyebut keduanya, dan pemanggilnya
+     * benar-benar mengoper keduanya. Memaku satu lapis saja akan lolos pada
+     * pemanggil yang diam-diam berhenti mengirim `transaksiSusulan`.
+     */
+    const rumah = baca("modules/penjualan/stok-keranjang.ts");
+    expect(rumah).toContain("export function gerbangBerlaku(");
+    expect(rumah).toContain("return p.blokirJualMinus && !p.openBillId && !p.transaksiSusulan;");
+
     const svc = baca("modules/penjualan/service.ts");
-    expect(svc).toContain(
-      "if (company.blokirJualMinus && !params.openBillId && !params.transaksiSusulan) {",
-    );
+    expect(svc).toContain("gerbangBerlaku({");
+    expect(svc).toContain("openBillId: params.openBillId,");
+    expect(svc).toContain("transaksiSusulan: params.transaksiSusulan,");
   });
 
   it("jalur sinkron benar-benar menandai dirinya susulan", () => {
@@ -81,9 +98,18 @@ describe("aturan resep → bahan cuma punya satu implementasi", () => {
      * yang bisa menjelaskan sebabnya kepada kasir.
      */
     expect(baca("modules/menu/service.ts")).toContain("export function tambahKebutuhanBahan(");
-    for (const p of ["modules/penjualan/service.ts", "modules/open-bill/routes.ts"]) {
-      expect(baca(p), p).toContain("tambahKebutuhanBahan(");
-    }
+    // `createSale` memanggilnya LANGSUNG: kebutuhannya ditumpuk di dalam gelung
+    // yang juga menghitung harga & HPP.
+    expect(baca("modules/penjualan/service.ts")).toContain("tambahKebutuhanBahan(");
+    /*
+     * `open-bill` kini menjangkaunya LEWAT `kebutuhanKeranjang` (2026-09-06):
+     * perakitan "keranjang → bahan" yang dulu diketik ulang di sana dipakai
+     * bersama `POST /penjualan/cek-stok`. Rantainya dipaku utuh — memeriksa
+     * sebutan `kebutuhanKeranjang(` saja akan lolos pada rumah yang diam-diam
+     * berhenti memakai aturan resep bersamanya.
+     */
+    expect(baca("modules/open-bill/routes.ts")).toContain("kebutuhanKeranjang(");
+    expect(baca("modules/penjualan/stok-keranjang.ts")).toContain("tambahKebutuhanBahan(");
   });
 
   it("tak ada yang menguraikan resep dengan tangan lagi", () => {

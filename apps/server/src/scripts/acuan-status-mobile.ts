@@ -91,6 +91,22 @@ for (const p of berkasTs(SHARED)) {
   }
 }
 
+// 4) objek `export const X = { k: "v", … } as const` di `packages/shared` —
+//    kode yang dibaca MESIN lewat konstanta BERNAMA. `SEBAB_LOGIN` tak pernah
+//    muncul sebagai literal `sebab: "…"` di rute (server melemparnya lewat
+//    `SEBAB_LOGIN.takTerdaftar`) dan tipenya `(typeof X)[keyof typeof X]`,
+//    bukan union literal — jadi ketiga sumber di atas buta terhadapnya, dan
+//    ponsel yang membandingkan `sebab == 'email_tak_dikenal'` dituduh memakai
+//    nilai yang "tak ada di kontrak mana pun". Terukur 2026-09-05.
+//    Hanya nilai berbentuk KODE (`^[a-z][a-z0-9_]*$`): kalimat manusia di objek
+//    sebelahnya (`PESAN_LOGIN`) bukan kontrak yang dibandingkan mesin.
+for (const p of berkasTs(SHARED)) {
+  const s = butaKomentar(readFileSync(p, "utf8"));
+  for (const m of s.matchAll(/export const (\w+)\s*=\s*\{([^}]*)\}\s*as const/g)) {
+    for (const v of m[2].matchAll(/:\s*"([a-z][a-z0-9_]*)"/g)) catat(`konst:${m[1]}`, v[1]);
+  }
+}
+
 const baris: string[] = [];
 for (const sumber of [...nilai.keys()].sort()) {
   for (const v of [...nilai.get(sumber)!].sort()) baris.push(`${sumber}|${v}`);

@@ -101,12 +101,42 @@ describe("zona waktu: server & web tak boleh berselisih diam-diam", () => {
   });
 
   it("TAK ADA jalan mengubah zona waktu perusahaan lewat API", () => {
-    // Inti penjaga ini. Menambahkan satu baris di zod akan membuat uji ini
-    // merah — dan itu memang yang diinginkan: bereskan dulu berkas web di atas.
+    /*
+     * Inti penjaga ini. Menambahkan satu baris di zod akan membuat uji ini
+     * merah — dan itu memang yang diinginkan: bereskan dulu berkas web di atas.
+     *
+     * Yang DIPERIKSA adalah permukaan TULIS, bukan seluruh berkas. Sampai
+     * 2026-09-06 uji ini melarang kata `timezone` di mana pun di
+     * `company/routes.ts`, dan itu lulus karena sebab yang salah: `GET
+     * /company` memang SUDAH mengirim zonanya sejak dulu — lewat `{ ...row }`,
+     * yang tak pernah menyebut satu nama kolom pun. Larangan sekata itu
+     * menjaga EJAAN, bukan kelakuan; begitu bentuk balasannya ditulis kolom
+     * demi kolom (`companyRow`, vena #99) ia menuduh jalur BACA yang tak
+     * berubah apa-apa.
+     *
+     * Maka: kata itu boleh muncul TEPAT DI SATU TEMPAT — perakit balasan
+     * `companyRow`. Di luar itu (zod `PatchBody`/`ModeBody`, tiap `.set({…})`)
+     * ia tetap terlarang, dan sekarang larangannya menunjuk hal yang benar.
+     */
     const rute = baca("apps/server/src/modules/company/routes.ts");
+
+    // Perakit balasan dipotong keluar; sisanya adalah permukaan tulisnya.
+    const m = /export function companyRow\([\s\S]*?\n\}\n/.exec(rute);
+    expect(m, "perakit balasan `companyRow` tak terbaca — potongannya meleset").not.toBeNull();
+    // Non-vakum ganda: kalau potongannya justru menelan seluruh berkas, sisanya
+    // kosong dan asersi di bawah lulus tanpa memeriksa apa pun.
+    const sisa = rute.replace(m![0], "");
+    expect(sisa.length / rute.length, "potongan `companyRow` menelan berkasnya").toBeGreaterThan(
+      0.5,
+    );
+    expect(m![0], "`companyRow` berhenti mengirim zona — itu perubahan kawat").toContain(
+      "timezone: row.timezone",
+    );
+
     expect(
-      /timezone/.test(rute),
-      "PATCH /company mulai menyentuh timezone — wirekan dulu zona perusahaan ke web " +
+      /timezone/.test(sisa),
+      "`company/routes.ts` menyentuh timezone DI LUAR perakit balasan `companyRow` — " +
+        "zod PATCH, `.set({…})`, atau jalur tulis lain. Wirekan dulu zona perusahaan ke web " +
         "(lihat daftar berkas di uji 'web memang masih mematoknya')",
     ).toBe(false);
   });

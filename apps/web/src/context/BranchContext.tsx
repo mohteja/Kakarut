@@ -1,34 +1,13 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { CabangDto } from "@kakarut/shared";
 import { api } from "../lib/api";
 import { bacaLokal, hapusLokal, tulisLokal } from "../lib/simpanan";
 import { useCompanyMode } from "../lib/useCompanyMode";
 import { useAuth } from "./AuthContext";
 
-export interface Cabang {
-  id: string;
-  nama: string;
-  alamat: string | null;
-  telepon: string | null;
-  /**
-   * store = outlet penjualan; central_kitchen = dapur produksi pengirim;
-   * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
-   */
-  tipe: "store" | "central_kitchen" | "kantor";
-  /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
-  central_kitchen_id: string | null;
-  /** struk per cabang: footer + tampil/tidaknya alamat & telepon cabang */
-  receipt_footer: string | null;
-  receipt_show_alamat: boolean;
-  /** titik maps + radius absen — absen hanya diterima dalam radius ini */
-  latitude: number | null;
-  longitude: number | null;
-  radius_absen_m: number;
-  /** jam operasional cabang "HH:MM" (null bila belum diatur) */
-  jam_buka: string | null;
-  jam_tutup: string | null;
-  is_active: boolean;
-}
+/** Satu baris `GET /cabang` — bentuknya milik kontrak (`CabangDto`, Lampiran A). */
+export type Cabang = CabangDto;
 
 /** Label cabang dengan ikon jenisnya — dipakai di pemilih cabang. */
 export function labelCabang(b: Pick<Cabang, "nama" | "tipe">) {

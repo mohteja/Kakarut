@@ -10,6 +10,7 @@ import { useKirimanMenggantung } from "../../lib/menggantung";
 import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import { unduhPdf } from "../../lib/pdf";
+import type { StokMasukRow } from "@kakarut/shared";
 import {
   AKSI_TAHAP,
   TEKS,
@@ -19,7 +20,6 @@ import {
   kelompokkanFaktur,
   sinyalFaktur,
   type FakturGroup,
-  type StokMasukRow,
   type TahapTujuan,
 } from "./TambahStokPage";
 import type { TahapNavState } from "./TahapPage";

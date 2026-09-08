@@ -6,9 +6,10 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { barisDitagih, formatAngkaId, hitungPb1, waktuKertas } from "@kakarut/shared";
+import { barisDitagih, hitungPb1, waktuKertas } from "@kakarut/shared";
 import { opsiKertasDariQuery, responsBon, responsSlip } from "../print/kertas";
-import { loadKatalog, tambahKebutuhanBahan } from "../menu/service";
+import { loadKatalog } from "../menu/service";
+import { kebutuhanKeranjang, pesanStokKurang } from "../penjualan/stok-keranjang";
 import { bahanKurang } from "../stok/service";
 import {
   branches,
@@ -213,23 +214,24 @@ async function pastikanStokCukup(
     .where(eq(companies.id, companyId));
   if (!company?.blokir) return;
   const katalog = await loadKatalog(db, companyId);
-  const menuById = new Map(katalog.rows.map((m) => [m.id, m]));
-  const butuh = new Map<string, number>();
-  for (const it of items) {
-    const menu = menuById.get(it.menu_id);
-    if (!menu) continue;
-    // `dine_in_override` per baris mengalahkan tipe bill — persis dasar biaya
-    // yang dipakai `createSale` saat bill ini kelak dibayar.
-    const dineIn = it.dine_in_override ?? billDineIn;
-    tambahKebutuhanBahan(butuh, katalog, menu, it.qty, dineIn);
-  }
+  // Perakitan keranjang → bahan dan kalimat penolakannya PINDAH RUMAH
+  // 2026-09-06 (`penjualan/stok-keranjang.ts`). Keduanya dulu diketik ulang di
+  // sini, sama persis dengan versi di `createSale` — dan sejak `POST
+  // /penjualan/cek-stok` memulangkan kalimat yang sama sebelum Bayar, tiga
+  // salinan yang harus tetap seragam adalah dua salinan terlalu banyak.
+  //
+  // `dine_in_override` per baris mengalahkan tipe bill — persis dasar biaya
+  // yang dipakai `createSale` saat bill ini kelak dibayar; `kebutuhanKeranjang`
+  // membaca medan `is_dine_in`, jadi barisnya dipetakan, bukan diserahkan
+  // begitu saja.
+  const butuh = kebutuhanKeranjang(
+    katalog,
+    items.map((it) => ({ menu_id: it.menu_id, qty: it.qty, is_dine_in: it.dine_in_override })),
+    billDineIn,
+  );
   const kurang = await bahanKurang(db, companyId, branchId, butuh);
   if (kurang.length > 0) {
-    throw new HTTPException(400, {
-      message: `Stok tidak cukup: ${kurang
-        .map((k) => `${k.nama} (sisa ${formatAngkaId(k.saldo)} ${k.satuan}, butuh ${formatAngkaId(k.butuh)})`)
-        .join("; ")}`,
-    });
+    throw new HTTPException(400, { message: pesanStokKurang(kurang) });
   }
 }
 

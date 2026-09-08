@@ -143,6 +143,35 @@ status_code_body() { # status_code_body <token> <method> <path> <json-body>
   printf '%s' "${out##*$'\n'}"
 }
 
+# ── Pembantu KONTRAK: medan sebuah interface di types.ts, dan selisih dua
+# himpunan kunci (dua arah). Dipakai §273, §296, §297, §298, §299 — karena itu
+# dinyatakan DI SINI, bukan di seksi yang pertama memerlukannya. Versi pertama
+# hidup di dalam §296 dan §273 di atasnya memanggil fungsi yang belum ada.
+#
+# HANYA DUA FUNGSI ini yang naik ke sini, dan batas itu disengaja. Pemindahan
+# pertama (2026-09-06) ikut mengangkat `K296_*`/`R296*` — penugasan yang
+# DIJALANKAN saat itu juga dan memanggil `$OWNER`, yang baru lahir di "== 1.
+# Login" jauh di bawah. Dengan `set -u` seluruh skrip mati di baris 159 sebelum
+# satu lengan pun jalan: bukan satu seksi merah, melainkan verifikasi yang
+# BERHENTI ADA sambil tetap memulangkan log. Pembantu di kepala berkas ini
+# boleh MEMBACA berkas, tak boleh menembak API.
+# Kelas medannya `[a-zA-Z0-9_]` — camelCase IKUT. Sampai 2026-09-05 ia
+# `[a-z0-9_]`, dan itu aman hanya selama kontraknya serba snake_case; `SaleRow`
+# (30 medan camelCase) langsung menyingkapkannya: premis §298 memulangkan 14
+# dari 50. Kebutaan yang sama ada di tiga sapuan kunci ponsel, ditutup pada
+# putaran yang sama.
+medan296() { awk -v N="$1" 'BEGIN{re="^export interface " N "( extends [A-Za-z, ]+)? \\{"} $0 ~ re {f=1;next} f&&/^\}/{exit} f&&/^  [a-zA-Z0-9_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u; }
+# `bocorkan` MENGHITUNG barisnya (itu yang dibaca `cek`, yang mem-float-kan
+# nilainya) dan MENUMPAHKAN isinya ke fd 2 supaya selisihnya kelihatan di log.
+# Ia lahir di dalam §295 dan tinggal di sana sampai 2026-09-06, padahal
+# `selisih296` di bawah menyalurkan ke dalamnya dan §273 — 2.000 baris LEBIH
+# AWAL — memanggil `selisih296`. Bentuk gagalnya menyesatkan: pipa ke fungsi
+# yang belum ada memulangkan teks kosong, `float("")` melempar, dan `cek`
+# melaporkan "nilai: , harusnya: V == 0" — terbaca seperti selisih kunci,
+# padahal soal urutan definisi.
+bocorkan() { local d; d=$(cat); [ -n "$d" ] && printf '%s\n' "$d" >&2; printf '%s\n' "$d" | grep -c . || true; }
+selisih296() { comm -3 <(printf '%s\n' "$1" | sort -u) <(printf '%s\n' "$2") | bocorkan; }
+
 # pastikanHadir <token> [keterangan] — pastikan pemegang token TERCATAT HADIR
 # di cabangnya, dari keadaan awal MANA PUN.
 #
@@ -229,7 +258,13 @@ cek "complement −1" "abs(V - ($COMP0 - 1)) < 0.001" "$(stok_of "$S1" "compleme
 echo "== 4. Penjualan dine-in TIDAK memotong kemasan, complement −0.5 =="
 PLASTIK1=$(stok_of "$S1" "plastik take away"); COMP1=$(stok_of "$S1" "complement saos & sambal")
 JUAL2=$(api "$KASIR" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
-HPP_TA=$(echo "$JUAL1" | jq '.items[0].hppSatuan'); HPP_DI=$(echo "$JUAL2" | jq '.items[0].hppSatuan')
+# HPP dibaca lewat `GET /penjualan/:id` sebagai OWNER, bukan dari balasan POST
+# milik kasir. Sampai 2026-09-05 balasan POST membawa `hppSatuan` berisi angka
+# untuk kasir juga — dan lengan ini memakai kebocoran itu sebagai saluran ukur.
+# Sejak biayanya ditahan di ketiga pintu (§298), yang berhak melihat angkanya
+# hanya manajemen; asersinya tak berubah, sumber bacaannya yang dibetulkan.
+HPP_TA=$(api "$OWNER" GET "/penjualan/$(echo "$JUAL1" | jq -r .sale.id)" | jq '.items[0].hppSatuan')
+HPP_DI=$(api "$OWNER" GET "/penjualan/$(echo "$JUAL2" | jq -r .sale.id)" | jq '.items[0].hppSatuan')
 cek "hpp dine-in < hpp take-away" "V == 1" "$(python3 -c "print(1 if $HPP_DI < $HPP_TA else 0)")"
 S2=$(api "$KASIR" GET /stok)
 cek "plastik take away tetap" "abs(V - $PLASTIK1) < 0.001" "$(stok_of "$S2" "plastik take away")"
@@ -11662,8 +11697,14 @@ DR213=$(balap213 3 "" /auth/register "{\"nama\":\"Daftar 213\",\"email\":\"$R213
 cek "INTI: 3 pendaftaran beremail sama → TAK ADA 5xx" "V == 0" "$(lima213 "$DR213")"
 cek "INTI: semuanya 200 — tak ada 409 yang membocorkan email mana yang ada" "V == 3" \
   "$(kode213 "$DR213" 200)"
-cek "…dan pesannya IDENTIK di ketiganya (kontrak anti-enumerasi)" "V == 1" \
-  "$(cat "$DR213"/b* | jq -s '[.[]|.message]|unique|length')"
+# Asersi ini DULU berbunyi "pesannya IDENTIK di ketiganya (kontrak
+# anti-enumerasi)". Netralitas itu dicabut KEPUTUSAN PEMILIK 2026-09-05: ketiga
+# balasan kini menyebut `sebab`, dan yang menang balapan berbeda dari yang
+# kalah. Yang tetap dijaga — dan itu maksud aslinya — TAK ADA 409 dan tak ada
+# kalimat karangan: tiap balasan memakai kosakata kontrak.
+sebab213(){ cat "$1"/b* | jq -r '.sebab // empty' 2>/dev/null | grep -cx 'kode_dikirim\|kode_dikirim_ulang\|jarak_kirim_ulang' || true; }
+cek "…dan ketiganya memakai kosakata kontrak (bukan kalimat rakitan)" "V == 3" \
+  "$(sebab213 "$DR213")"
 
 # ── PASANGAN: jalur BERURUTAN tak berubah perilakunya ──────────────────────
 # Terjemahan galat tak boleh menggeser jawaban yang selama ini benar.
@@ -15393,6 +15434,21 @@ for K273 in id nama slug plan timezone pb1Enabled pb1Rate metodeHpp \
   cek "GET /company tetap membawa \`$K273\`" "V == 1" \
     "$(echo "$CO273" | jq --arg k "$K273" 'if has($k) then 1 else 0 end')"
 done
+# ARAH SEBALIKNYA — dan ia LUPUT selama ini. Gelang di atas memakai `has($k)`:
+# ia menangkap kunci yang DICABUT, tak pernah yang DITAMBAH, dan komentar di
+# atasnya hanya membayangkan pencabutan. Terukur 2026-09-06: balasannya sudah
+# membawa 22 kunci, EMPAT lebih banyak daripada 18 yang dipaku di sini
+# (`alamat`, `telepon`, `logoUrl`, `planExpiresAt`) — masuk tanpa satu asersi
+# pun berubah warna. Sejak putaran ini bentuknya bernama (`CompanyRow`) dan
+# dipaku DUA ARAH terhadap kontraknya, bukan terhadap daftar yang diketik di
+# skrip ini.
+K273C=$(medan296 CompanyRow)
+cek "§273 premis: kontrak CompanyRow terbaca dari types.ts (22 medan)" "V == 22" \
+  "$(echo "$K273C" | grep -c .)"
+cek "§273 kunci GET /company == CompanyRow (DUA ARAH — arah yang dulu luput)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$CO273")" "$K273C")"
+cek "§273 kasir menerima kunci yang SAMA (rute [any])" "V == 0" \
+  "$(selisih296 "$(api "$REISS105" GET "/company" | jq -r 'keys[]')" "$K273C")"
 
 # ATURAN B lewat HTTP: tak satu pun rahasia muncul di balasan yang paling
 # mungkin membocorkannya — sesi login, dan kartu perusahaan.
@@ -16529,13 +16585,22 @@ cek "§284 barisnya BARU dan menyebut percobaan, bukan keputusan diam" "V == 1" 
       tak_dicoba\|akun_*|tak_dicoba\|jarak_kirim_ulang|TAK-ADA-BARIS) false;; *) true;; esac \
       && echo 1 || echo 0)"
 
-# ENUMERASI TETAP TERTUTUP — asersi yang MENAHAN pengetatan di atas. Balasan
-# untuk email yang sudah ada harus tetap sama persis dengan balasan untuk email
-# baru; `dev_verify_kode` dibuang lebih dulu karena ia memang hanya ada di dev.
-BADAN284A=$(echo "$R284A" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
-BADAN284B=$(echo "$R284B" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
-cek "PASANGAN §284: balasannya TETAP identik (enumerasi tak dibuka)" "V == 1" \
+# ENUMERASI: asersi ini DULU berbunyi "balasannya TETAP identik (enumerasi tak
+# dibuka)" dan MENAHAN pengetatan di atas. KEPUTUSAN PEMILIK 2026-09-05
+# mencabut netralitas itu — biayanya disampaikan lebih dulu (pintu ini tak
+# butuh password, jadi enumerasi di sini lebih murah daripada di `/login`).
+# Yang menggantikannya BUKAN penghapusan: bentuk balasannya harus tetap SAMA
+# (kunci yang sama, status yang sama) dan bedanya HANYA `sebab` + `message`,
+# keduanya dari kosakata kontrak. Kalau yang berbeda selain itu — panjang
+# larik, medan tambahan, status — itu kebocoran baru yang bukan bagian dari
+# keputusan siapa pun.
+BADAN284A=$(echo "$R284A" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url, .sebab, .message)')
+BADAN284B=$(echo "$R284B" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url, .sebab, .message)')
+cek "PASANGAN §284: bedanya HANYA sebab+message — sisanya identik" "V == 1" \
   "$([ "$BADAN284A" = "$BADAN284B" ] && [ -n "$BADAN284A" ] && echo 1 || echo 0)"
+cek "PASANGAN §284: kedua sebabnya dari kosakata kontrak" "V == 2" \
+  "$(printf '%s\n%s\n' "$(echo "$R284A" | jq -r '.sebab // empty')" "$(echo "$R284B" | jq -r '.sebab // empty')" \
+     | grep -cx 'kode_dikirim\|kode_dikirim_ulang\|jarak_kirim_ulang\|email_tak_dikenal\|akun_terhapus\|akun_nonaktif\|akun_terverifikasi')"
 cek "PASANGAN §284: daftar ulang tak membocorkan kode, di dev sekalipun" "V == 1" \
   "$(echo "$R284B" | jq '(.dev_verify_kode == null) | if . then 1 else 0 end')"
 
@@ -16597,11 +16662,14 @@ cek "§285 …dan balasannya berkata akun sudah aktif" "V == 1" \
 cek "§285 …dan keputusan 'tak dikirimi' tetap tercatat" "V == 1" \
   "$([ "$(jejak284 "$E285")" = "tak_dicoba|akun_terverifikasi" ] && echo 1 || echo 0)"
 
-# (b) PASSWORD SALAH → NETRAL, identik dengan email yang belum pernah ada.
-# Inilah yang menahan pengetatan di atas: yang dibocorkan /register harus TEPAT
-# SAMA dengan yang dibocorkan /login — keberadaan akun hanya terungkap kepada
-# pemegang password yang benar. Kalau balasan ini berbeda dari email baru,
-# celah enumerasi yang dijaga susah payah terbuka kembali lewat pintu baru.
+# (b) PASSWORD SALAH → kini MENYEBUT bahwa akunnya sudah terdaftar & aktif.
+# Asersi di bawah DULU menuntut balasan ini identik dengan email yang belum
+# pernah ada, dengan alasan "yang dibocorkan /register harus TEPAT SAMA dengan
+# yang dibocorkan /login". KEPUTUSAN PEMILIK 2026-09-05 mencabut syarat itu:
+# kedua pintu daftar kini menyebut sebabnya, dan biayanya (enumerasi di pintu
+# tanpa password) disampaikan lebih dulu. Yang diuji sekarang justru
+# PEMBEDAANNYA — dan bahwa statusnya tetap 200, sehingga yang berubah hanya
+# badan, bukan bentuk protokolnya.
 R285S=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
   -H "$XFF284" -d "{\"nama\":\"Uji 285\",\"email\":\"$E285\",\"password\":\"PasswordSalah999!\"}")
 E285X="baru285.$(date +%s)@contoh.id"
@@ -16609,8 +16677,11 @@ R285X=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/
   -H "$XFF284" -d "{\"nama\":\"Uji 285x\",\"email\":\"$E285X\",\"password\":\"Rahasia123!\"}")
 BADAN285S=$(echo "$R285S" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
 BADAN285X=$(echo "$R285X" | jq -Sc 'del(.dev_verify_kode, .dev_verify_url)')
-cek "PASANGAN §285: password SALAH → balasan identik dengan email yang belum pernah ada" "V == 1" \
-  "$([ "$BADAN285S" = "$BADAN285X" ] && [ -n "$BADAN285S" ] && echo 1 || echo 0)"
+cek "PASANGAN §285: password SALAH → akun_terverifikasi; email BARU → kode_dikirim" "V == 1" \
+  "$([ "$(echo "$R285S" | jq -r '.sebab // empty')" = "akun_terverifikasi" ] &&
+     [ "$(echo "$R285X" | jq -r '.sebab // empty')" = "kode_dikirim" ] && echo 1 || echo 0)"
+cek "PASANGAN §285: …dan bedanya HANYA sebab+message (bentuknya tetap sama)" "V == 1" \
+  "$([ "$(echo "$BADAN285S" | jq -Sc 'del(.sebab, .message)')" = "$(echo "$BADAN285X" | jq -Sc 'del(.sebab, .message)')" ] && echo 1 || echo 0)"
 cek "PASANGAN §285: password salah tak dapat sesi maupun kode" "V == 1" \
   "$(echo "$R285S" | jq '((.token == null) and (.dev_verify_kode == null)) | if . then 1 else 0 end')"
 
@@ -16685,12 +16756,16 @@ cek "dasar §286: tiga nota tercatat" "V == 1" \
   "$([ ${#SID286_1} -eq 36 ] && [ ${#SID286_2} -eq 36 ] && [ ${#SID286_3} -eq 36 ] && echo 1 || echo 0)"
 # Premis angka per nota — kalau ini meleset, laporan di bawah meleset karena
 # nota, bukan karena laporannya.
+# TOTAL dibaca dari nota kasir (ia memang berhak); HPP dari `GET /penjualan/:id`
+# sebagai OWNER — biaya ditahan untuk kasir sejak 2026-09-05 (§298), dan lengan
+# ini dulu membacanya dari balasan POST yang bocor.
+D286_1=$(api "$OWNER" GET "/penjualan/$SID286_1"); D286_2=$(api "$OWNER" GET "/penjualan/$SID286_2"); D286_3=$(api "$OWNER" GET "/penjualan/$SID286_3")
 cek "premis §286: S1 total 47.520 & HPP 10.000" "V == 1" \
-  "$(echo "$S286_1" | jq '((.sale.total==47520) and (.sale.totalHpp==10000))|if . then 1 else 0 end')"
+  "$(jq -n --argjson a "$S286_1" --argjson b "$D286_1" 'if ($a.sale.total==47520) and ($b.sale.totalHpp==10000) then 1 else 0 end')"
 cek "premis §286: S2 total 16.500 & HPP 5.000" "V == 1" \
-  "$(echo "$S286_2" | jq '((.sale.total==16500) and (.sale.totalHpp==5000))|if . then 1 else 0 end')"
+  "$(jq -n --argjson a "$S286_2" --argjson b "$D286_2" 'if ($a.sale.total==16500) and ($b.sale.totalHpp==5000) then 1 else 0 end')"
 cek "premis §286: S3 total 26.400 & HPP 0" "V == 1" \
-  "$(echo "$S286_3" | jq '((.sale.total==26400) and (.sale.totalHpp==0))|if . then 1 else 0 end')"
+  "$(jq -n --argjson a "$S286_3" --argjson b "$D286_3" 'if ($a.sale.total==26400) and ($b.sale.totalHpp==0) then 1 else 0 end')"
 
 # Sajian S1 dan S2 diselesaikan (dikerjakan → selesai) SEBELUM refund, supaya
 # baris durasinya lahir dari sajian yang memang dibuat.
@@ -17375,6 +17450,316 @@ cek "§294 tenant LAIN tak melihat faktur tenant ini" "V == 1" \
      echo "$LAIN" | jq -e --arg k "$K" 'if type=="object" and has("rows") then ([.rows[]|(.faktur_id // .id)]|index($k)|not) else true end' >/dev/null 2>&1 && echo 1 || echo 0)"
 cek "§294 kasir tak boleh membaca daftar ini → bukan 200" "V == 1" \
   "$([ "$(status_code "$REISS105" GET "/perlengkapan/beli")" != "200" ] && echo 1 || echo 0)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §295 — BARIS PENGADAAN: kunci yang DIKIRIM == medan `StokMasukRow` di kontrak
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 tipe baris `/produksi` & `/pembelian` hidup sebagai DTO
+# lokal halaman web, jadi Lampiran A & fikstur ponsel tak pernah melihatnya:
+# 55 kunci per baris, 52 dideklarasikan (`harga_tebakan`, `pengadaan`,
+# `qty_setara` dikirim tanpa pernah dideklarasikan). Kini tipenya di shared dan
+# dijaga statis (`stok-masuk-row-utuh.test.ts`: select+pengayaan == interface).
+# Lengan ini menagih hal yang sama dari sisi yang tak bisa dibohongi pengurai:
+# balasan HTTP sungguhan atas DB gerbang, dua arah.
+#
+# `bocorkan` (tulis selisih ke fd 2 yang DIWARISI, lalu hitung barisnya), BUKAN
+# `tee /dev/stderr`: saat skrip ini dijalankan `> log 2>&1` (gerbang),
+# `/dev/stderr` adalah berkas log itu sendiri. `tee` membukanya ULANG — tanpa
+# `-a` dengan O_TRUNC (seluruh log sebelum lengan ini terhapus; sisanya jadi
+# berkas jarang penuh NUL — terjadi di gerbang #95, 2026-09-05: 231.667 NUL
+# dari 231.786 byte, dua baris tersisa), dengan `-a` tak memotong tapi baris
+# diagnostiknya TERTIMPA tulisan stdout berikutnya (offset fd induk tak maju
+# pada O_APPEND). `>&2` di dalam `$(…)` memakai deskripsi berkas yang sama,
+# offsetnya bersama, urutannya benar. Penghitung PASS/FAIL hidup di memori,
+# jadi verdik gerbang #95 tetap sah; yang lenyap bukti tertulisnya. Dijaga
+# `verify-api-log-utuh.test.ts` (menjalankan ketiga bentuk di bash sungguhan).
+KUNCI295=$(awk '/^export interface StokMasukRow \{/{f=1;next} f&&/^\}/{exit} f&&/^  [a-z_]+\??:/{sub(/^  /,"");sub(/\??:.*/,"");print}' packages/shared/src/types.ts | sort -u)
+R295P=$(api "$OWNER" GET "/produksi?per_page=200&branch_id=all")
+R295B=$(api "$OWNER" GET "/pembelian?per_page=200&branch_id=all")
+HTTP295=$(printf '%s\n%s' "$R295P" "$R295B" | jq -r '[.rows[]|keys[]]|unique|.[]' | sort -u)
+cek "§295 premis: kedua rute berbalasan baris (≥ 20 baris gabungan)" "V >= 20" \
+  "$(printf '%s\n%s' "$R295P" "$R295B" | jq -s 'map(.rows|length)|add')"
+cek "§295 premis: kontrak StokMasukRow terbaca dari types.ts (≥ 50 medan)" "V >= 50" \
+  "$(echo "$KUNCI295" | grep -c .)"
+cek "§295 tiap kunci yang DIKIRIM ada di kontrak (dikirim − kontrak = ∅)" "V == 0" \
+  "$(comm -23 <(echo "$HTTP295") <(echo "$KUNCI295") | bocorkan)"
+cek "§295 tiap medan KONTRAK benar-benar dikirim (kontrak − dikirim = ∅)" "V == 0" \
+  "$(comm -13 <(echo "$HTTP295") <(echo "$KUNCI295") | bocorkan)"
+cek "§295 ketiga kunci yang dulu tak dideklarasikan kini ada di kontrak" "V == 3" \
+  "$(echo "$KUNCI295" | grep -cx 'harga_tebakan\|pengadaan\|qty_setara')"
+cek "§295 tak ada baris yang membawa asal_cabang (kunci hantu yang ponsel baca)" "V == 0" \
+  "$(printf '%s\n%s' "$R295P" "$R295B" | jq -r '[.rows[]|select(has("asal_cabang"))]|length' | paste -sd+ | bc)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §296 — SESI & CABANG: kunci yang DIKIRIM == kontrak (SesiLogin, SesiDto,
+#        AuthUser, CompanyDto, CabangDto)
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 tak satu pun medan sesi maupun baris `/cabang` ada di
+# Lampiran A: `SesiLogin` hidup di auth/session.ts, web mengetik ulang
+# `AuthState` tanpa `blokir_jual_minus`, `Cabang` diketik di BranchContext,
+# dan bentuk `company` dirakit di DUA tempat (companyDto + inline `/auth/me`).
+# Statisnya dijaga `sesi-cabang-dto-utuh.test.ts`; lengan ini menagih dari
+# kawat: balasan HTTP sungguhan, dua arah, seluruh baris.
+K296_USER=$(medan296 AuthUser); K296_CO=$(medan296 CompanyDto); K296_SESI=$(medan296 SesiDto); K296_CAB=$(medan296 CabangDto)
+K296_LOGIN=$(printf '%s\n%s\n' "$K296_SESI" "$(medan296 SesiLogin)" | sort -u)
+R296L=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")
+R296M=$(api "$OWNER" GET "/auth/me")
+R296C=$(api "$OWNER" GET "/cabang")
+R296CK=$(api "$REISS105" GET "/cabang")
+cek "§296 premis: kontrak terbaca dari types.ts (AuthUser 7 + CompanyDto 9 + SesiDto 3 + SesiLogin 1 + CabangDto 14)" "V == 34" \
+  "$(printf '%s\n%s\n%s\n%s\n%s\n' "$K296_USER" "$K296_CO" "$K296_SESI" "$(medan296 SesiLogin)" "$K296_CAB" | grep -c .)"
+cek "§296 premis: owner punya company (bukan null) dan /cabang ≥ 2 baris" "V == 1" \
+  "$([ "$(jq -r '.company|type' <<<"$R296M")" = object ] && [ "$(jq 'length' <<<"$R296C")" -ge 2 ] && echo 1 || echo 0)"
+cek "§296 /auth/login kunci atas == SesiLogin {token,user,company,branch} (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R296L")" "$K296_LOGIN")"
+cek "§296 /auth/me kunci atas == SesiDto {user,company,branch} (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R296M")" "$K296_SESI")"
+cek "§296 /auth/me .user == AuthUser (dua arah — iat/exp JWT tak bocor)" "V == 0" \
+  "$(selisih296 "$(jq -r '.user|keys[]' <<<"$R296M")" "$K296_USER")"
+cek "§296 /auth/me .company == CompanyDto (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r '.company|keys[]' <<<"$R296M")" "$K296_CO")"
+cek "§296 /auth/login .company == /auth/me .company — satu penulis, dibuktikan dari kawat" "V == 0" \
+  "$(selisih296 "$(jq -r '.company|keys[]' <<<"$R296L")" "$(jq -r '.company|keys[]' <<<"$R296M" | sort -u)")"
+cek "§296 pb1_rate & diskon_maks_persen angka JSON (kontrak: number), blokir_jual_minus boolean" "V == 1" \
+  "$(jq -r '.company|if (.pb1_rate|type)=="number" and (.diskon_maks_persen|type)=="number" and (.blokir_jual_minus|type)=="boolean" then 1 else 0 end' <<<"$R296M")"
+cek "§296 tiap baris /cabang == CabangDto (dua arah, gabungan seluruh baris)" "V == 0" \
+  "$(selisih296 "$(jq -r '[.[]|keys[]]|unique|.[]' <<<"$R296C")" "$K296_CAB")"
+cek "§296 tiap baris /cabang membawa SEMUA 14 kunci (bukan cuma gabungannya)" "V == 1" \
+  "$(jq -r --argjson n "$(echo "$K296_CAB" | grep -c .)" '[.[]|(keys|length)==$n]|all|if . then 1 else 0 end' <<<"$R296C")"
+cek "§296 kasir pun membaca /cabang dengan kunci yang sama (rute semua peran)" "V == 0" \
+  "$(selisih296 "$(jq -r 'if type=="array" then [.[]|keys[]]|unique|.[] else "BUKAN_LARIK" end' <<<"$R296CK")" "$K296_CAB")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §297 — BEP & NILAI STOK: kunci yang DIKIRIM == kontrak (BepResult,
+#        NilaiStokRingkas), dari kawat
+# ═══════════════════════════════════════════════════════════════════════════
+# Terukur 2026-09-05: `/laporan/bep` 8 kunci — web mendeklarasikan 7 (`periode`
+# dikirim tanpa dideklarasikan), ponsel membaca 6 (tanpa `basis`);
+# `/stok/nilai` 5 kunci yang interface-nya SUDAH di shared, tapi di
+# `nilai-stok.ts` — tak terlihat fikstur ponsel maupun Lampiran A (keduanya
+# hanya membaca types.ts). Statisnya `bep-nilai-dto-utuh.test.ts`; `medan296`
+# dan `selisih296` didefinisikan di §296.
+K297_BEP=$(medan296 BepResult); K297_NILAI=$(medan296 NilaiStokRingkas)
+R297B=$(api "$OWNER" GET "/laporan/bep?biaya_tetap=1000000&branch_id=all")
+R297N=$(api "$OWNER" GET "/stok/nilai")
+R297NK=$(api "$REISS105" GET "/stok/nilai")
+cek "§297 premis: kontrak terbaca dari types.ts (BepResult 8 + NilaiStokRingkas 5)" "V == 13" \
+  "$(printf '%s\n%s\n' "$K297_BEP" "$K297_NILAI" | grep -c .)"
+cek "§297 premis: /laporan/bep owner 200 berbadan objek (basis penjualan/katalog)" "V == 1" \
+  "$(jq -r 'if type=="object" and (.basis=="penjualan" or .basis=="katalog") then 1 else 0 end' <<<"$R297B")"
+cek "§297 /laporan/bep kunci == BepResult (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R297B")" "$K297_BEP")"
+cek "§297 /laporan/bep .periode == {dari, sampai} berformat tanggal" "V == 1" \
+  "$(jq -r 'if (.periode|keys)==["dari","sampai"] and (.periode.dari|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and (.periode.sampai|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) then 1 else 0 end' <<<"$R297B")"
+cek "§297 /laporan/bep enam angka bertipe number (bukan teks)" "V == 6" \
+  "$(jq -r '[.biaya_tetap,.rata_harga_jual,.rata_margin_kontribusi,.porsi_untuk_bep,.omzet_untuk_bep,.porsi_per_hari_30]|map(select(type=="number"))|length' <<<"$R297B")"
+cek "§297 kasir tak boleh menghitung BEP → 403" "V == 403" \
+  "$(status_code "$REISS105" GET "/laporan/bep?biaya_tetap=1000000")"
+cek "§297 /stok/nilai kunci == NilaiStokRingkas (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R297N")" "$K297_NILAI")"
+cek "§297 /stok/nilai kelima nilainya number" "V == 5" \
+  "$(jq -r '[.[]|select(type=="number")]|length' <<<"$R297N")"
+cek "§297 kasir membaca /stok/nilai dengan kunci yang sama (agregat sebelum harga ditahan)" "V == 0" \
+  "$(selisih296 "$(jq -r 'if type=="object" then keys[] else "BUKAN_OBJEK" end' <<<"$R297NK")" "$K297_NILAI")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §298 — STRUK PENJUALAN: kunci == kontrak, dan BIAYA tak bocor lewat POST
+# ═══════════════════════════════════════════════════════════════════════════
+# Tiga pintu memulangkan bentuk ini: `POST /penjualan` (kasir-saja), `GET
+# /penjualan/:id` (cetak ulang), dan perintah `penjualan` di `/sync`. Sampai
+# 2026-09-05 hanya yang KEDUA merakit bentuknya sendiri dan menahan biaya; dua
+# lainnya menyebar baris Drizzle mentah. Terukur pada SATU transaksi yang sama:
+# POST(kasir) totalHpp 4000 & hppSatuan 2000, GET(kasir) null & null,
+# GET(owner) 4000 & 2000 — pintu yang bocor justru yang `requireRole(cashier)`.
+# Statisnya `struk-penjualan-dto-utuh.test.ts`; `medan296`/`selisih296`/
+# `bocorkan` didefinisikan di §296.
+K298_SALE=$(medan296 SaleRow); K298_ITEM=$(medan296 SaleItemRow); K298_ATAS=$(medan296 SaleResult)
+# `$REISS105`, BUKAN `$KASIR`: §105 mengganti password kasir → token lama 401.
+# Shiftnya dipastikan terbuka lebih dulu; bila sudah, `/shift/buka` menolak dan
+# penolakan itu memang tak berarti apa-apa di sini.
+api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+MENU298=$(api "$REISS105" GET /menu | jq -r '[.[] | select(.tipe == "regular")][0].id')
+R298=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$MENU298\",\"qty\":2}]}")
+ID298=$(jq -r '.sale.id // ""' <<<"$R298")
+G298K=$(api "$REISS105" GET "/penjualan/$ID298")
+G298O=$(api "$OWNER" GET "/penjualan/$ID298")
+cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 30 + SaleItemRow 16 + SaleResult 4)" "V == 50" \
+  "$(printf '%s\n%s\n%s\n' "$K298_SALE" "$K298_ITEM" "$K298_ATAS" | grep -c .)"
+cek "§298 premis: kasir berhasil membuat transaksi (ada sale.id & satu baris)" "V == 1" \
+  "$([ -n "$ID298" ] && [ "$(jq '.items|length' <<<"$R298")" -ge 1 ] && echo 1 || echo 0)"
+cek "§298 POST /penjualan kunci atas == SaleResult (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$R298")" "$K298_ATAS")"
+cek "§298 POST .sale == SaleRow (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r '.sale|keys[]' <<<"$R298")" "$K298_SALE")"
+cek "§298 POST tiap baris .items == SaleItemRow (dua arah, gabungan)" "V == 0" \
+  "$(selisih296 "$(jq -r '[.items[]|keys[]]|unique|.[]' <<<"$R298")" "$K298_ITEM")"
+cek "§298 POST tiap baris membawa SEMUA 16 kunci (bukan cuma gabungannya)" "V == 1" \
+  "$(jq -r --argjson n "$(echo "$K298_ITEM" | grep -c .)" '[.items[]|(keys|length)==$n]|all|if . then 1 else 0 end' <<<"$R298")"
+# INTI TEMUAN: biaya ditahan di pintu yang kasir pakai tiap checkout.
+cek "§298 POST kasir: sale.totalHpp DITAHAN (null, bukan angka)" "V == 1" \
+  "$(jq -r 'if .sale.totalHpp == null then 1 else 0 end' <<<"$R298")"
+cek "§298 POST kasir: tiap items[].hppSatuan DITAHAN (null)" "V == 1" \
+  "$(jq -r '[.items[].hppSatuan]|all(. == null)|if . then 1 else 0 end' <<<"$R298")"
+cek "§298 GET /:id kasir atas transaksi yang sama: biaya juga ditahan" "V == 1" \
+  "$(jq -r 'if .sale.totalHpp == null and ([.items[].hppSatuan]|all(. == null)) then 1 else 0 end' <<<"$G298K")"
+# …dan gerbangnya memang GERBANG, bukan penghapus: manajemen tetap melihatnya.
+cek "§298 GET /:id owner: totalHpp ANGKA (> 0) — gerbang, bukan penghapus" "V == 1" \
+  "$(jq -r 'if (.sale.totalHpp|type) == "number" and .sale.totalHpp > 0 then 1 else 0 end' <<<"$G298O")"
+cek "§298 GET /:id owner: tiap items[].hppSatuan angka" "V == 1" \
+  "$(jq -r '[.items[].hppSatuan]|all(type == "number")|if . then 1 else 0 end' <<<"$G298O")"
+cek "§298 POST dan GET(kasir) berbentuk IDENTIK — satu penulis, dibuktikan dari kawat" "V == 0" \
+  "$(selisih296 "$(jq -r '[(keys[]),(.sale|keys[]|"sale."+.),(.items[0]|keys[]|"item."+.)]|.[]' <<<"$R298")" "$(jq -r '[(keys[]),(.sale|keys[]|"sale."+.),(.items[0]|keys[]|"item."+.)]|.[]' <<<"$G298K" | sort -u)")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §299 — /register & /resend-verification MENYEBUT SEBABNYA (keputusan pemilik)
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-05 kedua pintu membalas SATU jawaban untuk tiga belas keadaan,
+# padahal servernya sendiri sudah menamai tiap keadaan lewat `catatTakDicoba`.
+# Pemilik meminta keduanya dirapatkan ke `/login`; biayanya (enumerasi akun di
+# pintu yang TAK butuh password) disampaikan lebih dulu dan pilihannya tetap.
+# Statisnya `sebab-daftar-utuh.test.ts`. Emailnya berakhiran @example.com dan
+# unik per jalan supaya tak menabrak akun uji lain.
+# IP SENDIRI. `batasRegister` berkuota 20/IP/jam dan skrip ini sudah memakai
+# hampir semuanya — komentar di kepala `daftar_verif` sudah memperingatkannya
+# ("berjalan TEPAT DI TEPI kuota itu"), dan §299 versi pertama menabraknya:
+# KELIMA lengan yang menyentuh `/register` dijawab 429 sementara lengan
+# `/resend-verification` di sebelahnya hijau. Pola `X-Forwarded-For` ini
+# dipinjam dari §284/§285, yang sudah memakainya untuk alasan yang sama.
+XFF299="X-Forwarded-For: 203.0.113.99"
+reg299() { curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -H "$XFF299" -d "$1"; }
+rs299() { curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' -H "$XFF299" -d "$1"; }
+E299="vena299-$(date +%s)@example.com"
+R299A=$(reg299 "{\"nama\":\"Uji 299\",\"email\":\"$E299\",\"password\":\"Rahasia299!\"}")
+cek "§299 email BARU → sebab kode_dikirim" "V == 1" \
+  "$(jq -r 'if .sebab == "kode_dikirim" then 1 else 0 end' <<<"$R299A")"
+cek "§299 balasan daftar membawa message yang tak berpagar 'Jika email valid'" "V == 1" \
+  "$(jq -r 'if (.message|type)=="string" and (.message|test("Jika email valid")|not) then 1 else 0 end' <<<"$R299A")"
+# Daftar ULANG alamat yang sama: kodenya BARU saja dikirim, jadi jaraknya menahan.
+R299B=$(reg299 "{\"nama\":\"Uji 299\",\"email\":\"$E299\",\"password\":\"Rahasia299!\"}")
+cek "§299 daftar ULANG (jarak menahan) → jarak_kirim_ulang, bukan 'kode dikirim'" "V == 1" \
+  "$(jq -r 'if .sebab == "jarak_kirim_ulang" then 1 else 0 end' <<<"$R299B")"
+cek "§299 akun TERVERIFIKASI + password salah → akun_terverifikasi" "V == 1" \
+  "$(jq -r 'if .sebab == "akun_terverifikasi" then 1 else 0 end' \
+     <<<"$(reg299 "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"SalahSekali299!\"}")")"
+cek "§299 akun TERVERIFIKASI + password BENAR tetap memulangkan SESI (tak berubah)" "V == 1" \
+  "$(jq -r 'if (.token|type)=="string" and .sudah_aktif == true then 1 else 0 end' \
+     <<<"$(reg299 "{\"nama\":\"X\",\"email\":\"$OWNER_EMAIL\",\"password\":\"$OWNER_PASS\"}")")"
+cek "§299 kirim ulang: email TAK DIKENAL → email_tak_dikenal" "V == 1" \
+  "$(jq -r 'if .sebab == "email_tak_dikenal" then 1 else 0 end' \
+     <<<"$(rs299 "{\"email\":\"tak-ada-299@example.com\"}")")"
+cek "§299 kirim ulang: akun TERVERIFIKASI → akun_terverifikasi" "V == 1" \
+  "$(jq -r 'if .sebab == "akun_terverifikasi" then 1 else 0 end' \
+     <<<"$(rs299 "{\"email\":\"$OWNER_EMAIL\"}")")"
+cek "§299 kirim ulang: belum verifikasi & jarak menahan → jarak_kirim_ulang + retry_after" "V == 1" \
+  "$(jq -r 'if .sebab == "jarak_kirim_ulang" and (.retry_after_detik|type)=="number" then 1 else 0 end' \
+     <<<"$(rs299 "{\"email\":\"$E299\"}")")"
+cek "§299 statusnya TETAP 200 & ok tetap true — yang berubah kalimat + sebab" "V == 1" \
+  "$([ "$(status_code_body "" POST /auth/resend-verification "{\"email\":\"$OWNER_EMAIL\"}")" = "200" ] &&
+     [ "$(jq -r '.ok' <<<"$(rs299 "{\"email\":\"$OWNER_EMAIL\"}")")" = "true" ] && echo 1 || echo 0)"
+# Tiap sebab yang dipulangkan HARUS ada di kosakata kontrak — kalimat bebas
+# ketikan akan pelan-pelan jadi prosa yang tak bisa dicabangkan siapa pun.
+KOSA299=$(awk '/^export const SEBAB_DAFTAR = \{/{f=1;next} f&&/^\} as const;/{exit} f&&/:/{gsub(/.*: *"/,"");gsub(/",?$/,"");print}' packages/shared/src/constants.ts | sort -u)
+cek "§299 premis: kosakata SEBAB_DAFTAR terbaca dari shared (7 nilai)" "V == 7" "$(echo "$KOSA299" | grep -c .)"
+cek "§299 tiap sebab yang dipulangkan ada di kosakata kontrak" "V == 0" \
+  "$(comm -23 <(printf '%s\n' \
+      "$(jq -r '.sebab // empty' <<<"$R299A")" "$(jq -r '.sebab // empty' <<<"$R299B")" \
+      "$(jq -r '.sebab // empty' <<<"$(rs299 "{\"email\":\"$OWNER_EMAIL\"}")")" \
+      | sort -u) <(printf '%s\n' "$KOSA299") | bocorkan)"
+# `/forgot-password` TIDAK ikut — netralitasnya keputusan terpisah, dan itulah
+# yang membuat "dirapatkan ke /login" berhenti di dua pintu, bukan tiga.
+cek "§299 /forgot-password TETAP netral: email dikenal & tidak dijawab identik" "V == 1" \
+  "$([ "$(api "" POST /auth/forgot-password "{\"email\":\"$OWNER_EMAIL\"}" | jq -S 'del(.dev_reset_url)|keys')" \
+     = "$(api "" POST /auth/forgot-password '{"email":"tak-ada-299b@example.com"}' | jq -S 'del(.dev_reset_url)|keys')" ] && echo 1 || echo 0)"
+cek "§299 /forgot-password tak membawa medan sebab sama sekali" "V == 0" \
+  "$(api "" POST /auth/forgot-password "{\"email\":\"$OWNER_EMAIL\"}" | jq '[paths|.[0]]|map(select(.=="sebab"))|length')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §300 — PRACEK STOK: ramalan yang dihitung oleh yang menghakimi
+# ═══════════════════════════════════════════════════════════════════════════
+# Sampai 2026-09-06 satu-satunya bahan peringatan kasir adalah
+# `GET /menu/ketersediaan`, yang menjawab PER MENU. Komentar gerbangnya sendiri
+# di `penjualan/service.ts` sudah menyatakan itu tak setara: "dua menu berbeda
+# bisa memperebutkan bahan yang sama dalam satu struk, dan hanya jumlah inilah
+# yang tahu." Terukur pada DB gerbang: 38 dari 57 menu berbagi bahan pembatas
+# (12 kelompok), dan keranjang 20 PBB + 20 FS1 membuat KEDUA klien diam sebelum
+# ditolak. `POST /penjualan/cek-stok` menjawab untuk SELURUH keranjang, dengan
+# `kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku` yang sama.
+#
+# Lengan terpenting di sini nomor 4 (dua baris berebut satu bahan, disusun dari
+# ketersediaan HIDUP — bukan angka yang diketik) dan nomor 5 (kalimat ramalan
+# diadu byte-per-byte dengan kalimat vonis).
+K300=$(medan296 CekStokResult)
+cek "§300 premis: kontrak CekStokResult terbaca dari types.ts (4 medan)" "V == 4" \
+  "$(echo "$K300" | grep -c .)"
+
+api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+KET300=$(api "$REISS105" GET /menu/ketersediaan)
+JUAL300=$(api "$REISS105" GET /menu | jq -r '[.[]|select(.aktif != false)|.id]')
+# Dua menu dari SATU kelompok bahan pembatas, keduanya masih bisa dijual dan
+# sisa porsinya ≥ 2 — syarat supaya "60% porsi masing-masing" tetap bilangan
+# bulat yang MASIH DI BAWAH porsinya sendiri.
+PASANG300=$(jq -c --argjson jual "$JUAL300" '
+  [ .[] | select(.porsi != null and .porsi >= 2 and (.menu_id as $m | $jual | index($m))) ]
+  | group_by(.pembatas.ingredient_id) | map(select(length >= 2)) | .[0] // []
+  | .[0:2] | map({menu_id, porsi, per: .pembatas.qty_per_porsi, saldo: .pembatas.saldo, bahan: .pembatas.nama})
+' <<<"$KET300")
+cek "§300 premis: ada DUA menu terjual yang berbagi satu bahan pembatas" "V == 2" \
+  "$(jq 'length' <<<"$PASANG300")"
+M300A=$(jq -r '.[0].menu_id // ""' <<<"$PASANG300")
+M300B=$(jq -r '.[1].menu_id // ""' <<<"$PASANG300")
+# 60% porsi masing-masing: tiap baris SENDIRI lolos cek per-menu, gabungannya
+# menuntut ±120% saldo. Inilah bentuk yang selama ini lolos tanpa suara.
+Q300A=$(jq -r '(.[0].porsi * 0.6) | ceil' <<<"$PASANG300")
+Q300B=$(jq -r '(.[1].porsi * 0.6) | ceil' <<<"$PASANG300")
+ITEMS300="[{\"menu_id\":\"$M300A\",\"qty\":$Q300A},{\"menu_id\":\"$M300B\",\"qty\":$Q300B}]"
+cek "§300 premis: TIAP baris di bawah sisa porsinya sendiri (cek per-menu DIAM)" "V == 1" \
+  "$(jq -r --argjson a "$Q300A" --argjson b "$Q300B" 'if (.[0].porsi >= $a and .[1].porsi >= $b) then 1 else 0 end' <<<"$PASANG300")"
+cek "§300 premis: …tapi gabungannya MELEBIHI saldo bahan yang mereka perebutkan" "V == 1" \
+  "$(jq -r --argjson a "$Q300A" --argjson b "$Q300B" 'if (($a * .[0].per) + ($b * .[1].per)) > .[0].saldo then 1 else 0 end' <<<"$PASANG300")"
+
+# URUTANNYA DISENGAJA: seluruh lengan yang TAK MENULIS lebih dulu, dan lengan
+# yang benar-benar men-checkout (201) paling akhir. Percobaan pertama menaruh
+# lengan "setelan mati → 201" di depan, dan checkout itu MENGHABISKAN bahan yang
+# baru saja diukur — jadi lengan berikutnya tak lagi menguji keranjang
+# dua-baris-berebut-satu-bahan, melainkan keranjang yang tiap barisnya sendirian
+# sudah melebihi. Bukti merah KKK-lah yang menyingkapnya: ia tetap hijau di
+# lengan `akan_ditolak` yang seharusnya ikut merah.
+
+# ── setelan MENYALA: ramalan, lalu vonis (TAK ADA yang tertulis: POST-nya ditolak) ──
+api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
+CS300ON=$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"items\":$ITEMS300}")
+cek "§300 kunci balasan == CekStokResult (dua arah)" "V == 0" \
+  "$(selisih296 "$(jq -r 'keys[]' <<<"$CS300ON")" "$K300")"
+cek "§300 setelan MENYALA: akan_ditolak true untuk keranjang yang cek per-menu diamkan" "V == 1" \
+  "$(jq -r 'if (.blokir_jual_minus == true and .akan_ditolak == true) then 1 else 0 end' <<<"$CS300ON")"
+VONIS300=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}" | jq -r '.error // .message // ""')
+cek "§300 INTI: kalimat RAMALAN == kalimat VONIS, byte per byte" "V == 1" \
+  "$([ -n "$VONIS300" ] && [ "$(jq -r '.pesan // ""' <<<"$CS300ON")" = "$VONIS300" ] && echo 1 || echo 0)"
+cek "§300 …dan vonisnya memang 400, bukan sukses yang kebetulan berpesan" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}")"
+
+# ── open bill: gerbangnya SENGAJA lewat, jadi pracek tak boleh menjanjikan tolak ──
+CS300OB=$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"open_bill_id\":\"00000000-0000-4000-8000-000000000000\",\"items\":$ITEMS300}")
+cek "§300 open bill: akan_ditolak FALSE walau kurang (cermin gerbangnya)" "V == 1" \
+  "$(jq -r 'if (.akan_ditolak == false and (.kurang|length) >= 1) then 1 else 0 end' <<<"$CS300OB")"
+
+# ── peran: pracek tak boleh lebih longgar daripada pintu yang diramalnya ──
+cek "§300 owner DITOLAK di pracek, persis seperti di POST /penjualan" "V == 1" \
+  "$(A=$(status_code_body "$OWNER" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"items\":$ITEMS300}");
+     B=$(status_code_body "$OWNER" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}");
+     [ "$A" = "$B" ] && [ "$A" != 200 ] && echo 1 || echo 0)"
+cek "§300 badan ketat: kunci tak dikenal ditolak 400 (bukan dibuang diam-diam)" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"kunci_karangan\":1,\"items\":$ITEMS300}")"
+
+# ── setelan MATI, PALING AKHIR sebab lengan terakhirnya benar-benar menulis ──
+api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
+CS300OFF=$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":false,\"items\":$ITEMS300}")
+cek "§300 setelan MATI: blokir_jual_minus false & akan_ditolak false" "V == 1" \
+  "$(jq -r 'if (.blokir_jual_minus == false and .akan_ditolak == false) then 1 else 0 end' <<<"$CS300OFF")"
+cek "§300 setelan MATI: kekurangan TETAP dihitung & disebut namanya" "V == 1" \
+  "$(jq -r 'if ((.kurang|length) >= 1 and (.pesan|type) == "string" and ((.kurang[0].nama//"")|length) > 0) then 1 else 0 end' <<<"$CS300OFF")"
+cek "§300 setelan MATI: keranjang yang SAMA benar-benar diterima (201) — gerbang, bukan penghapus" "V == 201" \
+  "$(status_code_body "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}")"
 
 if [ "$FAIL" -gt 0 ]; then
   echo

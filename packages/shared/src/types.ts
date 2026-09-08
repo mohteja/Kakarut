@@ -23,6 +23,132 @@ export interface AuthUser {
   branch_id: string | null;
 }
 
+/** Mode aplikasi yang diturunkan dari `plan` — Lite menyembunyikan fitur Pro. */
+export type ModeCompany = "lite" | "pro";
+
+/**
+ * BARIS PERUSAHAAN sebagaimana dipulangkan `GET /api/company` — [any], jadi
+ * KASIR pun menerimanya utuh (terukur 2026-09-06: kuncinya identik dengan
+ * owner).
+ *
+ * BERBEDA dari `CompanyDto`, dan bedanya bukan kebetulan: `CompanyDto` adalah
+ * bagian `company` dari SESI (9 medan, snake_case, dirakit `companyDto`),
+ * sedangkan yang ini baris tabel apa adanya — camelCase, 21 kolom
+ * (`KOLOM_COMPANY`) + `mode` yang diturunkan dari `plan`. Keduanya hidup
+ * berdampingan hari ini; menyatukannya perubahan kawat tersendiri.
+ *
+ * Sampai 2026-09-06 bentuk ini tak pernah dideklarasikan di kontrak, dan web
+ * mengetiknya ulang TIGA kali — `Company` (15 medan, PerusahaanPage),
+ * `CompanyStruk` (6, ReceiptModal), `CompanyMode` (1, useCompanyMode) —
+ * masing-masing memilih medan yang ia butuhkan sendiri. Ponsel mencatat lima
+ * kuncinya sebagai hantu dan sengaja membaca DUA ejaan
+ * (`json['logoUrl'] ?? json['logo_url']`) "agar setelan struk tak diam-diam
+ * kosong bila server berubah bentuk" — pertahanan yang lahir justru karena
+ * bentuknya tak pernah bernama.
+ */
+export interface CompanyRow {
+  id: string;
+  nama: string;
+  metodeHpp: MetodeHpp;
+  slug: string;
+  alamat: string | null;
+  telepon: string | null;
+  logoUrl: string | null;
+  timezone: string;
+  pb1Enabled: boolean;
+  pb1Rate: number;
+  receiptFooter: string | null;
+  receiptShowAlamat: boolean;
+  diskonMaksPersen: number;
+  blokirJualMinus: boolean;
+  /** target omzet bulanan; `null` = belum diatur */
+  targetPenjualan: number | null;
+  foodCostMaks: number;
+  plan: string;
+  planExpiresAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** DITURUNKAN dari `plan` (`modeDariPlan`), bukan kolom tabel. */
+  mode: ModeCompany;
+}
+
+/**
+ * PERUSAHAAN SEBAGAIMANA DILIHAT KLIEN — bagian `company` dari sesi
+ * (`POST /auth/login`, `/register` bila akunnya sudah aktif, `/onboarding/*`,
+ * `GET /auth/me`). Sampai 2026-09-05 bentuk ini dirakit di DUA tempat
+ * (`companyDto` di `auth/session.ts` dan objek inline di `GET /auth/me`),
+ * dideklarasikan lokal di web (`AuthState`), dan diurai ponsel tanpa satu
+ * fikstur pun bisa menagihnya — terukur: 9 medan dikirim, nol di Lampiran A.
+ */
+export interface CompanyDto {
+  id: string;
+  nama: string;
+  slug: string;
+  logo_url: string | null;
+  pb1_enabled: boolean;
+  pb1_rate: number;
+  diskon_maks_persen: number;
+  /**
+   * Setelan "tolak jual saat stok minus". Dikirim supaya kasir bisa
+   * MEMPERINGATKAN sebelum tombol Bayar; penegakannya tetap di server
+   * (`penjualan/service.ts`). Terukur 2026-09-05: tak satu klien pun membaca
+   * medan ini — peringatan yang dijanjikan belum pernah dibuat (antrean vena).
+   */
+  blokir_jual_minus: boolean;
+  timezone: string;
+}
+
+/** Cabang tempat sesi ini terikat — identitasnya saja. */
+export interface BranchRingkas {
+  id: string;
+  nama: string;
+}
+
+/** Bentuk `GET /auth/me`: sesi tanpa token. */
+export interface SesiDto {
+  user: AuthUser;
+  /** null bila user belum punya perusahaan → klien mengarahkan ke onboarding. */
+  company: CompanyDto | null;
+  branch: BranchRingkas | null;
+}
+
+/** Bentuk `POST /auth/login` dan tiap pintu lain yang memulangkan sesi baru. */
+export interface SesiLogin extends SesiDto {
+  token: string;
+}
+
+/**
+ * Satu baris `GET /cabang` — cabang milik perusahaan, semua peran.
+ * Sampai 2026-09-05 dideklarasikan lokal di web (`Cabang` di BranchContext)
+ * dan diurai ponsel (`BranchDto`) tanpa tipe bersama: 14 medan dikirim, nol
+ * di Lampiran A.
+ */
+export interface CabangDto {
+  id: string;
+  nama: string;
+  alamat: string | null;
+  telepon: string | null;
+  /**
+   * store = outlet penjualan; central_kitchen = dapur produksi pengirim;
+   * kantor = lokasi kerja admin/finance (bukan tujuan kirim barang)
+   */
+  tipe: "store" | "central_kitchen" | "kantor";
+  /** CK pemasok cabang store — store hanya menerima kiriman dari CK ini */
+  central_kitchen_id: string | null;
+  /** struk per cabang: footer + tampil/tidaknya alamat & telepon cabang */
+  receipt_footer: string | null;
+  receipt_show_alamat: boolean;
+  /** titik maps + radius absen — absen hanya diterima dalam radius ini */
+  latitude: number | null;
+  longitude: number | null;
+  radius_absen_m: number;
+  /** jam operasional cabang "HH:MM" (null bila belum diatur) */
+  jam_buka: string | null;
+  jam_tutup: string | null;
+  is_active: boolean;
+}
+
 /** Profil akun sendiri (semua peran): identitas + kode/QR absen. */
 export interface ProfilDto {
   nama: string;
@@ -764,6 +890,66 @@ export interface MenuStokDto {
   pembatas: MenuStokPembatas | null;
 }
 
+/**
+ * Satu bahan yang TAK CUKUP untuk sebuah keranjang — bentuk yang sama dengan
+ * yang dipakai gerbang `blokir_jual_minus` saat menolak, jadi apa yang dipracek
+ * dan apa yang ditolak menyebut angka yang sama.
+ */
+export interface BahanKurangDto {
+  ingredient_id: string;
+  nama: string;
+  satuan: string;
+  /** saldo cabang saat dipracek */
+  saldo: number;
+  /** kebutuhan SELURUH keranjang atas bahan ini, bukan satu baris */
+  butuh: number;
+}
+
+/**
+ * Jawaban pracek stok atas SELURUH KERANJANG (`POST /api/penjualan/cek-stok`).
+ *
+ * KENAPA RUTE INI ADA, dan kenapa `MenuStokDto` tak cukup. Sampai 2026-09-06
+ * satu-satunya bahan peringatan kasir adalah `GET /menu/ketersediaan`, yang
+ * menjawab PER MENU. Komentar gerbangnya sendiri di `penjualan/service.ts`
+ * sudah menyatakan itu tak setara: "dua menu berbeda bisa memperebutkan bahan
+ * yang sama dalam satu struk, dan hanya jumlah inilah yang tahu."
+ *
+ * Terukur lewat HTTP pada DB gerbang, 2026-09-06: dari 57 menu, 38 (dua
+ * pertiga) berbagi bahan pembatas dengan menu lain — 12 kelompok. Keranjang
+ * 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa porsi 40)
+ * membuat KEDUA klien diam — tiap baris di bawah porsinya sendiri — sementara
+ * `POST /penjualan` menolak dengan "Stok tidak cukup: Baso aci jando (sisa 80
+ * butir, butuh 100)". Kasir berdiri di depan tamu dengan layar yang bersih.
+ *
+ * Rute ini menjawab dengan ARITMETIKA YANG SAMA dengan gerbangnya
+ * (`kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku`), bukan dengan
+ * salinan yang kebetulan cocok hari ini.
+ */
+export interface CekStokResult {
+  /**
+   * Setelan perusahaan saat pracek dijalankan. Klien memerlukannya untuk tahu
+   * apakah kekurangan di bawah ini NASIHAT (setelan mati: pesanan tetap
+   * diterima, saldo boleh minus) atau RAMALAN PENOLAKAN.
+   */
+  blokir_jual_minus: boolean;
+  /**
+   * `true` bila `POST /penjualan` atas keranjang INI akan ditolak. Bukan
+   * sekadar `kurang.length > 0`: gerbangnya sengaja DILEWATI untuk open bill
+   * (barangnya sudah dimasak) dan sinkron offline, jadi pracek yang mengabaikan
+   * itu akan menjanjikan penolakan yang tak akan terjadi.
+   */
+  akan_ditolak: boolean;
+  /** kosong bila cukup; selalu dihitung, bahkan saat setelannya mati */
+  kurang: BahanKurangDto[];
+  /**
+   * Kalimat yang PERSIS SAMA dengan pesan penolakan server (`pesanStokKurang`),
+   * atau `null` bila cukup. Dikirim jadi kalimat, bukan dirakit ulang klien:
+   * dua perakit akan menyimpang, dan yang dibaca kasir harus sama dengan yang
+   * akan ia terima bila tetap menekan Bayar.
+   */
+  pesan: string | null;
+}
+
 /** Satu baris rencana penambahan stok dari menu: target porsi per menu. */
 export interface RencanaMenuItem {
   menu_id: string;
@@ -986,6 +1172,30 @@ export interface ProduksiBerjalan {
   rencana: number;
   dikerjakan: number;
   menunggu: number;
+}
+
+/**
+ * Ringkasan nilai rupiah stok — balasan `GET /stok/nilai` (semua peran).
+ * Rumusnya `ringkasNilaiStok` di `nilai-stok.ts`. Sampai 2026-09-05 interface
+ * ini hidup DI BERKAS ITU: "sudah di shared", tapi Lampiran A dan fikstur
+ * kunci ponsel hanya membaca `types.ts` — lima kuncinya tercatat ponsel
+ * sebagai hantu. Bentuk kawat tinggal di sini; rumusnya boleh di mana saja.
+ */
+export interface NilaiStokRingkas {
+  /** Σ(saldo × harga per unit) atas baris bersaldo POSITIF. */
+  nilai: number;
+  /** banyak bahan yang benar-benar menyumbang rupiah (saldo > 0 & berharga) */
+  bahan_bernilai: number;
+  /** banyak bahan bersaldo minus — catatan belum lengkap, tak ikut dinilai */
+  minus_bahan: number;
+  /**
+   * Besarnya (POSITIF) rupiah yang akan hilang dari total seandainya saldo
+   * minus ikut dijumlahkan. Dibawa supaya layar bisa menyebut ongkos dari
+   * catatan yang belum beres, bukan sekadar mencacahnya.
+   */
+  minus_nilai: number;
+  /** bahan bersaldo positif yang `harga_beli`-nya masih 0 → nilainya tak terhitung */
+  tanpa_harga_bahan: number;
 }
 
 export interface StokRowDto {
@@ -1687,6 +1897,119 @@ export type SebabPenjualanGagal =
   | "kasir_belum_dibuka"
   | "shift_tidak_cocok";
 
+/**
+ * BENTUK STRUK: satu baris `sales` sebagaimana dilihat klien.
+ *
+ * camelCase — dan itu WARISAN, bukan gaya. Balasan ini satu-satunya pulau
+ * camelCase di kontrak yang serba snake_case, sebab sampai 2026-09-05 ia
+ * memang baris Drizzle mentah (`.returning()`) yang tak pernah dipetakan
+ * siapa pun. Menyeragamkannya ke snake_case adalah perubahan kawat yang
+ * memecah web DAN ponsel sekaligus; putaran ini MENAMAI bentuknya, bukan
+ * merapikannya. Penyeragaman itu vena tersendiri.
+ *
+ * Cakupan kolomnya sama persis dengan `KOLOM_SALE` (`db/kolom-publik.ts`) —
+ * yaitu yang `GET /penjualan/:id` sudah kirim hari ini. Menyempitkannya
+ * (`companyId`, `deletedAt`, …) perubahan kontrak tersendiri; komentar
+ * `KOLOM_SALE` sendiri sudah menyatakan itu butuh pengukurannya sendiri.
+ */
+export interface SaleRow {
+  id: string;
+  companyId: string;
+  branchId: string;
+  cashierUserId: string;
+  nomor: string;
+  isDineIn: boolean;
+  mejaId: string | null;
+  mejaLabel: string | null;
+  subtotal: number;
+  diskon: number;
+  diskonPersen: number | null;
+  pb1Amount: number;
+  total: number;
+  /**
+   * Jangkar SEBELUM refund pertama — `null` berarti transaksi ini belum pernah
+   * direfund, jadi nilai terkini di atas memang nilai asalnya. Diisi sekali dan
+   * tak pernah berubah; kalau ikut bergerak, refund kedua menggerus diskon
+   * untuk kedua kalinya.
+   */
+  subtotalAsal: number | null;
+  diskonAsal: number | null;
+  pb1Asal: number | null;
+  /** uang yang sudah dikembalikan ke pembeli (kumulatif, Rp) */
+  refundTotal: number;
+  /**
+   * BIAYA — `null` berarti DITAHAN, bukan "nol biaya".
+   *
+   * Sama seperti `harga_per_unit` di `BarisNilaiStok`: server menihilkannya
+   * untuk peran non-manajemen (`bolehLihatBiaya`). Terukur 2026-09-05: pintu
+   * `GET /penjualan/:id` sudah menahannya sejak 2026-08-26, tapi `POST
+   * /penjualan` — yang kasir-saja — memulangkan baris mentah, jadi tiap kasir
+   * menerima `totalHpp` dan `hppSatuan` pada TIAP checkout (terukur: 4000 dan
+   * 2000 pada transaksi yang GET-nya memulangkan null untuk kasir yang sama).
+   * Sejak putaran ini kedua pintu memakai satu penulis, `strukPenjualan`.
+   */
+  totalHpp: number | null;
+  catatan: string | null;
+  customerId: string | null;
+  customerNama: string | null;
+  customerWa: string | null;
+  metodeBayar: MetodeBayar;
+  uangDiterima: number | null;
+  waktu: string;
+  saleDate: string;
+  shiftId: string | null;
+  asalOpenBillId: string | null;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+/** Satu baris `sale_items` pada struk. */
+export interface SaleItemRow {
+  id: string;
+  saleId: string;
+  menuId: string;
+  menuNama: string;
+  hargaSatuan: number;
+  /** biaya per porsi — `null` = DITAHAN (lihat `SaleRow.totalHpp`) */
+  hppSatuan: number | null;
+  /**
+   * Porsi yang DIPESAN. Sengaja TIDAK dikurangi refund: berapa yang dipesan
+   * dan berapa yang dikembalikan adalah dua fakta, dan struk asli harus tetap
+   * terbaca. Yang DITAGIH = `qty − qtyRefund` — pakai `qtyDitagih` di
+   * `refund.ts`, jangan menghitungnya sendiri.
+   */
+  qty: number;
+  isDineIn: boolean;
+  catatan: string | null;
+  /** nilai baris pada `qty` ASAL — hitung ulang bila `qtyRefund > 0` */
+  lineTotal: number;
+  pesananStatus: PesananStatus;
+  pesananStatusAt: string | null;
+  pesananStatusOleh: string | null;
+  pesananMasukAt: string;
+  sajianTakeaway: boolean;
+  /** porsi yang sudah dikembalikan uangnya (kumulatif) */
+  qtyRefund: number;
+}
+
+/**
+ * Balasan struk penjualan — bentuk yang SAMA untuk tiga pintu: `POST
+ * /penjualan` (201), `GET /penjualan/:id` (cetak ulang), dan perintah
+ * `penjualan` di `POST /sync` (yang menambah `shift`, `ada_transaksi_susulan`,
+ * `di_luar_jendela_shift` di sekelilingnya).
+ *
+ * Sampai 2026-09-05 bentuknya hidup sebagai DTO lokal halaman web
+ * (`ReceiptModal.tsx`) dan kelas Dart di ponsel — nol medan di Lampiran A,
+ * padahal ia yang dicetak jadi kertas di kedua klien.
+ */
+export interface SaleResult {
+  sale: SaleRow;
+  items: SaleItemRow[];
+  branch_nama: string;
+  /** nama kasir yang melayani (untuk dicetak di nota) */
+  kasir: string | null;
+}
+
 /** Baris riwayat transaksi kasir (untuk cek pesanan / cetak ulang struk). */
 export interface RiwayatTransaksiRow {
   id: string;
@@ -1821,6 +2144,27 @@ export interface SampahRow {
 
 /** Metode pembayaran transaksi. */
 export type MetodeBayar = "tunai" | "qris" | "transfer";
+
+/** Dasar perhitungan BEP: riwayat penjualan pada rentang, atau rata-rata katalog bila rentangnya tanpa penjualan. */
+export type BasisBep = "penjualan" | "katalog";
+
+/**
+ * Balasan `GET /laporan/bep?biaya_tetap=…` (owner/admin). Sampai 2026-09-05
+ * diketik ulang di web tanpa `periode` (dikirim, tak dideklarasikan) dan
+ * diurai ponsel tanpa `basis` — angka BEP tampil tanpa menyebut ia dihitung
+ * dari penjualan sungguhan atau dari katalog.
+ */
+export interface BepResult {
+  biaya_tetap: number;
+  basis: BasisBep;
+  /** rentang yang dipakai (default 30 hari terakhir dalam zona waktu perusahaan) */
+  periode: { dari: string; sampai: string };
+  rata_harga_jual: number;
+  rata_margin_kontribusi: number;
+  porsi_untuk_bep: number;
+  omzet_untuk_bep: number;
+  porsi_per_hari_30: number;
+}
 
 export interface LaporanHarian {
   dari: string;
@@ -2271,6 +2615,145 @@ export interface RingkasPengadaan {
   ditolak: PasanganHitung;
   /** Bagian dari `selesai` yang barangnya belum sampai — lihat `barisBelumSampai`. */
   belum_sampai: PasanganHitung;
+}
+
+/**
+ * BARIS PENGADAAN — satu bentuk untuk `GET /api/produksi`, `GET /api/pembelian`,
+ * dan `GET /api/{mod}/faktur/:fakturId` (kueri & pengayaannya satu fungsi,
+ * `ambilBarisFaktur` di `modules/produksi/routes.ts`).
+ *
+ * Sampai 2026-09-05 tipe ini hidup sebagai DTO LOKAL halaman
+ * (`apps/web/src/pages/produksi/TambahStokPage.tsx`), jadi Lampiran A dan
+ * fikstur kunci ponsel tak pernah melihatnya — medan yang server kirim bisa
+ * hilang dari tipenya diam-diam. Terukur lewat HTTP terhadap DB gerbang
+ * (237 baris, 2 rute): 55 kunci per baris, 52 dideklarasikan; `harga_tebakan`,
+ * `pengadaan`, `qty_setara` dikirim tanpa pernah dideklarasikan. Ponsel
+ * (`FakturRow.fromJson`) membaca 40 di antaranya — plus SATU yang tak pernah
+ * dikirim siapa pun (`asal_cabang`). Dijaga `stok-masuk-row-utuh.test.ts`
+ * (select + pengayaan == interface, dua arah) dan verify-api §295 (HTTP).
+ */
+export interface StokMasukRow {
+  id: string;
+  ingredient_id?: string;
+  bahan: string;
+  isi: number;
+  satuan: string;
+  /** satuan beli/kemasan (mis. "dus"); 1 satuan_beli = isi satuan */
+  satuan_beli?: string | null;
+  qty: number;
+  /**
+   * Teks qty siap-pakai dari server (`qtyTeks`), sudah memperhitungkan satuan
+   * beli & isi. Server mengirimnya sejak lama (`docs/API-CONTRACT.md`), tapi
+   * tipe ini tak pernah mendeklarasikannya dan layarnya merakit ulang
+   * `formatAngka(qty) + satuan` sendiri — medan ini ada persis untuk mencegah
+   * itu. Opsional karena baris lama di cache bisa belum membawanya.
+   */
+  qty_teks?: string | null;
+  /**
+   * `total_harga` masih TEBAKAN — belum pernah dilihat manusia (estimasi RAB,
+   * belanja otomatis, hasil skala saat realisasi melebihi rencana). Baris
+   * bertanda ini dikecualikan dari median harga acuan. Dikirim sejak lama
+   * (kontrak menyebutnya di prosa `GET /api/{mod}`), tak pernah dideklarasikan
+   * di tipe mana pun sampai 2026-09-05 — ponsel sudah membacanya.
+   */
+  harga_tebakan: boolean;
+  /** jalur pengadaan bahan — dasar `batch`/`batch_teks` (hanya `produksi`). */
+  pengadaan: "produksi" | "beli";
+  /**
+   * Padanan `qty` dalam satuan beli, ditulis SERVER (`qtyTeks().setara`);
+   * null bila bahan tak berkemasan. Saudara `qty_teks`, dan sama-sama tak
+   * pernah dideklarasikan sampai 2026-09-05.
+   */
+  qty_setara: string | null;
+  /**
+   * BERAPA KALI RESEP DIJALANKAN (`qty ÷ isi`) — null untuk bahan beli atau
+   * bahan tanpa ukuran batch. `qty` menjawab "jadinya berapa"; ini menjawab
+   * "berapa kali masak", yang justru itulah pekerjaannya.
+   */
+  batch?: number | null;
+  /** teks siap tampil dari server, mis. "3 batch × 700 ml"; null = tak relevan */
+  batch_teks?: string | null;
+  total_harga: number | null;
+  is_batch: boolean;
+  catatan: string | null;
+  waktu: string;
+  prod_date: string;
+  /** tanggal kedaluwarsa lot — terisi saat baris masuk stok (Tiba/Selesai) */
+  exp_date?: string | null;
+  /** masa simpan (hari) dari master bahan — default form exp saat Tiba */
+  masa_simpan_hari?: number;
+  /** lokasi produksi resep ("cabang" = dikerjakan kitchen/bar cabang) */
+  produksi_di?: "ck" | "cabang" | null;
+  /** divisi pelaksana resep produksi cabang — dasar badge Kitchen/Bar */
+  divisi_produksi?: "kitchen" | "bar" | null;
+  faktur_id: string | null;
+  no_faktur: string | null;
+  /** nomor dokumen otomatis (PB-/PR-), sama untuk semua baris satu faktur */
+  nomor?: string | null;
+  status: KonfirmasiStatus;
+  supplier: string | null;
+  tempat: string | null;
+  supplier_id: string | null;
+  storage_location_id: string | null;
+  /** RAK SIMPAN default (home) bahan di CK — untuk auto-file & pratinjau per rak */
+  default_storage_location_id?: string | null;
+  default_tempat?: string | null;
+  dibuat_oleh: string | null;
+  diubah_oleh: string | null;
+  /**
+   * Siapa yang MENERIMA baris ini. Untuk kiriman beralamat cabang satu-satunya
+   * pintu yang mengisinya adalah tombol Terima di Penerimaan Barang — jadi ini
+   * sekaligus bukti bahwa penerimaannya sah, bukan hasil ubah tahap manual.
+   */
+  diterima_oleh?: string | null;
+  diterima_pada?: string | null;
+  updated_at: string | null;
+  worker_id: string | null;
+  dikerjakan_oleh: string | null;
+  qty_dipesan: number | null;
+  alasan_tolak: string | null;
+  /** waktu Laporan Harga riil dibuat utk baris ini (jalur beli); null = belum */
+  laporan_harga_at?: string | null;
+  /** cabang baris (utk tampilan Kantor "semua cabang") */
+  branch_id?: string | null;
+  cabang?: string | null;
+  /** work-order CK: cabang tujuan pengiriman (null = bukan work-order) */
+  tujuan_branch_id?: string | null;
+  tujuan_cabang?: string | null;
+  /** transfer stok antar-cabang (kirim dari stok CK / kirim hasil) — bukan produksi baru */
+  asal_branch_id?: string | null;
+  /** dari Permintaan Tambah Stok (rencana menu); null = input langsung */
+  rencana_id?: string | null;
+  /** nomor dokumen permintaan (PM-xxxx) — identitas asal faktur */
+  permintaan_nomor?: string | null;
+  /** produksi dari permintaan: hasil masuk stok CK lalu PERLU DIKIRIM ke cabang ini */
+  untuk_branch_id?: string | null;
+  untuk_cabang?: string | null;
+  /** total dana cair faktur ini (nilai sama di tiap baris; 0 bila belum ada) */
+  dana_cair: number;
+  /** supplier UTAMA bahan baris ini (info "beli di mana" saat diproses) */
+  supplier_bahan?: string | null;
+  supplier_bahan_alamat?: string | null;
+  supplier_bahan_telepon?: string | null;
+}
+
+export interface StokMasukPage {
+  rows: StokMasukRow[];
+  /** Jumlah FAKTUR atas seluruh populasi tersaring — bukan panjang `rows`. */
+  total: number;
+  page: number;
+  per_page: number;
+  total_pengeluaran: number;
+  /**
+   * Ringkasan antrean, dihitung SERVER atas populasi yang sama dengan `total`.
+   *
+   * Wajib dari server, dan itu terukur: daftarnya berhalaman 20 dan server
+   * mengurutkan faktur yang belum selesai lebih dulu, jadi halaman pertama
+   * `/produksi` (total 61 faktur) memuat 20 faktur yang KEDUA PULUHNYA belum
+   * selesai. Ringkasan yang dijumlahkan dari `rows` karena itu akan selalu
+   * berbunyi "0 selesai" sampai orangnya menelusuri ke halaman terakhir.
+   */
+  ringkas: RingkasPengadaan;
 }
 
 export interface RingkasSelisihDto {

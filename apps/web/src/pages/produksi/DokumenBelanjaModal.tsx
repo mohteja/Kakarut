@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Modal, btnPrimary, btnSecondary } from "../../components/ui";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import { unduhPdf } from "../../lib/pdf";
-import { badgeFaktur, labelTahapRingkas, type FakturGroup, type StokMasukRow } from "./TambahStokPage";
+import type { StokMasukRow } from "@kakarut/shared";
+import { badgeFaktur, labelTahapRingkas, type FakturGroup } from "./TambahStokPage";
 import { AreaCetak } from "../../components/AreaCetak";
 import { lolosHtml as esc } from "@kakarut/shared";
 

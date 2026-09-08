@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
+  CekStokResult,
   MejaDto,
   MemberCariRow,
   MenuDto,
@@ -554,6 +555,62 @@ export function KasirPage() {
   // dibayar. Ia tetap ada di `cart` supaya `PUT` tidak kehilangan barisnya.
   const cartTagih = cart.filter((l) => !dibatalkan(l));
   const subtotal = cartTagih.reduce((a, l) => a + hargaBaris(l) * l.qty, 0);
+
+  /**
+   * PRACEK STOK SELURUH KERANJANG — pertanyaan yang `sisaByMenu` di atas TAK
+   * BISA jawab.
+   *
+   * Badge & garis merah di atas menilai TIAP BARIS terhadap sisa porsi MENUNYA
+   * SENDIRI. Komentar gerbangnya di server sudah menyatakan itu tak setara:
+   * "dua menu berbeda bisa memperebutkan bahan yang sama dalam satu struk, dan
+   * hanya jumlah inilah yang tahu." Terukur lewat HTTP 2026-09-06: dari 57
+   * menu, 38 berbagi bahan pembatas dengan menu lain — keranjang 20 "Premium
+   * Basooopa B" (sisa 26) + 20 "Favorit Set 1" (sisa 40) membuat layar ini
+   * DIAM SEPENUHNYA, lalu Bayar ditolak "Stok tidak cukup: Baso aci jando
+   * (sisa 80 butir, butuh 100)".
+   *
+   * Kalimatnya datang dari server (`.pesan`) dan dipakai APA ADANYA: ia
+   * dirakit perakit yang SAMA dengan pesan penolakan, jadi yang dibaca kasir
+   * sekarang sama persis dengan yang akan ia terima bila tetap menekan Bayar.
+   * Merakit ulang di sini akan melahirkan kalimat kedua yang menyimpang.
+   *
+   * TIDAK MELARANG. Tombol Bayar tetap hidup — keputusan pemilik 2026-09-06,
+   * dan sejalan dengan aturan yang sudah berlaku di layar ini: ketersediaan
+   * memberi tahu, tidak melarang. Data pracek bisa basi; server tetap
+   * penghakim tunggal.
+   */
+  const cekBadan = useMemo(
+    () =>
+      cartTagih.length === 0
+        ? null
+        : {
+            is_dine_in: dineIn,
+            ...(editingBillId ? { open_bill_id: editingBillId } : {}),
+            items: cartTagih.map((l) => ({
+              menu_id: l.menu.id,
+              qty: l.qty,
+              ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
+            })),
+          },
+    [cartTagih, dineIn, editingBillId],
+  );
+  const { data: cekStok, error: gagalCek } = useQuery({
+    // Kuncinya BADANNYA, bukan penghitung perubahan: dua keranjang yang isinya
+    // sama tak perlu ditanyakan dua kali, dan react-query menyimpan jawabannya.
+    queryKey: ["cek-stok", branchQuery, JSON.stringify(cekBadan)],
+    // Jalurnya TANPA `branchQuery`, persis seperti `POST /penjualan` di bawah:
+    // keduanya menyerahkan cabang ke `resolveBranchId` sisi server. Pracek yang
+    // menanyakan cabang LAIN daripada yang akan ditulis adalah pracek yang
+    // meramal transaksi yang bukan ini. `branchQuery` tetap di queryKey supaya
+    // pindah cabang membatalkan jawaban lama.
+    queryFn: () => api<CekStokResult>("/penjualan/cek-stok", { method: "POST", body: cekBadan }),
+    enabled: cekBadan !== null,
+    // Jawaban lama tetap ditampilkan sementara yang baru diambil — tanpa ini
+    // peringatannya BERKEDIP hilang setiap kali qty diubah, dan yang paling
+    // sering diubah justru qty yang sedang bermasalah.
+    placeholderData: (lama) => lama,
+  });
+
   // diskon per transaksi (cermin logika server: clamp ke [0, subtotal])
   // `angkaDari`, bukan `Number`: kotaknya melayani DUA mode sekaligus —
   // persen ("7,5") dan nominal rupiah ("10.000"). `Number` salah di keduanya:
@@ -1401,6 +1458,55 @@ export function KasirPage() {
             <span>Subtotal</span>
             <span>{formatRupiah(subtotal)}</span>
           </div>
+          {/*
+            PERINGATAN SELURUH KERANJANG — di sini, tepat di atas tombolnya,
+            sebab inilah detik terakhir sebelum kasir menekan Bayar. Peringatan
+            per-baris di atas tetap ada dan tetap berguna (ia menunjuk BARIS
+            mana); yang ini menjawab pertanyaan yang berbeda: muat atau tidak.
+
+            Kalimatnya milik SERVER, ditampilkan apa adanya — ia dirakit perakit
+            yang sama dengan pesan penolakan, jadi kasir membaca lebih dulu
+            kalimat yang akan ia terima.
+          */}
+          {cekStok && cekStok.kurang.length > 0 && (
+            <div
+              className={
+                cekStok.akan_ditolak
+                  ? "rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800"
+                  : "rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+              }
+            >
+              {cekStok.akan_ditolak ? (
+                <>
+                  <b>⚠ Pesanan ini akan DITOLAK saat Bayar.</b> {cekStok.pesan}
+                  <div className="mt-1">
+                    Kurangi jumlahnya, atau minta pemilik mematikan setelan “Tolak pesanan yang
+                    melebihi stok”.
+                  </div>
+                </>
+              ) : (
+                <>
+                  ⚠ Keranjang ini membuat stok minus: {cekStok.pesan}
+                  <div className="mt-1">
+                    Pesanan tetap bisa diterima — setelan “Tolak pesanan yang melebihi stok”
+                    sedang mati.
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {/*
+            Cermin `gagalSisa` di atas, untuk alasan yang sama persis: peringatan
+            berbentuk "tampil kalau ada masalah" berubah jadi kebohongan begitu
+            yang gagal adalah pembacaannya sendiri.
+          */}
+          {gagalCek && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              ⚠ Kecukupan stok keranjang tidak terbaca — peringatan “pesanan ini akan ditolak”
+              tidak akan muncul walau bahannya kurang. Tanyakan dapur sebelum menerima pesanan
+              besar.
+            </div>
+          )}
           <ErrorText error={simpanBill.error} />
           {slipError && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
