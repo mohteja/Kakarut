@@ -47,6 +47,10 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-11): `waktu` riwayat penerimaan berhenti dikirim
+  // sebagai keluaran `Date.toString()`; menunggu rilis berikutnya bersama
+  // cabang `claude`.
+  "## 🟡 `GET /api/penerimaan/riwayat` mengirim `waktu` ISO-8601 — sebelumnya keluaran `Date.toString()` yang Dart tak bisa urai",
   // BELUM DI-MERGE (2026-09-11): amplop /transfer-stok & /stok/awal masuk
   // Lampiran A — nol perubahan kawat, tapi `rows_terpotong` akhirnya
   // terlihat; menunggu rilis berikutnya bersama cabang `claude`.

@@ -115,6 +115,58 @@ export function petaSidik(kontrak: Map<string, Medan[]>): Map<string, string[]> 
   return sidik;
 }
 
+/**
+ * STEMPEL WAKTU YANG BUKAN ISO-8601 — kelas yang lolos SELURUH penjaga lain.
+ *
+ * `waktu` bertipe `string` di kontrak dan `string` di kawat, jadi pembanding
+ * tipe di atas diam; kuncinya benar, jadi `selisih296` diam; fikstur ponsel
+ * cuma tahu NAMA kunci. Yang membedakannya cuma ISI-nya.
+ *
+ * Yang dituduh SEMPIT dan disengaja: teks yang benar-benar terurai jadi
+ * tanggal DAN berbentuk khas `Date.prototype.toString`/`toLocale*` — "GMT",
+ * "Thu Sep 10 2026", "9/10/2026". Teks biasa yang kebetulan `Date.parse`
+ * terima (mis. "5") TIDAK dituduh; penjaga yang menebak menuduh kode yang
+ * benar.
+ */
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+const BENTUK_DATE_TOSTRING =
+  /(GMT|UTC[+-]|^[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4}|^\d{1,2}\/\d{1,2}\/\d{4})/;
+
+export function stempelBukanIso(nilai: unknown): boolean {
+  if (typeof nilai !== "string" || nilai.length < 8) return false;
+  if (ISO_8601.test(nilai)) return false;
+  return BENTUK_DATE_TOSTRING.test(nilai) && Number.isFinite(Date.parse(nilai));
+}
+
+export interface Stempel {
+  rute: string;
+  jalur: string;
+  nilai: string;
+}
+
+/** Telusuri SELURUH nilai (bukan cuma objek yang tersidik) mencari stempel salah bentuk. */
+export function sapuStempel(
+  rute: string,
+  v: unknown,
+  keluar: Stempel[] = [],
+  jalur = "",
+  dalam = 0,
+): Stempel[] {
+  if (dalam > 8 || v === null) return keluar;
+  if (Array.isArray(v)) {
+    v.slice(0, 60).forEach((x, i) => sapuStempel(rute, x, keluar, `${jalur}[]`, dalam + 1));
+    return keluar;
+  }
+  if (typeof v === "object") {
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      sapuStempel(rute, x, keluar, jalur ? `${jalur}.${k}` : k, dalam + 1);
+    }
+    return keluar;
+  }
+  if (stempelBukanIso(v)) keluar.push({ rute, jalur, nilai: String(v) });
+  return keluar;
+}
+
 export interface Hasil {
   selisih: Selisih[];
   /** interface → berapa objek yang tersidik jadi dia */
@@ -209,7 +261,12 @@ async function utama(): Promise<void> {
     const salah = { tanggal: "2026-09-11", items: [{ ingredient_id: "x", qty: "1", tanggal: "2026-09-11" }] };
     const a = adu("uji", benar, kontrak, sidik).selisih.length;
     const b = adu("uji", salah, kontrak, sidik).selisih.length;
-    process.stdout.write(`${a} ${b}\n`);
+    // …dan pemindai stempelnya: ISO lolos, keluaran `Date.toString` tertuduh.
+    const c = sapuStempel("uji", { waktu: "2026-09-10T14:37:32.000Z" }).length;
+    const d = sapuStempel("uji", {
+      waktu: "Thu Sep 10 2026 14:37:32 GMT+0000 (Coordinated Universal Time)",
+    }).length;
+    process.stdout.write(`${a} ${b} ${c} ${d}\n`);
     process.exit(0);
   }
 
@@ -220,6 +277,7 @@ async function utama(): Promise<void> {
     kasir: arg("--kasir"),
   };
   const hasil: Hasil = { selisih: [], cocok: new Map() };
+  const stempel: Stempel[] = [];
   let terambil = 0;
   const gagal: string[] = [];
   for (const r of RUTE) {
@@ -239,21 +297,27 @@ async function utama(): Promise<void> {
     }
     terambil += 1;
     adu(r.jalur, body, kontrak, sidik, hasil);
+    sapuStempel(r.jalur, body, stempel);
   }
   for (const s of hasil.selisih) {
     process.stdout.write(`${s.iface}.${s.medan}: kontrak \`${s.tipe}\` · kawat ${s.nilai}  (${s.rute})\n`);
   }
+  const unikStempel = new Map<string, Stempel>();
+  for (const t of stempel) unikStempel.set(`${t.rute} ${t.jalur}`, t);
+  for (const t of unikStempel.values()) {
+    process.stdout.write(`STEMPEL ${t.rute} · ${t.jalur} = ${JSON.stringify(t.nilai)}\n`);
+  }
   const objek = [...hasil.cocok.values()].reduce((a, b) => a + b, 0);
   process.stderr.write(
-    `rute terambil ${terambil}/${RUTE.length} · interface tersidik ${hasil.cocok.size} · objek ${objek} · selisih ${hasil.selisih.length}\n`,
+    `rute terambil ${terambil}/${RUTE.length} · interface tersidik ${hasil.cocok.size} · objek ${objek} · selisih ${hasil.selisih.length} · stempel salah bentuk ${unikStempel.size}\n`,
   );
   if (gagal.length) process.stderr.write(`  tak terambil: ${gagal.join(", ")}\n`);
   if (process.argv.includes("--ringkas")) {
     process.stdout.write(
-      `RINGKAS ${terambil} ${RUTE.length} ${hasil.cocok.size} ${objek} ${hasil.selisih.length}\n`,
+      `RINGKAS ${terambil} ${RUTE.length} ${hasil.cocok.size} ${objek} ${hasil.selisih.length} ${unikStempel.size}\n`,
     );
   }
-  process.exit(hasil.selisih.length === 0 ? 0 : 1);
+  process.exit(hasil.selisih.length === 0 && unikStempel.size === 0 ? 0 : 1);
 }
 
 /*

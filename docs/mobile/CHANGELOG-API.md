@@ -25,6 +25,46 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 `GET /api/penerimaan/riwayat` mengirim `waktu` ISO-8601 — sebelumnya keluaran `Date.toString()` yang Dart tak bisa urai
+
+🟡 **PERLU DICEK** — dan layar Riwayat Penerimaan di ponsel **membaik tanpa
+perubahan kode**, tapi baca alasannya sebelum menganggapnya kosmetik.
+
+**Yang berubah** (`GET /api/penerimaan/riwayat`, `rows[].waktu`):
+
+| | nilai |
+| --- | --- |
+| sebelum | `"Thu Sep 10 2026 14:37:32 GMT+0000 (Coordinated Universal Time)"` |
+| sesudah | `"2026-09-10T14:37:32.997Z"` |
+
+**Kenapa ini bukan sekadar format.** Rutenya menulis `String(i.waktu)` atas
+kolom `timestamp` — dan `String(new Date())` memulangkan keluaran
+`Date.prototype.toString`, bukan ISO. Kontraknya bilang `string`, kawatnya
+memang string, kuncinya benar: tak satu penjaga pun bisa melihatnya.
+
+Biayanya asimetris, dan itu yang membuatnya bertahan lama. `new Date(teks)` di
+peramban MENGURAINYA — itu format buatan V8 sendiri — jadi layar web tampak
+benar. `DateTime.tryParse` di Dart memulangkan **null**, dan `formatWaktu`
+memulangkan masukannya apa adanya bila gagal urai, jadi kartu riwayat di
+ponsel memajang kalimat lengkap itu sebagai "jam". Cacat yang TIDAK TERLIHAT
+di permukaan yang dipakai penulisnya.
+
+**Cacat kedua di baris yang sama, dan ini soal ISI.** Teks itu juga
+DIBANDINGKAN untuk memilih "waktu keputusan TERAKHIR" (`String(i.waktu) > t`)
+— perbandingan leksikografis atas keluaran `toString`, jadi urutannya
+ditentukan **nama hari**: `"Fri Sep 11 2026"` < `"Thu Sep 10 2026"`. Faktur
+yang diterima bertahap dan tahap terakhirnya jatuh hari Jumat memajang stempel
+hari Kamis. Kini dibandingkan sebagai `Date` dan diubah ke ISO sekali di ujung.
+
+**Untuk tim mobile — tidak wajib.** `formatWaktu(row.waktu)` mulai bekerja
+dengan sendirinya. Yang perlu ditinjau: kode yang MEMBANDINGKAN atau
+MENGURUTKAN `waktu` riwayat penerimaan sebagai teks — dulu perbandingan itu
+selalu salah, sekarang benar, jadi urutan yang tampil bisa berubah.
+
+**Nol kunci kontrak baru.** `RiwayatPenerimaanFaktur` tak berubah bentuk; yang
+berubah nilainya. Dijaga dari kawat oleh verify-api **§310** (nol stempel
+non-ISO di seluruh 72 rute) dan oleh penjaga statis `stempel-iso.test.ts`.
+
 ## 🟡 Amplop `/api/transfer-stok` akhirnya bernama — dan `rows_terpotong` yang selama ini dibuang ponsel jadi terlihat
 
 🟡 **PERLU DICEK** — **nol perubahan di kawat**, tapi asumsi lama pada layar

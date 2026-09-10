@@ -1,4 +1,5 @@
 import type { SaleItemRow, SaleResult, SaleRow } from "@kakarut/shared";
+import { iso } from "../../lib/time";
 import type { saleItems, sales } from "../../db/schema";
 
 type BarisSale = typeof sales.$inferSelect;
@@ -99,11 +100,3 @@ export function strukPenjualan(
   };
 }
 
-/**
- * Stempel waktu jadi ISO 8601. `c.json` melakukannya sendiri untuk `Date`,
- * tapi kontraknya menyebut `string` — jadi konversinya ditulis, bukan
- * diserahkan ke kebetulan serialisasi.
- */
-function iso(t: Date | string): string {
-  return t instanceof Date ? t.toISOString() : t;
-}

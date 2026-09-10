@@ -1,6 +1,7 @@
 import type { CompanyRow, ModeCompany } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
 import { BATAS_UANG } from "../../lib/batas-angka";
+import { iso } from "../../lib/time";
 import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -55,11 +56,6 @@ export function companyRow(row: BarisCompany): CompanyRow {
     updatedAt: iso(row.updatedAt),
     mode: modeDariPlan(row.plan),
   };
-}
-
-/** Stempel waktu jadi ISO 8601 — ditulis, bukan diserahkan ke serialisasi. */
-function iso(t: Date | string): string {
-  return t instanceof Date ? t.toISOString() : t;
 }
 
 /** Mode aplikasi diturunkan dari plan: 'pro' = multi-lokasi, selainnya Lite. */

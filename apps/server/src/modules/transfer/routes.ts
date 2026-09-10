@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { halamanQuery } from "../../lib/halaman-query";
+import { iso } from "../../lib/time";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -281,7 +282,7 @@ export const transferRoutes = new Hono<AppEnv>()
         f = {
           faktur_id: key,
           nomor: r.nomor,
-          waktu: r.waktu instanceof Date ? r.waktu.toISOString() : String(r.waktu),
+          waktu: iso(r.waktu),
           prod_date: r.prod_date,
           asal_branch_id: r.asal_branch_id,
           asal_cabang: r.asal_cabang,

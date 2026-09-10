@@ -91,6 +91,31 @@ export function awalHariDi(timeZone: string, tanggal: string): Date {
   return new Date(sah.length > 0 ? Math.min(...sah) : Math.max(a, b));
 }
 
+/**
+ * STEMPEL WAKTU JADI ISO 8601 — ditulis, bukan diserahkan ke kebetulan.
+ *
+ * Kolom `timestamp` Drizzle memulangkan `Date`; kontraknya menyebut `string`.
+ * `c.json` KEBETULAN menuliskannya ISO lewat `JSON.stringify`, jadi kelalaian
+ * di sini tak selalu terlihat — dan justru itu yang membuatnya mahal saat
+ * akhirnya terlihat.
+ *
+ * Sampai 2026-09-11 aturan ini punya TIGA ejaan: dua salinan `function iso()`
+ * yang identik byte per byte (`company/routes.ts`, `penjualan/struk.ts`),
+ * satu bentuk `x instanceof Date ? x.toISOString() : String(x)` yang ditulis
+ * ulang per situs, dan — di satu tempat — `String(x)` telanjang.
+ *
+ * Yang terakhir itu BUKAN sekadar ejaan yang berbeda; ia bentuk yang salah.
+ * `String(new Date())` memulangkan `"Thu Sep 10 2026 14:37:32 GMT+0000
+ * (Coordinated Universal Time)"`. Terukur dari kawat di `/penerimaan/riwayat`:
+ * `DateTime.tryParse` Dart memulangkan null untuk teks itu, jadi layar
+ * Riwayat Penerimaan di ponsel memajang kalimat itu apa adanya; peramban
+ * kebetulan bisa mengurainya, sebab itu format buatan V8 sendiri. Cacat yang
+ * TIDAK TERLIHAT di permukaan yang dipakai penulisnya.
+ */
+export function iso(t: Date | string): string {
+  return t instanceof Date ? t.toISOString() : t;
+}
+
 /** Kode cabang untuk nomor struk: "Pusat" → "PUSAT". */
 export function kodeCabang(nama: string): string {
   return nama.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10) || "CAB";

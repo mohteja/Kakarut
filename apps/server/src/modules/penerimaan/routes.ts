@@ -4,9 +4,11 @@ import type {
   KirimanMenggantung,
   KonfirmasiStatus,
   PenerimaanRow,
+  RiwayatPenerimaanFaktur,
   TutupAnomaliHasil,
 } from "@kakarut/shared";
 import { tanggalQuery } from "../../lib/tanggal-query";
+import { iso } from "../../lib/time";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -133,7 +135,7 @@ function barisMenggantung(r: Record<string, unknown>): KirimanMenggantung {
     // `waktu` kolom timestamp: pg memulangkan `Date`, dan yang dijanjikan
     // kontrak ISO-8601. Diterjemahkan di sini, bukan diserahkan ke
     // serialisasi JSON — kelas yang sudah lima putaran berturut-turut muncul.
-    waktu: r.waktu instanceof Date ? r.waktu.toISOString() : String(r.waktu),
+    waktu: iso(r.waktu as Date | string),
     bahan: String(r.bahan),
     satuan: String(r.satuan),
     posisi_sekarang:
@@ -422,7 +424,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       byFaktur.set(b.faktur_id!, kump);
     }
 
-    const rows = ids.map((fakturId) => {
+    const rows = ids.map((fakturId): RiwayatPenerimaanFaktur => {
       const items = byFaktur.get(fakturId) ?? [];
       const p = items[0];
       const ditolak = items.filter((i) => i.status === "ditolak");
@@ -437,6 +439,22 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       );
       const hasil =
         diterima.length === 0 ? "ditolak" : ditolak.length > 0 || adaKurang ? "sebagian" : "diterima";
+      /*
+       * Waktu keputusan TERAKHIR — sebuah faktur bisa diterima bertahap.
+       *
+       * DIBANDINGKAN SEBAGAI `Date`, lalu diubah ke ISO sekali di ujung.
+       * Versi sebelumnya membandingkan `String(i.waktu)` — keluaran
+       * `Date.prototype.toString` — secara LEKSIKOGRAFIS, jadi urutannya
+       * ditentukan NAMA HARI: "Fri Sep 11 2026" < "Thu Sep 10 2026", dan
+       * faktur yang tahap terakhirnya jatuh Jumat memajang stempel Kamis.
+       * Teks yang sama juga terkirim apa adanya ke klien — dan `DateTime`
+       * Dart tak bisa menguraikannya, jadi layar Riwayat Penerimaan di ponsel
+       * memajang kalimat "Thu Sep 10 2026 14:37:32 GMT+0000 (…)" utuh.
+       */
+      const waktuTerakhir = items.reduce<Date | null>(
+        (t, i) => (i.waktu && (!t || i.waktu > t) ? i.waktu : t),
+        null,
+      );
       return {
         faktur_id: fakturId,
         nomor: p?.nomor ?? null,
@@ -444,11 +462,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         jalur: p?.jalur ?? "beli",
         cabang: p?.cabang ?? null,
         supplier: p?.supplier ?? null,
-        // waktu keputusan TERAKHIR — sebuah faktur bisa diterima bertahap
-        waktu: items.reduce<string | null>(
-          (t, i) => (i.waktu && (!t || String(i.waktu) > t) ? String(i.waktu) : t),
-          null,
-        ),
+        waktu: waktuTerakhir === null ? null : iso(waktuTerakhir),
         oleh: items.find((i) => i.oleh)?.oleh ?? null,
         alasan_tolak: items.find((i) => i.alasan_tolak)?.alasan_tolak ?? null,
         hasil,

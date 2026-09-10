@@ -18293,7 +18293,7 @@ ADU309="apps/server/test/util/adu-tipe-kawat.ts"
 # Tanpa ini "0 selisih" tak membedakan penjaga yang bekerja dari yang mati.
 UJI309=$(npx tsx "$ADU309" --uji-diri 2>/dev/null)
 cek "§309 PASANGAN: contoh benar 0 selisih, contoh salah-tipe 1 selisih" "V == 1" \
-  "$([ "$UJI309" = "0 1" ] && echo 1 || echo 0)"
+  "$([ "$UJI309" = "0 1 0 1" ] && echo 1 || echo 0)"
 R309=$(npx tsx "$ADU309" --ringkas --basis "$BASE/api" --owner "$OWNER" --sa "$SA" --kasir "$REISS105" 2>/tmp/adu309.err)
 KELUAR309=$?
 RINGKAS309=$(echo "$R309" | grep '^RINGKAS ' | head -1)
@@ -18310,7 +18310,33 @@ cek "§309 premis: objek yang diadu ≥ 3000" "V >= 3000" "$(echo "$RINGKAS309" 
 cek "§309 INTI: nol nilai yang tipenya berbeda dari kontraknya" "V == 0" \
   "$(echo "$RINGKAS309" | awk '{print $6}')"
 cek "§309 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR309"
-[ "$KELUAR309" -ne 0 ] && { echo "── selisih tipe yang dilaporkan §309 ──"; echo "$R309" | grep -v '^RINGKAS '; cat /tmp/adu309.err; }
+[ "$KELUAR309" -ne 0 ] && { echo "── selisih yang dilaporkan §309/§310 ──"; echo "$R309" | grep -v '^RINGKAS '; cat /tmp/adu309.err; }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §310 — STEMPEL WAKTU YANG BUKAN ISO-8601
+# ═══════════════════════════════════════════════════════════════════════════
+# Kelas yang lolos SELURUH penjaga lain, dan itu bukan hipotesis: terukur
+# 2026-09-11 di `/penerimaan/riwayat`, yang mengirim
+#
+#   "waktu": "Thu Sep 10 2026 14:37:32 GMT+0000 (Coordinated Universal Time)"
+#
+# — keluaran `Date.prototype.toString`, sebab rutenya menulis `String(i.waktu)`
+# atas kolom `timestamp`. Kontraknya bilang `string`, kawatnya string, kuncinya
+# benar: §309 diam, `selisih296` diam, fikstur ponsel cuma tahu NAMA kunci.
+# Yang membedakannya cuma ISI-nya.
+#
+# Dan biayanya asimetris — itu yang membuatnya bertahan lama: `new Date(teks)`
+# di peramban MENGURAINYA (format buatan V8 sendiri), sementara
+# `DateTime.tryParse` Dart memulangkan null, jadi layar Riwayat Penerimaan di
+# ponsel memajang kalimat itu utuh. Cacat yang tak terlihat di permukaan yang
+# dipakai penulisnya.
+#
+# Baris yang sama juga MEMBANDINGKAN teks itu (`String(i.waktu) > t`) untuk
+# memilih "keputusan terakhir" — urutan leksikografis atas nama hari.
+cek "§310 PASANGAN: ISO lolos, keluaran Date.toString tertuduh" "V == 1" \
+  "$([ "$UJI309" = "0 1 0 1" ] && echo 1 || echo 0)"
+cek "§310 INTI: nol stempel waktu yang bukan ISO-8601 di seluruh 72 rute" "V == 0" \
+  "$(echo "$RINGKAS309" | awk '{print $7}')"
 
 if [ "$FAIL" -gt 0 ]; then
   echo

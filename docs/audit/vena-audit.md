@@ -50,6 +50,128 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Cacat yang tak terlihat di permukaan yang dipakai penulisnya — `String(Date)` yang dikirim, lalu DIBANDINGKAN — server + ponsel — 2026-09-11
+
+**Vena.** Butir antrean "`waktu`/`timestamp` → ISO: bentuk baku yang belum
+punya aturan". Ia berumur lima putaran, dan catatannya sendiri berbunyi *"tiap
+kali ditemukan oleh ANOTASI, tak pernah oleh sapuan… menuntut informasi tipe,
+bukan regex"*. Putaran ini sapuannya yang menemukannya — dan yang ditemukan
+bukan kelalaian format melainkan **cacat perilaku**.
+
+**Sapuannya dari KAWAT, bukan dari kode.** Tiap nilai teks di 72 rute diperiksa:
+teks yang benar-benar terurai jadi tanggal TAPI berbentuk khas
+`Date.prototype.toString` (`GMT`, `Thu Sep 10 2026`, `9/10/2026`) dituduh.
+
+| | jumlah |
+| --- | --- |
+| medan berstempel ISO penuh | 38 |
+| medan berbentuk tanggal saja (`YYYY-MM-DD`) | 22 |
+| **berbentuk tanggal NON-ISO** | **1** (20 kemunculan) |
+
+```
+/penerimaan/riwayat · rows[].waktu
+  = "Thu Sep 10 2026 14:37:32 GMT+0000 (Coordinated Universal Time)"
+```
+
+**Kenapa tak satu penjaga pun bisa melihatnya.** Kontraknya bilang `string`,
+kawatnya memang string, kuncinya benar. §309 (tipe nilai, lahir putaran lalu)
+diam; `selisih296` diam; fikstur ponsel cuma tahu NAMA kunci. Yang
+membedakannya cuma ISI-nya.
+
+**Biayanya asimetris, dan itu yang membuatnya bertahan.** Terukur di kedua
+klien:
+
+| klien | pengurai | hasil |
+| --- | --- | --- |
+| web | `new Date(teks)` | **berhasil** — itu format buatan V8 sendiri |
+| ponsel | `DateTime.tryParse` | **null** → `formatWaktu` memulangkan masukannya apa adanya |
+
+Jadi kartu Riwayat Penerimaan di ponsel memajang kalimat lengkap itu sebagai
+"jam", sementara layar web tampak benar. **Cacat yang tidak terlihat di
+permukaan yang dipakai penulisnya.**
+
+**CACAT KEDUA DI BARIS YANG SAMA, dan ini bukan soal tampilan.** Teks itu juga
+DIBANDINGKAN untuk memilih "waktu keputusan TERAKHIR":
+
+```js
+items.reduce((t, i) => (i.waktu && (!t || String(i.waktu) > t) ? String(i.waktu) : t), null)
+```
+
+Perbandingan leksikografis atas keluaran `toString` mengurutkan menurut **nama
+hari**. Dibuktikan:
+
+```
+String(a) = Thu Sep 10 2026 14:00:00 GMT+0000 (…)
+String(b) = Fri Sep 11 2026 14:00:00 GMT+0000 (…)
+a < b               → true
+String(b) > String(a) → FALSE   ← yang dipakai reduce
+```
+
+Faktur yang diterima bertahap dan tahap terakhirnya jatuh hari Jumat memajang
+stempel hari Kamis. Kolomnya berlabel "waktu keputusan TERAKHIR", dan ia
+memajang yang bukan.
+
+**Populasi lengkapnya, disapu dengan pohon sintaks atas nama kolom `timestamp`
+yang dibaca dari `schema.ts` (31 kolom):**
+
+| | jumlah |
+| --- | --- |
+| `String(<kolom timestamp>)` | **4** (2 sudah bergerbang `instanceof Date`, 2 cacatnya) |
+| `toISOString()` di modul | 80 |
+| salinan `function iso()` yang identik byte per byte | **2** (`company/routes.ts`, `penjualan/struk.ts`) |
+
+Satu aturan, **tiga ejaan**: dua salinan `iso()`, satu bentuk
+`x instanceof Date ? x.toISOString() : String(x)` yang ditulis ulang per situs,
+dan `String(x)` telanjang yang salah. Satu bentuk dengan banyak penulis adalah
+cara salah satunya menyimpang tanpa suara — dan di sini salah satunya memang
+sudah.
+
+**Yang dikerjakan.**
+
+- **`iso()` pindah ke satu rumah** (`lib/time.ts`, bersebelahan dengan
+  `tanggalDi`/`awalHariDi`); kedua salinan dicabut, dan kedua bentuk
+  `instanceof Date ? … : String(…)` memakainya.
+- **Cacatnya diperbaiki dua-duanya**: dibandingkan sebagai `Date`, diubah ke
+  ISO sekali di ujung. Barisnya juga dipaku `RiwayatPenerimaanFaktur[]`, jadi
+  `waktu: Date` tak bisa lagi lolos typecheck.
+- **verify-api §310** — pemindai stempel non-ISO atas seluruh 72 rute,
+  menumpang sapuan yang sama dengan §309 (satu jalan ambil, dua vonis).
+- **`stempel-iso.test.ts`** — `String(<kolom timestamp>)` = **0** keras (bukan
+  ratchet), `function iso(` cuma boleh ada di `lib/time.ts`, plus asersi
+  perilaku yang menuliskan bedanya supaya tak perlu diingat.
+
+**Bukti merah** (semuanya dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| `String(i.waktu)` dikembalikan | `stempel-iso` INTI | **merah**, menyebut berkas & barisnya |
+| salinan kedua `function iso()` | `stempel-iso` rumah-tunggal | **merah**, menyebut berkasnya |
+| `String(waktuTerakhir)` di rute, server dijalankan ulang | §310 dari kawat | **merah**, menyebut rute & jalur medannya, keluar 1 |
+
+**Gerbang**: typecheck bersih · verify-api **3.733 / 0** (+2, keduanya §310) · vitest **259 berkas / 3.151 uji** (+1 berkas, +8 uji) · invarian **27 / 0** · Playwright **48 lolos**. §310 dari dalam gerbang: 72 rute, **0** stempel salah bentuk.
+
+**Batas yang diakui.**
+
+- **Pemindai statisnya SEMPIT dengan sengaja** — ia cuma menuduh
+  `String(<nama kolom timestamp>)`. `String(x)` atas variabel bernama lain,
+  atau stempel yang lewat pembantu, tak terlihat olehnya. Yang lebar dijaga
+  dari KAWAT (§310), tempat bentuk salahnya benar-benar terlihat; keduanya
+  dipasang justru karena tak satu pun cukup sendirian.
+- **Pemindai kawatnya juga sempit**: teks yang `Date.parse` terima tapi tak
+  berbentuk khas `toString` (mis. `"5"`) TIDAK dituduh. Penjaga yang menebak
+  menuduh kode yang benar, dan tuduhan palsu mengajari orang mengabaikannya.
+- **Perbandingan stempel sebagai TEKS tak dijaga mekanis.** Yang diperbaiki
+  situsnya; sapuan `banding-stempel` memulangkan 6 situs lain yang semuanya sah
+  (Date vs Date, atau `YYYY-MM-DD` yang memang boleh dibandingkan
+  leksikografis). Aturan yang membedakan keduanya menuntut informasi tipe —
+  jalur pengecek TypeScript masih tertutup (TS 7 port Go, API JS-nya cuma
+  `version`). Antrean.
+- **Ini PERUBAHAN KAWAT**, changelog 🟡. Ponsel membaik tanpa perubahan kode;
+  yang perlu ditinjau di sana kode yang MENGURUTKAN `waktu` riwayat sebagai
+  teks — dulu selalu salah, sekarang benar.
+
+---
+
 ## Kunci diadu dua arah sembilan putaran berturut-turut — TIPE NILAINYA tak sekali pun — server — 2026-09-11
 
 **Vena.** Butir antrean "padanan RUTE → TIPE belum ditegakkan mekanis", lahir
@@ -14268,12 +14390,21 @@ berlaku di situ).
       (dari lima, sesudah `danaTipeEnum` dibayar #107). Tiga di antaranya belum
       pernah menyeberang ke klien; `branchTipeEnum` yang layak ditimbang —
       web membacanya lewat `CabangDto.tipe`
-- [ ] **`waktu`/`timestamp` → ISO: bentuk baku yang belum punya aturan** —
-      empat kali dalam empat putaran (`planExpiresAt` #99, `archived_at` #101,
-      `waktu` penerimaan #106, `waktu` dana #107). Tiap kali ditemukan oleh
-      ANOTASI, tak pernah oleh sapuan. Yang belum ada: aturan mekanis "kolom
-      `timestamp` yang sampai ke `c.json` wajib lewat `.toISOString()`" —
-      menuntut informasi tipe, bukan regex
+- [x] ~~**`waktu`/`timestamp` → ISO: bentuk baku yang belum punya aturan**~~ —
+      DIBAYAR #111, lihat entri di atas — dan sapuannya menemukan **cacat
+      perilaku**, bukan kelalaian format. `/penerimaan/riwayat` mengirim
+      keluaran `Date.toString()` DAN membandingkannya sebagai teks untuk
+      memilih "keputusan terakhir", jadi urutannya ditentukan nama hari.
+      Aturannya ternyata tak menuntut informasi tipe: nama kolom `timestamp`
+      dibaca dari `schema.ts` lalu `String(<nama itu>)` dituduh (0 keras), dan
+      yang lebar dijaga dari KAWAT (§310). `iso()` kini punya satu rumah di
+      `lib/time.ts` — dua salinan identik dicabut
+- [ ] **Perbandingan stempel sebagai TEKS tak dijaga mekanis** — lahir #111.
+      Situsnya diperbaiki, tapi sapuan `banding-stempel` memulangkan 6 situs
+      lain yang semuanya SAH (Date vs Date, atau `YYYY-MM-DD` yang memang boleh
+      dibandingkan leksikografis). Aturan yang membedakan keduanya menuntut
+      informasi tipe — dan jalur pengecek TypeScript masih tertutup (TS 7 yang
+      terpasang port Go, API JS-nya cuma `version`)
 - [ ] **9 situs web masih merakit teks jumlah telanjang** — dijaga ratchet
       `qty-teks-milik-server.test.ts` (`MAKS_TELANJANG = 9`) sejak #106.
       Kesembilannya berjalan atas baris yang rutenya memang TAK mengirim
