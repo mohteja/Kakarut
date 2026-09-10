@@ -18074,6 +18074,59 @@ cek "§305 qty_setara null atau string (tak pernah angka)" "V == 1" \
 cek "§305 qty_dipesan & qty_dipesan_teks selalu sepasang" "V == 1" \
   "$(echo "$R305" | jq '([.rows[]|select((.qty_dipesan == null) == (.qty_dipesan_teks == null))]|length) == (.rows|length) | if . then 1 else 0 end')"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §306 — BUKU DANA FAKTUR: satu bentuk, dan `kembali` yang DIKURANGKAN
+# ═══════════════════════════════════════════════════════════════════════════
+# Vena paling tipis dari deretannya, dan itu disebut apa adanya: barisnya cocok
+# satu-satu dengan kawat sejak awal. Yang belum ada cuma NAMANYA — amplop
+# `{rows, total}` salah satu dari 20 yang dihitung `amplop-berkontrak`, dan
+# kosakata `tipe` dieja dua kali tanpa rumah bersama.
+#
+# Lengan yang benar-benar menjaga ANGKA yang terakhir: `total` dibaca layar
+# faktur sebagai "dana efektif", dan penjumlahan yang lupa membalik tanda
+# `kembali` memulangkan angka yang terlalu besar — tak ada yang menyadarinya
+# sampai kas tak cocok.
+K306=$(medan296 DanaEntri)
+cek "§306 premis: kontrak DanaEntri terbaca dari types.ts (6 medan)" "V == 6" \
+  "$(echo "$K306" | grep -c .)"
+K306A=$(medan296 BukuDanaFaktur)
+cek "§306 premis: kontrak BukuDanaFaktur terbaca (2 medan)" "V == 2" \
+  "$(echo "$K306A" | grep -c .)"
+# Faktur yang PUNYA entri dana — dicari, bukan diasumsikan.
+FKD306=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r '[.rows[]|select(.faktur_id != null)|.faktur_id]|unique|.[]' | while read -r f; do
+  n=$(api "$OWNER" GET "/pembelian/dana/$f" | jq '.rows|length')
+  [ "$n" -gt 0 ] && { echo "$f"; break; }
+done)
+cek "§306 premis: ada faktur berbuku dana (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$([ -n "$FKD306" ] && echo 1 || echo 0)"
+R306=$(api "$OWNER" GET "/pembelian/dana/$FKD306")
+cek "§306 amplop == BukuDanaFaktur, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R306" | jq -r 'keys[]')" "$K306A")"
+cek "§306 tiap baris == DanaEntri, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R306" | jq -r '[.rows[]|keys[]]|unique|.[]')" "$K306")"
+# `waktu` ISO string: kolomnya timestamp (Drizzle → Date). Kelas keempat
+# berturut-turut sesudah planExpiresAt (#99), archived_at (#101), waktu
+# penerimaan (#106).
+cek "§306 tiap waktu bertipe string berbentuk ISO-8601" "V == 1" \
+  "$(echo "$R306" | jq '([.rows[]|select((.waktu|type)=="string" and (.waktu|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))]|length) == (.rows|length) | if . then 1 else 0 end')"
+# Kosakata `tipe` DIADU dengan kontrak, dua arah — bukan sekadar "ada".
+KOSA306=$(awk '/^export type TipeDana = /{gsub(/.*= /,"");gsub(/;$/,"");gsub(/ \| /,"\n");gsub(/"/,"");print}' packages/shared/src/types.ts | sort -u)
+cek "§306 premis: kosakata TipeDana terbaca dari kontrak (3 nilai)" "V == 3" \
+  "$(echo "$KOSA306" | grep -c .)"
+cek "§306 tiap tipe yang dikirim ada di kosakata TipeDana" "V == 0" \
+  "$(comm -23 <(echo "$R306" | jq -r '[.rows[]|.tipe]|unique|.[]' | sort -u) <(printf '%s\n' "$KOSA306") | bocorkan)"
+# ARITMETIKA — dihitung ULANG di sini dari `rows`, lalu diadu dengan `total`
+# milik server. Inilah lengan yang menangkap tanda `kembali` yang terbalik.
+HIT306=$(echo "$R306" | jq '[.rows[] | if .tipe == "kembali" then -.nominal else .nominal end] | add // 0')
+cek "§306 total server == cair + tambahan − kembali (dihitung ulang di sini)" "V == 1" \
+  "$([ "$(echo "$R306" | jq -r '.total')" = "$HIT306" ] && echo 1 || echo 0)"
+# …dan penjumlahan NAIF (tanpa membalik `kembali`) HARUS berbeda begitu ada
+# entri `kembali` — kalau tidak, lengan di atas hijau tanpa menyatakan apa pun.
+NAIF306=$(echo "$R306" | jq '[.rows[].nominal] | add // 0')
+ADAK306=$(echo "$R306" | jq '[.rows[]|select(.tipe=="kembali")]|length')
+cek "§306 uji-diri: bila ADA entri kembali, penjumlahan naif berbeda" "V == 1" \
+  "$([ "$ADAK306" -eq 0 ] && echo 1 || { [ "$NAIF306" != "$HIT306" ] && echo 1 || echo 0; })"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

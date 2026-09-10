@@ -3162,6 +3162,54 @@ export interface PenerimaanRow {
   qty_dipesan_teks: string | null;
 }
 
+/**
+ * Jenis entri buku dana faktur — cermin `dana_tipe` di basis data.
+ *
+ * `cair` = pencairan RAB · `tambahan` = dana menyusul saat belanja melebihi
+ * rencana · `kembali` = sisa yang dikembalikan (dikurangkan dari total).
+ *
+ * Sampai 2026-09-11 kosakata ini dieja DUA kali tanpa rumah bersama: sekali
+ * sebagai `pgEnum` di skema, sekali diketik tangan di `FakturDetailPage.tsx`.
+ * Ia salah satu dari LIMA pgEnum (dari 27) yang tak punya padanan di kontrak —
+ * dua puluh dua sisanya sudah berpasangan, dan pasangan itu memang dijaga
+ * (dibuktikan: menambah nilai karangan ke sebuah union memerahkan
+ * `status-satu-kontrak`, bahkan pada union yang typecheck-nya diam).
+ */
+export type TipeDana = "cair" | "tambahan" | "kembali";
+
+/**
+ * SATU ENTRI BUKU DANA sebuah faktur — `GET /api/{produksi|pembelian}/dana/:id`.
+ *
+ * `waktu` sengaja `string`: kolomnya `timestamp` (Drizzle → `Date`), yang
+ * sampai ke kawat ISO-8601. Kelas KEEMPAT kali berturut-turut sesudah
+ * `planExpiresAt` (#99), `archived_at` (#101), dan `waktu` penerimaan (#106) —
+ * perakitnya yang menerjemahkan, supaya tipe yang tertulis di sini adalah tipe
+ * yang benar-benar dikirim.
+ */
+export interface DanaEntri {
+  id: string;
+  tipe: TipeDana;
+  nominal: number;
+  catatan: string | null;
+  /** nama orang yang mencatatnya; null bila akunnya sudah dihapus */
+  oleh: string | null;
+  waktu: string;
+}
+
+/**
+ * AMPLOP buku dana satu faktur.
+ *
+ * `total` dihitung SERVER dengan `kembali` DIKURANGKAN — bukan dijumlahkan.
+ * Itu sebabnya ia dikirim alih-alih dibiarkan klien menjumlahkan `rows`:
+ * penjumlahan yang lupa membalik tanda `kembali` memulangkan angka yang
+ * terlalu besar, dan angka itu dibaca sebagai "dana efektif" di layar faktur.
+ */
+export interface BukuDanaFaktur {
+  rows: DanaEntri[];
+  /** dana efektif: cair + tambahan − kembali */
+  total: number;
+}
+
 /** Satu FAKTUR transfer stok (nomor TF-) berisi banyak bahan. */
 export interface TransferStokFaktur {
   faktur_id: string;

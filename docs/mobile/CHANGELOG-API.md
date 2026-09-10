@@ -25,6 +25,41 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Buku dana faktur akhirnya bernama: `BukuDanaFaktur` + `DanaEntri` + `TipeDana` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: amplop
+> `GET /api/{produksi|pembelian}/dana/:fakturId` dan barisnya akhirnya
+> **dideklarasikan** di `types.ts`, berikut kosakata `tipe`-nya.
+
+**Vena paling tipis dari deretannya, dan itu ditulis apa adanya:** barisnya
+cocok satu-satu dengan kawat sejak awal — tak ada medan yang dikirim tanpa
+disebut, tak ada layar yang menghitung ulang. Yang belum ada cuma namanya.
+
+**Bentuknya:**
+
+```
+{ rows: DanaEntri[], total }
+DanaEntri = { id, tipe, nominal, catatan, oleh, waktu }
+TipeDana  = "cair" | "tambahan" | "kembali"
+```
+
+`total` dihitung SERVER dengan **`kembali` dikurangkan**, bukan dijumlahkan —
+itu sebabnya ia dikirim alih-alih dibiarkan klien menjumlahkan `rows` sendiri.
+Penjumlahan yang lupa membalik tandanya memulangkan "dana efektif" yang terlalu
+besar di layar faktur, dan tak ada yang menyadarinya sampai kas tak cocok.
+
+`waktu` kini **diterjemahkan** perakitnya (kolom `timestamp` → ISO-8601) — sama
+seperti `archived_at`, `planExpiresAt`, dan `waktu` penerimaan.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci **+8**, fikstur status **+3**
+(`union:TipeDana`). Nol baris `lib/` berubah.
+
+**Satu catatan yang WAJIB dibaca sebelum dianggap utang lunas:** entri hantu
+`nominal` dicabut dari `hantuDiketahui`, tapi **bukan karena balasan REFUND
+mendapat DTO** — ia masih tanpa tipe. Yang terjadi: `nominal` kini ada di
+kontrak lewat `DanaEntri`, bentuk yang sama sekali lain. Berkas itu berkunci
+NAMA, jadi ratchet-nya menuntut pencabutan. Utang refund tetap di antrean.
+
 ## ⚪️ Baris penerimaan akhirnya bernama: `PenerimaanRow` (25 kunci) — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: baris yang

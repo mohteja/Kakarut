@@ -57,8 +57,10 @@ const TIPE = "packages/shared/src/types.ts";
  * terhitung terlalu sempit. `kunciObjek` — pembantu rumah yang sudah dipakai
  * lima penjaga lain — mengenalinya. Dua cara menghitung yang tak cocok adalah
  * cara temuan lahir; yang salah instrumen baruku, bukan yang lama.
+ *
+ * Amplop buku dana `{rows, total}` dibayar 2026-09-11 → **19**.
  */
-const MAKS_UTANG = 20;
+const MAKS_UTANG = 19;
 
 /**
  * Dua kelas yang SENGAJA di luar hitungan, dan alasannya bukan kemudahan.

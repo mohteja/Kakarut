@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { BukuDanaFaktur, DanaEntri } from "@kakarut/shared";
 import { halamanQuery } from "../../lib/halaman-query";
 import { tanggalQuery, zTanggal } from "../../lib/tanggal-query";
 import { SEPULUH_TAHUN, SETAHUN, zTanggalKejadian, zTanggalRencana } from "../../lib/waktu-kejadian";
@@ -2503,11 +2504,31 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
           and(eq(fakturDana.companyId, auth.company_id!), eq(fakturDana.fakturId, fakturId)),
         )
         .orderBy(asc(fakturDana.waktu), asc(fakturDana.id));
-      const total = rows.reduce(
+      /*
+       * `waktu` DITERJEMAHKAN di sini, tidak dibiarkan lewat: kolomnya
+       * `timestamp` (Drizzle → `Date`) sementara yang sampai ke kawat ISO
+       * string. Kelas keempat berturut-turut sesudah `planExpiresAt` (#99),
+       * `archived_at` (#101), dan `waktu` penerimaan (#106).
+       */
+      const entri: DanaEntri[] = rows.map((r) => ({
+        id: r.id,
+        tipe: r.tipe,
+        nominal: r.nominal,
+        catatan: r.catatan,
+        oleh: r.oleh,
+        waktu: r.waktu.toISOString(),
+      }));
+      /*
+       * `kembali` DIKURANGKAN, bukan dijumlahkan — dan itu sebabnya angka ini
+       * dikirim alih-alih dibiarkan klien menjumlahkan `rows` sendiri.
+       * Penjumlahan yang lupa membalik tandanya memulangkan "dana efektif"
+       * yang terlalu besar di layar faktur.
+       */
+      const total = entri.reduce(
         (t, r) => t + (r.tipe === "kembali" ? -r.nominal : r.nominal),
         0,
       );
-      return c.json({ rows, total });
+      return c.json({ rows: entri, total } satisfies BukuDanaFaktur);
     })
     /**
      * Konfirmasi "ya, ada": barang benar-benar diterima → stok terhitung.

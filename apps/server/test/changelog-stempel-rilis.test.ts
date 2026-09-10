@@ -47,6 +47,9 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-11): buku dana faktur masuk Lampiran A — nol
+  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## ⚪️ Buku dana faktur akhirnya bernama: `BukuDanaFaktur` + `DanaEntri` + `TipeDana` — tak ada perubahan di kawat",
   // BELUM DI-MERGE (2026-09-11): baris penerimaan masuk Lampiran A — nol
   // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
   "## ⚪️ Baris penerimaan akhirnya bernama: `PenerimaanRow` (25 kunci) — tak ada perubahan di kawat",

@@ -50,6 +50,100 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Sapuan yang BERSIH — 22 pasang enum yang ternyata memang dijaga — plus buku dana yang belum bernama — server + web + ponsel — 2026-09-11
+
+**Vena.** Butir antrean "salinan bentuk di web", sasaran `DanaEntri`. Dan
+inilah putaran pertama dari deretan ini yang **temuan terbesarnya adalah bahwa
+tak ada temuan** — dinyatakan dengan detektor yang dibuktikan bisa menuduh,
+bukan dengan sapuan yang kebetulan sepi.
+
+**HIPOTESIS YANG SAYA UJI, LALU TERBANTAH.** Kosakata `tipe` buku dana dieja
+dua kali (pgEnum di skema, tangan di web) tanpa rumah bersama. Dugaan saya:
+kelas itu berlaku luas — puluhan `pgEnum` dan union kontrak dirawat berpasangan
+dengan tangan, dan tak ada yang membandingkannya.
+
+Disapu (comment-blind, sesudah sapuan pertama saya salah membaca nilai dari
+dalam komentar): **27 `pgEnum`**, **22 berpasangan nilai-identik** dengan union
+kontrak, 5 tanpa padanan.
+
+Lalu detektornya diuji — dan **hipotesisnya terbantah**:
+
+| suntikan | typecheck | `status-satu-kontrak` |
+| --- | --- | --- |
+| `MetodeBayar` + nilai karangan | **MERAH** (`Record<MetodeBayar,…>` menagih eksklusif) | **MERAH** |
+| `SmtpEncryption` + nilai karangan | hijau | **MERAH** |
+
+Uji kedua yang menentukan: pada union **tanpa** `Record<>` eksklusif, typecheck
+diam — dan `status-satu-kontrak` tetap menuduh. **Kelas itu memang sudah
+dijaga**, lewat pembangkit fikstur status ponsel yang membaca keempat
+sumbernya. Tak perlu penjaga baru, dan menambahkannya justru akan jadi penjaga
+kedua untuk aturan yang sama.
+
+**Yang tersisa nyata, dan tipis.** Tiga hal, semuanya soal NAMA:
+
+1. **Amplop `{rows, total}` tak pernah dideklarasikan** — salah satu dari 20
+   yang dihitung `amplop-berkontrak` (#103). Dibayar → **19**.
+2. **Kosakata `tipe`** satu dari **lima** `pgEnum` tanpa padanan kontrak;
+   sesudah putaran ini **empat** (`branchTipeEnum`, `dokumenJenisEnum`,
+   `klarifikasiStatusEnum`, `supplyKirimStatusEnum`).
+3. **`waktu`** `Date` di Drizzle, ISO di kawat — kelas KEEMPAT berturut-turut
+   sesudah `planExpiresAt` (#99), `archived_at` (#101), `waktu` penerimaan
+   (#106). Empat kali dalam empat putaran; ia bukan lagi kejutan melainkan
+   **bentuk baku** yang tiap `timestamp` di jalur balasan punya.
+
+**Yang TIDAK ditemukan, dan itu ikut diukur:** barisnya cocok satu-satu dengan
+kawat (6 medan, nol yang dikirim tanpa disebut), dan layar faktur memakai
+`dana.total` milik server alih-alih menjumlahkan `rows` sendiri. Tak seperti
+#102 (`SatuanDto` berbohong) atau #106 (`qty_teks` disembunyikan), di sini
+salinan lokalnya memang setia.
+
+**Yang dikerjakan.** `TipeDana` + `DanaEntri` + `BukuDanaFaktur` ke kontrak;
+perakit tunggal di server yang menerjemahkan `waktu`; web mencabut salinan
+lokal DAN ejaan kosakatanya.
+
+**Penjaganya.** `buku-dana-utuh.test.ts` (6 uji). Yang paling bernilai bukan
+yang menjaga bentuk melainkan yang menjaga **angka**: `kembali` DIKURANGKAN,
+dan klien tak menghitungnya ulang. **§306** (10 lengan) mengadu amplop & baris
+dua arah, memaku `waktu` ISO, mengadu kosakata `tipe` dengan kontrak, lalu
+**menghitung ulang `total` dari `rows`** dan membandingkannya dengan milik
+server — plus satu **lengan uji-diri**: bila ada entri `kembali`, penjumlahan
+NAIF wajib berbeda dari yang benar. Tanpa lengan itu, lengan aritmetikanya bisa
+hijau atas data yang tak punya `kembali` sama sekali, dan hijaunya tak
+menyatakan apa pun.
+
+**Gerbang menuduh saya, dan kali ini penjaga yang SAMA yang kupakai untuk
+membuktikan kelasnya bersih.** Menambah `TipeDana` ke kontrak menambah sumber
+nilai status, jadi fikstur status ponsel jadi basi dan `status-satu-kontrak`
+memerah. Disegarkan (+3 baris `union:TipeDana`), bukan dilemahkan.
+
+**Bukti merah**, tiap berkas dipulihkan `cmp`: amplop berhenti menyatakan
+tipenya · `kembali` berhenti dikurangkan · `waktu` dilewatkan mentah · web
+mengeja ulang kosakatanya.
+
+**Gerbang** (sesudah fikstur status disegarkan): typecheck bersih · verify-api
+**3.689 / 0** (+10) · vitest **256 berkas / 3.128 uji** · invarian **27 / 0** ·
+Playwright **48 lolos**. Nol perubahan kawat.
+
+**Batas yang diakui.**
+
+- **Ponsel: entri hantu `nominal` dicabut karena TABRAKAN NAMA, bukan karena
+  utangnya lunas.** Balasan REFUND (`{ok, nominal, total_lama, total_baru}`)
+  masih tanpa DTO; yang berubah cuma bahwa `nominal` kini ada di kontrak lewat
+  `DanaEntri` — bentuk yang sama sekali lain. Berkas itu berkunci NAMA, jadi
+  ratchet-nya menuntut pencabutan. Ditulis panjang di tempatnya supaya tak
+  terbaca sebagai kemajuan, dan utang refund tetap di antrean. Kelas
+  `asal_cabang`, dan ini kali kedua ia menggigit dalam sepuluh hari.
+- **Sapuan pgEnum berkunci NILAI, bukan nama.** Dua enum bernilai identik tapi
+  bermakna beda (`PengajuanStatus`/`PenyesuaianStatus`) terhitung berpasangan
+  dengan union mana pun yang cocok. Untuk pertanyaan yang ditanyakan di sini
+  ("apakah kosakatanya punya rumah") itu cukup; untuk "apakah rumahnya BENAR"
+  tidak.
+- **Empat pgEnum masih tanpa padanan kontrak** — dan tiga di antaranya memang
+  belum pernah menyeberang ke klien; hanya `branchTipeEnum` yang layak
+  ditimbang tersendiri (web membacanya lewat `CabangDto.tipe`).
+
+---
+
 ## Aturan yang ditulis tiga kali, dilanggar kodenya sendiri — dan medan yang ada PERSIS untuk mencegah itu — server + web — 2026-09-11
 
 **Vena.** Butir antrean "salinan bentuk di web", sasaran `PenerimaanRow`. Yang
@@ -13748,7 +13842,7 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **3 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+- [ ] **2 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
       bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
       diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
       **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
@@ -13766,8 +13860,10 @@ berlaku di situ).
       salinannya yang paling mahal melainkan `dev_verify_url`, medan yang
       dikirim tanpa pernah punya nama. `PenerimaanRow` dibayar #106 — dan di
       sana pun bukan salinannya yang paling mahal melainkan `qty_teks` yang
-      disembunyikannya. Sisa **3**: `DanaEntri`, `StokAwalTersimpan`, `Tenant`.
-      Berikutnya `DanaEntri`.
+      disembunyikannya. `DanaEntri` dibayar #107 — dan di sana, untuk pertama
+      kalinya dalam deretan ini, salinan lokalnya ternyata SETIA: yang kurang
+      cuma namanya. Sisa **2**: `StokAwalTersimpan`, `Tenant`. Berikutnya
+      `StokAwalTersimpan`.
       (Angka "3" yang sempat tertulis di sini SALAH: daftarnya memuat lima
       nama. Disapu ulang tiap putaran sejak.) Catatan lama, masih berlaku: diukur ulang 2026-09-06
       SESUDAH #99. Angka "15" pada
@@ -13781,6 +13877,23 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
+- [x] ~~**pgEnum vs union kontrak: dua daftar tangan tanpa pembanding?**~~ —
+      **BERSIH**, dan dibuktikan #107. 27 pgEnum, 22 berpasangan nilai-identik;
+      menambah nilai karangan ke sebuah union memerahkan `status-satu-kontrak`
+      BAHKAN pada union yang typecheck-nya diam (`SmtpEncryption`). Kelasnya
+      sudah dijaga pembangkit fikstur status ponsel; penjaga baru cuma akan
+      jadi penjaga kedua untuk aturan yang sama
+- [ ] **Empat pgEnum tanpa padanan kontrak** — `branchTipeEnum`,
+      `dokumenJenisEnum`, `klarifikasiStatusEnum`, `supplyKirimStatusEnum`
+      (dari lima, sesudah `danaTipeEnum` dibayar #107). Tiga di antaranya belum
+      pernah menyeberang ke klien; `branchTipeEnum` yang layak ditimbang —
+      web membacanya lewat `CabangDto.tipe`
+- [ ] **`waktu`/`timestamp` → ISO: bentuk baku yang belum punya aturan** —
+      empat kali dalam empat putaran (`planExpiresAt` #99, `archived_at` #101,
+      `waktu` penerimaan #106, `waktu` dana #107). Tiap kali ditemukan oleh
+      ANOTASI, tak pernah oleh sapuan. Yang belum ada: aturan mekanis "kolom
+      `timestamp` yang sampai ke `c.json` wajib lewat `.toISOString()`" —
+      menuntut informasi tipe, bukan regex
 - [ ] **9 situs web masih merakit teks jumlah telanjang** — dijaga ratchet
       `qty-teks-milik-server.test.ts` (`MAKS_TELANJANG = 9`) sejak #106.
       Kesembilannya berjalan atas baris yang rutenya memang TAK mengirim
