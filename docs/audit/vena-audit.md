@@ -50,6 +50,114 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Satu bentuk daftar induk, sembilan perakit tangan — dan `dipakai` yang dijanjikan tipe tapi tak pernah dikirim — server + web — 2026-09-10
+
+**Vena.** Butir teratas antrean sesudah #101, yang menyebut sasarannya dengan
+nama: *"Berikutnya `Kategori` (tiga salinan satu bentuk)"*. Yang ditemukan
+lebih besar daripada tiga salinan itu.
+
+**Populasi & pengukuran.** Bentuk `{id, nama, sort_order}` adalah balasan TIGA
+modul: `/kategori`, `/kategori-bahan`, dan jalur tulis `/satuan`. Disapu
+dengan pemindai yang mengurai literalnya (bukan mencari teks `sort_order:` —
+lihat batas di bawah): **sembilan situs merakitnya dengan tangan**, plus satu
+varian berkunci empat di `GET /satuan`. Nol perakit.
+
+| modul | situs |
+| --- | --- |
+| `kategori/routes.ts` | 3 (GET · POST 201 · PATCH) |
+| `kategori-bahan/routes.ts` | 4 (GET · POST 201 · POST cabang "sudah ada" · PATCH) |
+| `satuan/routes.ts` | 2 tulis + 1 varian 4-kunci di GET |
+| web | 3 salinan `interface Kategori` |
+
+**Detektornya dibuktikan bisa menuduh — dan yang dibuktikan lagi-lagi bahwa
+SEBELUMNYA tak ada yang menuduh.** Satu kunci ke-4 disuntikkan ke
+`GET /kategori`, dibuktikan terkirim dari kawat, lalu ketiga gerbang
+dijalankan penuh: typecheck **hijau**, **3.097 uji hijau**, **3.633 lengan
+verify-api hijau**. Nol penjaga berubah warna. Kelas persis sama dengan #101
+sehari sebelumnya, di modul yang lain — dan itulah yang membuatnya layak jadi
+vena tersendiri, bukan pengulangan: **bentuk balasan yang tak punya perakit
+adalah bentuk yang tak punya penjaga, di mana pun ia berada.**
+
+**TEMUAN 1 — tipe yang ada, di rute yang salah.** `KategoriDto` **sudah** di
+kontrak, dan komentarnya berbunyi *"Kategori menu (master data)"* — yaitu
+`/kategori`. Terukur: **lima** pemanggil web memakainya untuk
+`/kategori-bahan`, dan **nol** untuk `/kategori`; rute yang tipe itu dinamai
+untuknya justru dibaca lewat tiga salinan lokal. Keduanya lolos hanya karena
+kedua bentuknya identik hari ini. Kelas baru yang layak dicatat namanya:
+**"tipenya ada" ≠ "tipenya dipakai di tempat ia dinamai".**
+
+**TEMUAN 2 — `SatuanDto` berbohong tentang balasan tulis, dan web sudah
+memercayainya.** Ia mendeklarasikan `dipakai: number`; `SatuanSelect.tsx`
+mengetik balasan `POST` sebagai `SatuanDto`. Servernya memulangkan TIGA kunci.
+Terukur dari kawat:
+
+```
+POST /satuan  → ["id","nama","sort_order"]     has("dipakai") = false
+PATCH /satuan → ["id","nama","sort_order"]     idem
+GET  /satuan  → ["dipakai","id","nama","sort_order"]
+```
+
+Yang menahannya dari jadi bug cuma kebetulan bahwa satu-satunya pembacanya
+`.nama` (`onSuccess: (s) => selesai(s.nama)`). Klien yang menyisipkan hasil
+`POST` ke daftar hasil `GET` menaruh baris cacat di sana — `dipakai`
+`undefined` sementara TypeScript bilang `number`.
+
+Diperbaiki dari sisi **SERVER**, bukan dengan memperlemah tipenya: bentuk yang
+dikirim disamakan, bukan janjinya yang dikecilkan. Dan pada `PATCH` medan itu
+bukan hiasan — `dipakai` dicocokkan lewat NAMA, dan `PATCH` boleh mengganti
+nama, jadi angkanya bisa berubah oleh permintaan itu sendiri.
+
+**Yang dikerjakan.**
+
+- **`apps/server/src/lib/baris-master.ts`** (baru): `barisMaster()` satu-satunya
+  perakit; `barisSatuan()` yang MENYEBARnya lalu menambah `dipakai`;
+  `hitungDipakai()` untuk jalur tulis.
+- **Sembilan situs → nol.** Ketiga modul memanggil rumah bersama.
+- **Web**: tiga salinan lenyap; `/kategori` kini dibaca `KategoriDto` — tipe
+  yang memang dinamai untuknya.
+- **Komentar kontrak diperbaiki** supaya menyebut KEDUA rute, bukan satu.
+
+**Penjaganya.** `baris-master-utuh.test.ts` (7 uji), dan yang menentukan
+pemindainya: ia **mengurai literalnya** dan hanya menuduh bila kuncinya persis
+ketiga itu. Sapuan berbasis teks `sort_order:` ikut menuduh `menu/service.ts`,
+tempat `sort_order` satu dari sembilan belas kunci `MenuDto` — kelas
+`TABRAKAN_NAMA` yang sudah dua kali menggigit repo ini (#99, #100), dan yang
+ketiga kalinya ditolak di muka. **§302** (14 lengan) mengadu keenam pintu
+kategori dan ketiga metode `/satuan` dua arah, plus satu lengan yang memaku
+**dua aritmetika `dipakai`** — sapuan `GET` atas seluruh daftar vs kueri
+tunggal jalur tulis — supaya keduanya tak berbeda pendapat tentang angka yang
+dibaca gerbang hapus di web.
+
+**Bukti merah, empat statis + satu HTTP**, tiap berkas dipulihkan `cmp`: modul
+merakit dengan tangan lagi · jalur tulis `/satuan` berbohong lagi · web
+menyalin lagi · kunci ke-4 di perakit (2 uji). Dan yang paling menunjukkan
+harga satu perakit: kunci ke-4 yang dulu lolos **3.633 lengan** kini
+memerahkan **sembilan** sekaligus, di tiga modul.
+
+**Gerbang** (jalan pertama, hijau): typecheck bersih · verify-api **3.647 / 0**
+(+14) · vitest **253 berkas / 3.106 uji** · invarian **27 / 0** · Playwright
+**48 lolos**.
+
+**Batas yang diakui.**
+
+- **Bentuk kawat `/kategori` & `/kategori-bahan` tak berubah satu byte pun**
+  (kunci & urutan diadu sebelum/sesudah). Yang BERUBAH `/satuan`: `POST` dan
+  `PATCH` bertambah `dipakai` — additif, dan changelog-nya 🟡.
+- **Ponsel nol perubahan** — ia tak memanggil `/satuan` sama sekali, dan
+  fikstur kuncinya identik byte demi byte sesudah dibangkitkan ulang.
+- **Pemindainya berkunci BENTUK, dan itu pedang bermata dua.** Literal daftar
+  induk yang kelak menambah kunci keempat berhenti tertuduh — ia tak lagi
+  cocok. Yang menangkapnya §302, bukan penjaga statisnya. Disebut supaya
+  hijaunya tak terbaca lebih luas dari yang benar.
+- **`hitungDipakai` menembak satu kueri per permintaan tulis.** Diukur tak
+  perlu: jalur tulis satuan dipanggil manusia, satu baris per klik. Yang akan
+  berubah lebih dulu bila kelak ada impor massal satuan.
+- **Kelas "tipe dipakai di rute yang bukan namanya" belum punya penjaga.**
+  Yang dipasang putaran ini cuma menagih `/kategori` memakai `KategoriDto`;
+  rute lain yang kelak meminjam tipe orang lain tak tertagih siapa pun.
+
+---
+
 ## Rute INTI sebuah modul yang bentuknya tak dipaku SIAPA PUN — dan kunci ke-10 yang lolos ketiga gerbang — server + web + ponsel — 2026-09-10
 
 **Vena.** Butir teratas antrean: "8 tipe lokal web + 47 `api<{…}>` inline",
@@ -13325,17 +13433,20 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **7 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+- [ ] **4 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
       bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
       diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
       **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
       sebelumnya sebagai utang yang tersisa. Kini dibedakan — salinan **8 → 7**
       (`Karyawan`/`KaryawanRow` dibayar #101), alias 10. Sisa salinan:
       `Kategori` 3×, `SistemStatus` 2×, `PenerimaanRow`, `DanaEntri`,
-      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. Berikutnya `Kategori`
-      (tiga salinan satu bentuk — pola yang sama persis dengan `Company` di #99
-      dan `Karyawan` di #101). Catatan lama, masih berlaku: diukur ulang
-      2026-09-06 SESUDAH #99. Angka "15" pada
+      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. `Kategori` (3 salinan)
+      dibayar #102 — dan di sana ternyata bukan salinannya yang paling mahal
+      melainkan bahwa `KategoriDto` SUDAH ada di kontrak dan dipakai untuk rute
+      yang LAIN. Sisa **4**: `SistemStatus` 2×, `PenerimaanRow`, `DanaEntri`,
+      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. Berikutnya `SistemStatus`
+      (dua salinan). Catatan lama, masih berlaku: diukur ulang 2026-09-06
+      SESUDAH #99. Angka "15" pada
       pengukuran pertama terlalu besar: sapuan `api<T>` memungut `Record`/`Pick`
       (bawaan TS) dan `AuthState`/`Cabang` yang sejak #95 sudah jadi ALIAS.
       Dari 12 yang benar-benar lokal, #97 membayar tiga (`SaleResult` + dua
@@ -13346,6 +13457,17 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
+- [ ] **Kelas "tipe dipakai di rute yang bukan namanya" belum punya penjaga** —
+      lahir #102. `KategoriDto` dikomentari "Kategori menu" sementara LIMA
+      pemanggil web memakainya untuk `/kategori-bahan` dan NOL untuk
+      `/kategori`; lolos bertahun-tahun karena kedua bentuknya identik. Yang
+      dipasang putaran itu cuma menagih `/kategori` memakai `KategoriDto`; rute
+      lain yang kelak meminjam tipe orang lain tak tertagih siapa pun.
+      Menutupnya menuntut peta rute→tipe yang dinyatakan, bukan disimpulkan
+- [ ] **Pemindai `baris-master` berkunci BENTUK, dan itu pedang bermata dua** —
+      literal daftar induk yang kelak menambah kunci KEEMPAT berhenti tertuduh
+      (ia tak lagi cocok "persis tiga kunci"). Yang menangkapnya §302 dari
+      kawat, bukan penjaga statisnya. Kelas yang sama dengan batas `jangkar-iris`
 - [ ] **`POST /karyawan/undang` (201, 3 kunci) & `PUT /karyawan/:userId/tempat`
       (`{ok, assigned}`) masih tanpa DTO** — dua sisa modul karyawan sesudah
       #101 menamai barisnya dan balasan pembuatannya. Keduanya kecil dan tak

@@ -47,6 +47,10 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-10): `dipakai` ikut dikirim dua pintu tulis
+  // /satuan — bentuk BERTAMBAH, tak ada yang hilang; menunggu rilis
+  // berikutnya bersama cabang `claude`.
+  "## 🟡 `POST` & `PATCH /api/satuan` kini ikut mengirim `dipakai` — tipe yang sudah menjanjikannya akhirnya benar",
   // BELUM DI-MERGE (2026-09-10): baris karyawan + balasan 201 pembuatannya
   // masuk Lampiran A — nol perubahan kawat; menunggu rilis berikutnya
   // bersama cabang `claude`.

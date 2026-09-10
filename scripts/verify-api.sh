@@ -17830,6 +17830,76 @@ cek "§301 premis: kosakata UserRole terbaca dari shared (6 nilai)" "V == 6" \
 cek "§301 tiap role yang dikirim ada di kosakata UserRole" "V == 0" \
   "$(comm -23 <(api "$OWNER" GET /karyawan | jq -r '[.[]|.role]|unique|.[]' | sort -u) <(printf '%s\n' "$PERAN301") | bocorkan)"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §302 — DAFTAR INDUK: satu bentuk, tiga modul, dan `dipakai` yang dijanjikan
+#        tipe tapi tak pernah dikirim
+# ═══════════════════════════════════════════════════════════════════════════
+# Diukur 2026-09-10. Bentuk `{id, nama, sort_order}` dipulangkan `/kategori`,
+# `/kategori-bahan`, dan jalur tulis `/satuan` — sembilan situs merakitnya
+# dengan tangan, tanpa satu perakit pun, dan bertahan hanya karena kebetulan
+# sama. Kunci ke-4 yang disuntikkan ke `GET /kategori` lolos typecheck, 3.097
+# uji, DAN 3.633 lengan verify-api: nol penjaga berubah warna.
+#
+# Yang paling mahal justru bukan salinannya melainkan `SatuanDto`: ia
+# mendeklarasikan `dipakai: number`, `SatuanSelect.tsx` sudah mengetik balasan
+# POST sebagai `SatuanDto`, dan servernya memulangkan TIGA kunci. Terukur:
+# `has("dipakai")` = false. Lengan 302f–302h yang memakunya.
+K302=$(medan296 KategoriDto)
+cek "§302 premis: kontrak KategoriDto terbaca dari types.ts (3 medan)" "V == 3" \
+  "$(echo "$K302" | grep -c .)"
+K302S=$(medan296 SatuanDto)
+cek "§302 premis: kontrak SatuanDto terbaca (4 medan — `dipakai` yang keempat)" "V == 4" \
+  "$(echo "$K302S" | grep -c .)"
+# DUA RUTE, SATU BENTUK — dan keduanya diadu DUA ARAH. Sampai putaran ini
+# `KategoriDto` dikomentari "Kategori menu" sementara web memakainya untuk
+# `/kategori-bahan`; keduanya lolos hanya karena bentuknya identik. Kalau
+# kelak salah satu menyimpang, lengan inilah yang mengatakannya.
+cek "§302 GET /kategori == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /kategori | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
+cek "§302 GET /kategori-bahan == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /kategori-bahan | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
+# Jalur TULIS kedua modul kategori memakai bentuk yang sama dengan bacanya.
+NK302=$(api "$OWNER" POST /kategori '{"nama":"Vena302"}')
+cek "§302 POST /kategori 201 == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$NK302" | jq -r 'keys[]')" "$K302")"
+IK302=$(echo "$NK302" | jq -r .id)
+cek "§302 PATCH /kategori/:id == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" PATCH "/kategori/$IK302" '{"sort_order":7}' | jq -r 'keys[]')" "$K302")"
+NB302=$(api "$OWNER" POST /kategori-bahan '{"nama":"Vena302B"}')
+cek "§302 POST /kategori-bahan 201 == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$NB302" | jq -r 'keys[]')" "$K302")"
+# Cabang "sudah ada" pada /kategori-bahan memulangkan 200 dengan baris yang
+# ADA — bentuknya wajib sama dengan cabang 201, kalau tidak klien yang
+# memakai satu pengurai untuk keduanya diam-diam kehilangan medan.
+cek "§302 POST /kategori-bahan yang SUDAH ADA: bentuk sama (dua arah)" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" POST /kategori-bahan '{"nama":"Vena302B"}' | jq -r 'keys[]')" "$K302")"
+
+# ── `dipakai` di KETIGA metode /satuan ────────────────────────────────────
+cek "§302f GET /satuan == SatuanDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /satuan | jq -r '[.[]|keys[]]|unique|.[]')" "$K302S")"
+NS302=$(api "$OWNER" POST /satuan '{"nama":"vena302"}')
+cek "§302g POST /satuan 201 == SatuanDto, dua arah (dulu TIGA kunci)" "V == 0" \
+  "$(selisih296 "$(echo "$NS302" | jq -r 'keys[]')" "$K302S")"
+IS302=$(echo "$NS302" | jq -r .id)
+cek "§302h PATCH /satuan/:id == SatuanDto, dua arah (dulu TIGA kunci)" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" PATCH "/satuan/$IS302" '{"sort_order":9}' | jq -r 'keys[]')" "$K302S")"
+# Satuan yang baru lahir memang belum dipakai bahan mana pun.
+cek "§302 satuan baru: dipakai = 0 (bukan null, bukan hilang)" "V == 0" \
+  "$(echo "$NS302" | jq -r '.dipakai')"
+# DUA ARITMETIKA, SATU JAWABAN. `GET` menghitung seluruh daftar lewat satu
+# sapuan; jalur tulis menghitung satu nama lewat satu kueri. Keduanya
+# mencocokkan NAMA terhadap `ingredients.satuan` DAN `satuan_beli`. Yang
+# membaca angka ini gerbang hapus di web ("satuan masih terpakai"), jadi dua
+# cara yang besok berbeda akan menghapus satuan yang masih dipakai resep.
+NPAKAI302=$(api "$OWNER" GET /satuan | jq -r '[.[]|select(.dipakai>0)][0].nama')
+cek "§302 premis: ada satuan yang benar-benar dipakai bahan (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(api "$OWNER" GET /satuan | jq '([.[]|select(.dipakai>0)]|length>=1)|if . then 1 else 0 end')"
+IP302=$(api "$OWNER" GET /satuan | jq -r --arg n "$NPAKAI302" '[.[]|select(.nama==$n)][0].id')
+GP302=$(api "$OWNER" GET /satuan | jq -r --arg n "$NPAKAI302" '[.[]|select(.nama==$n)][0].dipakai')
+PP302=$(api "$OWNER" PATCH "/satuan/$IP302" '{"sort_order":3}' | jq -r '.dipakai')
+cek "§302 dipakai: sapuan GET == kueri jalur tulis (satuan yang terpakai)" "V == 1" \
+  "$([ "$GP302" = "$PP302" ] && [ "$GP302" -gt 0 ] && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

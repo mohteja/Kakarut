@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   CekStokResult,
+  KategoriDto,
   MejaDto,
   MemberCariRow,
   MenuDto,
@@ -116,12 +117,6 @@ function dibatalkan(l: CartLine) {
   return dibatalkanDapur(l.pesananStatus);
 }
 
-interface Kategori {
-  id: string;
-  nama: string;
-  sort_order: number;
-}
-
 /**
  * Badge sisa porsi untuk kasir. `porsi` null → menu tak terlacak stoknya →
  * tak menampilkan apa pun. 0 → "Habis" (merah) + bahan PEMBATAS yang kosong
@@ -147,7 +142,7 @@ export function KasirPage() {
   });
   const { data: kategori = [] } = useQuery({
     queryKey: ["kategori"],
-    queryFn: () => api<Kategori[]>("/kategori"),
+    queryFn: () => api<KategoriDto[]>("/kategori"),
   });
   const { data: mejaList = [], isLoading: mejaLoading } = useQuery({
     queryKey: ["meja", branchQuery],

@@ -25,6 +25,50 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 `POST` & `PATCH /api/satuan` kini ikut mengirim `dipakai` — tipe yang sudah menjanjikannya akhirnya benar
+
+🟡 **PERLU DICEK** — bentuknya **BERTAMBAH** satu kunci pada dua pintu; tak ada
+yang hilang, berubah tipe, atau berganti nama. Aplikasi yang mengabaikan medan
+baru berjalan persis seperti sekarang.
+
+**Yang berubah.** `POST /api/satuan` (201) dan `PATCH /api/satuan/:id`
+memulangkan `dipakai` — jumlah bahan yang memakai satuan itu — sama seperti
+`GET /api/satuan` selama ini. Ketiganya kini `SatuanDto` yang sama:
+
+```
+{ id, nama, sort_order, dipakai }
+```
+
+**Kenapa ini perbaikan, bukan penambahan fitur.** `SatuanDto` sudah
+mendeklarasikan `dipakai: number` sejak lama, dan web sudah mengetik balasan
+`POST` sebagai `SatuanDto`. Servernya memulangkan tiga kunci. Terukur dari
+kawat 2026-09-10: `POST /satuan` → `["id","nama","sort_order"]`,
+`has("dipakai")` = **false**. **Tipenya berbohong**, dan yang menahannya dari
+jadi bug hanya kebetulan bahwa satu-satunya pembacanya `.nama`. Klien yang
+menyisipkan hasil `POST` ke dalam daftar hasil `GET` menaruh baris cacat di
+sana — `dipakai` `undefined`, sementara TypeScript bilang `number`.
+
+Diperbaiki dari sisi **server**, bukan dengan memperlemah tipenya: bentuk yang
+dikirim disamakan, bukan janjinya yang dikecilkan.
+
+**`dipakai` pada `PATCH` bukan hiasan.** Ia dihitung dengan mencocokkan NAMA
+satuan terhadap kolom `satuan` dan `satuan_beli` di tabel bahan — dan `PATCH`
+boleh mengganti nama. Jadi angkanya memang bisa berubah oleh permintaan itu
+sendiri. Untuk satuan yang baru dibuat nilainya `0` (bukan `null`, bukan
+hilang), kecuali namanya kebetulan sudah dipakai bahan sebagai teks bebas.
+
+**Untuk ponsel — tidak wajib.** Ponsel tak memanggil `/satuan` sama sekali, dan
+`dipakai` memang sudah tercatat di `kunci-belum-dibaca.txt`. Nol perubahan
+fikstur, nol baris `lib/`.
+
+**Sambil lalu, tanpa perubahan kawat:** bentuk `{id, nama, sort_order}` yang
+dipulangkan `/kategori`, `/kategori-bahan`, dan jalur tulis `/satuan` kini
+punya **satu perakit** (`barisMaster`). Sebelumnya diketik ulang dengan tangan
+di **sembilan** situs di tiga modul. Terukur: satu kunci ke-4 yang disuntikkan
+ke `GET /kategori` lolos typecheck, 3.097 uji, DAN 3.633 lengan verify-api
+tanpa satu penjaga pun berubah warna. Kini kunci yang sama memerahkan
+**sembilan** lengan.
+
 ## ⚪️ Baris karyawan akhirnya bernama: `KaryawanRow` (9 kunci) + `KaryawanBaruResult` — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: baris yang

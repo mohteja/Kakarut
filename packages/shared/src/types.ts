@@ -639,14 +639,38 @@ export interface KomponenDto {
   is_complement: boolean;
 }
 
-/** Kategori menu (master data). */
+/**
+ * BARIS DAFTAR INDUK sederhana — `{id, nama, sort_order}`.
+ *
+ * Dipakai DUA rute, dan penyebutan itu bukan kerapian: sampai 2026-09-10
+ * komentar di sini berbunyi "Kategori menu (master data)" sementara **lima**
+ * pemanggil web memakainya untuk `GET /kategori-bahan`, dan `GET /kategori` —
+ * rute yang tipe ini dinamai untuknya — dibaca lewat TIGA salinan lokal.
+ * Keduanya lolos hanya karena bentuknya identik hari ini.
+ *
+ *   · `/api/kategori`        — kategori MENU (GET, POST 201, PATCH)
+ *   · `/api/kategori-bahan`  — kategori BAHAN & perlengkapan (idem)
+ *
+ * Balasan tulis `/api/satuan` memakai `SatuanDto`, bukan ini — lihat di bawah.
+ * Perakit tunggalnya `barisMaster()` di `apps/server/src/lib/baris-master.ts`.
+ */
 export interface KategoriDto {
   id: string;
   nama: string;
   sort_order: number;
 }
 
-/** Satuan bahan (master data) — sumber pilihan dropdown satuan. */
+/**
+ * Satuan bahan (master data) — sumber pilihan dropdown satuan.
+ *
+ * `dipakai` kini dikirim oleh KETIGA metode (`GET`, `POST` 201, `PATCH`).
+ * Sampai 2026-09-10 hanya `GET` yang mengirimnya, sementara `SatuanSelect.tsx`
+ * sudah mengetik balasan `POST` sebagai `SatuanDto` — jadi tipenya menjanjikan
+ * medan yang tak pernah ada (terukur dari kawat: `has("dipakai")` = false).
+ * Yang menahannya dari jadi bug cuma kebetulan bahwa satu-satunya pembacanya
+ * `.nama`. Diperbaiki dari sisi server supaya klien yang menyisipkan hasil
+ * `POST` ke dalam daftar hasil `GET` tak menaruh baris cacat di sana.
+ */
 export interface SatuanDto {
   id: string;
   nama: string;

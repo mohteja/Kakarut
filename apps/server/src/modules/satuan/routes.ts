@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { barisSatuan, hitungDipakai } from "../../lib/baris-master";
 import { BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, asc, count, eq, or } from "drizzle-orm";
 import { Hono } from "hono";
@@ -49,14 +50,7 @@ export const satuanRoutes = new Hono<AppEnv>()
       if (p.satuanBeli) nama.add(p.satuanBeli);
       for (const n of nama) dipakai.set(n, (dipakai.get(n) ?? 0) + 1);
     }
-    return c.json(
-      rows.map((r) => ({
-        id: r.id,
-        nama: r.nama,
-        sort_order: r.sortOrder,
-        dipakai: dipakai.get(r.nama) ?? 0,
-      })),
-    );
+    return c.json(rows.map((r) => barisSatuan(r, dipakai.get(r.nama) ?? 0)));
   })
   .post(
     "/",
@@ -75,10 +69,7 @@ export const satuanRoutes = new Hono<AppEnv>()
         .onConflictDoNothing()
         .returning();
       if (!row) throw new HTTPException(409, { message: "Satuan sudah ada" });
-      return c.json(
-        { id: row.id, nama: row.nama, sort_order: row.sortOrder },
-        201,
-      );
+      return c.json(barisSatuan(row, await hitungDipakai(auth.company_id!, row.nama)), 201);
     },
   )
   .patch(
@@ -107,7 +98,7 @@ export const satuanRoutes = new Hono<AppEnv>()
       );
       if (!row)
         throw new HTTPException(404, { message: "Satuan tidak ditemukan" });
-      return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder });
+      return c.json(barisSatuan(row, await hitungDipakai(auth.company_id!, row.nama)));
     },
   )
   .delete("/:id", requireRole("owner", "admin"), async (c) => {
