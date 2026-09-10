@@ -50,6 +50,140 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Amplop yang tak bernama, di KEDUA ujung kawat — dan bendera yang dikirim sejak putaran 23 tanpa pernah sampai ke satu layar pun — server + web + ponsel — 2026-09-11
+
+**Vena.** Butir antrean "salinan bentuk di web", sasaran `StokAwalTersimpan` —
+tipe lokal terakhir di web. Sasarannya memang tipis (bentuk kawatnya cocok
+PERSIS dengan salinan lokalnya), dan justru karena tipis ia memaksa pertanyaan
+yang lebih besar: **berapa banyak lagi yang seperti itu, dan bagaimana cara
+tahu tanpa menebak?**
+
+**Populasi, disapu mekanis atas seluruh `apps/web/src` (145 berkas).**
+
+| | jumlah |
+| --- | --- |
+| situs `api<T>(…)` bertipe | 225 |
+| **T-nya STRUKTURAL — ditulis tangan di situs pengambilannya** | **46** |
+
+Ini ujung satunya lagi dari kawat yang dihitung `amplop-berkontrak` sejak
+2026-09-10. Yang itu menghitung amplop yang SERVER kirim tanpa nama; yang ini
+menghitung tempat WEB menuliskan sendiri bentuk balasan alih-alih menyebut
+kontraknya. Kelas yang sama dilihat dari dua ujung — dan yang di sini lebih
+berbahaya, sebab **ia hijau di typecheck**. Tipe struktural yang ditulis tangan
+tak pernah "salah" menurut kompilator; ia hanya membuat kompilator bersaksi
+untuk balasan yang lebih sempit daripada yang dikirim. Medan yang tak disebut
+bukan cuma tak terpakai — ia MUSTAHIL dipakai.
+
+**Diukur lewat HTTP terhadap DB gerbang, bukan dibaca dari kode:**
+
+| rute | dikirim server | diketik web |
+| --- | --- | --- |
+| `GET /auth/me` | `SesiDto`: `user`, `branch`, `company` (**9** medan) | `{ company: { tiga medan } }` |
+| `GET /cabang` | `CabangDto` — **14** medan | `{ id, nama }[]` |
+| `GET /company` | `CompanyRow` — **22** kunci | `{ nama }` · `{ foodCostMaks }` |
+| `GET /transfer-stok` | `{ rows, rows_terpotong }` | `{ rows }` |
+
+**TEMUAN, dan bukan soal kerapian.** `rows_terpotong` dikirim server sejak
+putaran 23 dan dipaku §274 verify-api — tapi amplopnya **tak pernah punya
+nama**, jadi kedua kliennya mengetik ulang `{ rows }` sendiri dan benderanya
+lenyap di kedua ujung: ponsel membuangnya (`transfer_repository.dart:51`,
+tercatat di ledger putaran itu), web bahkan tak bisa melihatnya. Daftar
+transfer BERLANGIT-LANGIT, bukan berhalaman (bawaan 50, maks 200). Faktur
+ke-51 tidak ada di layar dan tak ada satu kalimat pun yang mengatakannya —
+padahal repo ini SUDAH punya idiom spanduknya di tiga tempat
+(`KartuSupplierPage`, `ShiftDetailModal`, `RiwayatHargaModal`).
+
+**BUKTI DARI KOMPILATOR, bukan argumen.** `CompanyDto.blokir_jual_minus`
+dikirim persis supaya kasir bisa memperingatkan sebelum tombol Bayar.
+Menambahkan `pb1Conf?.blokir_jual_minus` di `KasirPage`:
+
+```
+src/pages/kasir/KasirPage.tsx(176,27): error TS2339: Property
+'blokir_jual_minus' does not exist on type
+'{ pb1_enabled: boolean; pb1_rate: number; diskon_maks_persen: number; }'.
+```
+
+Tipe yang ditulis tangan di situs pengambilannya adalah SEBABNYA medan itu tak
+terbaca — bukan kelalaian yang terpisah.
+
+**Ralat catatan kontrak.** Komentar `blokir_jual_minus` berkata "peringatan
+yang dijanjikan belum pernah dibuat". Itu sudah tidak benar: peringatannya ADA
+lewat `POST /penjualan/cek-stok` (tayang rilis ini), yang menjawab pertanyaan
+lebih tajam — bahan MANA, kurang berapa — dengan predikat gerbang yang SAMA
+(`gerbangBerlaku`). Catatan yang salah di kontrak menyesatkan vena berikutnya;
+ia sempat menyesatkan vena INI selama satu putaran pengukuran.
+
+**Yang dikerjakan.**
+
+- **Empat nama baru di kontrak**: `TransferStokDaftar` (`rows`,
+  `rows_terpotong`), `TransferStokSaldo` (`branch_id`, `rows`),
+  `StokAwalTersimpan` + `StokAwalItem`. Lima situs `c.json` dipaku
+  `satisfies`-nya.
+- **Spanduk pemotongan dirender** di halaman Transfer Stok web — dengan idiom
+  yang sudah dipakai tiga layar lain. Benderanya sudah dikirim server sejak
+  lama; yang hilang cuma tipe yang membuatnya terlihat.
+- **Enam situs web menyebut kontraknya**: `KasirPage` ×3, `MenuListPage`,
+  `TransferStokPage` ×2. Yang tersisa di keempat berkas itu hanya pengakuan
+  `{ok, …}` — kelas yang SENGAJA di luar hitungan di kedua ujung.
+- **Penjaga baru `amplop-web-berkontrak.test.ts`** — cermin
+  `amplop-berkontrak` di ujung web. Ratchet **46 → 40**, plus asersi bernama
+  bahwa keenam situs yang dibayar tak lahir kembali.
+- **Ratchet server dikencangkan 19 → 13.** Lima situs dibayar; sisa selisihnya
+  utang yang sudah ada.
+
+**Ratchet yang kutulis sendiri ternyata longgar satu.** `MAKS_UTANG` tertulis
+19 sementara pohon bersih memulangkan **18** — putaran sebelumnya membayar DUA
+situs (`{rows,total}` di dua rute) tapi hanya mengurangi satu. Ratchet longgar
+satu diam-diam menyediakan kursi bagi amplop tanpa kontrak berikutnya. Angkanya
+kini SELALU diturunkan dari pengukuran, tak pernah dari aritmetika di kepala —
+dan itu ditulis di komentar berkasnya supaya penerusnya tak mengulanginya.
+
+**Dua instrumen, satu angka.** 46 (dan 40 sesudahnya) dihitung dua kali dengan
+alat berbeda: sapuan Python sekali pakai dan pemindai di dalam penjaga baru.
+Keduanya sepakat. Sesi ini sudah empat kali menemukan instrumen sekali-pakainya
+yang keliru, jadi kesepakatan dua alat bukan formalitas.
+
+**Bukti merah** (semuanya dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| satu situs `api<{karangan_vena}>` baru | `amplop-web-berkontrak` INTI | **merah**, 41 > 40, menyebut berkas & barisnya |
+| …situs yang sama | INTI "keenam situs tak kembali" | **merah**, menyebutnya |
+| `TransferStokDaftar` dicabut dari kontrak | `amplop-berkontrak` INTI | **merah**, 15 > 13, menyebut kedua rutenya |
+| `pb1Conf?.blokir_jual_minus` di `KasirPage` | typecheck | **merah** TS2339 (bukti temuannya) |
+
+**Ponsel.** Fikstur kunci **+9 baris**, dan HIMPUNAN NAMA KUNCI TAK BERUBAH
+sama sekali (dibuktikan `diff` atas kolom kedua) — keempat invarian nol:
+kunci kontrak tanpa keputusan 0, catatan basi 0, hantu liar 0,
+`hantuDiketahui` basi 0. Nol baris `lib/` disentuh; pekerjaan mengurai
+`rows_terpotong` di `transfer_repository` tercatat di changelog sebagai 🟡.
+
+**Gerbang**: typecheck bersih · verify-api **3.723 / 0** (+17, seluruhnya §308) · vitest **257 berkas / 3.133 uji** (+1 berkas, +5 uji) · invarian **27 / 0** · Playwright **48 lolos**.
+
+**Batas yang diakui.**
+
+- **Ratchet, bukan larangan.** Empat puluh situs tersisa, dan sebagiannya
+  memang benar struktural (`{ url }` balasan unggah, pengakuan `{ ok }`).
+  Yang dijaga: angkanya hanya boleh menyusut.
+- **Pemindainya menuduh BENTUK, bukan KEBENARAN.** `api<PenerimaanRow[]>` yang
+  menyebut tipe SALAH lolos dengan mulus — yang menjaga arah itu §-§ verify-api
+  per rute, bukan berkas ini. Batas yang sama dengan `kunci_kontrak_server_test`
+  di ponsel.
+- **Padanan rute→tipe tidak ditegakkan mekanis.** `amplop-berkontrak`
+  mencocokkan HIMPUNAN KUNCI dengan kontrak mana pun; mencabut `satisfies`
+  dari rutenya tetap hijau selama ada interface berkunci sama. Terukur
+  (bukti merah pertama gagal karena itu). Yang menangkap penyimpangan tetap
+  ada — begitu kuncinya berbeda, utangnya bertambah — tapi "rute ini memakai
+  tipe INI" belum punya penjaga. Antrean.
+- **Spanduk pemotongan belum pernah terlihat di DOM.** DB gerbang hanya punya
+  16 faktur transfer; benderanya dibuktikan menyala dari kawat lewat
+  `per_page=1` (§308), bukan dari peramban. Sekelas dengan utang lengan
+  peramban peringatan keranjang.
+- **`rows_terpotong` masih dibuang ponsel.** Sekarang ia punya nama, jadi
+  pekerjaannya bisa dituntut; ia belum dikerjakan.
+
+---
+
 ## ATURAN A melaporkan NOL sementara dua baris tabel telanjang berjalan di kawat — sebab ia hanya melihat argumen langsung — server + web + ponsel — 2026-09-11
 
 **Vena.** Butir antrean "salinan bentuk di web", sasaran `Tenant`. Yang
@@ -13936,8 +14070,7 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **1 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
-      bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
+- [ ] **0 salinan bentuk di web (HABIS #109) + 40 `api<{…}>` inline berratchet** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
       diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
       **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
       sebelumnya sebagai utang yang tersisa. Kini dibedakan — salinan **8 → 7**
@@ -13957,8 +14090,17 @@ berlaku di situ).
       disembunyikannya. `DanaEntri` dibayar #107 — dan di sana, untuk pertama
       kalinya dalam deretan ini, salinan lokalnya ternyata SETIA: yang kurang
       cuma namanya. `Tenant` dibayar #108 — dan di sana salinannya cuma pintu
-      masuk: yang ditemukan lubang di ATURAN A `bentuk-balasan`. Sisa **1**:
-      `StokAwalTersimpan`.
+      masuk: yang ditemukan lubang di ATURAN A `bentuk-balasan`.
+      **`StokAwalTersimpan` dibayar #109 — SALINANNYA HABIS, nol tersisa.**
+      Dan di sana pun sasarannya cuma pintu masuk: salinan terakhir itu SETIA
+      (seperti #107), jadi yang dikerjakan pindah ke paruh kedua butir ini —
+      `api<{…}>` inline, yang sampai putaran itu tak pernah dihitung siapa pun
+      dengan alat yang benar. Angka "47" di judul butir ini juga terlalu besar:
+      diukur ulang dengan pengurai berkurung-berimbang (bukan regex) atas 145
+      berkas, populasinya **225 situs `api<T>(…)` bertipe, 46 di antaranya
+      struktural**. Enam dibayar #109 → **40**, dan kini ada ratchet-nya:
+      `apps/server/test/amplop-web-berkontrak.test.ts`. Butir ini karena itu
+      berhenti jadi daftar nama dan jadi ANGKA yang hanya boleh menyusut.
       (Angka "3" yang sempat tertulis di sini SALAH: daftarnya memuat lima
       nama. Disapu ulang tiap putaran sejak.) Catatan lama, masih berlaku: diukur ulang 2026-09-06
       SESUDAH #99. Angka "15" pada
@@ -13972,6 +14114,20 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
+- [ ] **Padanan RUTE → TIPE belum ditegakkan mekanis** — lahir #109, terukur
+      di sana. `amplop-berkontrak` mencocokkan HIMPUNAN KUNCI sebuah `c.json`
+      dengan interface kontrak MANA PUN; ia tak pernah bertanya apakah rutenya
+      benar-benar menyebut tipe itu. Bukti merah pertama #109 gagal justru
+      karena ini: `satisfies TransferStokDaftar` dicabut dari kedua rutenya,
+      penjaganya tetap hijau. Penyimpangan bentuk tetap tertangkap (begitu
+      kuncinya berbeda, utangnya bertambah), tapi penyimpangan TIPE — `qty`
+      yang berubah jadi string, misalnya — tidak. Yang setara di ujung web
+      punya batas yang sama: `api<PenerimaanRow[]>` yang menyebut tipe SALAH
+      lolos mulus
+- [ ] **Spanduk pemotongan Transfer Stok belum pernah terlihat di DOM** —
+      dirender #109, dibuktikan dari kawat lewat `per_page=1` (§308), tapi DB
+      gerbang cuma punya 16 faktur transfer jadi benderanya tak pernah menyala
+      di peramban. Sekelas dengan utang lengan peramban peringatan keranjang
 - [x] ~~**pgEnum vs union kontrak: dua daftar tangan tanpa pembanding?**~~ —
       **BERSIH**, dan dibuktikan #107. 27 pgEnum, 22 berpasangan nilai-identik;
       menambah nilai karangan ke sebuah union memerahkan `status-satu-kontrak`
@@ -14175,6 +14331,12 @@ berlaku di situ).
       Stok Menu TAMPIL — mengalirkannya lewat helper membalik itu
 
 ### Mobile
+- [ ] **`rows_terpotong` masih dibuang `transfer_repository.dart:51`** — salah
+      satu dari sepuluh situs DIAM yang dicatat putaran 23. Yang berubah #109:
+      amplopnya akhirnya bernama (`TransferStokDaftar`), jadi pekerjaannya bisa
+      dituntut alih-alih cuma dicatat. Daftar transfer berlangit-langit dan
+      ponsel bahkan meminta `per_page=50` sendiri padahal server sanggup 200;
+      `sampah_page.dart` sudah menunjukkan idiom spanduknya
 - [x] ~~**`shift_repository.dart:54` menelan galat jadi NOL**~~ — SELESAI
       2026-09-05, lihat entri "Lencana yang gagal ≠ lencana nol" di atas.
       Populasi 7 provider lencana, **3 menelan** (selisih kas, kebersihan,

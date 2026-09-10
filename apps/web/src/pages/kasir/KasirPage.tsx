@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
+  CabangDto,
   CekStokResult,
+  CompanyRow,
   KategoriDto,
   MejaDto,
   MemberCariRow,
@@ -12,6 +14,7 @@ import type {
   OpenBillDetail,
   OpenBillRow,
   PesananStatus,
+  SesiDto,
   Shift,
   StatusHadirDto,
 } from "@kakarut/shared";
@@ -155,22 +158,23 @@ export function KasirPage() {
   // tambahan — react-query memakai cache yang sama.
   const { data: company } = useQuery({
     queryKey: ["company"],
-    queryFn: () => api<{ nama: string }>("/company"),
+    queryFn: () => api<CompanyRow>("/company"),
     staleTime: 60_000,
   });
   const { data: daftarCabangSlip } = useQuery({
     queryKey: ["cabang"],
-    queryFn: () => api<{ id: string; nama: string }[]>("/cabang"),
+    queryFn: () => api<CabangDto[]>("/cabang"),
     staleTime: 60_000,
   });
   const cabangIni = daftarCabangSlip?.find((b) => b.id === branchId) ?? null;
 
   const { data: me } = useQuery({
     queryKey: ["me"],
-    queryFn: () =>
-      api<{
-        company: { pb1_enabled: boolean; pb1_rate: number; diskon_maks_persen: number } | null;
-      }>("/auth/me"),
+    // `SesiDto` UTUH, bukan tiga medan yang kebetulan dipakai hari ini: `/auth/me`
+    // mengirim sembilan medan `company` (terukur), dan mengetik ulang sebagiannya
+    // di sini membuat enam sisanya TAK ADA bagi typecheck — termasuk
+    // `blokir_jual_minus`, yang dikirim persis untuk layar ini.
+    queryFn: () => api<SesiDto>("/auth/me"),
   });
   const pb1Conf = me?.company ?? auth?.company;
 

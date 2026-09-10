@@ -47,6 +47,10 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-11): amplop /transfer-stok & /stok/awal masuk
+  // Lampiran A — nol perubahan kawat, tapi `rows_terpotong` akhirnya
+  // terlihat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟡 Amplop `/api/transfer-stok` akhirnya bernama — dan `rows_terpotong` yang selama ini dibuang ponsel jadi terlihat",
   // BELUM DI-MERGE (2026-09-11): panel penyewa berhenti mengirim baris
   // tabel apa adanya; menunggu rilis berikutnya bersama cabang `claude`.
   "## 🟡 `GET /api/admin/tenants/:id` berhenti mengirim BARIS TABEL apa adanya — `company` & `cabang` kini bentuk yang sama dengan rute yang menyajikannya",

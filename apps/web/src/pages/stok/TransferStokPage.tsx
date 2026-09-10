@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { TransferStokFaktur, TransferStokSaldoRow } from "@kakarut/shared";
+import type {
+  TransferStokDaftar,
+  TransferStokFaktur,
+  TransferStokSaldo,
+  TransferStokSaldoRow,
+} from "@kakarut/shared";
 import { angkaDari } from "@kakarut/shared";
 import {
   Card,
@@ -105,9 +110,7 @@ export function TransferStokPage() {
     queryKey: ["transfer-saldo", asalId],
     enabled: !!asalId,
     queryFn: () =>
-      api<{ branch_id: string; rows: TransferStokSaldoRow[] }>(
-        `/transfer-stok/saldo?branch_id=${asalId}`,
-      ),
+      api<TransferStokSaldo>(`/transfer-stok/saldo?branch_id=${asalId}`),
   });
   const saldoRows = saldoData?.rows ?? [];
   const saldoById = useMemo(
@@ -125,7 +128,7 @@ export function TransferStokPage() {
 
   const { data: riwayat, isLoading: riwayatLoading, error: riwayatGagal } = useQuery({
     queryKey: ["transfer-stok"],
-    queryFn: () => api<{ rows: TransferStokFaktur[] }>("/transfer-stok"),
+    queryFn: () => api<TransferStokDaftar>("/transfer-stok"),
   });
 
   /**
@@ -763,6 +766,20 @@ export function TransferStokPage() {
               </Card>
             );
           })}
+          {/*
+            Daftar ini BERLANGIT-LANGIT, bukan berhalaman: server memulangkan
+            `per_page` faktur terbaru (bawaan 50) dan menandai sisanya lewat
+            `rows_terpotong`. Tanpa kalimat ini, faktur ke-51 tak ada bagi
+            siapa pun yang membuka layar ini — dan justru saat transfernya
+            paling ramai. Benderanya sudah dikirim server sejak lama; yang
+            hilang cuma tipe yang membuatnya terlihat.
+          */}
+          {riwayat?.rows_terpotong && (
+            <Card className="p-3 text-xs text-stone-600">
+              Menampilkan <b>{riwayat.rows.length} transfer terbaru</b>. Masih ada transfer
+              yang lebih lama yang tidak ada di daftar ini.
+            </Card>
+          )}
           <ErrorText error={batal.error} />
         </div>
       )}

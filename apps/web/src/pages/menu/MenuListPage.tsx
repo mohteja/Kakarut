@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { SakelarTampilan, useTampilan } from "../../components/SakelarTampilan";
 import { Link, useNavigate } from "react-router-dom";
-import type { MenuDto } from "@kakarut/shared";
+import type { CompanyRow, MenuDto } from "@kakarut/shared";
 import {
   ErrorText,
   PageTitle,
@@ -73,7 +73,7 @@ export function MenuListPage() {
   });
   const { data: company } = useQuery({
     queryKey: ["company"],
-    queryFn: () => api<{ foodCostMaks: number }>("/company"),
+    queryFn: () => api<CompanyRow>("/company"),
   });
   const foodCostMaks = company?.foodCostMaks ?? 40;
 

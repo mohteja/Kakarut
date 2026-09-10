@@ -59,8 +59,24 @@ const TIPE = "packages/shared/src/types.ts";
  * cara temuan lahir; yang salah instrumen baruku, bukan yang lama.
  *
  * Amplop buku dana `{rows, total}` dibayar 2026-09-11 → **19**.
+ *
+ * **19 ITU SATU LEBIH LONGGAR DARIPADA KENYATAANNYA**, dan itu terukur
+ * 2026-09-11 dengan menurunkan angka ini ke nol lalu membaca daftarnya:
+ * pohon bersih memulangkan **18**. Ratchet yang longgar satu bukan ratchet
+ * yang ketat; ia diam-diam menyediakan satu kursi bagi amplop tanpa kontrak
+ * berikutnya. Sebabnya sepele dan pantas dicatat: putaran sebelumnya membayar
+ * DUA situs (`{rows,total}` muncul di dua rute) tapi hanya mengurangi satu.
+ * Karena itu angka ini kini SELALU diturunkan dari pengukuran, bukan dari
+ * aritmetika di kepala.
+ *
+ * Vena "amplop yang tak bernama, di kedua ujung kawat" (2026-09-11) membayar
+ * lima situs sekaligus — `GET /stok/awal` (`StokAwalTersimpan`), dan keempat
+ * balasan `/transfer-stok` (`TransferStokDaftar` ×2, `TransferStokSaldo` ×2) —
+ * jadi **18 → 13**. Yang keempat itu bukan kerapian: `rows_terpotong` yang
+ * dikirim server sejak putaran 23 tak pernah sampai ke layar mana pun, sebab
+ * kedua kliennya mengetik ulang `{ rows }` di situs pengambilannya sendiri.
  */
-const MAKS_UTANG = 19;
+const MAKS_UTANG = 13;
 
 /**
  * Dua kelas yang SENGAJA di luar hitungan, dan alasannya bukan kemudahan.

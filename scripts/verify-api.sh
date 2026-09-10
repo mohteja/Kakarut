@@ -18195,6 +18195,80 @@ cek "§307 detail.anggota == TenantAnggota, dua arah" "V == 0" \
 cek "§307 owner akses daftar penyewa → 403" "V == 403" "$(status_code "$OWNER" GET /admin/tenants)"
 cek "§307 owner akses detail penyewa → 403" "V == 403" "$(status_code "$OWNER" GET "/admin/tenants/$TID307")"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §308 — AMPLOP YANG TAK BERNAMA, DI KEDUA UJUNG KAWAT: bendera yang dikirim
+#        server sejak lama dan tak pernah sampai ke satu layar pun
+# ═══════════════════════════════════════════════════════════════════════════
+# `/transfer-stok` memulangkan `{rows, rows_terpotong}` sejak putaran 23, dan
+# §274 sudah memaku bahwa benderanya DIKIRIM. Yang tak pernah ditanyakan siapa
+# pun: apakah bentuk itu punya NAMA. Ia tak punya — jadi kedua kliennya
+# mengetik ulang `{ rows }` di situs pengambilannya sendiri, dan benderanya
+# lenyap dua kali: web tak bisa melihatnya (typecheck bersaksi untuk balasan
+# yang lebih sempit daripada yang dikirim), ponsel membuangnya di
+# `transfer_repository`. Daftarnya berlangit-langit 50; faktur ke-51 hilang
+# tanpa satu kalimat pun.
+#
+# Yang dipaku di sini: amplopnya kini `TransferStokDaftar` di kontrak, dua
+# arah — dan benderanya BISA menyala, dibuktikan dari kawat dengan memaksa
+# `per_page=1`. Bendera yang tak pernah true akan membuat lengan mana pun di
+# atasnya hijau tanpa menyatakan apa pun.
+K308=$(medan296 TransferStokDaftar)
+cek "§308 premis: kontrak TransferStokDaftar terbaca dari types.ts (2 medan)" "V == 2" \
+  "$(echo "$K308" | grep -c .)"
+R308=$(api "$OWNER" GET /transfer-stok)
+cek "§308 premis: ada faktur transfer (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R308" | jq '((.rows|length) >= 1)|if . then 1 else 0 end')"
+cek "§308 amplop /transfer-stok == TransferStokDaftar, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R308" | jq -r 'keys[]')" "$K308")"
+cek "§308 rows_terpotong BOOLEAN, bukan sekadar ada" "V == 1" \
+  "$(echo "$R308" | jq '((.rows_terpotong|type)=="boolean")|if . then 1 else 0 end')"
+# Daftar yang MUAT tidak dituduh terpotong…
+cek "§308 daftar bawaan (muat) → rows_terpotong false" "V == 1" \
+  "$(echo "$R308" | jq '(.rows_terpotong == false)|if . then 1 else 0 end')"
+# …dan benderanya benar-benar bisa menyala. Tanpa lengan ini, "false" di atas
+# tak membedakan bendera yang bekerja dari bendera yang mati.
+P308=$(api "$OWNER" GET "/transfer-stok?per_page=1")
+cek "§308 UJI-DIRI: per_page=1 memotong → rows_terpotong true" "V == 1" \
+  "$(echo "$P308" | jq '((.rows_terpotong == true) and ((.rows|length) == 1))|if . then 1 else 0 end')"
+cek "§308 …dan amplop yang terpotong berkunci SAMA (dua arah)" "V == 0" \
+  "$(selisih296 "$(echo "$P308" | jq -r 'keys[]')" "$K308")"
+K308R=$(medan296 TransferStokFaktur)
+cek "§308 baris /transfer-stok == TransferStokFaktur, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R308" | jq -r '[.rows[]|keys[]]|unique|.[]')" "$K308R")"
+
+# ── saldo: amplop yang menyebut cabang MANA yang dijawab ─────────────────
+K308S=$(medan296 TransferStokSaldo)
+cek "§308 premis: kontrak TransferStokSaldo terbaca (2 medan)" "V == 2" \
+  "$(echo "$K308S" | grep -c .)"
+BR308=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active)][0].id')
+S308=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$BR308")
+cek "§308 amplop /transfer-stok/saldo == TransferStokSaldo, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$S308" | jq -r 'keys[]')" "$K308S")"
+# `branch_id` bukan hiasan: tanpa parameter, server memutuskan cabangnya
+# sendiri, dan daftar saldo tanpa keterangan cabang tak bisa diperiksa.
+cek "§308 saldo menggemakan cabang yang DIMINTA, bukan cabang lain" "V == 1" \
+  "$([ "$(echo "$S308" | jq -r '.branch_id')" = "$BR308" ] && echo 1 || echo 0)"
+
+# ── saldo pembuka: bentuk yang sampai kemarin hanya hidup di halaman web ──
+K308A=$(medan296 StokAwalTersimpan)
+cek "§308 premis: kontrak StokAwalTersimpan terbaca (2 medan)" "V == 2" \
+  "$(echo "$K308A" | grep -c .)"
+A308=$(api "$OWNER" GET /stok/awal)
+cek "§308 amplop /stok/awal == StokAwalTersimpan, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$A308" | jq -r 'keys[]')" "$K308A")"
+cek "§308 premis: ada saldo pembuka tersimpan (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(echo "$A308" | jq '((.items|length) >= 1)|if . then 1 else 0 end')"
+K308I=$(medan296 StokAwalItem)
+cek "§308 baris /stok/awal == StokAwalItem, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$A308" | jq -r '[.items[]|keys[]]|unique|.[]')" "$K308I")"
+# `tanggal` amplop = tanggal saldo pembuka TERKINI, dihitung SERVER. Bila ia
+# diam-diam jadi "hari ini" walau ada item, formulir Stok Awal membuka tanggal
+# yang salah dan penyimpanan berikutnya memindahkan saldo pembuka ke sana.
+cek "§308 tanggal amplop == tanggal item TERBESAR (bukan hari ini)" "V == 1" \
+  "$(echo "$A308" | jq '(.tanggal == ([.items[].tanggal]|max))|if . then 1 else 0 end')"
+cek "§308 tiap tanggal item berbentuk YYYY-MM-DD" "V == 1" \
+  "$(echo "$A308" | jq '([.items[]|select(.tanggal|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))]|length) == (.items|length)|if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

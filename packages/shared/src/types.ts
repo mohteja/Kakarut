@@ -93,8 +93,19 @@ export interface CompanyDto {
   /**
    * Setelan "tolak jual saat stok minus". Dikirim supaya kasir bisa
    * MEMPERINGATKAN sebelum tombol Bayar; penegakannya tetap di server
-   * (`penjualan/service.ts`). Terukur 2026-09-05: tak satu klien pun membaca
-   * medan ini — peringatan yang dijanjikan belum pernah dibuat (antrean vena).
+   * (`penjualan/service.ts`).
+   *
+   * Terukur 2026-09-05: tak satu klien pun membacanya. Itu MASIH benar
+   * 2026-09-11, tapi sebabnya sudah berganti dan catatan lamanya
+   * ("peringatan yang dijanjikan belum pernah dibuat") kini menyesatkan:
+   * peringatannya ADA, lewat `POST /penjualan/cek-stok` yang menjawab
+   * pertanyaan yang lebih tajam — bahan MANA dan kurang berapa — dengan
+   * predikat gerbang yang sama (`gerbangBerlaku`). Bendera ini tinggal
+   * pintasan yang tak diperlukan pemanggil `cek-stok`.
+   *
+   * Sampai 2026-09-11 ia juga MUSTAHIL dibaca di layar yang paling
+   * membutuhkannya: `KasirPage` mengetik ulang tiga medan `company` di situs
+   * `api<…>("/auth/me")`-nya, jadi enam medan sisanya tak ada bagi typecheck.
    */
   blokir_jual_minus: boolean;
   timezone: string;
@@ -284,6 +295,30 @@ export interface TenantAnggota {
   nama: string;
   email: string;
   role: UserRole;
+}
+
+/** Satu saldo pembuka bahan yang tersimpan — baris `GET /api/stok/awal`. */
+export interface StokAwalItem {
+  ingredient_id: string;
+  qty: number;
+  /** tanggal terkunci saldo pembuka bahan INI (bisa beda antar bahan) */
+  tanggal: string;
+}
+
+/**
+ * SALDO PEMBUKA yang tersimpan — `GET /api/stok/awal`, untuk mengisi ulang
+ * formulir Stok Awal (bukan saldo live).
+ *
+ * `tanggal` di tingkat amplop adalah tanggal saldo pembuka TERKINI (yang
+ * terbesar di antara `items`), atau HARI INI bila belum ada satu pun. Dan
+ * "hari ini" itu dihitung server di ZONA PERUSAHAAN (`tanggalDi(timezone)`),
+ * bukan di zona peramban — pembedaan yang hari ini tak terlihat karena
+ * `companies.timezone` belum bisa diubah, dan yang menahan pasangan itu tetap
+ * konsisten adalah `zona-waktu-satu-suara.test.ts`.
+ */
+export interface StokAwalTersimpan {
+  tanggal: string;
+  items: StokAwalItem[];
 }
 
 export type SmtpEncryption = "none" | "ssl" | "starttls";
@@ -1665,6 +1700,44 @@ export interface TransferStokSaldoRow {
   tersedia_teks: string;
   /** setara kemasan dari sisa siap kirim, mis. "≈ 0,9 kg"; null bila tak berkemasan */
   tersedia_setara: string | null;
+}
+
+/**
+ * DAFTAR FAKTUR TRANSFER — `GET /transfer-stok`. Berlangit-langit, BUKAN
+ * berhalaman: pintu ini menerima `per_page` (bawaan 50, maks 200) tapi tak
+ * pernah memulangkan `page`, jadi yang benar baginya penanda pemotongan.
+ *
+ * `rows_terpotong` ADA justru supaya klien bisa mengatakannya. Sampai
+ * 2026-09-11 amplop ini tak bernama, dan akibatnya terukur di kedua klien:
+ * halaman Transfer Stok web mendeklarasikan sendiri `{ rows: … }` di situs
+ * pengambilannya, jadi benderanya tak pernah ada bagi typecheck maupun bagi
+ * orang yang membaca layarnya; ponsel membuangnya di `transfer_repository`.
+ * Server sudah mengirimnya sejak putaran 23 dan §274 verify-api memakunya —
+ * yang hilang cuma rumah bagi bentuknya.
+ */
+export interface TransferStokDaftar {
+  /** maksimal `per_page` faktur, TERBARU dulu — selebihnya `rows_terpotong` */
+  rows: TransferStokFaktur[];
+  /**
+   * `rows` dipotong; masih ada faktur transfer yang lebih lama.
+   *
+   * Sekelas `SupplierKartu.rows_terpotong` dan `CustomerDetail.transaksi_terpotong`,
+   * dan alasannya sama: halaman transfer menyaring di peramban, jadi faktur
+   * yang tak terkirim tak pernah ada baginya.
+   */
+  rows_terpotong: boolean;
+}
+
+/**
+ * STOK READY DI SATU CABANG — `GET /transfer-stok/saldo`, dua situs balasan
+ * (daftar kosong lebih awal + daftar penuh). `branch_id` dikirim balik supaya klien
+ * tahu cabang MANA yang dijawab: kalau `branch_id` tak dikirim, server
+ * memutuskannya sendiri (`resolveBranchId`), dan daftar tanpa keterangan
+ * cabang adalah daftar yang tak bisa diperiksa.
+ */
+export interface TransferStokSaldo {
+  branch_id: string;
+  rows: TransferStokSaldoRow[];
 }
 
 /**

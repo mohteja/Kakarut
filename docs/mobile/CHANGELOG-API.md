@@ -25,6 +25,45 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 Amplop `/api/transfer-stok` akhirnya bernama — dan `rows_terpotong` yang selama ini dibuang ponsel jadi terlihat
+
+🟡 **PERLU DICEK** — **nol perubahan di kawat**, tapi asumsi lama pada layar
+Transfer Stok memang keliru, jadi ini bukan sekadar penamaan.
+
+**Yang bertambah di Lampiran A** (bentuk kawatnya SAMA PERSIS seperti sebelumnya):
+
+| tipe | rute | isi |
+| --- | --- | --- |
+| **`TransferStokDaftar`** | `GET /api/transfer-stok` | `rows: TransferStokFaktur[]`, `rows_terpotong: boolean` |
+| **`TransferStokSaldo`** | `GET /api/transfer-stok/saldo` | `branch_id: string`, `rows: TransferStokSaldoRow[]` |
+| **`StokAwalTersimpan`** / **`StokAwalItem`** | `GET /api/stok/awal` | `tanggal`, `items[]` (`ingredient_id`, `qty`, `tanggal`) |
+
+**Kenapa ini 🟡 dan bukan ⚪️.** `rows_terpotong` dikirim server sejak putaran
+23 dan dipaku §274 verify-api — tapi ia tak pernah punya nama, jadi kedua
+kliennya mengetik ulang `{ rows }` sendiri di situs pengambilannya dan
+benderanya lenyap di kedua ujung. Di ponsel ia dibuang di
+`transfer_repository.dart:51`; di web ia bahkan tak ada bagi typecheck.
+
+Akibatnya sama di kedua aplikasi: daftar transfer **berlangit-langit**, bukan
+berhalaman (bawaan `per_page=50`, maksimum 200). Faktur ke-51 tidak ada di
+layar dan tidak ada satu kalimat pun yang mengatakannya. Ponsel bahkan meminta
+`per_page=50` secara eksplisit padahal servernya sanggup 200.
+
+**Yang perlu dikerjakan tim mobile** (tidak wajib, tidak memutus): urai
+`rows_terpotong` di `transfer_repository`, lalu tampilkan spanduk "menampilkan
+N transfer terbaru" seperti yang sudah dilakukan `sampah_page.dart`. Halaman
+Transfer Stok web sudah merendernya pada rilis ini.
+
+**`GET /api/stok/awal`** ikut bernama pada putaran yang sama — bentuknya sampai
+kemarin hanya hidup sebagai `interface` lokal di halaman web. `tanggal` pada
+amplop adalah tanggal saldo pembuka TERKINI (terbesar di antara `items`), atau
+hari ini bila belum ada satu pun — dan "hari ini" itu dihitung server di zona
+perusahaan, bukan zona peramban.
+
+**Fikstur kunci ponsel:** tak ada kunci baru (`rows`, `rows_terpotong`,
+`branch_id`, `tanggal`, `items`, `ingredient_id`, `qty` semuanya sudah ada dari
+kontrak lain).
+
 ## 🟡 `GET /api/admin/tenants/:id` berhenti mengirim BARIS TABEL apa adanya — `company` & `cabang` kini bentuk yang sama dengan rute yang menyajikannya
 
 🟡 **PERLU DICEK** — dan hampir pasti tidak, sebab **tak ada satu klien pun
