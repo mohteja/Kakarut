@@ -787,12 +787,12 @@ function PanelMenggantung() {
               />
             )}
             <span className="font-medium text-stone-800">{r.bahan}</span>
-            {/* Baris ini `KirimanMenggantung` (GET /penerimaan/anomali), BUKAN
-                `PenerimaanRow` — dan rute itu tak mengirim `qty_teks` sama
-                sekali. Dirakit ulang di sini karena memang tak ada pilihan
-                lain; celahnya dicatat di antrean vena, bukan didiamkan. */}
+            {/* `qty_teks` milik server — jangan dirakit ulang. Sampai
+                2026-09-11 rute ini memang tak mengirimnya dan baris di sini
+                merakitnya sendiri; kini ia datang, dan pagarnya tetap
+                dipertahankan untuk balasan dari server versi lama. */}
             <span className="text-stone-600">
-              {formatAngka(r.qty)} {r.satuan}
+              {r.qty_teks ?? `${formatAngka(r.qty)} ${r.satuan}`}
             </span>
             {r.nomor && (
               <span className="rounded bg-white px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">

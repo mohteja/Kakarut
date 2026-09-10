@@ -25,6 +25,38 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 `GET /api/penerimaan/anomali` akhirnya mengirim `qty_teks` + `qty_setara` — layar kiriman menggantung berhenti menebak satuan
+
+🟢 **BARU** — additif, tak ada yang berubah bentuk. Dan ini pekerjaan yang
+memang PANTAS dibawa ke ponsel, sebab layarnya hari ini menebak sendiri.
+
+**Yang bertambah** (`GET /api/penerimaan/anomali`, tiap `rows[]`):
+
+| medan | isi |
+| --- | --- |
+| `qty_teks` | jumlah + satuan yang sudah ditulis server, mis. `"900 gr"` |
+| `qty_setara` | setara kemasan, mis. `"≈ 0,9 kg"`; `null` bila tak berkemasan |
+
+**Kenapa.** `qty_teks` ada di repo ini justru supaya web & ponsel MUSTAHIL
+berbeda satuan — aturannya tertulis di tiga tempat. Rute ini satu-satunya
+pengirim baris ber-`qty` yang tak pernah mengirimnya, jadi kedua klien merakit
+`formatAngka(qty) + satuan` sendiri: `PenerimaanPage.tsx:795` dan
+`anomali_page.dart:216`. Bukan kelalaian — tak ada pilihan lain.
+
+Menebak satuan sendiri **sudah pernah melahirkan "900 kg" untuk barang yang
+sebenarnya 900 gr**, tercatat di komentar `qtyTeks()` sebagai kejadian, bukan
+kekhawatiran. Kasus itu kini diuji harfiah (`kiriman-menggantung-utuh.test.ts`).
+
+**Yang perlu dikerjakan tim mobile** (tidak wajib, tidak memutus): ganti
+`'${r.bahan} · ${formatQty(r.qty)} ${r.satuan}'` di `anomali_page.dart:216`
+dengan `r.qtyTeks`, dengan pagar `?? …` untuk balasan server versi lama —
+bentuk yang sama dengan yang sudah dipakai layar Penerimaan. `qty_setara`
+boleh ditampilkan di sebelahnya seperti di layar Stok Masuk.
+
+**Fikstur kunci ponsel +2 baris**, dan **nol nama kunci baru**: `qty_teks` dan
+`qty_setara` sudah ada dari `StokMasukRow`, `PenerimaanRow`, dan
+`TransferStokItemRow`.
+
 ## 🟡 `GET /api/perlengkapan` berhenti mengirim `harga_beli` ke peran non-manajemen
 
 🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa: disapu, tak ada layar

@@ -47,6 +47,9 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-11): baris kiriman menggantung akhirnya membawa
+  // teks jumlahnya; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟢 `GET /api/penerimaan/anomali` akhirnya mengirim `qty_teks` + `qty_setara` — layar kiriman menggantung berhenti menebak satuan",
   // BELUM DI-MERGE (2026-09-11): harga beli perlengkapan berhenti dikirim ke
   // peran non-manajemen; menunggu rilis berikutnya bersama cabang `claude`.
   "## 🟡 `GET /api/perlengkapan` berhenti mengirim `harga_beli` ke peran non-manajemen",

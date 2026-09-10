@@ -47,9 +47,19 @@ const TIPE = "packages/shared/src/types.ts";
  * antrean: tiap satu yang rutenya kelak ikut mengirim `qty_teks` wajib
  * berpindah ke bentuk berpagar, dan angka ini turun.
  *
+ * **9 → 8 pada 2026-09-11**, dan begitulah cara antrean ini dimaksudkan
+ * berkurang: bukan dengan melonggarkan pemindainya, melainkan dengan
+ * membuat RUTENYA mengirim medan itu. `GET /penerimaan/anomali` kini
+ * memulangkan `qty_teks` + `qty_setara` (`KirimanMenggantung`), jadi
+ * `PenerimaanPage.tsx` berpindah ke bentuk berpagar. Sapuan kontraknya
+ * terukur pada hari yang sama: dari 10 bentuk ber-`qty`+`satuan`, EMPAT sudah
+ * membawa `qty_teks` sebelum putaran ini, kini lima — sisanya
+ * `BeliPerlengkapanRow`, `KomponenDto`, `BahanResepRow`, `PenyumbangHpp`,
+ * `SupplierKartuRow`.
+ *
  * Hanya boleh MENYUSUT.
  */
-const MAKS_TELANJANG = 9;
+const MAKS_TELANJANG = 8;
 
 /** `{formatAngka(x.qty)} {x.satuan}` — perakitan ulang, bentuk JSX. */
 const RAKIT = /\{formatAngka\((\w+)\.qty\)\}\s*\{\1\.satuan\}/g;

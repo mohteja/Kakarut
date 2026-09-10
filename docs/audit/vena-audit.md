@@ -50,6 +50,83 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Medan yang ada PERSIS untuk menghentikan tebakan, di satu-satunya rute yang tak pernah mengirimnya — server + web + ponsel — 2026-09-11
+
+**Vena.** Butir antrean "`GET /penerimaan/anomali` tak mengirim `qty_teks`",
+ditemukan #106 lewat tuduhan typecheck dan dicatat apa adanya: *"layar kiriman
+menggantung karena itu merakit satuannya sendiri, satu-satunya pilihan yang
+ada."*
+
+**Populasi, disapu atas kontraknya sendiri:**
+
+| bentuk ber-`qty` + `satuan` | jumlah |
+| --- | --- |
+| membawa `qty_teks` | 4 |
+| **TANPA `qty_teks`** | **6** |
+
+Enam itu: `KirimanMenggantung`, `BeliPerlengkapanRow`, `KomponenDto`,
+`BahanResepRow`, `PenyumbangHpp`, `SupplierKartuRow`. Yang pertama satu-satunya
+yang punya pemakai yang TERBUKTI menebak — dan menebaknya terukur di **kedua**
+klien: `PenerimaanPage.tsx:795` dan `anomali_page.dart:216`.
+
+**Aturannya sudah tertulis TIGA KALI** (komentar `qtyTeks()`, komentar medan
+`qty_teks` di kontrak, dan komentar di layar Penerimaan yang berbunyi harfiah
+*"milik server, jangan dirakit ulang"*). Yang tak ada: medannya. Menebak
+satuan sendiri **sudah pernah melahirkan "900 kg" untuk barang yang sebenarnya
+900 gr** — tercatat sebagai kejadian, bukan kekhawatiran, dan kasus itu kini
+diuji harfiah.
+
+**Yang dikerjakan.**
+
+- **SQL-nya menarik `i.isi` & `i.satuan_beli`** (join `ingredients` sudah ada),
+  dan `barisMenggantung` — perakit tunggal yang lahir #110 — memanggil
+  `qtyTeks()`, pembantu yang SAMA dengan seluruh repo. Satu ejaan, bukan ejaan
+  kedua yang kebetulan mirip.
+- **`KirimanMenggantung` +2 medan** (`qty_teks`, `qty_setara`); additif, nol
+  bentuk yang berubah. Changelog 🟢.
+- **`PenerimaanPage.tsx` berpindah ke bentuk berpagar**, dan ratchet
+  `MAKS_TELANJANG` **9 → 8** — cara antrean itu memang dimaksudkan berkurang:
+  bukan dengan melonggarkan pemindainya, melainkan dengan membuat RUTENYA
+  mengirim medan itu.
+
+**KAWAT TAK BISA MENGUJINYA, dan itu bukan kelalaian melainkan akibat
+langsung dari invarian repo ini.** `GET /penerimaan/anomali` memulangkan `rows`
+yang, kalau semuanya benar, SELALU KOSONG: §157 verify-api ada persis untuk
+membuktikan tak ada satu pun dari lima pintu kirim yang meninggalkan barang
+menggantung, dan ia menagih `jumlah == 0` sesudah menempuh kelimanya. Terukur:
+`KirimanMenggantung` tak pernah sekali pun tersidik §309/§311.
+
+Yang menutup celah itu: perakitnya **fungsi MURNI**, jadi ia diekspor dan
+diberi baris SQL karangan — `kiriman-menggantung-utuh.test.ts`, 6 uji yang
+memaku kelengkapan medan, "900 gr" (bukan "900 kg") lewat pembanding terhadap
+`qtyTeks()` itu sendiri, stempel ISO, `null` yang tak boleh jadi teks
+`"null"`, dan angka yang tetap angka walau kolomnya teks.
+
+**Bukti merah** (dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| layarnya dikembalikan ke bentuk telanjang | ratchet `qty-teks-milik-server` | **merah**, 9 > 8 |
+| `qty_teks` dirakit tangan (`${r.qty} ${r.satuan}`) di perakitnya | uji baru | **merah** pada kasus 900 gr |
+
+**Gerbang**: typecheck bersih · verify-api **3.759 / 0** · vitest **260 berkas / 3.174 uji** (+1 berkas, +6 uji) · invarian **27 / 0** · Playwright **48 lolos**.
+
+**Batas yang diakui.**
+
+- **Lima bentuk lain masih tanpa `qty_teks`** — dan tak satu pun dari mereka
+  punya pemakai yang terbukti menebak hari ini. Menambahkannya tanpa pemakai
+  adalah menambah medan yang tak diminta siapa pun; yang menagihnya nanti
+  ratchet `MAKS_TELANJANG`, satu per satu, saat layarnya benar-benar ada.
+- **`anomali_page.dart` masih menebak.** Medannya kini ada, jadi pekerjaannya
+  bisa dituntut; ia belum dikerjakan (changelog 🟢, nol baris `lib/` disentuh
+  putaran ini).
+- **Tak ada lengan verify-api baru** — dan alasannya di atas: barisnya memang
+  tak bisa dibuat lewat HTTP tanpa merusak invarian yang §157 jaga. Kalau
+  kelak fikstur menggantung sengaja disisakan untuk diukur, §309/§311 akan
+  ikut melihatnya tanpa satu baris tambahan.
+
+---
+
 ## Kebijakan yang dijaga daftarnya, bukan kawatnya — dan penyaring yang terpasang di rute sebelahnya — server + web — 2026-09-11
 
 **Vena.** Butir antrean yang kutulis sendiri sehari sebelumnya: *"Tak ada
@@ -14826,11 +14903,14 @@ berlaku di situ).
       Mendaftarkan OID 20 akan mengubah SELURUH repo sekaligus — perubahan
       sikap, bukan perbaikan, jadi ia keputusan pemilik. Yang menahan sementara
       ini: §309 dari kawat
-- [ ] **`KirimanMenggantung` tak pernah ikut terbanding §309** — barisnya
-      KOSONG di DB gerbang saat sapuan berjalan (§157 menutup fikstur
-      menggantungnya lebih awal). Perakit barunya dijaga typecheck, bukan oleh
-      kawat. Menembaknya menuntut §309 dijalankan pada titik yang lain, atau
-      fikstur menggantung yang sengaja disisakan
+- [ ] **`KirimanMenggantung` tak pernah ikut terbanding §309/§311** — dan
+      sebabnya bukan kelalaian melainkan akibat langsung invarian repo ini:
+      `rows` rute itu SELALU kosong kalau semuanya benar, dan §157 ada persis
+      untuk membuktikannya (`jumlah == 0` sesudah menempuh lima pintu kirim).
+      Ditutup sebagian #116 dengan menguji perakitnya sebagai FUNGSI MURNI
+      (`kiriman-menggantung-utuh.test.ts`, 6 uji). Yang tetap tak ada: lengan
+      dari kawat. Kalau kelak fikstur menggantung sengaja disisakan untuk
+      diukur, §309/§311 ikut melihatnya tanpa satu baris tambahan
 - [ ] **Spanduk pemotongan Transfer Stok belum pernah terlihat di DOM** —
       dirender #109, dibuktikan dari kawat lewat `per_page=1` (§308), tapi DB
       gerbang cuma punya 16 faktur transfer jadi benderanya tak pernah menyala
@@ -14867,10 +14947,21 @@ berlaku di situ).
       `qty_teks` (perlengkapan ×3, analisis harga, laporan pembelian, laporan
       harga, kiriman menggantung, tahap, hasil produksi). Tiap rute yang kelak
       ikut mengirimnya menurunkan angka ini
-- [ ] **`GET /penerimaan/anomali` tak mengirim `qty_teks`** — celah nyata yang
-      ditemukan #106 lewat tuduhan typecheck. Layar kiriman menggantung karena
-      itu merakit satuannya sendiri, satu-satunya pilihan yang ada. Kelas yang
-      sama dengan `StokMasukRow` sebelum #98
+- [x] ~~**`GET /penerimaan/anomali` tak mengirim `qty_teks`**~~ — DIBAYAR #116,
+      lihat entri di atas. `KirimanMenggantung` +`qty_teks`/`qty_setara`
+      (additif, changelog 🟢); web berpindah ke bentuk berpagar dan ratchet
+      `MAKS_TELANJANG` **9 → 8**. Sapuan kontraknya: dari 10 bentuk
+      ber-`qty`+`satuan`, kini LIMA membawa `qty_teks`
+- [ ] **Lima bentuk masih tanpa `qty_teks`** — `BeliPerlengkapanRow`,
+      `KomponenDto`, `BahanResepRow`, `PenyumbangHpp`, `SupplierKartuRow`. Tak
+      satu pun punya pemakai yang TERBUKTI menebak hari ini; menambahkannya
+      tanpa pemakai berarti menambah medan yang tak diminta siapa pun. Yang
+      menagihnya nanti ratchet `MAKS_TELANJANG`, satu per satu, saat layarnya
+      benar-benar ada
+- [ ] **`anomali_page.dart:216` masih menebak satuan** — medannya kini ada
+      (#116), jadi pekerjaannya bisa dituntut; ganti
+      `'${r.bahan} · ${formatQty(r.qty)} ${r.satuan}'` dengan `r.qtyTeks`
+      berpagar, seperti layar Penerimaan
 - [ ] **Kelas "kontraknya diperbaiki, pemanggilnya ditinggal"** — lahir #106.
       `qty_teks` masuk `StokMasukRow` pada #98 TEPAT untuk menghentikan
       perakitan ulang, dan tiga layar tetap merakit selama enam hari tanpa satu

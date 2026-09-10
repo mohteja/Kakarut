@@ -124,7 +124,13 @@ const MENGGANTUNG = sql`g.lolos_gerbang = false
  * berarti sesuatu: kolom SQL yang hilang jadi galat tipe, dan kolom baru tak
  * ikut terkirim tanpa ada yang menuliskannya di sini lebih dulu.
  */
-function barisMenggantung(r: Record<string, unknown>): KirimanMenggantung {
+export function barisMenggantung(r: Record<string, unknown>): KirimanMenggantung {
+  const teks = qtyTeks({
+    qty: Number(r.qty),
+    satuan: String(r.satuan),
+    isi: r.isi === null || r.isi === undefined ? null : Number(r.isi),
+    satuanBeli: r.satuan_beli === null || r.satuan_beli === undefined ? null : String(r.satuan_beli),
+  });
   return {
     id: String(r.id),
     faktur_id: String(r.faktur_id),
@@ -138,6 +144,12 @@ function barisMenggantung(r: Record<string, unknown>): KirimanMenggantung {
     waktu: iso(r.waktu as Date | string),
     bahan: String(r.bahan),
     satuan: String(r.satuan),
+    // Ditulis SERVER, sekali, dengan pembantu yang SAMA dengan seluruh repo —
+    // supaya web & ponsel mustahil berbeda satuan. Keduanya merakitnya sendiri
+    // sampai 2026-09-11, dan bukan karena lalai: rute ini memang tak
+    // mengirimnya sama sekali.
+    qty_teks: teks.teks,
+    qty_setara: teks.setara,
     posisi_sekarang:
       r.posisi_sekarang === null || r.posisi_sekarang === undefined ? null : String(r.posisi_sekarang),
     dikirim_dari:
@@ -561,7 +573,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const rows = await db.execute(sql`
       ${cteMenggantung(auth.company_id!)}
       SELECT g.id, g.faktur_id, g.tipe, g.status, g.qty, g.waktu,
-             i.nama AS bahan, i.satuan,
+             i.nama AS bahan, i.satuan, i.isi, i.satuan_beli,
              bp.nama AS posisi_sekarang,
              ba.nama AS dikirim_dari,
              dn.nomor_teks AS nomor,

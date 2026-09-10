@@ -5500,6 +5500,17 @@ export interface KirimanMenggantung {
   dikirim_dari: string | null;
   /** sudah berapa hari menggantung — makin tua makin gawat */
   umur_hari: number;
+  /**
+   * Jumlah + satuan yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ditambahkan 2026-09-11: sampai hari itu rute ini tak mengirimnya
+   * sama sekali, jadi KEDUA klien merakit `formatAngka(qty) + satuan` sendiri
+   * (`PenerimaanPage.tsx:795`, `anomali_page.dart:216`) — satu-satunya pilihan
+   * yang ada. Menebak satuan sendiri sudah pernah melahirkan "900 kg" untuk
+   * barang yang sebenarnya 900 gr.
+   */
+  qty_teks: string;
+  /** setara kemasan, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan */
+  qty_setara: string | null;
 }
 
 /** Satu barang di dalam satu kiriman yang sudah diterima/ditolak. */
