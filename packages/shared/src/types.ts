@@ -333,6 +333,51 @@ export interface TemuanSetelanDto {
   tindakan: string;
 }
 
+/** Satu entri migrasi basis data, sebagaimana panel sistem melihatnya. */
+export interface MigrasiEntriDto {
+  tag: string;
+  /** timestamp pembuatan berkas migrasi (dari journal drizzle) */
+  dibuat: string | null;
+  status: "terpasang" | "menunggu";
+}
+
+/** Ringkasan migrasi: berapa terpasang, berapa menunggu, dan daftarnya. */
+export interface MigrasiStatusDto {
+  total: number;
+  terpasang: number;
+  menunggu: number;
+  terakhir_diterapkan: string | null;
+  daftar: MigrasiEntriDto[];
+}
+
+/**
+ * AMPLOP `GET /api/admin/sistem` — panel sistem super-admin.
+ *
+ * Enam kunci, dan sampai 2026-09-10 bentuknya tak dideklarasikan di mana pun.
+ * Daun-daunnya sudah lama di kontrak (`TemuanSetelanDto`, `PercobaanEmailDto`)
+ * — amplop yang membungkusnya tidak. Kelas yang sama dengan #99/#101/#102,
+ * dan kali ini pada rute yang MEMANG diketuk verify-api: kunci ke-7 yang
+ * disuntikkan ke sini lolos typecheck, lolos 3.106 uji, dan lolos 3.647 lengan
+ * verify-api tanpa satu penjaga pun berubah warna.
+ *
+ * Akibatnya bukan hipotesis. DUA halaman web mendeklarasikan `SistemStatus`
+ * dengan nama yang SAMA untuk himpunan kunci yang SALING LEPAS — `SistemPage`
+ * lima kunci, `RiwayatEmailPage` satu (`email_percobaan`) — dan tak satu pun
+ * dari keduanya menggambarkan balasan yang sebenarnya. Nama yang sama untuk
+ * dua bentuk berbeda lebih buruk daripada dua nama: pembacanya mengira sudah
+ * melihat bentuknya.
+ */
+export interface SistemStatusDto {
+  database_ok: boolean;
+  storage_mode: "r2" | "local";
+  node_version: string;
+  migrations: MigrasiStatusDto;
+  /** temuan setelan yang sama dengan yang dicetak ke log boot */
+  pemeriksaan: TemuanSetelanDto[];
+  /** riwayat percobaan kirim email — menumpang rute ini, dibaca halaman lain */
+  email_percobaan: PercobaanEmailDto[];
+}
+
 /**
  * Peringatan cadangan basi — DAN kesiapan saluran yang mengabarkannya.
  *

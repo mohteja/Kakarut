@@ -50,6 +50,114 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## "Disebut penulisnya" ≠ "disebut kontrak" — 21 amplop tanpa tipe, dan dua halaman yang menamai bentuk berbeda dengan nama yang sama — server + web + ponsel — 2026-09-10
+
+**Vena.** Butir teratas antrean menyebut sasarannya: `SistemStatus`, dua salinan
+web. Yang ditemukan bukan salinannya, melainkan **kelas yang sudah tiga putaran
+berturut-turut menghasilkan temuan** — dan yang akhirnya diberi alat hitung di
+sini alih-alih dibayar satu rute per hari.
+
+**Kenapa kelas, bukan rute.** `bentuk-balasan.ts` sudah memaku dua aturan sejak
+lama: bentuk balasan tak boleh ditentukan TABELNYA (ATURAN A), dan kolom
+rahasia tak punya jalan ke balasan (ATURAN B). Keduanya **hijau pada tiap cacat
+yang #99, #101, dan #102 temukan** — sebab sebuah `c.json({ … })` yang mengetik
+kuncinya satu per satu memang "disebut penulisnya". Yang tak pernah ditanyakan
+siapa pun: **apakah bentuk itu ADA di kontrak?**
+
+**Populasi**, disapu atas seluruh `modules/**/routes.ts`:
+
+| kelas | jumlah |
+| --- | --- |
+| literal `c.json({…})` berkunci ≥ 2 | **77** |
+| cocok PERSIS satu interface `types.ts` | **7** |
+| pengakuan `{ok, …}` (≤ 4 kunci) | 45 |
+| badan galat (`error`/`kode`) | 6 |
+| **amplop data tanpa kontrak** | **21** |
+
+**Alat ukurku sendiri salah lebih dulu, dan salahnya instruktif.** Sapuan
+Python pertamaku melaporkan **19**. Ia menuntut TITIK DUA untuk mengenali
+kunci, jadi properti ringkas (`{ ok: true, diperiksa, yatim, … }`) tak terlihat
+olehnya dan dua amplop terhitung terlalu sempit. Yang membongkarnya: pemindai
+versi TypeScript memakai `kunciObjek` — pembantu rumah yang sudah dipakai lima
+penjaga lain — dan memulangkan angka yang **tak cocok**. Dua cara menghitung
+yang tak sepakat adalah cara temuan lahir; kali ini yang salah instrumen
+BARUKU, bukan yang lama. Angka yang dipakai 21.
+
+**Temuan yang dibayar: `GET /admin/sistem`, amplop terbesar dari ke-21.**
+Terukur dengan menyuntikkan kunci ke-7: typecheck **hijau**, **3.106 uji
+hijau**, **3.647 lengan verify-api hijau**. Nol penjaga berubah warna — dan
+kali ini pada rute yang **ADA di `rute-diketuk.txt`**, yakni memang dilewati
+tiap jalan. **"Diketuk" bukan "dijaga"**, dan itu bedanya yang membuat §303
+ada.
+
+Biayanya terlihat di web, dan bentuknya lebih buruk daripada dua salinan
+identik: **dua halaman mendeklarasikan `SistemStatus` dengan NAMA YANG SAMA
+untuk himpunan kunci yang SALING LEPAS** — `SistemPage` lima kunci,
+`RiwayatEmailPage` satu (`email_percobaan`) — dan **tak satu pun menggambarkan
+balasan yang sebenarnya** (enam). Nama yang sama untuk dua bentuk berbeda lebih
+buruk daripada dua nama: pembacanya mengira sudah melihat bentuknya. Komentar
+di `SistemPage` bahkan menuliskan pembagiannya, jadi ia disengaja — hanya tak
+pernah dinyatakan.
+
+**Yang dikerjakan.**
+
+- **`types.ts`**: `SistemStatusDto` (6), `MigrasiStatusDto` (5),
+  `MigrasiEntriDto` (3). Amplopnya dinyatakan `satisfies` di rutenya.
+- **`db/migrate.ts`**: `MigrationEntry`/`MigrationStatus` jadi ALIAS tipe
+  kontrak. Bentuk yang sampai ke kawat tak lagi tinggal di lapisan basis data.
+- **Web**: kedua salinan lenyap; masing-masing memakai `Pick<SistemStatusDto,…>`
+  yang MENYATAKAN irisannya. `MigrationEntry` lokal ikut dicabut.
+- **Ponsel**: fikstur +14; sepuluh nama tercatat beralasan (`total` dan
+  `status` sengaja TIDAK — keduanya disentuh `lib/` untuk konsep lain, dan
+  mencantumkannya justru memerahkan ratchet). Nol baris `lib/`.
+
+**Penjaganya, dan bentuknya RATCHET.** `amplop-berkontrak.test.ts` (5 uji)
+menghitung utang dan memaku `MAKS_UTANG = 20` — hanya boleh menyusut.
+Menutup ke-21 sekaligus akan jadi satu commit yang tak bisa ditinjau siapa
+pun; yang berbahaya bukan utangnya melainkan **utang yang tumbuh tanpa ada
+yang menghitungnya**. Dua kelas dikecualikan dengan alasan tertulis
+(pengakuan `{ok,…}`, badan galat), dan batas pengecualiannya sendiri diuji.
+**§303** (15 lengan) memaku amplop + `migrations` + tiap entri dua arah, plus
+tiga lengan aritmetika (`total == panjang daftar`, `terpasang + menunggu ==
+total`, `terpasang == entri berstatus terpasang`) dan dua lengan peran.
+
+**Penjaga LAMA menuduh saya, dan tuduhannya tepat — dua kali dalam satu jalan.**
+`verify-api-token.test.ts` menuduh §303 memakai `$KASIR`, yang MATI sejak §105
+mengganti passwordnya. Bentuk kegagalannya persis yang ia ada untuk
+menahannya: 401 yang menyamar jadi "gerbang perannya bocor" — dan lengan §303
+itu memang memerah dengan `nilai: 401`. Ia menuduh dalam hitungan detik,
+sementara verify-api butuh Postgres segar lebih dulu. `kunci-satu-kontrak`
+menuduh fikstur ponsel yang belum disegarkan. Keduanya diperbaiki, bukan
+dilemahkan.
+
+**Bukti merah**, tiap berkas dipulihkan `cmp`: amplop kembali tanpa kontrak (1)
+· kunci ke-7 menaikkan utang (2) · web menyalin bentuknya lagi (1) · dan dari
+kawat, kunci ke-7 memerahkan §303.
+
+**Gerbang** (sesudah dua tuduhan penjaga lama diperbaiki): typecheck bersih ·
+verify-api **3.662 / 0** (+15) · vitest **254 berkas / 3.112 uji** · invarian
+**27 / 0** · Playwright **48 lolos**.
+
+**Batas yang diakui.**
+
+- **Ratchet tak menahan dirinya dilonggarkan.** Dibuktikan, bukan diduga:
+  menaikkan `MAKS_UTANG` jadi 21 membuat seluruh berkas HIJAU. Yang menahannya
+  peninjauan diff, dan itu disebut apa adanya alih-alih dibiarkan terbaca
+  sebagai jaminan.
+- **Pengecualian `{ok, …}` berkunci JUMLAH kunci (≤4).** Amplop data yang
+  kebetulan membawa `ok` dan sempit lolos hitungan. Tak ada yang seperti itu
+  hari ini — ditelusuri satu per satu — dan yang menangkapnya kelak §303-sejenis
+  dari kawat, bukan berkas ini.
+- **20 amplop masih berutang**, dan daftarnya dicetak tiap kali ujinya merah.
+  Yang terbesar: `POST /admin/sistem/sapu-unggahan` (6 kunci, di berkas yang
+  sama dengan yang dibayar), `penyimpanan/routes.ts:393`, empat di
+  `transfer/routes.ts`.
+- **`status` & `total` tak bisa dicatat di `kunci-belum-dibaca.txt`** sebab
+  berkas itu berkunci NAMA dan keduanya disentuh `lib/` untuk konsep lain —
+  batas yang sudah di antrean, kini bergigi.
+
+---
+
 ## Satu bentuk daftar induk, sembilan perakit tangan — dan `dipakai` yang dijanjikan tipe tapi tak pernah dikirim — server + web — 2026-09-10
 
 **Vena.** Butir teratas antrean sesudah #101, yang menyebut sasarannya dengan
@@ -13433,7 +13541,7 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **4 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+- [ ] **3 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
       bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
       diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
       **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
@@ -13444,8 +13552,12 @@ berlaku di situ).
       dibayar #102 — dan di sana ternyata bukan salinannya yang paling mahal
       melainkan bahwa `KategoriDto` SUDAH ada di kontrak dan dipakai untuk rute
       yang LAIN. Sisa **4**: `SistemStatus` 2×, `PenerimaanRow`, `DanaEntri`,
-      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. Berikutnya `SistemStatus`
-      (dua salinan). Catatan lama, masih berlaku: diukur ulang 2026-09-06
+      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. `SistemStatus` (2 salinan)
+      dibayar #103 — dan di sana pun bukan salinannya yang paling mahal
+      melainkan bahwa KEDUANYA memakai nama yang SAMA untuk himpunan kunci yang
+      SALING LEPAS. Sisa **3**: `PenerimaanRow`, `DanaEntri`,
+      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. Berikutnya `DaftarResult`
+      (ia sudah membawa `sebab` dari kontrak; bentuknya sendiri belum). Catatan lama, masih berlaku: diukur ulang 2026-09-06
       SESUDAH #99. Angka "15" pada
       pengukuran pertama terlalu besar: sapuan `api<T>` memungut `Record`/`Pick`
       (bawaan TS) dan `AuthState`/`Cabang` yang sejak #95 sudah jadi ALIAS.
@@ -13457,6 +13569,22 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
+- [ ] **20 amplop balasan masih tanpa tipe kontrak** — ratchet
+      `amplop-berkontrak.test.ts` (`MAKS_UTANG = 20`) menghitungnya sejak #103
+      dan mencetak daftarnya tiap kali merah. Yang terbesar
+      `POST /admin/sistem/sapu-unggahan` (6 kunci), `penyimpanan/routes.ts:393`,
+      dan EMPAT di `transfer/routes.ts`. Dibayar sedikit-sedikit; yang penting
+      angkanya tak boleh naik
+- [ ] **Ratchet `amplop-berkontrak` tak menahan dirinya dilonggarkan** —
+      dibuktikan #103, bukan diduga: menaikkan `MAKS_UTANG` sendiri membuat
+      seluruh berkas hijau. Kelasnya berlaku untuk tiap ratchet berangka di
+      repo ini (`MAKS_UTANG` di `bentuk-balasan`, `hantuDiketahui` di ponsel).
+      Yang menahannya peninjauan diff — sebuah gerbang yang membandingkan
+      angka itu dengan riwayat git akan menutupnya
+- [ ] **Pengecualian `{ok, …}` berkunci JUMLAH kunci (≤4)** — lahir #103.
+      Amplop DATA yang kebetulan membawa `ok` dan sempit lolos hitungan utang.
+      Tak ada yang seperti itu hari ini (ditelusuri satu per satu); yang
+      menangkapnya kelak lengan verify-api, bukan penjaga statisnya
 - [ ] **Kelas "tipe dipakai di rute yang bukan namanya" belum punya penjaga** —
       lahir #102. `KategoriDto` dikomentari "Kategori menu" sementara LIMA
       pemanggil web memakainya untuk `/kategori-bahan` dan NOL untuk

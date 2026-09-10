@@ -25,6 +25,44 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Amplop panel sistem akhirnya bernama: `SistemStatusDto` (6 kunci) + `MigrasiStatusDto` / `MigrasiEntriDto` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: amplop
+> `GET /api/admin/sistem` akhirnya **dideklarasikan** di `types.ts`, jadi ikut
+> Lampiran A dan fikstur kunci ponsel. Rutenya **super-admin saja** — ponsel
+> tak punya layar itu, jadi entri ini murni catatan kontrak.
+
+**Kenapa entri ini layak dibaca meski ⚪️.** Daun-daun amplop itu sudah lama di
+kontrak (`TemuanSetelanDto`, `PercobaanEmailDto`); amplop yang membungkusnya
+tidak. Bentuk migrasinya bahkan hidup di `db/migrate.ts` — lapisan basis data,
+bukan kontrak — sementara halaman web mengetik ulang entrinya.
+
+Terukur 2026-09-10 dengan menyuntikkan kunci ke-7 ke amplopnya:
+
+| gerbang | hasil dengan kunci ke-7 |
+| --- | --- |
+| `npm run typecheck` | **hijau** |
+| `npm test` (3.106 uji) | **hijau** |
+| `verify-api` (3.647 lengan) | **hijau** |
+
+Nol penjaga berubah warna — dan kali ini pada rute yang **memang diketuk** tiap
+jalan verify-api. **"Diketuk" bukan "dijaga".**
+
+**Bentuknya, apa adanya:**
+
+```
+database_ok  storage_mode  node_version
+migrations { total, terpasang, menunggu, terakhir_diterapkan, daftar[] }
+pemeriksaan[]      → TemuanSetelanDto
+email_percobaan[]  → PercobaanEmailDto
+```
+
+**Untuk ponsel — tidak wajib, dan kemungkinan besar tak akan pernah.** Fikstur
+kunci bertambah **14**; kesepuluh nama yang belum punya pembaca tercatat
+beralasan di `kunci-belum-dibaca.txt`. Ponsel tak punya layar super-admin sama
+sekali, dan panel ini dibuka saat deploy sedang berjalan — dari komputer. Nol
+baris `lib/` berubah.
+
 ## 🟡 `POST` & `PATCH /api/satuan` kini ikut mengirim `dipakai` — tipe yang sudah menjanjikannya akhirnya benar
 
 🟡 **PERLU DICEK** — bentuknya **BERTAMBAH** satu kunci pada dua pintu; tak ada

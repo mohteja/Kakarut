@@ -6,6 +6,7 @@
  *  3. Panel super-admin (GET/POST /api/admin/sistem) → lihat status & jalankan
  */
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import type { MigrasiEntriDto, MigrasiStatusDto } from "@kakarut/shared";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,20 +35,15 @@ export async function runMigrations(): Promise<void> {
   }
 }
 
-export interface MigrationEntry {
-  tag: string;
-  /** timestamp pembuatan file migrasi (dari journal drizzle) */
-  dibuat: string | null;
-  status: "terpasang" | "menunggu";
-}
-
-export interface MigrationStatus {
-  total: number;
-  terpasang: number;
-  menunggu: number;
-  terakhir_diterapkan: string | null;
-  daftar: MigrationEntry[];
-}
+/*
+ * Bentuk ini SAMPAI KE KAWAT lewat `GET /api/admin/sistem`, jadi rumahnya
+ * kontrak — bukan lapisan basis data. Sampai 2026-09-10 ia hidup di sini saja,
+ * dan `SistemPage.tsx` mengetik ulang `MigrationEntry` di sebelah sana.
+ * Namanya dipertahankan sebagai alias supaya pemanggil lama tak ikut berubah
+ * pada putaran yang sama dengan perubahan bentuknya.
+ */
+export type MigrationEntry = MigrasiEntriDto;
+export type MigrationStatus = MigrasiStatusDto;
 
 /**
  * Bandingkan journal migrasi (file di repo) dengan tabel riwayat drizzle

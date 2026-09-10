@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { PercobaanEmailDto } from "@kakarut/shared";
+import type { PercobaanEmailDto, SistemStatusDto } from "@kakarut/shared";
 import { Link } from "react-router-dom";
 import { PageTitle, SpinnerAtauGalat } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
@@ -25,9 +25,12 @@ import { api } from "../../lib/api";
  * pertanyaan yang dulu tak bisa dijawab dari mana pun.
  */
 
-interface SistemStatus {
-  email_percobaan: PercobaanEmailDto[];
-}
+/**
+ * Halaman ini memakai SATU dari enam kunci amplopnya. `Pick` menyatakannya;
+ * salinan lokalnya dulu memakai nama `SistemStatus` — nama yang SAMA dengan
+ * milik `SistemPage`, untuk himpunan kunci yang SALING LEPAS.
+ */
+type StatusEmail = Pick<SistemStatusDto, "email_percobaan">;
 
 /**
  * Sebab "tidak dikirim", diterjemahkan ke kalimat yang bisa dibaca orang.
@@ -55,7 +58,7 @@ const SEBAB: Record<string, string> = {
 export function RiwayatEmailPage() {
   const { data: sistem, error } = useQuery({
     queryKey: ["admin-sistem"],
-    queryFn: () => api<SistemStatus>("/admin/sistem"),
+    queryFn: () => api<StatusEmail>("/admin/sistem"),
   });
 
   if (!sistem) return <SpinnerAtauGalat error={error} apa="Riwayat kirim email" />;

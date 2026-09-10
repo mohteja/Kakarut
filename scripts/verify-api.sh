@@ -17900,6 +17900,67 @@ PP302=$(api "$OWNER" PATCH "/satuan/$IP302" '{"sort_order":3}' | jq -r '.dipakai
 cek "§302 dipakai: sapuan GET == kueri jalur tulis (satuan yang terpakai)" "V == 1" \
   "$([ "$GP302" = "$PP302" ] && [ "$GP302" -gt 0 ] && echo 1 || echo 0)"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §303 — AMPLOP PANEL SISTEM: bentuk yang diketuk tiap jalan, dipaku nol kali
+# ═══════════════════════════════════════════════════════════════════════════
+# `GET /admin/sistem` ADA di `rute-diketuk.txt` — ia memang dilewati tiap
+# jalan verify-api. Yang tak pernah ada: satu pun asersi atas KUNCINYA.
+# Terukur 2026-09-10, kunci ke-7 disuntikkan ke amplopnya: typecheck hijau,
+# 3.106 uji hijau, 3.647 lengan verify-api hijau. Nol penjaga berubah warna.
+# "Diketuk" bukan "dijaga" — dan itu bedanya yang membuat seksi ini ada.
+#
+# Biayanya terlihat di web: DUA halaman mendeklarasikan `SistemStatus` dengan
+# NAMA YANG SAMA untuk himpunan kunci yang SALING LEPAS (5 dan 1), dan tak satu
+# pun menggambarkan balasan yang sebenarnya.
+K303=$(medan296 SistemStatusDto)
+cek "§303 premis: kontrak SistemStatusDto terbaca dari types.ts (6 medan)" "V == 6" \
+  "$(echo "$K303" | grep -c .)"
+R303=$(api "$SA" GET /admin/sistem)
+cek "§303 premis: panel sistem terbaca super-admin (kalau tidak, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R303" | jq '(type == "object" and (keys|length) >= 1)|if . then 1 else 0 end')"
+cek "§303 kunci kawat == SistemStatusDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r 'keys[]')" "$K303")"
+# Amplop BERSARANG ikut dipaku: `migrations` bentuknya sendiri, dan sampai
+# putaran ini ia hidup di `db/migrate.ts` — lapisan basis data, bukan kontrak —
+# sementara `SistemPage.tsx` mengetik ulang entrinya di sebelah sana.
+K303M=$(medan296 MigrasiStatusDto)
+cek "§303 premis: kontrak MigrasiStatusDto terbaca (5 medan)" "V == 5" \
+  "$(echo "$K303M" | grep -c .)"
+cek "§303 migrations == MigrasiStatusDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r '.migrations|keys[]')" "$K303M")"
+K303E=$(medan296 MigrasiEntriDto)
+cek "§303 premis: kontrak MigrasiEntriDto terbaca (3 medan)" "V == 3" \
+  "$(echo "$K303E" | grep -c .)"
+cek "§303 premis: ada entri migrasi (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(echo "$R303" | jq '((.migrations.daftar|length) >= 1)|if . then 1 else 0 end')"
+cek "§303 tiap entri migrasi == MigrasiEntriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r '[.migrations.daftar[]|keys[]]|unique|.[]')" "$K303E")"
+# Angka ringkasannya harus sepakat dengan daftarnya sendiri. Panel yang
+# menyebut "3 menunggu" sambil mendaftar dua adalah panel yang dibaca orang
+# saat deploy sedang berjalan.
+cek "§303 total == panjang daftar" "V == 1" \
+  "$(echo "$R303" | jq '(.migrations.total == (.migrations.daftar|length))|if . then 1 else 0 end')"
+cek "§303 terpasang + menunggu == total" "V == 1" \
+  "$(echo "$R303" | jq '((.migrations.terpasang + .migrations.menunggu) == .migrations.total)|if . then 1 else 0 end')"
+cek "§303 terpasang == entri berstatus terpasang" "V == 1" \
+  "$(echo "$R303" | jq '(.migrations.terpasang == ([.migrations.daftar[]|select(.status=="terpasang")]|length))|if . then 1 else 0 end')"
+# Daun-daunnya sudah lama di kontrak; sekarang amplopnya juga, jadi keduanya
+# bisa diadu di tempat yang sama.
+K303T=$(medan296 TemuanSetelanDto)
+cek "§303 pemeriksaan: tiap temuan == TemuanSetelanDto, dua arah (bila ada)" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r 'if (.pemeriksaan|length) > 0 then ([.pemeriksaan[]|keys[]]|unique|.[]) else empty end')" \
+      "$(echo "$R303" | jq -e '(.pemeriksaan|length) > 0' >/dev/null 2>&1 && echo "$K303T" || echo "")")"
+cek "§303 storage_mode adalah salah satu dari dua nilai kontraknya" "V == 1" \
+  "$(echo "$R303" | jq '((.storage_mode == "r2") or (.storage_mode == "local"))|if . then 1 else 0 end')"
+# Peran: panel ini super-admin saja, dan itu dipaku supaya amplop yang kini
+# bernama tak diam-diam terbuka lebih lebar. Token kasirnya `$REISS105`,
+# BUKAN `$KASIR` — yang terakhir mati sejak §105 mengganti passwordnya, dan
+# memakainya memulangkan 401 yang menyamar jadi "gerbang perannya bocor".
+# Jalan pertama seksi ini memakainya; `verify-api-token.test.ts` menuduh
+# dalam hitungan detik, jauh sebelum verify-api sempat mengeluh.
+cek "§303 owner akses panel sistem → 403" "V == 403" "$(status_code "$OWNER" GET /admin/sistem)"
+cek "§303 kasir akses panel sistem → 403" "V == 403" "$(status_code "$REISS105" GET /admin/sistem)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

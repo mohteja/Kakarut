@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import type { SistemStatusDto } from "@kakarut/shared";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -122,7 +123,7 @@ export const adminSystemRoutes = new Hono<AppEnv>()
        * sampai orang berhenti membacanya.
        */
       email_percobaan: (await percobaanEmailTerakhir().catch(() => [])).map(percobaanDto),
-    });
+    } satisfies SistemStatusDto);
   })
   .post("/migrate", async (c) => {
     try {
