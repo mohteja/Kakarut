@@ -50,6 +50,92 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Aturan yang diputuskan dari SISANYA — dan tipe cabang keempat yang akan lolos tanpa ada yang memutuskannya — web — 2026-09-11
+
+**Vena.** Butir antrean `StokPage:58`, lahir dari entri "Central Kitchen
+ditawarkan sebagai lokasi menu". Ia dicatat sebagai *"benar hari ini, tapi ia
+pengecualian bukan penyertaan: tipe cabang keempat kelak lolos diam-diam"* —
+dan pemeriksaan putaran ini menemukan bahwa "benar hari ini" pun tidak
+sepenuhnya benar.
+
+**Populasi, disapu dengan pohon sintaks atas KEDUA pohon** (`apps/web/src` +
+`apps/server/src`), mencari rantai `x !== "a" && x !== "b"` yang nilainya
+anggota `pgEnum`:
+
+| | jumlah |
+| --- | --- |
+| daftar-kecuali atas nilai enum | **12** |
+| …atas peran (`owner`/`admin`, `kitchen`/`bar`) | 10 |
+| …atas status pembelian | 1 |
+| **…atas TIPE CABANG** | **1** |
+
+**Kesepuluh yang atas peran AMAN, dan itu diperiksa bukan diasumsikan**:
+semuanya berbentuk "bukan manajemen → tolak/saring". Peran baru jatuh ke sisi
+TERTOLAK — sisi yang aman. Menyebut satu nilai yang tak diinginkan adalah
+gerbang; itu bukan kelas yang sama.
+
+Yang satu itu membalik arahnya:
+
+```
+StokPage.tsx:58   selTipe !== "central_kitchen" && selTipe !== "kantor"
+```
+
+Ia menyebut **seluruh sisanya**, jadi tipe cabang keempat jatuh ke sisi
+DITERIMA — tab **Stok Menu** tampil untuk lokasi yang tak pernah diputuskan
+siapa pun. Kelas yang persis membuat `MenuListPage` menawarkan "🏭 Central
+Kitchen" sebagai lokasi menu **selama dua tahun**.
+
+**DAN IA TAK MENUNGGU TIPE KEEMPAT.** `selTipe` berasal dari
+`cabang.find(...)?.tipe`, dan selagi `GET /cabang` dalam perjalanan nilainya
+`undefined` — sementara `undefined !== "central_kitchen"` juga benar. Jadi tab
+Stok Menu TAMPIL untuk Central Kitchen sampai daftar cabangnya tiba, lalu
+menghilang. Bentuk positif menjawab keduanya dengan satu baris.
+
+**Penjaganya sudah ada, dan populasinya digambar mengelilingi satu direktori.**
+`lokasi-menu-hanya-store.test.ts` melarang `pages/menu/` menulis aturan ini
+sendiri **dalam bentuk apa pun** — doktrin yang tepat, dengan sejarah yang
+mahal tertulis di kepalanya. Yang tak terjangkau: aturan yang SAMA diputuskan
+di `pages/stok/`. Kelalaian ini keempat kalinya berturut-turut dalam deretan
+ini, dan bentuknya selalu sama: **aturannya benar, populasinya digambar
+sekali.**
+
+**Yang dikerjakan.**
+
+- **`StokPage` memakai `bolehJadiLokasiMenu`** — rumah yang sudah ada.
+- **Penjaga baru `tipe-cabang-disebut-positif.test.ts`**, dan sengaja
+  BERBEDA BENTUK dari saudaranya: yang lama populasi SEMPIT dengan tuduhan
+  LUAS (satu direktori, semua ejaan); yang baru populasi LUAS dengan tuduhan
+  SEMPIT (dua pohon, satu bentuk). Mencabut salah satunya membuka separuh
+  celahnya kembali — dan uji silang-rujuk di dalamnya menagih saudaranya masih
+  berdiri.
+
+**Bukti merah** (dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| bentuk daftar-kecuali dikembalikan ke `StokPage` | penjaga baru | **merah**, menyebut berkas, baris, kedua nilainya |
+| `bolehJadiLokasiMenu` dilonggarkan jadi `!== "kantor"` | penjaga LAMA + silang-rujuk yang baru | **merah DUA-DUANYA** |
+
+**Gerbang**: typecheck bersih · verify-api **3.759 / 0** · vitest **261 berkas / 3.178 uji** (+1 berkas, +4 uji) · invarian **27 / 0** · Playwright **48 lolos**.
+
+**Batas yang diakui.**
+
+- **Tuduhannya SEMPIT dengan sengaja.** Ia cuma mengenali rantai `&&`
+  ber-`!==` dengan operand kiri yang sama. `!["central_kitchen","kantor"].includes(t)`
+  adalah bentuk yang sama dan TIDAK tertangkap; nol di repo hari ini, dan itu
+  keadaan bukan jaminan. Yang menutup arah itu di halaman menu tetap penjaga
+  lama, yang tak peduli ejaan.
+- **Sepuluh daftar-kecuali atas PERAN dibiarkan**, dan alasannya ditulis: arah
+  jatuhnya aman. Kalau kelak ada yang berbentuk "bukan A dan bukan B → BOLEH",
+  penjaga ini tak melihatnya — populasinya tipe cabang, bukan peran.
+- **Perubahan perilakunya tak terlihat satu spek e2e pun.** Tak ada spek untuk
+  tab Stok Menu; yang berubah transien (selagi `/cabang` dimuat) dan
+  hipotetis (tipe keempat). Disebut supaya "gerbang hijau" tak terbaca lebih
+  luas dari yang benar.
+- **Nol perubahan kawat**, nol perubahan kontrak, nol baris ponsel.
+
+---
+
 ## Medan yang ada PERSIS untuk menghentikan tebakan, di satu-satunya rute yang tak pernah mengirimnya — server + web + ponsel — 2026-09-11
 
 **Vena.** Butir antrean "`GET /penerimaan/anomali` tak mengirim `qty_teks`",
@@ -15155,16 +15241,18 @@ berlaku di situ).
       linier, ~150 ms di langit-langit 200. Satu agregat `GROUP BY shift`
       menggantikan N panggilan — belum dikerjakan karena angkanya belum
       menuntutnya, dan itu yang akan berubah lebih dulu
-- [ ] **`StokPage:58` menulis aturan lokasi menu untuk kedua kalinya** — lahir
-      dari entri "Central Kitchen ditawarkan sebagai lokasi menu". Ia berbunyi
-      `selTipe !== "central_kitchen" && selTipe !== "kantor"`, benar hari ini
-      dan komentarnya sendiri menyebut alasannya, tapi ia pengecualian bukan
-      penyertaan: tipe cabang keempat kelak lolos diam-diam. Menyatukannya ke
-      `bolehJadiLokasiMenu` menuntut keputusan lebih dulu soal `selTipe`
-      `undefined` (selagi `/cabang` dalam perjalanan) yang hari ini berarti tab
-      Stok Menu TAMPIL — mengalirkannya lewat helper membalik itu
-
-### Mobile
+- [x] ~~**`StokPage:58` menulis aturan lokasi menu untuk kedua kalinya**~~ —
+      DIBAYAR #117, lihat entri di atas. Ia memakai `bolehJadiLokasiMenu`
+      sekarang, dan pertanyaan `undefined` terjawab dengan sendirinya: bentuk
+      positif menutupnya ke sisi aman. Sapuan dua pohon menemukan 12
+      daftar-kecuali atas nilai enum; sepuluh atas PERAN (arah jatuhnya aman,
+      diperiksa satu per satu), satu atas status, dan HANYA yang ini atas tipe
+      cabang. Penjaga baru `tipe-cabang-disebut-positif.test.ts` memaku nol
+- [ ] **Daftar-kecuali bentuk `![…].includes(t)` tak tertangkap** — lahir #117.
+      Penjaga barunya cuma mengenali rantai `&&` ber-`!==` dengan operand kiri
+      yang sama; bentuk `includes` setara artinya dan tak terlihat. Nol di repo
+      hari ini — keadaan, bukan jaminan. Yang menutup arah itu di halaman menu
+      tetap `lokasi-menu-hanya-store`, yang tak peduli ejaan
 - [ ] **`rows_terpotong` masih dibuang `transfer_repository.dart:51`** — salah
       satu dari sepuluh situs DIAM yang dicatat putaran 23. Yang berubah #109:
       amplopnya akhirnya bernama (`TransferStokDaftar`), jadi pekerjaannya bisa

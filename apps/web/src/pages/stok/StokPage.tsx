@@ -35,7 +35,7 @@ import { CabangDataBar } from "../../components/CabangDataBar";
 import { CatatWasteModal } from "./CatatWasteModal";
 import { StokPerlengkapanTab } from "./StokPerlengkapanTab";
 import { useAuth } from "../../context/AuthContext";
-import { useBranch, useCabangData } from "../../context/BranchContext";
+import { bolehJadiLokasiMenu, useBranch, useCabangData } from "../../context/BranchContext";
 import { api, bacaTerpotong } from "../../lib/api";
 import {
   formatAngka,
@@ -53,9 +53,21 @@ export function StokPage() {
   //  - store          → simpan bahan + jual menu (Stok Bahan + Stok Menu)
   //  - central_kitchen → produksi bahan, TIDAK jual menu (Stok Bahan saja)
   //  - kantor          → kantor tak menyimpan stok fisik (tak ada keduanya)
-  const selTipe = cabang.find((b) => b.id === dataId)?.tipe;
-  const isKantorData = selTipe === "kantor";
-  const bolehStokMenu = selTipe !== "central_kitchen" && selTipe !== "kantor";
+  const cabangData = cabang.find((b) => b.id === dataId);
+  const isKantorData = cabangData?.tipe === "kantor";
+  /*
+   * `bolehJadiLokasiMenu`, BUKAN ejaan sendiri — dan bukan sekadar kerapian.
+   *
+   * Bentuk lamanya `selTipe !== "central_kitchen" && selTipe !== "kantor"`:
+   * sebuah DAFTAR-KECUALI atas nilai enum yang bisa tumbuh, dan ia jatuh ke
+   * sisi PERMISIF pada dua keadaan. Tipe cabang keempat kelak mendapat tab
+   * Stok Menu tanpa ada yang memutuskannya — persis kelas yang membuat
+   * `MenuListPage` menawarkan "🏭 Central Kitchen" selama dua tahun. Dan hari
+   * ini juga: selagi `/cabang` dalam perjalanan `selTipe` masih `undefined`,
+   * jadi tabnya TAMPIL untuk Central Kitchen sampai daftarnya tiba. Bentuk
+   * positif menjawab keduanya sekaligus.
+   */
+  const bolehStokMenu = bolehJadiLokasiMenu(cabangData);
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
   // Dua tampilan: stok BAHAN (baris per bahan baku) & stok MENU (sisa porsi
   // per menu, diturunkan dari saldo bahan — selalu berkorelasi otomatis).
