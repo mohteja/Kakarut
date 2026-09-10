@@ -18305,8 +18305,19 @@ cek "§309 premis: pemindainya benar-benar jalan (baris RINGKAS ada)" "V == 1" \
 cek "§309 premis: SELURUH rute di daftarnya terambil (nol yang 4xx/5xx)" "V == 1" \
   "$([ "$(echo "$RINGKAS309" | awk '{print $2}')" = "$(echo "$RINGKAS309" | awk '{print $3}')" ] && echo 1 || echo 0)"
 cek "§309 premis: daftar rutenya ≥ 70" "V >= 70" "$(echo "$RINGKAS309" | awk '{print $3}')"
-cek "§309 premis: interface tersidik ≥ 90" "V >= 90" "$(echo "$RINGKAS309" | awk '{print $4}')"
-cek "§309 premis: objek yang diadu ≥ 3000" "V >= 3000" "$(echo "$RINGKAS309" | awk '{print $5}')"
+# ── rute DETAIL (`:id`): 37 rute yang sampai 2026-09-11 tak tersapu siapa pun ──
+# Idnya dipetik DARI KAWAT (dari rute daftar yang baru diambil), bukan dari
+# fikstur — fikstur di dalam alat ukur adalah cara alat ukur mulai punya
+# pendapat sendiri tentang data yang benar.
+cek "§309 premis: SELURUH rute detail terambil, kecuali yang daftarnya kosong" "V == 1" \
+  "$([ "$(echo "$RINGKAS309" | awk '{print $8}')" = "$(echo "$RINGKAS309" | awk '{print $9-$10}')" ] && echo 1 || echo 0)"
+# Daftar yang kosong = rute detail yang tak bisa diketuk sama sekali. Satu hari
+# ini (`/kebersihan/:id`, DB gerbang tak punya laporan kebersihan); ratchet
+# supaya yang kedua tak lahir diam-diam.
+cek "§309 premis: rute detail tanpa data ≤ 1" "V <= 1" "$(echo "$RINGKAS309" | awk '{print $10}')"
+cek "§309 premis: daftar rute detailnya ≥ 35" "V >= 35" "$(echo "$RINGKAS309" | awk '{print $9}')"
+cek "§309 premis: interface tersidik ≥ 130" "V >= 130" "$(echo "$RINGKAS309" | awk '{print $4}')"
+cek "§309 premis: objek yang diadu ≥ 4000" "V >= 4000" "$(echo "$RINGKAS309" | awk '{print $5}')"
 cek "§309 INTI: nol nilai yang tipenya berbeda dari kontraknya" "V == 0" \
   "$(echo "$RINGKAS309" | awk '{print $6}')"
 cek "§309 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR309"
@@ -18335,7 +18346,7 @@ cek "§309 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KE
 # memilih "keputusan terakhir" — urutan leksikografis atas nama hari.
 cek "§310 PASANGAN: ISO lolos, keluaran Date.toString tertuduh" "V == 1" \
   "$([ "$UJI309" = "0 1 0 1" ] && echo 1 || echo 0)"
-cek "§310 INTI: nol stempel waktu yang bukan ISO-8601 di seluruh 72 rute" "V == 0" \
+cek "§310 INTI: nol stempel waktu yang bukan ISO-8601 di 108 rute GET" "V == 0" \
   "$(echo "$RINGKAS309" | awk '{print $7}')"
 
 if [ "$FAIL" -gt 0 ]; then

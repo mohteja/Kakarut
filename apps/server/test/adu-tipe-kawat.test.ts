@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { RUTE, adu, kontrakTipe, petaSidik, sah } from "./util/adu-tipe-kawat";
+import { DETAIL, KECUALI, RUTE, adu, kontrakTipe, petaSidik, petik, sah } from "./util/adu-tipe-kawat";
 import { semuaRute } from "./util/rute";
 
 /**
@@ -55,31 +55,69 @@ describe("verify-api memanggil pembanding tipe kawat", () => {
   });
 });
 
-describe("daftar rute pembanding == GET tanpa parameter, sama persis", () => {
-  const jalurGet = semuaRute()
-    .filter((r) => r.metode === "GET" && !r.jalur.includes(":"))
-    .map((r) => r.jalur);
-  const punya = new Set(RUTE.map((r) => r.jalur.split("?")[0]));
+describe("daftar rute pembanding == SELURUH GET, sama persis", () => {
+  /*
+   * Sampai 2026-09-11 uji ini cuma menagih GET TANPA PARAMETER (72), dan
+   * **38 rute detail** (`:id`) tak pernah tersapu siapa pun — justru di
+   * sanalah bentuk terkaya tinggal (`OpenBillDetail`, `SupplierKartu`,
+   * `CustomerDetail`, `ShiftDetail`). Sekarang ketiga daftar itu — `RUTE`,
+   * `DETAIL`, `KECUALI` — harus MENUTUP seluruh GET, dua arah.
+   */
+  const jalurGet = semuaRute().filter((r) => r.metode === "GET").map((r) => r.jalur);
+  const tanpaParam = new Set(RUTE.map((r) => r.jalur.split("?")[0]));
+  const berparam = new Set(DETAIL.map((r) => r.jalur));
+  const kecuali = new Set(Object.keys(KECUALI));
+  const tercakup = new Set([...tanpaParam, ...berparam, ...kecuali]);
 
-  it("PREMIS: keduanya berisi", () => {
-    expect(jalurGet.length).toBeGreaterThan(60);
-    expect(punya.size).toBeGreaterThan(60);
+  it("PREMIS: ketiganya berisi, dan rute berparameter memang ada", () => {
+    expect(jalurGet.length).toBeGreaterThan(100);
+    expect(tanpaParam.size).toBeGreaterThan(60);
+    expect(berparam.size).toBeGreaterThan(30);
+    expect(jalurGet.filter((j) => j.includes(":")).length).toBeGreaterThan(30);
   });
 
-  it("INTI: tak ada GET tanpa parameter yang luput dari sapuan", () => {
-    const luput = jalurGet.filter((j) => !punya.has(j)).sort();
+  it("INTI: tak ada GET yang luput dari sapuan", () => {
+    const luput = jalurGet.filter((j) => !tercakup.has(j)).sort();
     expect(
       luput,
-      "rute GET baru tak masuk daftar `RUTE` di `adu-tipe-kawat.ts` — balasannya " +
+      "rute GET baru tak masuk `RUTE`/`DETAIL` di `adu-tipe-kawat.ts` — balasannya " +
         "tak pernah diadu dengan kontraknya. Tambahkan barisnya (dengan peran " +
-        "yang benar), atau pindahkan ke daftar pengecualian DENGAN alasan:\n" +
-        luput.join("\n"),
+        "yang benar; untuk `:id`, sebut rute daftar tempat idnya dipetik), atau " +
+        "catat di `KECUALI` DENGAN alasan:\n" + luput.join("\n"),
     ).toEqual([]);
   });
 
   it("INTI: tak ada entri daftar yang rutenya sudah tak ada", () => {
-    const basi = [...punya].filter((j) => !jalurGet.includes(j)).sort();
-    expect(basi, `entri basi di \`RUTE\`:\n${basi.join("\n")}`).toEqual([]);
+    const ada = new Set(jalurGet);
+    const basi = [...tercakup].filter((j) => !ada.has(j)).sort();
+    expect(basi, `entri basi di RUTE/DETAIL/KECUALI:\n${basi.join("\n")}`).toEqual([]);
+  });
+
+  it("tiap pengecualian punya ALASAN, bukan cuma jalur", () => {
+    // Daftar pengecualian tanpa alasan pelan-pelan jadi tong sampah — dan
+    // rute yang masuk ke sana diam-diam berhenti dijaga.
+    for (const [jalur, alasan] of Object.entries(KECUALI)) {
+      expect(alasan.length, `${jalur} tercatat tanpa alasan yang memadai`).toBeGreaterThan(30);
+    }
+  });
+
+  it("tiap rute detail menyebut rute daftar yang BENAR-BENAR disapu", () => {
+    /*
+     * Id dipetik dari kawat, bukan fikstur — jadi rute daftarnya harus ikut
+     * diambil pada jalan yang sama. Kalau ia sendiri tak ada di `RUTE`,
+     * pemetikannya bergantung pada permintaan yang tak pernah diuji.
+     */
+    const yatim = DETAIL.filter((d) => !tanpaParam.has(d.dari)).map((d) => `${d.jalur} ← ${d.dari}`);
+    expect(yatim, `rute daftar sumber id tak ada di \`RUTE\`:\n${yatim.join("\n")}`).toEqual([]);
+  });
+
+  it("PASANGAN: `petik` menemukan baris pertama yang BERISI, bukan baris [0]", () => {
+    // Baris [0] `/produksi` ber-`faktur_id` null; versi pertama pemetik ini
+    // melaporkan "id tak ditemukan" untuk data yang jelas ada.
+    expect(petik({ rows: [{ id: null }, { id: "b2" }] }, "rows[].id")).toBe("b2");
+    expect(petik([{ id: "a1" }], "[].id")).toBe("a1");
+    expect(petik({ items: [] }, "items[].id")).toBeNull();
+    expect(petik({ rows: [{ id: 7 }] }, "rows[].id")).toBeNull();
   });
 });
 

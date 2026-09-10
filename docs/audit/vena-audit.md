@@ -50,6 +50,104 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Sepertiga rute GET tak pernah tersapu siapa pun — dan di sanalah bentuk terkaya tinggal — server — 2026-09-11
+
+**Vena.** Butir antrean "§309 hanya menyapu GET TANPA PARAMETER", lahir dua
+putaran lalu bersama pembandingnya. Batas itu ditulis jujur waktu itu dan
+alasannya masuk akal — *"menembak rute `:id` menuntut fikstur, dan fikstur di
+dalam alat ukur adalah cara alat ukur mulai punya pendapat"*. Yang ternyata
+salah bukan keberatannya, melainkan anggapan bahwa fikstur satu-satunya jalan.
+
+**Populasi.**
+
+| | jumlah |
+| --- | --- |
+| rute GET seluruhnya | 110 |
+| tersapu §309/§310 sebelum putaran ini | 72 |
+| **rute `:id` yang tak pernah tersapu siapa pun** | **38** |
+
+Dan bukan rute pinggiran: di sanalah bentuk terkaya repo ini tinggal —
+`OpenBillDetail`, `SupplierKartu`, `CustomerDetail`, `ShiftDetail`,
+`RiwayatHargaDto`, `JejakBahanDto`. Termasuk **ketiga sidik yang bertabrakan**
+(`CustomerDetail`/`ShiftDetail`, `PermintaanStokBagian`/…`Perlengkapan`,
+`PermintaanStokDaftar`/`BeliPerlengkapanDaftar`), yang tak satu pun pernah
+benar-benar diadu.
+
+**IDNYA DIPETIK DARI KAWAT, bukan dari fikstur.** Tiap rute detail menyebut
+rute DAFTAR yang memuat idnya dan jalan petiknya (`rows[].faktur_id`,
+`items[].id`, `[].session_id`). Daftarnya sendiri sudah diambil di jalan yang
+sama, jadi tak ada satu pun nilai yang diketik tangan ke dalam alat ukur — dan
+uji cakupannya menagih bahwa rute daftar itu MEMANG ada di sapuan, supaya
+pemetikan tak bergantung pada permintaan yang tak pernah diuji.
+
+**Hasilnya, terukur:**
+
+| | sebelum | sesudah |
+| --- | --- | --- |
+| rute tersapu | 72 | **108** (dari 110) |
+| interface tersidik | 102 | **133** |
+| objek diadu | 3.861 | **4.062** |
+
+**SAPUANNYA BERSIH** — nol selisih tipe, nol stempel salah bentuk pada ke-36
+rute detail. Dan itu dinyatakan dengan detektor yang dibuktikan menuduh **pada
+rute detail itu sendiri**, bukan cuma pada rute yang sudah tersapu sebelumnya:
+`total_belanja` di `/supplier/:id/kartu` dibuat mengirim string, dan §309
+menuduhnya dengan nama interface, medan, tipe kontrak, nilai kawat, dan
+rutenya. `SupplierKartu` MUSTAHIL tertuduh sebelum putaran ini — ia cuma bisa
+dicapai lewat rute `:id`.
+
+**Dua rute tak tercakup, dan keduanya disebut, bukan didiamkan:**
+
+- `/admin/sistem/backup/:id/unduh` — aliran BERKAS cadangan
+  (`octet-stream`), bukan JSON. Masuk `KECUALI` beserta alasannya, dan uji
+  menagih tiap pengecualian punya alasan yang memadai (bukan cuma jalur).
+- `/kebersihan/:id` — DB gerbang tak punya satu pun laporan kebersihan, jadi
+  idnya tak bisa dipetik. Dilaporkan sebagai "detail tanpa data", **bukan
+  dilewati diam-diam**, dan diratchet ≤ 1 supaya yang kedua tak lahir sunyi.
+
+**Yang dikerjakan.**
+
+- **Tabel `DETAIL` (37 rute)** di `adu-tipe-kawat`, lengkap dengan peran dan
+  jalan petik idnya; `petik()` memindai SELURUH larik sampai menemukan baris
+  yang medannya berisi — baris [0] `/produksi` ber-`faktur_id` null, dan versi
+  pertama pemetik ini melaporkan "id tak ditemukan" untuk data yang jelas ada.
+- **Uji cakupan dilebarkan dari 72 ke 110**: `RUTE` ∪ `DETAIL` ∪ `KECUALI`
+  harus MENUTUP seluruh GET, dua arah — rute baru tak bisa lolos hanya karena
+  tak ditulis di mana pun.
+- **Lima lengan §309 baru**: detail terambil == daftarnya dikurangi yang
+  kosong, ratchet "tanpa data" ≤ 1, dan lantai interface/objek dinaikkan
+  (90 → 130, 3.000 → 4.000) supaya sapuan yang menyusut tak lolos.
+
+**Bukti merah** (semuanya dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| `/supplier/:id/kartu` dicabut dari `DETAIL` | uji cakupan | **merah**, menyebut jalurnya |
+| rute daftar sumbernya diganti jadi rute yang tak disapu | uji "sumber id" | **merah**, menyebut pasangannya |
+| `total_belanja: String(…)` di rutenya, server dijalankan ulang | §309 dari kawat | **merah**, `SupplierKartu.total_belanja`, keluar 1 |
+
+**Gerbang**: typecheck bersih · verify-api **3.736 / 0** (+3) · vitest **259 berkas / 3.154 uji** (+3 uji) · invarian **27 / 0** · Playwright **48 lolos**. §309 dari dalam gerbang: 72 rute daftar + **37 rute detail**, 133 interface, **4.079 objek**, 0 selisih, 0 stempel salah bentuk.
+
+**Batas yang diakui.**
+
+- **Balasan TULIS masih di luar sapuan** — 113 POST, 17 PATCH, 16 PUT, 24
+  DELETE. Idnya tak bisa dipetik dari daftar; menembaknya menuntut membuat
+  baris, dan alat ukur yang MENULIS ke DB berhenti jadi alat ukur. Jalan yang
+  masuk akal untuk itu bukan memperbesar daftar ini melainkan menumpang
+  verify-api yang SUDAH mengetuknya 3.700 kali: sebuah middleware dev-only
+  (`ADU_TIPE=`, seidiom `JEJAK_RUTE=`) yang mengadu tiap balasan JSON saat
+  gerbang berjalan. Hambatannya nyata dan pantas dicatat: pembandingnya
+  membaca `types.ts` lewat pohon sintaks yang tinggal di `test/util/ast.ts`,
+  sementara `src/` TIDAK PERNAH mengimpor dari `test/` — invarian yang
+  diperiksa dan tak boleh dilanggar sambil lalu. Antrean.
+- **`/kebersihan/:id` tetap tak teruji dari kawat** sampai DB gerbang punya
+  laporan kebersihan.
+- **Sapuan ini menemukan NOL**, dan itu putaran bersih kedua berturut-turut
+  untuk pembanding tipe. Yang membuatnya berarti cuma bukti merahnya; tanpa
+  itu ia sekadar sapuan yang kebetulan sepi.
+
+---
+
 ## Cacat yang tak terlihat di permukaan yang dipakai penulisnya — `String(Date)` yang dikirim, lalu DIBANDINGKAN — server + ponsel — 2026-09-11
 
 **Vena.** Butir antrean "`waktu`/`timestamp` → ISO: bentuk baku yang belum
@@ -14355,13 +14453,28 @@ berlaku di situ).
       dirakit dari SEBARAN baris SQL mentah. Arah TIPE NILAI-nya kini dijaga
       dari kawat (`adu-tipe-kawat` + §309): 72 rute, 102 interface, 3.880
       objek, 0 selisih. Sisa batasnya dicatat sebagai butir tersendiri di bawah
-- [ ] **§309 hanya menyapu GET TANPA PARAMETER** — 72 rute. Rute ber-`:id` dan
-      SELURUH balasan POST/PATCH/PUT di luar sapuan, sebab menembaknya menuntut
-      fikstur — dan fikstur di dalam alat ukur adalah cara alat ukur mulai
-      punya pendapat. Yang paling layak ditimbang lebih dulu: balasan tulis
-      yang bentuknya sudah bernama (`SaleResult`, `KaryawanBaruResult`,
-      `DaftarResult`), sebab di sanalah `Number(...)` paling sering ditulis
-      tangan
+- [x] ~~**§309 hanya menyapu GET TANPA PARAMETER**~~ — separuhnya DIBAYAR #112:
+      37 rute `:id` masuk sapuan, idnya dipetik DARI KAWAT (rute daftar yang
+      sudah diambil), bukan dari fikstur. Cakupan GET **72 → 108 dari 110**;
+      interface tersidik 102 → 133, objek 3.861 → 4.062. Bersih, dan
+      dibuktikan menuduh pada rute detail itu sendiri (`SupplierKartu`
+      mustahil tertuduh sebelumnya). Dua yang tersisa disebut: satu aliran
+      berkas (`KECUALI`, beralasan), satu tanpa data di DB gerbang
+- [ ] **Balasan TULIS masih di luar sapuan §309/§310** — 113 POST, 17 PATCH,
+      16 PUT, 24 DELETE. Idnya tak bisa dipetik dari daftar, dan alat ukur yang
+      MENULIS ke DB berhenti jadi alat ukur. Jalan yang masuk akal bukan
+      memperbesar daftar rutenya melainkan menumpang verify-api yang SUDAH
+      mengetuknya 3.700 kali: middleware dev-only (`ADU_TIPE=`, seidiom
+      `JEJAK_RUTE=` yang sudah ada di `app.ts`) yang mengadu tiap balasan JSON
+      saat gerbang berjalan. Hambatannya nyata: pembandingnya membaca
+      `types.ts` lewat pohon sintaks yang tinggal di `test/util/ast.ts`,
+      sementara `src/` TIDAK PERNAH mengimpor dari `test/` — invarian yang
+      sudah diperiksa. Pilihannya memindahkan `ast.ts` ke `src/scripts/`
+      (5 pengimpor, sebelah `buta-komentar.ts` yang presedennya persis sama)
+      atau membangkitkan tabel sidik sebagai JSON berpenjaga kesegaran
+- [ ] **`/kebersihan/:id` tak pernah teruji dari kawat** — DB gerbang tak punya
+      satu pun laporan kebersihan, jadi idnya tak bisa dipetik. Diratchet ≤ 1
+      di §309 supaya rute detail kedua yang senasib tak lahir diam-diam
 - [ ] **OID 20 (`bigint`/`int8`) tak terdaftar di `setTypeParser`** — terukur
       #110 dari basis data sungguhan: `count(*)` lewat `db.execute` memulangkan
       `"235"`, sebuah STRING, sementara `numeric` (OID 1700) diparse jadi

@@ -245,6 +245,103 @@ export const RUTE: { peran: "owner" | "sa" | "kasir"; jalur: string }[] = [
   ...["/open-bill", "/shift/aktif"].map((jalur) => ({ peran: "kasir" as const, jalur })),
 ];
 
+/**
+ * RUTE DETAIL (`:id`) — 38 dari 110 GET, dan sampai 2026-09-11 tak satu pun
+ * pernah tersapu. Justru di sanalah bentuk terkaya tinggal: `OpenBillDetail`,
+ * `SupplierKartu`, `RiwayatHargaDto`, `CustomerDetail`, `ShiftDetail`.
+ *
+ * IDNYA DIAMBIL DARI KAWAT, bukan dari fikstur. Itu syaratnya, bukan
+ * kenyamanan: fikstur di dalam alat ukur adalah cara alat ukur mulai punya
+ * pendapat sendiri tentang data yang benar. Tiap entri menyebut rute DAFTAR
+ * yang memuat idnya dan jalan petiknya; `[]` berarti "baris PERTAMA yang
+ * medannya berisi", sebab baris [0] `/produksi` ber-`faktur_id` null dan
+ * versi pertama sapuan ini melaporkan "id tak ditemukan" untuk data yang
+ * jelas ada.
+ */
+export interface RuteDetail {
+  jalur: string;
+  peran: "owner" | "sa" | "kasir";
+  /** rute daftar tempat idnya dipetik, dan jalannya (mis. `rows[].faktur_id`) */
+  dari: string;
+  sel: string;
+  /** nilai tetap untuk parameter kedua (mis. `:jenis` pada /pesanan) */
+  tetap?: Record<string, string>;
+}
+
+/**
+ * GET yang SENGAJA di luar sapuan, dengan alasannya. Daftar ini dibaca uji
+ * cakupan: rute baru tak bisa lolos hanya karena tak ditulis di mana pun.
+ */
+export const KECUALI: Record<string, string> = {
+  "/admin/sistem/backup/:id/unduh":
+    "aliran BERKAS cadangan (octet-stream), bukan JSON — tak ada bentuk untuk diadu",
+};
+
+export const DETAIL: RuteDetail[] = [
+  { jalur: "/admin/error-log/:sidik", peran: "sa", dari: "/admin/error-log", sel: "rows[].sidik" },
+  { jalur: "/admin/tenants/:id", peran: "sa", dari: "/admin/tenants", sel: "[].id" },
+  { jalur: "/bahan/:id/detail", peran: "owner", dari: "/bahan", sel: "[].id" },
+  { jalur: "/bahan/:id/langkah", peran: "owner", dari: "/bahan", sel: "[].id" },
+  { jalur: "/bahan/:id/pembelian", peran: "owner", dari: "/bahan", sel: "[].id" },
+  { jalur: "/bahan/:id/resep", peran: "owner", dari: "/bahan", sel: "[].id" },
+  { jalur: "/bahan/:id/riwayat-resep", peran: "owner", dari: "/bahan", sel: "[].id" },
+  { jalur: "/bahan/:id/supplier", peran: "owner", dari: "/bahan", sel: "[].id" },
+  { jalur: "/customer/:id", peran: "owner", dari: "/customer", sel: "items[].id" },
+  { jalur: "/kebersihan/:id", peran: "owner", dari: "/kebersihan", sel: "[].id" },
+  { jalur: "/karyawan/:userId/aktivitas", peran: "owner", dari: "/karyawan", sel: "[].user_id" },
+  { jalur: "/karyawan/:userId/tempat", peran: "owner", dari: "/karyawan", sel: "[].user_id" },
+  { jalur: "/meja/:id/log", peran: "owner", dari: "/meja", sel: "[].id" },
+  { jalur: "/menu/:id", peran: "owner", dari: "/menu", sel: "[].id" },
+  { jalur: "/menu/:id/riwayat-harga", peran: "owner", dari: "/menu", sel: "[].id" },
+  { jalur: "/open-bill/:id", peran: "kasir", dari: "/open-bill", sel: "[].id" },
+  { jalur: "/open-bill/:id/bon", peran: "kasir", dari: "/open-bill", sel: "[].id" },
+  { jalur: "/open-bill/:id/slip", peran: "kasir", dari: "/open-bill", sel: "[].id" },
+  { jalur: "/pembelian/dana/:fakturId", peran: "owner", dari: "/pembelian", sel: "rows[].faktur_id" },
+  { jalur: "/pembelian/faktur/:fakturId", peran: "owner", dari: "/pembelian", sel: "rows[].faktur_id" },
+  { jalur: "/pembelian/log/:fakturId", peran: "owner", dari: "/pembelian", sel: "rows[].faktur_id" },
+  { jalur: "/penjualan/:id", peran: "owner", dari: "/penjualan", sel: "[].id" },
+  { jalur: "/penjualan/:id/slip", peran: "owner", dari: "/penjualan", sel: "[].id" },
+  { jalur: "/penyimpanan/:id/bahan", peran: "owner", dari: "/penyimpanan", sel: "[].id" },
+  { jalur: "/perlengkapan/:id/kartu", peran: "owner", dari: "/perlengkapan", sel: "[].id" },
+  { jalur: "/perlengkapan/:id/pembelian", peran: "owner", dari: "/perlengkapan", sel: "[].id" },
+  { jalur: "/perlengkapan/:id/supplier", peran: "owner", dari: "/perlengkapan", sel: "[].id" },
+  { jalur: "/perlengkapan/opname/sesi/:sessionId", peran: "owner", dari: "/perlengkapan/opname/riwayat", sel: "[].session_id" },
+  { jalur: "/pesanan/:jenis/:id/log", peran: "owner", dari: "/pesanan", sel: "[].id", tetap: { jenis: "penjualan" } },
+  { jalur: "/produksi/dana/:fakturId", peran: "owner", dari: "/produksi", sel: "rows[].faktur_id" },
+  { jalur: "/produksi/faktur/:fakturId", peran: "owner", dari: "/produksi", sel: "rows[].faktur_id" },
+  { jalur: "/produksi/log/:fakturId", peran: "owner", dari: "/produksi", sel: "rows[].faktur_id" },
+  { jalur: "/shift/:id", peran: "owner", dari: "/shift", sel: "[].id" },
+  { jalur: "/stok/fifo/:ingredientId", peran: "owner", dari: "/stok", sel: "[].ingredient_id" },
+  { jalur: "/stok/kartu/:ingredientId", peran: "owner", dari: "/stok", sel: "[].ingredient_id" },
+  { jalur: "/stok/opname/sesi/:sessionId", peran: "owner", dari: "/stok/opname/riwayat", sel: "[].session_id" },
+  { jalur: "/supplier/:id/kartu", peran: "owner", dari: "/supplier", sel: "[].id" },
+];
+
+/**
+ * Petik nilai teks pertama pada jalan `sel` (`rows[].faktur_id`, `[].id`, …).
+ * `[]` memindai SELURUH lariknya sampai menemukan yang berisi.
+ */
+export function petik(v: unknown, sel: string): string | null {
+  const seg = sel.split(".");
+  const jalan = (cur: unknown, i: number): string | null => {
+    if (cur === null || cur === undefined) return null;
+    if (i >= seg.length) return typeof cur === "string" ? cur : null;
+    const s = seg[i];
+    if (s.endsWith("[]")) {
+      const nm = s.slice(0, -2);
+      const arr = nm ? (cur as Record<string, unknown>)[nm] : cur;
+      if (!Array.isArray(arr)) return null;
+      for (const x of arr) {
+        const h = jalan(x, i + 1);
+        if (h) return h;
+      }
+      return null;
+    }
+    return jalan((cur as Record<string, unknown>)[s], i + 1);
+  };
+  return jalan(v, 0);
+}
+
 async function utama(): Promise<void> {
   const arg = (n: string): string | undefined => {
     const i = process.argv.indexOf(n);
@@ -299,6 +396,44 @@ async function utama(): Promise<void> {
     adu(r.jalur, body, kontrak, sidik, hasil);
     sapuStempel(r.jalur, body, stempel);
   }
+  // ── rute detail: idnya dipetik dari daftar yang baru saja diambil ──
+  const daftarCache = new Map<string, unknown>();
+  let detailAmbil = 0;
+  const detailKosong: string[] = [];
+  for (const d of DETAIL) {
+    const t = token[d.peran];
+    if (!t) continue;
+    const kunciCache = `${d.peran}${d.dari}`;
+    if (!daftarCache.has(kunciCache)) {
+      const r = await fetch(basis + d.dari, { headers: { Authorization: `Bearer ${t}` } });
+      daftarCache.set(kunciCache, r.ok ? await r.json().catch(() => null) : null);
+    }
+    const id = petik(daftarCache.get(kunciCache), d.sel);
+    if (!id) {
+      // DB gerbang tak punya barisnya — dilaporkan, bukan dilewati diam-diam.
+      detailKosong.push(`${d.jalur} (daftar ${d.dari} kosong)`);
+      continue;
+    }
+    let jalur = d.jalur;
+    for (const [nm, nilai] of Object.entries(d.tetap ?? {})) jalur = jalur.replace(`:${nm}`, nilai);
+    jalur = jalur.replace(/:[A-Za-z]+/, id);
+    const res = await fetch(basis + jalur, { headers: { Authorization: `Bearer ${t}` } });
+    if (!res.ok) {
+      gagal.push(`${jalur} → ${res.status}`);
+      continue;
+    }
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      gagal.push(`${jalur} → bukan JSON`);
+      continue;
+    }
+    detailAmbil += 1;
+    adu(d.jalur, body, kontrak, sidik, hasil);
+    sapuStempel(d.jalur, body, stempel);
+  }
+
   for (const s of hasil.selisih) {
     process.stdout.write(`${s.iface}.${s.medan}: kontrak \`${s.tipe}\` · kawat ${s.nilai}  (${s.rute})\n`);
   }
@@ -309,12 +444,16 @@ async function utama(): Promise<void> {
   }
   const objek = [...hasil.cocok.values()].reduce((a, b) => a + b, 0);
   process.stderr.write(
-    `rute terambil ${terambil}/${RUTE.length} · interface tersidik ${hasil.cocok.size} · objek ${objek} · selisih ${hasil.selisih.length} · stempel salah bentuk ${unikStempel.size}\n`,
+    `rute terambil ${terambil}/${RUTE.length} · detail ${detailAmbil}/${DETAIL.length} (kosong ${detailKosong.length})` +
+      ` · interface tersidik ${hasil.cocok.size} · objek ${objek} · selisih ${hasil.selisih.length}` +
+      ` · stempel salah bentuk ${unikStempel.size}\n`,
   );
+  if (detailKosong.length) process.stderr.write(`  detail tanpa data: ${detailKosong.join(", ")}\n`);
   if (gagal.length) process.stderr.write(`  tak terambil: ${gagal.join(", ")}\n`);
   if (process.argv.includes("--ringkas")) {
     process.stdout.write(
-      `RINGKAS ${terambil} ${RUTE.length} ${hasil.cocok.size} ${objek} ${hasil.selisih.length} ${unikStempel.size}\n`,
+      `RINGKAS ${terambil} ${RUTE.length} ${hasil.cocok.size} ${objek} ${hasil.selisih.length}` +
+        ` ${unikStempel.size} ${detailAmbil} ${DETAIL.length} ${detailKosong.length}\n`,
     );
   }
   process.exit(hasil.selisih.length === 0 && unikStempel.size === 0 ? 0 : 1);
