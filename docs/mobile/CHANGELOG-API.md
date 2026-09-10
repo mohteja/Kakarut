@@ -25,6 +25,42 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Baris penerimaan akhirnya bernama: `PenerimaanRow` (25 kunci) — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: baris yang
+> `GET /api/penerimaan` pulangkan akhirnya **dideklarasikan** di `types.ts`,
+> jadi ikut Lampiran A dan fikstur kunci ponsel — termasuk **empat medan yang
+> dikirim tanpa pernah disebut tipe mana pun**.
+
+**Yang layak dibaca meski ⚪️: `qty_teks`.** Handler-nya menyebar hasil `select`
+(`{ ...r, qty_teks, qty_setara, qty_dipesan_teks }`), dan halaman web mengetik
+ulang **21 dari 25** medan. Keempat yang tak disebutnya: `satuan_beli`,
+`qty_teks`, `qty_setara`, `qty_dipesan_teks`.
+
+Akibatnya bukan kosmetik. Karena tipe lokal itu menyembunyikan `qty_teks`,
+layar Penerimaan **merakit ulang** `formatAngka(qty) + satuan` di dua panel —
+persis yang medan itu ada untuk mencegah. Komentar `qtyTeks()` menuliskan
+kejadiannya, bukan kekhawatiran: menebak satuan sendiri sudah melahirkan
+**"900 kg" untuk barang yang sebenarnya 900 gr**, dan "batch" untuk barang
+bersatuan gram.
+
+**Bentuknya, apa adanya:**
+
+```
+id  ingredient_id  bahan  isi  satuan  satuan_beli  qty  total_harga
+is_batch  catatan  waktu  prod_date  faktur_id  no_faktur  nomor
+status  jalur  cabang  supplier  tempat  qty_dipesan  alasan_tolak
+qty_teks  qty_setara  qty_dipesan_teks
+```
+
+`waktu` kini **diterjemahkan** perakitnya, bukan diserahkan ke serialisasi:
+kolomnya `timestamp` (Drizzle → `Date`), yang sampai ke kawat ISO-8601. Sama
+seperti `archived_at` (`KaryawanRow`) dan `planExpiresAt` (`CompanyRow`).
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci bertambah **25**; tak satu pun
+nama baru yang perlu keputusan (semuanya sudah disentuh `lib/` lewat DTO lain).
+Nol baris `lib/` berubah.
+
 ## ⚪️ Balasan `/register` & `/resend-verification` akhirnya bernama: `DaftarResult` (6 kunci, termasuk `dev_verify_url`) — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: amplop netral kedua

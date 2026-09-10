@@ -1,4 +1,5 @@
 import { halamanQuery } from "../../lib/halaman-query";
+import type { PenerimaanRow } from "@kakarut/shared";
 import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
@@ -218,7 +219,20 @@ export const penerimaanRoutes = new Hono<AppEnv>()
               isi: r.isi,
               satuanBeli: r.satuan_beli,
             });
-      return { ...r, qty_teks: t.teks, qty_setara: t.setara, qty_dipesan_teks: d?.teks ?? null };
+      /*
+       * `waktu` DITERJEMAHKAN di sini, tidak dibiarkan lewat: kolomnya
+       * `timestamp` (Drizzle → `Date`) sementara yang sampai ke kawat ISO
+       * string. Membiarkannya lewat membuat tipe yang tertulis di kontrak
+       * berbohong tentang apa yang dikirim — persis cacat yang anotasi
+       * `CompanyRow` (#99) dan `KaryawanRow` (#101) temukan.
+       */
+      return {
+        ...r,
+        waktu: r.waktu.toISOString(),
+        qty_teks: t.teks,
+        qty_setara: t.setara,
+        qty_dipesan_teks: d?.teks ?? null,
+      } satisfies PenerimaanRow;
     });
     return c.json({ rows: rowsTeks });
   })

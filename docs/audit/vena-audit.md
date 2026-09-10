@@ -50,6 +50,116 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Aturan yang ditulis tiga kali, dilanggar kodenya sendiri — dan medan yang ada PERSIS untuk mencegah itu — server + web — 2026-09-11
+
+**Vena.** Butir antrean "salinan bentuk di web", sasaran `PenerimaanRow`. Yang
+ditemukan bukan salinannya melainkan **apa yang salinan itu sembunyikan**.
+
+**Populasi & pengukuran.** `GET /penerimaan` mengirim **25 kunci** (terukur
+lewat HTTP pada DB gerbang); `PenerimaanPage.tsx` mengetik ulang **21**. Empat
+yang tak disebutnya: `satuan_beli`, `qty_teks`, `qty_setara`,
+`qty_dipesan_teks`.
+
+**Yang paling mahal `qty_teks`, dan aturannya sudah tertulis TIGA kali di repo
+ini:**
+
+1. komentar `qtyTeks()` — menebak satuan sendiri sudah melahirkan **"900 kg"
+   untuk barang yang sebenarnya 900 gr**, dan "batch" untuk barang bersatuan
+   gram. Kejadian, bukan kekhawatiran;
+2. komentar medan di kontrak — *"tampilkan apa adanya… agar web & mobile
+   mustahil berbeda satuan"*;
+3. dan sebuah komentar di `FakturDetailPage.tsx` yang berbunyi **harfiah**
+   *"`qty_teks` milik server, jangan dirakit ulang"*.
+
+**Kode tepat DI BAWAH komentar ketiga itu merakitnya ulang.**
+
+**Sapuan mekanis** atas seluruh `apps/web/src`: **16 situs** merakit
+`formatAngka(x.qty) + x.satuan`. Dipilah dengan tangan menurut apakah barisnya
+benar-benar MEMBAWA `qty_teks` di kawat:
+
+| kelompok | jumlah |
+| --- | --- |
+| pelanggaran — medannya ADA, layarnya merakit sendiri | **5** |
+| sudah benar (`qty_teks ?? …`, dibayar #98) | 1 |
+| barisnya memang tak punya `qty_teks` — antrean, bukan pelanggaran | 9 |
+| yang tersisa sesudah putaran ini | **9** |
+
+**Dua sebab yang berbeda untuk kelima pelanggaran, dan itu yang bikin vena ini
+bukan pengulangan.**
+
+- **Tiga situs** (`FakturDetailPage`, `DokumenBelanjaModal`,
+  `DokumenKirimModal`) berjalan atas `StokMasukRow`, yang **sudah**
+  mendeklarasikan `qty_teks` sejak 2026-09-05 (#98). Komentar kontraknya
+  bahkan menuliskan sebab penambahannya: *"tipe ini tak pernah
+  mendeklarasikannya dan layarnya merakit ulang… medan ini ada persis untuk
+  mencegah itu."* **Tipenya dibetulkan; pemakainya ditinggal.** Kelas yang
+  layak punya nama: **kontraknya diperbaiki, pemanggilnya tidak.**
+- **Dua situs** di layar Penerimaan tak PUNYA pilihan: tipe lokalnya
+  menyembunyikan medan itu. Layar tak bisa memakai apa yang tipenya sendiri
+  tak akui.
+
+**Temuan sampingan yang muncul karena bentuknya ditulis.** `waktu` kolomnya
+`timestamp` → `Date | null` di Drizzle, ISO-8601 di kawat. Kelas ketiga kali
+berturut-turut (`planExpiresAt` #99, `archived_at` #101); kini perakitnya yang
+menerjemahkan.
+
+**Yang dikerjakan.** `PenerimaanRow` (25 medan) ke kontrak, handler `satisfies`,
+salinan lokal dicabut, **lima situs** memakai teks milik server.
+
+**Batas yang dijaga jujur, bukan disembunyikan:** situs ketiga di layar
+Penerimaan **TIDAK** diubah. Ia berjalan atas `KirimanMenggantung`
+(`/penerimaan/anomali`), dan rute itu **tak mengirim `qty_teks` sama sekali** —
+jadi merakit ulang di sana memang satu-satunya pilihan. Sebabnya ditulis di
+komentar tepat di situsnya, dan celahnya masuk antrean.
+
+**Penjaganya.** `qty-teks-milik-server.test.ts` (6 uji) berbentuk RATCHET:
+`MAKS_TELANJANG = 9`, hanya boleh menyusut. Ia **membedakan berpagar dari
+telanjang** — `x.qty_teks ?? …` bukan pelanggaran, ia bentuk yang benar
+(medannya opsional pada `StokMasukRow`: baris lama di cache klien bisa belum
+membawanya). **§305** (8 lengan) memaku 25 kunci dua arah, `waktu` ISO,
+`qty_setara` tak pernah angka, `qty_dipesan` & `qty_dipesan_teks` selalu
+sepasang — dan satu lengan yang **membaca ISI** `qty_teks`, bukan cuma adanya:
+teksnya wajib memuat satuan barisnya sendiri. Itulah lengan yang akan menangkap
+"900 kg" untuk barang bersatuan gram.
+
+**Penjaga & gerbang menuduh saya, dua kali lagi.** (1) Salinan `{r.qty_teks}`
+yang kusapu global ikut mengenai situs `KirimanMenggantung`; **typecheck**
+menuduhnya seketika — `Property 'qty_teks' does not exist on type
+'KirimanMenggantung'` — dan tuduhan itulah yang mengungkap bahwa rute anomali
+memang tak mengirimnya. (2) Lengan "qty_teks memuat satuannya" memerah dengan
+`nilai: ` KOSONG pada jalan pertama: di dalam `select(.qty_teks |
+contains(.satuan))`, `.satuan` dinilai terhadap STRING-nya, bukan terhadap
+baris. jq melempar, dan `cek` melaporkannya seperti asersi gagal. Ikatan
+`. as $r` memperbaikinya; ekspresinya lalu **diuji dua arah di luar skrip** —
+sampel benar → 1, sampel "900 kg / gr" → 0.
+
+**Bukti merah**, tiap berkas dipulihkan `cmp`: layar Penerimaan merakit ulang
+lagi (2 uji) · `FakturDetailPage` melanggar komentarnya sendiri lagi (1) ·
+`qty_teks` lenyap dari `PenerimaanRow` (1).
+
+**Gerbang** (sesudah jq diperbaiki): typecheck bersih · verify-api
+**3.679 / 0** (+8) · vitest **255 berkas / 3.119 uji** · invarian **27 / 0** ·
+Playwright **48 lolos**. Nol perubahan kawat; fikstur ponsel +25, nol nama baru
+yang perlu keputusan, nol baris `lib/`.
+
+**Batas yang diakui.**
+
+- **9 situs masih merakit telanjang**, dan kesembilannya berjalan atas baris
+  yang rutenya memang tak mengirim `qty_teks` (perlengkapan ×3, analisis harga,
+  laporan pembelian, laporan harga, kiriman menggantung, tahap, hasil
+  produksi). Mereka antrean, bukan pelanggaran — dan tiap rute yang kelak ikut
+  mengirim `qty_teks` menurunkan angkanya.
+- **Pemindainya berkunci BENTUK JSX** (`{formatAngka(x.qty)} {x.satuan}`).
+  Perakitan lewat pembantu, template string di luar JSX, atau `String(...)`
+  tak terlihat. Disapu: nol hari ini.
+- **Ratchet tak menahan dirinya dilonggarkan** — sama seperti
+  `amplop-berkontrak` (#103), dan disebut lagi di sini alih-alih dianggap
+  sudah diketahui.
+- **`/penerimaan/anomali` tak mengirim `qty_teks`** — celah nyata, dicatat di
+  komentar situsnya DAN di antrean.
+
+---
+
 ## Ratchet yang kubuat kemarin ternyata rabun — dan medan yang dikirim tanpa pernah punya nama — server + web + ponsel — 2026-09-11
 
 **Vena.** Butir antrean "salinan bentuk di web", sasaran `DaftarResult`. Yang
@@ -13638,7 +13748,7 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **4 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+- [ ] **3 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
       bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
       diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
       **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
@@ -13654,8 +13764,10 @@ berlaku di situ).
       melainkan bahwa KEDUANYA memakai nama yang SAMA untuk himpunan kunci yang
       SALING LEPAS. `DaftarResult` dibayar #105 — dan di sana pun bukan
       salinannya yang paling mahal melainkan `dev_verify_url`, medan yang
-      dikirim tanpa pernah punya nama. Sisa **4**: `PenerimaanRow`, `DanaEntri`,
-      `StokAwalTersimpan`, `Tenant`. Berikutnya `PenerimaanRow`.
+      dikirim tanpa pernah punya nama. `PenerimaanRow` dibayar #106 — dan di
+      sana pun bukan salinannya yang paling mahal melainkan `qty_teks` yang
+      disembunyikannya. Sisa **3**: `DanaEntri`, `StokAwalTersimpan`, `Tenant`.
+      Berikutnya `DanaEntri`.
       (Angka "3" yang sempat tertulis di sini SALAH: daftarnya memuat lima
       nama. Disapu ulang tiap putaran sejak.) Catatan lama, masih berlaku: diukur ulang 2026-09-06
       SESUDAH #99. Angka "15" pada
@@ -13669,6 +13781,22 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
+- [ ] **9 situs web masih merakit teks jumlah telanjang** — dijaga ratchet
+      `qty-teks-milik-server.test.ts` (`MAKS_TELANJANG = 9`) sejak #106.
+      Kesembilannya berjalan atas baris yang rutenya memang TAK mengirim
+      `qty_teks` (perlengkapan ×3, analisis harga, laporan pembelian, laporan
+      harga, kiriman menggantung, tahap, hasil produksi). Tiap rute yang kelak
+      ikut mengirimnya menurunkan angka ini
+- [ ] **`GET /penerimaan/anomali` tak mengirim `qty_teks`** — celah nyata yang
+      ditemukan #106 lewat tuduhan typecheck. Layar kiriman menggantung karena
+      itu merakit satuannya sendiri, satu-satunya pilihan yang ada. Kelas yang
+      sama dengan `StokMasukRow` sebelum #98
+- [ ] **Kelas "kontraknya diperbaiki, pemanggilnya ditinggal"** — lahir #106.
+      `qty_teks` masuk `StokMasukRow` pada #98 TEPAT untuk menghentikan
+      perakitan ulang, dan tiga layar tetap merakit selama enam hari tanpa satu
+      pun gerbang berubah warna. Yang menutupnya sekarang ratchet per-medan;
+      yang belum ada: aturan umum "medan yang ditambahkan untuk menggantikan
+      perhitungan klien wajib punya penjaga pemakaian pada putaran yang sama"
 - [ ] **`/forgot-password` (`{ok, dev_reset_url}`) masih tanpa tipe** —
       dikecualikan penghitung amplop sebagai pengakuan (`ok` + 2 kunci), jadi
       `dev_reset_url` masih medan tanpa nama, kelas yang sama dengan

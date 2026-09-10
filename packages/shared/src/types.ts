@@ -1446,6 +1446,71 @@ export interface TransferStokItemRow {
   alasan_tolak: string | null;
 }
 
+/**
+ * SATU BARIS KIRIMAN MASUK yang menunggu diterima — `GET /api/penerimaan`.
+ *
+ * 25 kunci, terukur lewat HTTP 2026-09-11. Bentuknya tak pernah dideklarasikan:
+ * handler-nya menyebar hasil `select` (`{ ...r, qty_teks, qty_setara,
+ * qty_dipesan_teks }`), dan `PenerimaanPage.tsx` mengetik ulang **21** medan —
+ * empat yang dikirim tak disebutnya sama sekali.
+ *
+ * Yang paling mahal di antara keempatnya `qty_teks`, dan mahalnya terukur:
+ * karena tipe lokal itu tak menyebutnya, layar Penerimaan **merakit ulang**
+ * `formatAngka(qty) + satuan` di TIGA tempat — persis yang medan ini ada untuk
+ * mencegah. Komentar `qtyTeks()` menuliskan sebabnya lebih dulu: menebak satuan
+ * sendiri sudah pernah melahirkan **"900 kg" untuk barang yang sebenarnya 900
+ * gr**, dan "batch" untuk barang bersatuan gram.
+ *
+ * `waktu` sengaja `string`: kolomnya `timestamp` (Drizzle → `Date`), dan yang
+ * sampai ke kawat ISO-8601. Pelajaran `archived_at` pada `KaryawanRow` (#101)
+ * dan `planExpiresAt` pada `CompanyRow` (#99) — perakitnya yang menerjemahkan,
+ * supaya tipe yang tertulis di sini adalah tipe yang benar-benar dikirim.
+ */
+export interface PenerimaanRow {
+  id: string;
+  ingredient_id: string;
+  bahan: string;
+  /** isi per kemasan beli; dasar `qty_setara` */
+  isi: number;
+  /** SATUAN TAMPILAN: `qty` SELALU dinyatakan dalam ini */
+  satuan: string;
+  /** satuan kemasan — bahan teks setara, JANGAN dipasang ke `qty` */
+  satuan_beli: string | null;
+  qty: number;
+  total_harga: number | null;
+  /** ASAL-USUL input, BUKAN satuan */
+  is_batch: boolean;
+  catatan: string | null;
+  waktu: string;
+  prod_date: string;
+  faktur_id: string | null;
+  no_faktur: string | null;
+  /** nomor faktur asal (PB-/PR-) */
+  nomor: string | null;
+  status: KonfirmasiStatus;
+  /** jalur kiriman: beli (pemasok) / produksi (Central Kitchen) */
+  jalur: JenisPengadaan;
+  /** cabang penerima — terisi untuk tampilan Kantor "semua cabang" */
+  cabang: string | null;
+  supplier: string | null;
+  tempat: string | null;
+  qty_dipesan: number | null;
+  alasan_tolak: string | null;
+  /**
+   * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ada agar web & mobile mustahil berbeda satuan (lihat `qtyTeks()`).
+   */
+  qty_teks: string;
+  /**
+   * setara kemasan beli, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan.
+   * PELENGKAP — boleh ditampilkan di samping `qty_teks`, tak boleh
+   * menggantikannya.
+   */
+  qty_setara: string | null;
+  /** `qty_dipesan` dalam bentuk teks; null bila tak ada yang dipesan */
+  qty_dipesan_teks: string | null;
+}
+
 /** Satu FAKTUR transfer stok (nomor TF-) berisi banyak bahan. */
 export interface TransferStokFaktur {
   faktur_id: string;

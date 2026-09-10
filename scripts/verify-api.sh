@@ -18028,6 +18028,52 @@ cek "§304 kirim ulang email TAK DIKENAL: bentuknya sama dengan yang dikenal" "V
 cek "§304 /register email BARU: bentuknya sama dengan pendaftaran baru lain" "V == 1" \
   "$([ "$(echo "$R304" | jq -S 'keys')" = "$(echo "$R304B" | jq -S 'keys')" ] && echo 1 || echo 0)"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §305 — BARIS PENERIMAAN: 25 kunci dikirim, 21 diketik ulang web
+# ═══════════════════════════════════════════════════════════════════════════
+# Handler `GET /penerimaan` menyebar hasil `select` (`{ ...r, qty_teks, … }`),
+# dan `PenerimaanPage.tsx` mengetik ulang 21 dari 25 medan yang benar-benar
+# dikirim. Empat yang tak disebutnya: `satuan_beli`, `qty_teks`, `qty_setara`,
+# `qty_dipesan_teks`.
+#
+# Yang paling mahal `qty_teks`, dan mahalnya bukan kosmetik: karena tipe lokal
+# itu menyembunyikannya, layarnya MERAKIT ULANG `formatAngka(qty) + satuan` di
+# dua panel — persis yang medan itu ada untuk mencegah. Komentar `qtyTeks()`
+# menuliskan kejadiannya: menebak satuan sendiri sudah melahirkan "900 kg"
+# untuk barang yang sebenarnya 900 gr.
+K305=$(medan296 PenerimaanRow)
+cek "§305 premis: kontrak PenerimaanRow terbaca dari types.ts (25 medan)" "V == 25" \
+  "$(echo "$K305" | grep -c .)"
+R305=$(api "$OWNER" GET "/penerimaan?branch_id=all")
+cek "§305 premis: ada kiriman menunggu (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R305" | jq '((.rows|length) >= 1)|if . then 1 else 0 end')"
+cek "§305 kunci kawat == PenerimaanRow, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R305" | jq -r '[.rows[]|keys[]]|unique|.[]')" "$K305")"
+# `qty_teks` DIPAKU ADA DAN TERISI pada tiap baris. Medan yang kosong sama
+# saja dengan medan yang hilang bagi layar yang memakainya apa adanya.
+cek "§305 tiap baris membawa qty_teks bertipe string tak kosong" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.qty_teks|type) == "string" and (.qty_teks|length) > 0)]|length) == (.rows|length) | if . then 1 else 0 end')"
+# …dan ISINYA memang menyebut satuan barisnya — bukan teks apa saja. Inilah
+# yang membedakan "medannya ada" dari "medannya benar".
+# Ikatan `. as $r` WAJIB: di dalam `select(.qty_teks | contains(.satuan))`,
+# `.satuan` dinilai terhadap STRING `qty_teks`, bukan terhadap barisnya — jq
+# melempar dan `cek` melaporkan "nilai: " kosong, yang terbaca seperti asersi
+# gagal padahal ekspresinya yang rusak. Jalan pertama seksi ini kena persis itu.
+cek "§305 qty_teks memuat satuan barisnya sendiri" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[] | . as $r | select($r.qty_teks | contains($r.satuan))] | length) == (.rows|length) | if . then 1 else 0 end')"
+# `waktu` DI KAWAT harus ISO string: kolomnya `timestamp` (Drizzle → Date), dan
+# sebelum perakitnya ada, tipe mana pun yang menyatakannya akan berbohong.
+cek "§305 waktu bertipe string berbentuk ISO-8601" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.waktu|type)=="string" and (.waktu|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))]|length) == (.rows|length) | if . then 1 else 0 end')"
+# `qty_setara` PELENGKAP, bukan pengganti — boleh null, tapi kalau terisi ia
+# harus teks. Dipaku supaya ia tak diam-diam berubah jadi angka.
+cek "§305 qty_setara null atau string (tak pernah angka)" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.qty_setara == null) or ((.qty_setara|type) == "string"))]|length) == (.rows|length) | if . then 1 else 0 end')"
+# `qty_dipesan_teks` mengikuti `qty_dipesan`: dua-duanya ada, atau dua-duanya
+# tidak. Sepasang yang bercabang melahirkan "(dikirim )" kosong di layar.
+cek "§305 qty_dipesan & qty_dipesan_teks selalu sepasang" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.qty_dipesan == null) == (.qty_dipesan_teks == null))]|length) == (.rows|length) | if . then 1 else 0 end')"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

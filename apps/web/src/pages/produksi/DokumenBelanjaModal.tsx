@@ -181,7 +181,7 @@ export function DokumenBelanjaModal({
                       )}
                     </td>
                     <td className="whitespace-nowrap py-1 pr-2 text-right">
-                      {formatAngka(r.qty)} {r.satuan}
+                      {r.qty_teks ?? `${formatAngka(r.qty)} ${r.satuan}`}
                       {kemasan(r) && (
                         <div className={`text-[11px] ${cetak ? "" : "text-stone-400"}`}>
                           {kemasan(r)}

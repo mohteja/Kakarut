@@ -225,11 +225,19 @@ export function FakturDetailPage({ tipe }: { tipe: JenisPengadaan }) {
       : []),
   ];
 
-  /** Teks jumlah satu baris — `qty_teks` milik server, jangan dirakit ulang. */
-  const jumlahTeks = (r: StokMasukRow) =>
-    r.status === "ditolak"
-      ? `0 dari ${formatAngka(r.qty)} ${r.satuan}`
-      : `+${formatAngka(r.qty)} ${r.satuan}`;
+  /*
+   * Teks jumlah satu baris — `qty_teks` milik SERVER, jangan dirakit ulang.
+   *
+   * Komentar itu sudah berdiri di sini sejak lama; kodenya di bawahnya justru
+   * melakukan kebalikannya sampai 2026-09-11. `qty_teks` masuk `StokMasukRow`
+   * pada 2026-09-05 (#98) tepat untuk mencegah perakitan ulang — tipenya
+   * dibetulkan, pemakainya tidak. `??` tetap ada sebab medannya opsional:
+   * baris lama di cache klien bisa belum membawanya.
+   */
+  const jumlahTeks = (r: StokMasukRow) => {
+    const teks = r.qty_teks ?? `${formatAngka(r.qty)} ${r.satuan}`;
+    return r.status === "ditolak" ? `0 dari ${teks}` : `+${teks}`;
+  };
 
   const isi = (cetak: boolean) => (
     <div className={cetak ? "text-black" : ""}>
