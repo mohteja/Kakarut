@@ -25,6 +25,37 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 `GET /api/admin/tenants/:id` berhenti mengirim BARIS TABEL apa adanya — `company` & `cabang` kini bentuk yang sama dengan rute yang menyajikannya
+
+🟡 **PERLU DICEK** — dan hampir pasti tidak, sebab **tak ada satu klien pun
+yang memanggil rute ini**: web hanya memakai `PATCH`-nya, ponsel tak
+menyentuhnya sama sekali. Disebut sebagai 🟡 karena bentuknya memang berubah,
+bukan karena ada yang perlu dikerjakan.
+
+**Yang berubah** (`GET /api/admin/tenants/:id`, super-admin saja):
+
+| medan | sebelum | sesudah |
+| --- | --- | --- |
+| `company` | 21 kunci camelCase — baris tabel `companies` apa adanya | **`CompanyRow`** (22, sama persis dengan `GET /api/company`) |
+| `cabang[]` | 16 kunci camelCase — baris tabel `branches` apa adanya | **`CabangDto`** (14 snake_case, sama persis dengan `GET /api/cabang`) |
+| `anggota[]` | — | kini bernama `TenantAnggota` (tak berubah isinya) |
+
+**Kenapa.** Keduanya lahir dari `db.select()` **telanjang**: bentuknya
+mengikuti SKEMA, jadi kolom yang ditambahkan besok ikut terkirim tanpa ada yang
+memutuskannya. Satu tabel karena itu punya DUA bentuk di kawat — satu yang
+dipilih penulisnya (`GET /company`, `GET /cabang`) dan satu yang mengikuti
+tabel. Kini keduanya lewat perakit yang sama.
+
+**Dan `GET /api/admin/tenants` (daftar) mendapat nama tanpa berubah bentuk:**
+`TenantRow`, 9 kunci. Salah satunya — `plan_expires_at` — dikirim sejak lama
+sementara tipe lokal web menyatakan **delapan** medan. Kelas yang sama dengan
+`dev_verify_url` dan `qty_teks`. `created_at` & `plan_expires_at` kini
+diterjemahkan perakitnya ke ISO-8601, bukan diserahkan ke serialisasi.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci **+16**; tiga nama tercatat
+beralasan (ponsel tak punya layar super-admin, dan rutenya 403 untuk peran mana
+pun selain super-admin). Nol baris `lib/` berubah.
+
 ## ⚪️ Buku dana faktur akhirnya bernama: `BukuDanaFaktur` + `DanaEntri` + `TipeDana` — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: amplop

@@ -50,6 +50,100 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## ATURAN A melaporkan NOL sementara dua baris tabel telanjang berjalan di kawat — sebab ia hanya melihat argumen langsung — server + web + ponsel — 2026-09-11
+
+**Vena.** Butir antrean "salinan bentuk di web", sasaran `Tenant`. Yang
+ditemukan bukan salinannya melainkan **lubang di penjaga tertua repo ini**.
+
+**Aturan yang dilanggar sudah punya penjaga, dan penjaganya HIJAU.**
+`bentuk-balasan` ATURAN A memaku `MAKS_UTANG = 0`: tak boleh ada baris
+`db.select()` TELANJANG yang sampai ke `c.json`, sebab bentuknya lalu mengikuti
+TABEL — *"kolom yang ditambahkan besok ikut terkirim ke semua klien tanpa satu
+baris kode pun berubah. Itu bukan keputusan; itu ketiadaan keputusan."*
+
+Ia melaporkan nol. Repo ini punya **dua**.
+
+**Sebabnya jangkauan, bukan aturannya.** Yang diklasifikasi ARGUMEN LANGSUNG
+`c.json` plus sebaran di dalamnya: `c.json(baris)` tertangkap, `c.json({ ...baris })`
+tertangkap — `c.json({ x: baris })` **tidak**. Satu lapis, dan aturan
+`MAKS_UTANG = 0` yang paling tegas di repo ini jadi tak menyatakan apa pun
+untuk bentuk itu.
+
+**Terukur dari kawat**, `GET /admin/tenants/:id`:
+
+| medan | isi |
+| --- | --- |
+| `company` | **21 kunci camelCase** — baris `companies` apa adanya |
+| `cabang[]` | **16 kunci camelCase** — baris `branches` apa adanya |
+
+Dan itu berarti **satu tabel punya DUA bentuk di kawat**: `GET /company`
+menyajikan `CompanyRow` (22, dipilih penulisnya sejak #99) sementara rute ini
+menyajikan baris tabelnya; `GET /cabang` menyajikan `CabangDto` (14
+snake_case) sementara rute ini menyajikan 16 camelCase.
+
+**BUKTI YANG PALING BERSIH DARI SELURUH DERETAN INI**, sebab ia mengadu dua
+pemindai atas KODE YANG SAMA:
+
+| | pemindai LAMA | pemindai BARU |
+| --- | --- | --- |
+| kode sebelum vena (dua baris telanjang) | **HIJAU, 10 lolos** | **menuduh keduanya dengan nama tabelnya** |
+| kode sesudah vena | hijau | hijau |
+
+`modules/admin-tenants/routes.ts:192  company ← companies` dan
+`cabang ← branches`. Bukan hipotesis tentang apa yang mungkin lolos: yang lolos
+disebutkan namanya.
+
+**Temuan kedua, kelas yang sudah dikenal.** `GET /admin/tenants` mengirim
+**sembilan** kunci; tipe lokal web menyatakan **delapan** — `plan_expires_at`
+dikirim tanpa disebut siapa pun. Kelas `dev_verify_url` (#105) dan `qty_teks`
+(#106).
+
+**Temuan ketiga, yang kelima berturut-turut.** `created_at` & `plan_expires_at`
+`Date` di Drizzle, ISO di kawat. Lima putaran, lima kali, tiap kali ditemukan
+oleh ANOTASI dan tak sekali pun oleh sapuan.
+
+**Yang dikerjakan.**
+
+- **Pemindainya dilebarkan** satu lapis: properti TINGKAT ATAS sebuah amplop
+  yang nilainya Identifier telanjang kini ikut diklasifikasi. Sengaja tak lebih
+  dalam — identifier di dalam `.map(…)` sudah lewat tangan penulis, dan yang
+  bukan hasil `select()` telanjang tetap lolos dengan sendirinya sebab
+  `peta.get(nama)` hanya mengenal itu.
+- **`cabangDto()` diekstrak** jadi perakit tunggal (dulu inline dengan satu
+  pemakai; kini dua). Pola `companyRow` / `barisMaster` / `karyawanRow`.
+- **Kedua baris telanjang lewat perakit bersama** — `companyRow` & `cabangDto`.
+  Satu tabel, satu bentuk.
+- **`TenantRow` (9), `TenantDetail`, `TenantAnggota`** ke kontrak; amplopnya
+  membayar utang **19 → 18**.
+
+**Penjaga LAMA menuduh saya, dan tuduhannya tepat — lagi.**
+`sesi-cabang-dto-utuh` (#98) memaku DI MANA `CabangDto` dirakit, lewat pola
+literal inline-nya. Memindahkan perakit itu memerahkannya seketika, DUA KALI:
+sekali asersi utamanya, sekali suntikan uji-dirinya sendiri. Keduanya
+diarahkan ke rumah baru, bukan dilemahkan — yang dijaganya memang "di mana
+bentuk ini dirakit", dan yang berubah alamatnya.
+
+**Gerbang**: typecheck bersih · verify-api **3.706 / 0** (+17) · vitest
+**256 berkas / 3.128 uji** · invarian **27 / 0** · Playwright **48 lolos**.
+
+**Batas yang diakui.**
+
+- **Ini PERUBAHAN KAWAT**, dan changelog-nya 🟡 — tapi rutenya **tak punya satu
+  pemanggil pun**: web hanya memakai `PATCH`-nya, ponsel tak menyentuhnya.
+  Ditelusuri, bukan diasumsikan. Itulah yang membuat perbaikan bentuknya murah;
+  di rute yang dibaca, harganya lain.
+- **Pemindainya hanya melihat properti TINGKAT ATAS** dan hanya Identifier
+  telanjang. `c.json({ a: { b: baris } })` atau `c.json({ x: bikin(baris) })`
+  tetap tak terlihat. Disapu: nol di repo hari ini — keadaan, bukan jaminan.
+- **`GET /admin/tenants/:id` tetap tanpa pembaca.** Bentuknya kini benar dan
+  dijaga sepuluh lengan §307, tapi tak ada layar yang membuktikannya dari
+  DOM. Kalau kelak ia dibaca, lengan itulah yang sudah berdiri.
+- **`branchTipeEnum` masih tanpa padanan kontrak** — `CabangDto.tipe`
+  mengejanya sendiri (`"store" | "central_kitchen" | "kantor"`). Terlihat
+  putaran ini, tak dikerjakan; antrean.
+
+---
+
 ## Sapuan yang BERSIH — 22 pasang enum yang ternyata memang dijaga — plus buku dana yang belum bernama — server + web + ponsel — 2026-09-11
 
 **Vena.** Butir antrean "salinan bentuk di web", sasaran `DanaEntri`. Dan
@@ -13842,7 +13936,7 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **2 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+- [ ] **1 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
       bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
       diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
       **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
@@ -13862,7 +13956,8 @@ berlaku di situ).
       sana pun bukan salinannya yang paling mahal melainkan `qty_teks` yang
       disembunyikannya. `DanaEntri` dibayar #107 — dan di sana, untuk pertama
       kalinya dalam deretan ini, salinan lokalnya ternyata SETIA: yang kurang
-      cuma namanya. Sisa **2**: `StokAwalTersimpan`, `Tenant`. Berikutnya
+      cuma namanya. `Tenant` dibayar #108 — dan di sana salinannya cuma pintu
+      masuk: yang ditemukan lubang di ATURAN A `bentuk-balasan`. Sisa **1**:
       `StokAwalTersimpan`.
       (Angka "3" yang sempat tertulis di sini SALAH: daftarnya memuat lima
       nama. Disapu ulang tiap putaran sejak.) Catatan lama, masih berlaku: diukur ulang 2026-09-06
@@ -13910,6 +14005,20 @@ berlaku di situ).
       pun gerbang berubah warna. Yang menutupnya sekarang ratchet per-medan;
       yang belum ada: aturan umum "medan yang ditambahkan untuk menggantikan
       perhitungan klien wajib punya penjaga pemakaian pada putaran yang sama"
+- [ ] **Pemindai ATURAN A hanya melihat properti TINGKAT ATAS** — dilebarkan
+      #108 dari "argumen langsung `c.json`" jadi "+ properti tingkat atas yang
+      nilainya Identifier telanjang". Yang masih tak terlihat:
+      `c.json({ a: { b: baris } })` bersarang, dan `c.json({ x: bikin(baris) })`
+      lewat pembantu. Disapu: nol di repo hari ini — keadaan, bukan jaminan
+- [ ] **`GET /admin/tenants/:id` tak punya satu pemanggil pun** — bentuknya
+      kini benar dan dijaga §307, tapi tak ada layar yang membuktikannya dari
+      DOM. Ditelusuri #108: web cuma memakai `PATCH`-nya, ponsel tak
+      menyentuhnya. Entah ia layak punya layar, entah layak dicabut — keduanya
+      keputusan pemilik, bukan keputusan penyapu
+- [ ] **`branchTipeEnum` mengejakan dirinya di `CabangDto.tipe`** — union
+      `"store" | "central_kitchen" | "kantor"` diketik di dalam interface,
+      bukan sebagai type bernama, jadi sapuan pgEnum↔kontrak (#107) tak
+      melihatnya berpasangan. Satu dari empat pgEnum tanpa padanan
 - [ ] **`/forgot-password` (`{ok, dev_reset_url}`) masih tanpa tipe** —
       dikecualikan penghitung amplop sebagai pengakuan (`ok` + 2 kunci), jadi
       `dev_reset_url` masih medan tanpa nama, kelas yang sama dengan

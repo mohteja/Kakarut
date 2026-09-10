@@ -1,4 +1,7 @@
 import { zValidator } from "../../lib/validator";
+import { cabangDto } from "../branches/dto";
+import { companyRow } from "../company/routes";
+import type { TenantDetail, TenantRow } from "@kakarut/shared";
 import bcrypt from "bcryptjs";
 import { desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -76,7 +79,27 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
       })
       .from(companies)
       .orderBy(desc(companies.createdAt));
-    return c.json(rows);
+    /*
+     * Stempel waktu DITERJEMAHKAN, tak diserahkan ke serialisasi: kolomnya
+     * `timestamp` (Drizzle → `Date`) sementara yang sampai ke kawat ISO-8601.
+     * Kelas KELIMA berturut-turut sesudah `planExpiresAt` (#99), `archived_at`
+     * (#101), `waktu` penerimaan (#106), `waktu` dana (#107).
+     */
+    return c.json(
+      rows.map(
+        (r): TenantRow => ({
+          id: r.id,
+          nama: r.nama,
+          slug: r.slug,
+          plan: r.plan,
+          plan_expires_at: r.plan_expires_at === null ? null : r.plan_expires_at.toISOString(),
+          is_active: r.is_active,
+          created_at: r.created_at.toISOString(),
+          jumlah_cabang: r.jumlah_cabang,
+          jumlah_user: r.jumlah_user,
+        }),
+      ),
+    );
   })
   .post("/", zValidator("json", CreateTenantBody), async (c) => {
     const body = c.req.valid("json");
@@ -189,7 +212,21 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
       .from(memberships)
       .innerJoin(users, eq(memberships.userId, users.id))
       .where(eq(memberships.companyId, company.id));
-    return c.json({ company, cabang, anggota });
+    /*
+     * `company` & `cabang` dulu dikirim sebagai BARIS TABEL APA ADANYA —
+     * `db.select()` telanjang, 21 dan 16 kunci camelCase. Bentuknya mengikuti
+     * SKEMA, jadi kolom yang ditambahkan besok ikut terkirim tanpa ada yang
+     * memutuskannya; itu bukan keputusan, itu ketiadaan keputusan.
+     *
+     * Keduanya kini lewat perakit yang SAMA dengan rute yang menyajikannya
+     * sehari-hari (`companyRow` dari `GET /company`, `cabangDto` dari
+     * `GET /cabang`) — jadi satu tabel tak lagi punya dua bentuk di kawat.
+     */
+    return c.json({
+      company: companyRow(company),
+      cabang: cabang.map(cabangDto),
+      anggota,
+    } satisfies TenantDetail);
   })
   .patch("/:id", zValidator("json", PatchTenantBody), async (c) => {
     const body = c.req.valid("json");

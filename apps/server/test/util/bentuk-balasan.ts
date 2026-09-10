@@ -236,6 +236,31 @@ export function situsBalasan(kode?: Record<string, string>, skema?: string): Sit
           if (arg?.type === "Identifier") penentu.add(arg.name as string);
         }
       });
+      /*
+       * MEDAN AMPLOP yang nilainya sebuah baris — `c.json({ company, cabang })`.
+       *
+       * Sampai 2026-09-11 lapisan ini tak terlihat: yang diklasifikasi hanya
+       * ARGUMEN LANGSUNG `c.json` dan sebaran di dalamnya. `c.json(baris)`
+       * tertangkap; `c.json({ x: baris })` tidak — dan `MAKS_UTANG = 0` di
+       * `bentuk-balasan.test.ts` karena itu melaporkan nol atas repo yang punya
+       * DUA baris tabel telanjang di kawat: `GET /admin/tenants/:id`
+       * memulangkan `company` 21 kunci camelCase dan `cabang` 16, keduanya dari
+       * `db.select()` telanjang. Aturannya benar; jangkauannya yang kurang satu
+       * lapis.
+       *
+       * HANYA properti TINGKAT ATAS, dan hanya yang nilainya Identifier
+       * TELANJANG. Identifier di dalam `.map(…)` atau ekspresi lain bukan
+       * "bentuk balasan ditentukan tabelnya" — ia sudah lewat tangan penulis.
+       * Dan yang bukan hasil `select()` telanjang tetap lolos dengan
+       * sendirinya: `peta.get(nama)` memulangkan tabelnya HANYA untuk itu.
+       */
+      if (a0.type === "ObjectExpression") {
+        for (const prop of (a0.properties ?? []) as Simpul[]) {
+          if (prop.type !== "Property") continue;
+          const nilai = prop.value as Simpul | undefined;
+          if (nilai?.type === "Identifier") penentu.add(nilai.name as string);
+        }
+      }
 
       const titik = (c.property as Simpul).start;
       const akhirBaris = isi.indexOf("\n", titik);

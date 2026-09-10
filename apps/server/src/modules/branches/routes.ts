@@ -1,5 +1,5 @@
-import type { CabangDto } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
+import { cabangDto } from "./dto";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -118,24 +118,7 @@ export const cabangRoutes = new Hono<AppEnv>()
       // cabang dalam SATU transaksi, jadi `createdAt`-nya identik dan urutannya
       // jadi undian tiap query kalau tak dipatok.
       .orderBy(asc(branches.createdAt), asc(branches.id));
-    return c.json(
-      rows.map((r): CabangDto => ({
-        id: r.id,
-        nama: r.nama,
-        alamat: r.alamat,
-        telepon: r.telepon,
-        tipe: r.tipe,
-        central_kitchen_id: r.centralKitchenId,
-        receipt_footer: r.receiptFooter,
-        receipt_show_alamat: r.receiptShowAlamat,
-        latitude: r.latitude,
-        longitude: r.longitude,
-        radius_absen_m: r.radiusAbsenM,
-        jam_buka: r.jamBuka,
-        jam_tutup: r.jamTutup,
-        is_active: r.isActive,
-      })),
-    );
+    return c.json(rows.map(cabangDto));
   })
   /**
    * Pengaturan STRUK cabang (footer + tampil alamat) — diatur dari halaman

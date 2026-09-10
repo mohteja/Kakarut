@@ -235,6 +235,57 @@ export interface KaryawanBaruResult {
   employee_code: string;
 }
 
+/**
+ * SATU PENYEWA sebagaimana `GET /api/admin/tenants` mengirimnya (9 kunci).
+ *
+ * `plan_expires_at` sampai 2026-09-11 DIKIRIM tanpa disebut tipe mana pun:
+ * salinan lokal `TenantsPage.tsx` menyatakan delapan medan, kawat mengirim
+ * sembilan. Kelas yang sama dengan `dev_verify_url` (#105) dan `qty_teks`
+ * (#106) — medan yang ada di kawat dan tak ada di tipe mana pun.
+ *
+ * `created_at` & `plan_expires_at` `string`, bukan `Date`: kolomnya
+ * `timestamp`, dan yang sampai ke kawat ISO-8601. Kelas KELIMA berturut-turut.
+ */
+export interface TenantRow {
+  id: string;
+  nama: string;
+  slug: string;
+  plan: string;
+  /** `null` = tanpa kedaluwarsa */
+  plan_expires_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  jumlah_cabang: number;
+  jumlah_user: number;
+}
+
+/**
+ * AMPLOP `GET /api/admin/tenants/:id` — satu penyewa beserta cabang & anggotanya.
+ *
+ * Sampai 2026-09-11 amplop ini memulangkan DUA BARIS TABEL APA ADANYA:
+ * `company` 21 kunci camelCase dan `cabang` 16 — keduanya dari `db.select()`
+ * telanjang. Bentuknya mengikuti SKEMA, jadi kolom yang ditambahkan besok ikut
+ * terkirim tanpa ada yang memutuskannya.
+ *
+ * Itu persis yang ATURAN A `bentuk-balasan` larang dengan `MAKS_UTANG = 0` —
+ * dan penjaganya melaporkan NOL, sebab ia mengklasifikasi ARGUMEN LANGSUNG
+ * `c.json`. `c.json(baris)` tertangkap; `c.json({ x: baris })` tidak. Aturannya
+ * benar; jangkauannya yang kurang satu lapis.
+ */
+export interface TenantDetail {
+  company: CompanyRow;
+  cabang: CabangDto[];
+  anggota: TenantAnggota[];
+}
+
+/** Satu anggota (membership) penyewa, untuk panel super-admin. */
+export interface TenantAnggota {
+  user_id: string;
+  nama: string;
+  email: string;
+  role: UserRole;
+}
+
 export type SmtpEncryption = "none" | "ssl" | "starttls";
 
 /** Pengaturan email (SMTP) platform — GET tak pernah mengembalikan password mentah. */

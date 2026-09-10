@@ -18127,6 +18127,74 @@ ADAK306=$(echo "$R306" | jq '[.rows[]|select(.tipe=="kembali")]|length')
 cek "§306 uji-diri: bila ADA entri kembali, penjumlahan naif berbeda" "V == 1" \
   "$([ "$ADAK306" -eq 0 ] && echo 1 || { [ "$NAIF306" != "$HIT306" ] && echo 1 || echo 0; })"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §307 — PENYEWA: satu tabel, dua bentuk — dan baris telanjang yang lolos
+#        ATURAN A karena dibungkus literal
+# ═══════════════════════════════════════════════════════════════════════════
+# `bentuk-balasan` memaku ATURAN A dengan MAKS_UTANG = 0: tak boleh ada baris
+# `db.select()` TELANJANG yang sampai ke `c.json`. Ia melaporkan NOL, dan repo
+# ini punya DUA — `GET /admin/tenants/:id` memulangkan `company` (21 kunci
+# camelCase, baris `companies` apa adanya) dan `cabang` (16, baris `branches`).
+#
+# Sebabnya bukan aturannya salah melainkan jangkauannya kurang satu lapis:
+# yang diklasifikasi ARGUMEN LANGSUNG `c.json`. `c.json(baris)` tertangkap;
+# `c.json({ x: baris })` tidak. Dibuktikan: pemindai lama HIJAU atas kode yang
+# sama, pemindai baru menuduh keduanya dengan nama tabelnya.
+#
+# Keduanya kini lewat perakit yang SAMA dengan rute yang menyajikannya
+# sehari-hari — `companyRow` (dari `GET /company`, vena #99) dan `cabangDto`
+# (dari `GET /cabang`, diekstrak putaran ini). Satu tabel tak lagi punya dua
+# bentuk di kawat.
+K307=$(medan296 TenantRow)
+cek "§307 premis: kontrak TenantRow terbaca dari types.ts (9 medan)" "V == 9" \
+  "$(echo "$K307" | grep -c .)"
+R307=$(api "$SA" GET /admin/tenants)
+cek "§307 premis: ada penyewa (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R307" | jq '((length) >= 1)|if . then 1 else 0 end')"
+cek "§307 daftar penyewa == TenantRow, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R307" | jq -r '[.[]|keys[]]|unique|.[]')" "$K307")"
+# `plan_expires_at` DIPAKU BERNAMA: ia dikirim sejak lama dan tipe lokal web
+# menyatakan DELAPAN medan, bukan sembilan. Kelas `dev_verify_url` (#105).
+cek "§307 daftar membawa plan_expires_at (medan yang dulu tanpa nama)" "V == 1" \
+  "$(echo "$R307" | jq '([.[]|select(has("plan_expires_at"))]|length) == (length) | if . then 1 else 0 end')"
+# Stempel waktu ISO — kelas KELIMA berturut-turut.
+cek "§307 created_at tiap baris string ISO-8601" "V == 1" \
+  "$(echo "$R307" | jq '([.[]|select((.created_at|type)=="string" and (.created_at|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))]|length) == (length) | if . then 1 else 0 end')"
+cek "§307 plan_expires_at null atau string ISO (tak pernah objek)" "V == 1" \
+  "$(echo "$R307" | jq '([.[]|select((.plan_expires_at == null) or ((.plan_expires_at|type)=="string"))]|length) == (length) | if . then 1 else 0 end')"
+
+# ── detail: SATU TABEL, SATU BENTUK ──────────────────────────────────────
+TID307=$(echo "$R307" | jq -r '.[0].id')
+D307=$(api "$SA" GET "/admin/tenants/$TID307")
+K307D=$(medan296 TenantDetail)
+cek "§307 premis: kontrak TenantDetail terbaca (3 medan)" "V == 3" \
+  "$(echo "$K307D" | grep -c .)"
+cek "§307 amplop detail == TenantDetail, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r 'keys[]')" "$K307D")"
+# INILAH lengan yang menjaga temuannya: `company` di sini harus bentuk yang
+# SAMA dengan yang `GET /company` sajikan — bukan baris tabel apa adanya.
+K307C=$(medan296 CompanyRow)
+cek "§307 detail.company == CompanyRow, dua arah (bukan baris tabel)" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r '.company|keys[]')" "$K307C")"
+# …dan dibandingkan LANGSUNG dengan rute yang menyajikannya sehari-hari.
+cek "§307 detail.company berkunci SAMA PERSIS dengan GET /company" "V == 1" \
+  "$([ "$(echo "$D307" | jq -S '.company|keys')" = "$(api "$OWNER" GET /company | jq -S 'keys')" ] && echo 1 || echo 0)"
+K307B=$(medan296 CabangDto)
+cek "§307 premis: kontrak CabangDto terbaca (14 medan)" "V == 14" \
+  "$(echo "$K307B" | grep -c .)"
+cek "§307 premis: penyewa ini punya cabang (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(echo "$D307" | jq '((.cabang|length) >= 1)|if . then 1 else 0 end')"
+cek "§307 detail.cabang == CabangDto, dua arah (bukan baris tabel)" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r '[.cabang[]|keys[]]|unique|.[]')" "$K307B")"
+cek "§307 detail.cabang berkunci SAMA PERSIS dengan GET /cabang" "V == 1" \
+  "$([ "$(echo "$D307" | jq -S '.cabang[0]|keys')" = "$(api "$OWNER" GET /cabang | jq -S '.[0]|keys')" ] && echo 1 || echo 0)"
+K307A=$(medan296 TenantAnggota)
+cek "§307 detail.anggota == TenantAnggota, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r '[.anggota[]|keys[]]|unique|.[]')" "$K307A")"
+# Peran: panel penyewa super-admin saja.
+cek "§307 owner akses daftar penyewa → 403" "V == 403" "$(status_code "$OWNER" GET /admin/tenants)"
+cek "§307 owner akses detail penyewa → 403" "V == 403" "$(status_code "$OWNER" GET "/admin/tenants/$TID307")"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

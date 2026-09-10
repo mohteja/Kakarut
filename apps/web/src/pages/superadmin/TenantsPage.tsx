@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { TenantRow } from "@kakarut/shared";
 import { useState, type FormEvent } from "react";
 import {
   ErrorText,
@@ -12,16 +13,6 @@ import {
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
 
-interface Tenant {
-  id: string;
-  nama: string;
-  slug: string;
-  plan: string;
-  is_active: boolean;
-  created_at: string;
-  jumlah_cabang: number;
-  jumlah_user: number;
-}
 
 interface FormState {
   nama: string;
@@ -35,7 +26,7 @@ export function TenantsPage() {
   const queryClient = useQueryClient();
   const { data: tenants, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["tenants"],
-    queryFn: () => api<Tenant[]>("/admin/tenants"),
+    queryFn: () => api<TenantRow[]>("/admin/tenants"),
   });
   const [form, setForm] = useState<FormState | null>(null);
   const [dibuat, setDibuat] = useState<{ email: string; password: string } | null>(null);
@@ -50,7 +41,7 @@ export function TenantsPage() {
   });
 
   const toggle = useMutation({
-    mutationFn: (t: Tenant) =>
+    mutationFn: (t: TenantRow) =>
       api(`/admin/tenants/${t.id}`, { method: "PATCH", body: { is_active: !t.is_active } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tenants"] }),
   });
