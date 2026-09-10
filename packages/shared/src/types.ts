@@ -186,6 +186,54 @@ export interface UndanganKaryawanRow {
   diundang_pada: string;
 }
 
+/**
+ * SATU BARIS KARYAWAN sebagaimana `GET /api/karyawan` mengirimnya (9 kunci,
+ * snake_case). `?arsip=true` memulangkan bentuk yang SAMA — yang berbeda cuma
+ * penyaringnya.
+ *
+ * Bentuk ini rute INTI modulnya, dan sampai 2026-09-10 ia satu-satunya di
+ * modul itu yang TIDAK ada di kontrak: tetangganya `UndanganKaryawanRow`,
+ * `AktivitasRow`, dan `KaryawanTempatDto` sudah lama di sini (17 kunci di
+ * fikstur ponsel), sementara barisnya sendiri nol. Akibatnya web mengetiknya
+ * ulang TIGA kali dengan lebar berbeda-beda — 9, 7, dan 4 medan — dan ponsel
+ * merawat cerminnya dengan tangan (`karyawan_models.dart`, yang komentarnya
+ * sendiri berbunyi "cermin GET /karyawan").
+ *
+ * `archived_at` sengaja `string`, bukan `Date`: kolomnya `timestamp` dan
+ * Drizzle menyimpulkannya `Date | null`, tapi yang sampai ke kawat ISO-8601
+ * (terukur 2026-09-10: `"2026-09-10T06:29:33.540Z"`). Perakitnya
+ * (`karyawanRow`) yang menerjemahkan, supaya tipe yang tertulis di sini adalah
+ * tipe yang benar-benar dikirim — pelajaran `planExpiresAt` pada `CompanyRow`.
+ */
+export interface KaryawanRow {
+  user_id: string;
+  nama: string;
+  email: string;
+  is_active: boolean;
+  role: UserRole;
+  branch_id: string | null;
+  /** nama cabang; `null` = belum ditempatkan (owner/admin lintas cabang) */
+  cabang: string | null;
+  /** kode absensi 8 digit; `null` hanya untuk membership yang belum di-backfill */
+  employee_code: string | null;
+  /** terisi = karyawan sudah diarsipkan (keluar; riwayat tetap tersimpan) */
+  archived_at: string | null;
+}
+
+/**
+ * Balasan 201 `POST /api/karyawan` — bukan `KaryawanRow`, dan bedanya
+ * disengaja: yang baru dibuat belum punya cabang terpetakan namanya, dan
+ * `employee_code` justru SATU-SATUNYA alasan balasan ini dibaca (ponsel
+ * memulangkannya langsung ke layar sebagai kode absen).
+ */
+export interface KaryawanBaruResult {
+  user_id: string;
+  email: string;
+  nama: string;
+  role: UserRole;
+  employee_code: string;
+}
+
 export type SmtpEncryption = "none" | "ssl" | "starttls";
 
 /** Pengaturan email (SMTP) platform — GET tak pernah mengembalikan password mentah. */

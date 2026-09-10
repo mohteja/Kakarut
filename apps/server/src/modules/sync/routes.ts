@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { bolehLihatBiaya } from "@kakarut/shared";
-import type { SyncItemResult, SyncResponse } from "@kakarut/shared";
+import type { SyncItemResult, SyncResponse, UserRole } from "@kakarut/shared";
 import { db } from "../../db/client";
 import { branches, companies, memberships, shifts, syncCommands, users } from "../../db/schema";
 import { env } from "../../config/env";
@@ -86,7 +86,7 @@ export function setSyncApp(a: { fetch: (req: Request) => Response | Promise<Resp
 /** Bentuk minimal auth yang dipakai eksekutor perintah. */
 type SyncAuth = {
   sub: string;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar" | null;
+  role: UserRole | null;
   company_id: string | null;
   branch_id: string | null;
   nama: string;

@@ -25,6 +25,61 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Baris karyawan akhirnya bernama: `KaryawanRow` (9 kunci) + `KaryawanBaruResult` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: baris yang
+> `GET /api/karyawan` pulangkan — **rute inti modulnya** — akhirnya
+> **dideklarasikan** di `types.ts`, jadi ikut Lampiran A dan fikstur kunci
+> ponsel. Balasan 201 `POST /api/karyawan` ikut bernama.
+
+**Kenapa entri ini layak dibaca meski ⚪️.** Tetangga rute ini sudah lama di
+kontrak — `UndanganKaryawanRow`, `AktivitasRow`, `KaryawanTempatDto`, **17
+kunci** di fikstur ponsel. Barisnya sendiri **nol**. Terukur 2026-09-10 dengan
+menyuntikkan satu kunci ke-10 ke `select`-nya lalu menjalankan ketiga gerbang:
+
+| gerbang | hasil dengan kunci ke-10 |
+| --- | --- |
+| `npm run typecheck` | **hijau** |
+| `npm test` (3.087 uji) | **hijau** |
+| `verify-api` (3.620 lengan) | **hijau** |
+
+Nol penjaga berubah warna. Bentuk ini bisa bertambah atau menyusut tanpa satu
+pun alat di repo mengatakannya — termasuk ke ponsel, yang merawat cerminnya
+dengan tangan (`karyawan_models.dart`, komentarnya sendiri: *"cermin GET
+/karyawan"*).
+
+**Bentuknya, apa adanya** (`GET /api/karyawan`, dan `?arsip=true` **sama
+persis** — yang berbeda cuma penyaringnya):
+
+```
+user_id  nama  email  is_active  role
+branch_id  cabang  employee_code  archived_at
+```
+
+`POST /api/karyawan` → **201** `{ user_id, email, nama, role, employee_code }`.
+Bentuknya sengaja BUKAN `KaryawanRow`: yang baru dibuat belum punya nama cabang
+terpetakan, dan `employee_code` justru satu-satunya alasan balasan ini dibaca.
+
+**Satu hal yang benar-benar diperbaiki, dan ponsel sudah benar duluan.**
+`archived_at` kolomnya `timestamp`; Drizzle menyimpulkannya `Date | null`,
+sementara yang sampai ke kawat ISO-8601 (`"2026-09-10T06:29:33.540Z"`).
+Sebelum putaran ini tak ada tipe yang menyatakan itu, jadi tak ada yang bisa
+salah — dan tak ada yang bisa benar. Kini perakit tunggal `karyawanRow` yang
+menerjemahkannya, dan kontrak menyebut `string | null`. Ponsel sudah membacanya
+`String?` sejak awal, jadi **tak ada yang perlu diubah** di sana.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci bertambah **14**
+(`KaryawanRow` 9 + `KaryawanBaruResult` 5), dan `archived_at` **dicabut** dari
+`hantuDiketahui` (36 → 35) karena kini ia ada di kontrak. Nol baris `lib/`
+berubah.
+
+**Sekalian, satu ejaan yang berhenti bercabang.** Union peran
+(`"owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar"`) punya rumah sejak
+lama — `UserRole` di `packages/shared/src/constants.ts` — tapi tak pernah punya
+gerbang. Terukur **tiga ejaan**; dua di antaranya hidup bertahun-tahun tepat di
+sebelah impor `@kakarut/shared` yang sudah ada di berkasnya sendiri. Kini
+**satu**, dan dijaga. Nilainya tidak berubah, jadi ponsel tak terpengaruh.
+
 ## 🟢 Rute BARU `POST /api/penjualan/cek-stok` — kasir bisa tahu keranjangnya akan ditolak SEBELUM menekan Bayar
 
 > Bentuk lama tidak berubah sama sekali. Yang bertambah: satu rute BACA

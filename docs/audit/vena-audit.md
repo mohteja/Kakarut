@@ -50,6 +50,125 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Rute INTI sebuah modul yang bentuknya tak dipaku SIAPA PUN — dan kunci ke-10 yang lolos ketiga gerbang — server + web + ponsel — 2026-09-10
+
+**Vena.** Butir teratas antrean: "8 tipe lokal web + 47 `api<{…}>` inline",
+yang menyebut sasaran berikutnya dengan nama — *"`KaryawanRow`/`Karyawan`
+(tiga salinan satu bentuk, pola yang sama persis dengan `Company` di #99)"*.
+
+**Populasi & pengukuran.** `GET /api/karyawan` memulangkan hasil `select` apa
+adanya lewat `c.json(rows)`: **9 kolom**, terukur lewat HTTP pada DB gerbang.
+Yang mengetiknya ulang:
+
+| tempat | lebar | nama |
+| --- | --- | --- |
+| `KaryawanPage.tsx` | **9** | `Karyawan` |
+| `PenyimpananPage.tsx` | **7** | `KaryawanRow` |
+| `TambahStokDariMenuPage.tsx` | **4** | `Karyawan` |
+| `karyawan_models.dart` (ponsel) | 9 | `KaryawanRow` — cermin tangan |
+
+Dan yang membuat vena ini berbeda dari #99 bukan salinannya melainkan
+**siapa yang menjaganya: tak seorang pun.** Tetangga rute ini sudah lama di
+kontrak — `UndanganKaryawanRow`, `AktivitasRow`, `KaryawanTempatDto`, **17
+kunci** di fikstur ponsel. Barisnya sendiri **nol kunci**. Kelas yang sama
+dengan #96 (*"sudah di shared" ≠ "terlihat kontrak"*), tapi sekali lagi lebih
+dalam: di sini ia tak pernah di shared sama sekali.
+
+**Detektornya dibuktikan bisa menuduh — dan yang dibuktikan justru bahwa
+SEBELUMNYA tak ada yang menuduh.** Satu kunci ke-10 (`kunci_karangan_101`)
+disuntikkan ke `select` rutenya, lalu ketiga gerbang dijalankan penuh atas
+kode yang benar-benar mengirimnya (dibuktikan dari kawat: `keys_unsorted`
+memulangkan sepuluh nama):
+
+| gerbang | hasil |
+| --- | --- |
+| `npm run typecheck` | **hijau** |
+| `npm test` — 3.087 uji / 251 berkas | **hijau** |
+| `bash scripts/verify-api.sh` — **3.620 lengan** | **hijau** |
+
+Nol penjaga berubah warna. Ini **lebih buruk** daripada temuan #99, tempat
+§273 setidaknya memaku 18 dari 22 kunci (searah, dan empat kunci menyelinap
+lewat celah searah itu); di sini yang memaku **0 dari 9**.
+
+**Temuan kedua, yang muncul justru karena bentuknya ditulis.** `archived_at`
+kolomnya `timestamp` → Drizzle menyimpulkan `Date | null`, sementara yang
+sampai ke kawat ISO-8601 (terukur: `"2026-09-10T06:29:33.540Z"`). Sebelum
+putaran ini tak ada tipe mana pun yang menyatakannya, jadi **tak ada yang bisa
+salah — dan tak ada yang bisa benar**. Persis kelas `planExpiresAt` yang
+anotasi `CompanyRow` temukan di #99, dan sekali lagi anotasinya yang
+menemukannya, bukan pembacaan. Ponsel sudah membacanya `String?` sejak awal,
+jadi ia benar duluan tanpa pernah bisa membuktikannya.
+
+**Temuan ketiga, sambil lalu dan berangka.** Union peran punya rumah sejak
+lama — `UserRole` di `packages/shared/src/constants.ts` — tanpa gerbang.
+Disapu: **tiga ejaan**. Dua di antaranya (`FormState.role` di web,
+`SyncAuth.role` di server) hidup bertahun-tahun **tepat di sebelah impor
+`@kakarut/shared` yang sudah ada di berkasnya sendiri** — bukan tak tahu
+rumahnya, hanya tak pernah ditagih. Kini **satu**, dan ditagih.
+
+**Yang dikerjakan.**
+
+- **`packages/shared/src/types.ts`**: `KaryawanRow` (9 medan) dan
+  `KaryawanBaruResult` (5 medan, balasan 201 `POST /karyawan` — sengaja BUKAN
+  `KaryawanRow`: yang baru dibuat belum punya nama cabang terpetakan, dan
+  `employee_code` satu-satunya alasan balasan itu dibaca ponsel).
+- **`users/routes.ts`**: `karyawanRow()` — satu-satunya perakit, memetakan
+  kolom demi kolom, dan **menerjemahkan** `archived_at` alih-alih
+  menyerahkannya ke `JSON.stringify`. Balasan POST dinyatakan
+  `KaryawanBaruResult`, bukan objek anonim.
+- **Web**: ketiga salinan lenyap. Yang butuh lebar penuh memakai `KaryawanRow`;
+  dua pemakai sempit **menyatakan pilihannya** lewat `Pick` (`PetugasRow` 7,
+  `PelaksanaRow` 4) — bukan menyalin bentuk yang kebetulan lebih pendek.
+- **Alat ukur antreannya ikut diperbaiki.** Sapuan "tipe lokal web" tak bisa
+  membedakan **salinan bentuk** dari **alias kontrak** (`type X = Pick<…>`),
+  dan itulah kenapa angka pertamanya dulu terlalu besar. Kini dibedakan:
+  **salinan 8 → 7**, alias 10 (yang dibayar #95/#97/#99 plus dua dari putaran
+  ini), inline `api<{…}>` tetap **47**.
+- **Ponsel**: fikstur kunci **+14**; `archived_at` **dicabut** dari
+  `hantuDiketahui` (**36 → 35**) sebab kini ia di kontrak. **Nol baris `lib/`**
+  berubah — ponsel memang sudah membaca kesembilan kuncinya.
+
+**Penjaganya.** `karyawan-row-utuh.test.ts` (7 uji): literal perakit ==
+kontrak **dua arah**; `archived_at` dipetakan DAN rutenya berhenti memulangkan
+baris mentah; balasan 201 == `KaryawanBaruResult` dua arah; ketiga salinan web
+lenyap dan dua pemakai sempit memakai `Pick`; union peran dieja satu kali.
+**§301** (13 lengan) memakai `selisih296` — **dua arah sejak lahir**, bukan
+`has($k)`; pelajaran §273 dipakai di muka alih-alih ditemukan lagi.
+
+**Bukti merah, empat statis + satu HTTP**, tiap berkas dipulihkan `cmp`:
+kunci ke-10 di perakit (**2 uji merah**) · `archived_at` dilewatkan mentah
+(1) · web menyalin bentuknya lagi (1) · ejaan kedua union peran kembali (1).
+Dan yang paling penting — **kasus yang memulai vena ini dijalankan ulang
+melawan §301**: kunci ke-10 yang dulu lolos 3.620 lengan kini memerahkan
+**tiga** (`kunci kawat == KaryawanRow`, `?arsip=true bentuk sama`,
+`karyawan baru bentuk sama`).
+
+**Gerbang** (jalan pertama, hijau): typecheck bersih · verify-api
+**3.633 / 0** (+13) · vitest **252 berkas / 3.097 uji** · invarian **27 / 0** ·
+Playwright **48 lolos**. Cakupan rute **identik** dengan rekaman — nol rute
+baru; yang bertambah cuma cara membacanya.
+
+**Batas yang diakui.**
+
+- **Bentuk kawatnya tak berubah satu byte pun** — dibuktikan dengan
+  membandingkan `keys_unsorted` sebelum & sesudah (9 kunci, urutan sama) dan
+  balasan 201 (5 kunci). Yang bertambah keterbacaannya, bukan datanya.
+- **`?arsip=true` diuji, `GET /karyawan/:userId/aktivitas` dan `/tempat`
+  tidak** — keduanya sudah punya tipe kontrak, jadi di luar vena ini.
+- **`POST /karyawan/undang` (201, 3 kunci) dan `PUT /:userId/tempat`
+  (`{ok, assigned}`) masih tanpa DTO.** Keduanya kecil dan tak dibaca ponsel
+  selain sebagai keberhasilan; masuk antrean, tidak diselundupkan ke putaran
+  ini.
+- **Sapuan union peran berkunci EJAAN, bukan tipe.** Ia menangkap enam nilai
+  yang berurutan; sebuah `Exclude<UserRole, "owner">` atau union yang menyusun
+  ulang urutannya lolos. Batas yang diketahui, bukan yang diukur.
+- **Penjaga "salinan vs alias" hidup di skrip pengukuran, bukan di repo.**
+  Yang di repo cuma menagih tiga berkas yang SUDAH dibayar; berkas keempat yang
+  kelak menyalin bentuk ini lagi tak tertagih siapa pun. Kelas yang sama dengan
+  butir antrean "pemindai `bentuk-balasan` berlingkup satu fungsi".
+
+---
+
 ## RILIS 2026-09-10 — sembilan vena tayang, dan gerbang yang hasilnya bergantung pada sisa jalan sebelumnya — web + ponsel — 2026-09-10
 
 - **Diminta pemilik**: *"rilis production"*. Aturan berdirinya — tak ada yang
@@ -13206,8 +13325,17 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **8 tipe lokal web + 47 `api<{…}>` inline — rute INTI tanpa tipe
-      bersama** — diukur ulang 2026-09-06 SESUDAH #99. Angka "15" pada
+- [ ] **7 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+      bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
+      diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
+      **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
+      sebelumnya sebagai utang yang tersisa. Kini dibedakan — salinan **8 → 7**
+      (`Karyawan`/`KaryawanRow` dibayar #101), alias 10. Sisa salinan:
+      `Kategori` 3×, `SistemStatus` 2×, `PenerimaanRow`, `DanaEntri`,
+      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. Berikutnya `Kategori`
+      (tiga salinan satu bentuk — pola yang sama persis dengan `Company` di #99
+      dan `Karyawan` di #101). Catatan lama, masih berlaku: diukur ulang
+      2026-09-06 SESUDAH #99. Angka "15" pada
       pengukuran pertama terlalu besar: sapuan `api<T>` memungut `Record`/`Pick`
       (bawaan TS) dan `AuthState`/`Cabang` yang sejak #95 sudah jadi ALIAS.
       Dari 12 yang benar-benar lokal, #97 membayar tiga (`SaleResult` + dua
@@ -13218,6 +13346,22 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
+- [ ] **`POST /karyawan/undang` (201, 3 kunci) & `PUT /karyawan/:userId/tempat`
+      (`{ok, assigned}`) masih tanpa DTO** — dua sisa modul karyawan sesudah
+      #101 menamai barisnya dan balasan pembuatannya. Keduanya kecil dan tak
+      dibaca ponsel selain sebagai keberhasilan, jadi biayanya rendah — tapi
+      "kecil" persis alasan yang membuat bentuk `GET /karyawan` tak pernah
+      ditulis selama bertahun-tahun
+- [ ] **Penjaga "salinan vs alias" hidup di skrip pengukuran, bukan di repo** —
+      `karyawan-row-utuh` menagih TIGA berkas yang sudah dibayar; berkas
+      keempat yang kelak menyalin bentuk itu lagi tak tertagih siapa pun. Yang
+      dibutuhkan aturan statis "interface web yang bentuknya == bentuk kontrak
+      = salinan", dan itu menuntut informasi tipe, bukan regex. Kelas yang sama
+      dengan butir `bentuk-balasan` berlingkup satu fungsi di bawah
+- [ ] **Sapuan union peran berkunci EJAAN, bukan tipe** — lahir #101. Ia
+      menangkap keenam nilai yang berurutan; `Exclude<UserRole, "owner">` atau
+      union yang menyusun ulang urutannya lolos. Batas yang diketahui, bukan
+      yang diukur
 - [ ] **Ponsel tak punya gerbang Lite/Pro sama sekali** — terukur 2026-09-06:
       `mode`, `plan`, `isActive` nol kali dibaca di seluruh `lib/`, dan tak ada
       konsep `isPro` di sana. Web memakainya untuk menyembunyikan fitur

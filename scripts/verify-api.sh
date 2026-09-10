@@ -17761,6 +17761,75 @@ cek "§300 setelan MATI: kekurangan TETAP dihitung & disebut namanya" "V == 1" \
 cek "§300 setelan MATI: keranjang yang SAMA benar-benar diterima (201) — gerbang, bukan penghapus" "V == 201" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}")"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §301 — BARIS KARYAWAN: rute INTI yang bentuknya tak dipaku SIAPA PUN
+# ═══════════════════════════════════════════════════════════════════════════
+# Diukur 2026-09-10, dan angkanya yang membuat seksi ini ada. Sebuah kunci
+# ke-10 disuntikkan ke `select` milik `GET /karyawan`, lalu ketiga gerbang
+# dijalankan penuh:
+#
+#   typecheck hijau · npm test 3.087 hijau · verify-api 3.620 lengan hijau
+#
+# NOL penjaga berubah warna. Lebih buruk daripada temuan §273 di vena #99 —
+# di sana setidaknya 18 dari 22 kunci dipaku (searah); di sini 0 dari 9.
+# Tetangganya sudah lama di kontrak (`UndanganKaryawanRow`, `AktivitasRow`,
+# `KaryawanTempatDto`), barisnya sendiri tidak.
+#
+# Karena itu seksi ini DUA ARAH sejak lahir — `selisih296`, bukan `has($k)`.
+# Pelajaran §273: `has()` menangkap kunci yang DICABUT dan tak pernah yang
+# DITAMBAH, dan itulah cara empat kunci `/company` menyelinap masuk.
+K301=$(medan296 KaryawanRow)
+cek "§301 premis: kontrak KaryawanRow terbaca dari types.ts (9 medan)" "V == 9" \
+  "$(echo "$K301" | grep -c .)"
+R301=$(api "$OWNER" GET /karyawan)
+cek "§301 premis: daftar karyawan tidak kosong (kalau kosong, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R301" | jq '(length >= 1) | if . then 1 else 0 end')"
+# DUA ARAH: kunci di kawat == medan di kontrak, tak ada yang tertinggal di
+# salah satu sisi. Diambil dari GABUNGAN semua baris, bukan baris pertama —
+# baris yang satu bisa kehilangan kunci yang lain punya.
+cek "§301 kunci kawat == KaryawanRow, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R301" | jq -r '[.[]|keys[]]|unique|.[]')" "$K301")"
+# `?arsip=true` bentuknya SAMA — yang berbeda cuma penyaringnya. Kalau kelak
+# ia mengirim bentuk lain, ponsel yang memakai satu `fromJson` untuk keduanya
+# akan diam-diam kehilangan medan.
+R301A=$(api "$OWNER" GET "/karyawan?arsip=true")
+cek "§301 ?arsip=true memakai bentuk yang SAMA (dua arah)" "V == 0" \
+  "$(selisih296 "$(echo "$R301A" | jq -r '[.[]|keys[]]|unique|.[]')" "$K301")"
+# `archived_at` DI KAWAT harus ISO string, bukan objek: kolomnya `timestamp`
+# (Drizzle → `Date`), dan sebelum `karyawanRow` ada, tipe mana pun yang
+# menyatakannya akan berbohong. Diuji pada baris yang benar-benar diarsipkan.
+UARS301=$(echo "$R301" | jq -r '[.[]|select(.role=="cashier")][0].user_id')
+api "$OWNER" PATCH "/karyawan/$UARS301" '{"arsip":true}' > /dev/null
+ARS301=$(api "$OWNER" GET "/karyawan?arsip=true" | jq -r --arg u "$UARS301" '[.[]|select(.user_id==$u)][0].archived_at')
+cek "§301 archived_at terisi bertipe string (bukan objek Date)" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq -r --arg u "$UARS301" '([.[]|select(.user_id==$u)][0].archived_at|type=="string")|if . then 1 else 0 end')"
+cek "§301 archived_at berbentuk ISO-8601" "V == 1" \
+  "$(printf '%s' "$ARS301" | grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$')"
+api "$OWNER" PATCH "/karyawan/$UARS301" '{"arsip":false}' > /dev/null
+cek "§301 pemulihan arsip: barisnya kembali ke daftar berjalan" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq -r --arg u "$UARS301" '([.[]|select(.user_id==$u)]|length==1)|if . then 1 else 0 end')"
+cek "§301 baris berjalan: archived_at null (bukan hilang)" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq -r --arg u "$UARS301" '([.[]|select(.user_id==$u)][0]|has("archived_at") and .archived_at==null)|if . then 1 else 0 end')"
+# Balasan 201 `POST /karyawan` — bentuk KEDUA modul ini yang tak pernah bernama.
+# Ponsel membacanya untuk SATU kunci (`employee_code`, kode absen yang langsung
+# ditampilkan), jadi bentuk yang menyempit di sini menghapus angka dari layar.
+K301B=$(medan296 KaryawanBaruResult)
+cek "§301 premis: kontrak KaryawanBaruResult terbaca (5 medan)" "V == 5" \
+  "$(echo "$K301B" | grep -c .)"
+CB301=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+N301=$(api "$OWNER" POST /karyawan "{\"nama\":\"Vena 301\",\"email\":\"vena301@basooopa.id\",\"password\":\"Vena301Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB301\"}")
+cek "§301 balasan 201 == KaryawanBaruResult, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$N301" | jq -r 'keys[]')" "$K301B")"
+cek "§301 karyawan baru muncul di daftar dengan bentuk yang sama" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /karyawan | jq -r --arg u "$(echo "$N301" | jq -r .user_id)" '[.[]|select(.user_id==$u)][0]|keys[]')" "$K301")"
+# Peran yang dikirim harus ada di kosakata kontrak — union yang sejak putaran
+# ini dieja SATU kali (`UserRole` di constants.ts, terukur 3 ejaan → 1).
+PERAN301=$(awk '/^export type UserRole = /{gsub(/.*= /,"");gsub(/;$/,"");gsub(/ \| /,"\n");gsub(/"/,"");print}' packages/shared/src/constants.ts | sort -u)
+cek "§301 premis: kosakata UserRole terbaca dari shared (6 nilai)" "V == 6" \
+  "$(echo "$PERAN301" | grep -c .)"
+cek "§301 tiap role yang dikirim ada di kosakata UserRole" "V == 0" \
+  "$(comm -23 <(api "$OWNER" GET /karyawan | jq -r '[.[]|.role]|unique|.[]' | sort -u) <(printf '%s\n' "$PERAN301") | bocorkan)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"
