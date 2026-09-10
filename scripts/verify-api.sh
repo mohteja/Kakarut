@@ -18269,6 +18269,49 @@ cek "§308 tanggal amplop == tanggal item TERBESAR (bukan hari ini)" "V == 1" \
 cek "§308 tiap tanggal item berbentuk YYYY-MM-DD" "V == 1" \
   "$(echo "$A308" | jq '([.items[]|select(.tanggal|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))]|length) == (.items|length)|if . then 1 else 0 end')"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §309 — TIPE NILAI DI KAWAT, DIADU DENGAN TIPE DI KONTRAK
+# ═══════════════════════════════════════════════════════════════════════════
+# Sembilan putaran memaku KUNCI balasan dua arah dan tak sekali pun TIPE
+# NILAINYA. `qty: "15000"` alih-alih `15000` lolos setiap penjaga yang ada:
+# kuncinya benar, jumlahnya benar, namanya benar.
+#
+# Dan hal itu punya jalan masuk yang nyata: baris `db.execute(sql`…`)`
+# memulangkan `Record<string, unknown>`, jadi `satisfies` di rutenya tak
+# menjamin apa pun tentang isinya. Yang menjaga `numeric` jadi `number` cuma
+# SATU BARIS di `db/client.ts` (`setTypeParser(1700, parseFloat)`) — dan OID 20
+# (`bigint`) tidak terdaftar. Terukur dari kawat: `count(*)` lewat SQL mentah
+# memulangkan `"235"`, sebuah STRING. Repo ini lolos hari ini karena tiap
+# situsnya menulis `Number(…)` atau `::int` dengan tangan.
+#
+# Lengan ini tak butuh peta rute→tipe (yang memang belum ada): tiap objek
+# disidik dari HIMPUNAN KUNCI-nya, dan yang cocok satu interface `types.ts`
+# diadu medan demi medan. Yang tak tersidik DILEWATI — itu batas yang disebut,
+# dan populasinya persis vena "amplop tanpa kontrak".
+ADU309="apps/server/test/util/adu-tipe-kawat.ts"
+# PASANGAN lebih dulu: contoh benar → 0, contoh yang tipenya SENGAJA salah → 1.
+# Tanpa ini "0 selisih" tak membedakan penjaga yang bekerja dari yang mati.
+UJI309=$(npx tsx "$ADU309" --uji-diri 2>/dev/null)
+cek "§309 PASANGAN: contoh benar 0 selisih, contoh salah-tipe 1 selisih" "V == 1" \
+  "$([ "$UJI309" = "0 1" ] && echo 1 || echo 0)"
+R309=$(npx tsx "$ADU309" --ringkas --basis "$BASE/api" --owner "$OWNER" --sa "$SA" --kasir "$REISS105" 2>/tmp/adu309.err)
+KELUAR309=$?
+RINGKAS309=$(echo "$R309" | grep '^RINGKAS ' | head -1)
+cek "§309 premis: pemindainya benar-benar jalan (baris RINGKAS ada)" "V == 1" \
+  "$([ -n "$RINGKAS309" ] && echo 1 || echo 0)"
+# Rute yang 4xx diam-diam adalah sapuan yang menyusut tanpa suara — dan sapuan
+# yang menyusut LULUS tanpa memeriksa apa pun. Karena itu yang dipaku bukan
+# "≥ sekian" saja, melainkan TERAMBIL == DAFTARNYA.
+cek "§309 premis: SELURUH rute di daftarnya terambil (nol yang 4xx/5xx)" "V == 1" \
+  "$([ "$(echo "$RINGKAS309" | awk '{print $2}')" = "$(echo "$RINGKAS309" | awk '{print $3}')" ] && echo 1 || echo 0)"
+cek "§309 premis: daftar rutenya ≥ 70" "V >= 70" "$(echo "$RINGKAS309" | awk '{print $3}')"
+cek "§309 premis: interface tersidik ≥ 90" "V >= 90" "$(echo "$RINGKAS309" | awk '{print $4}')"
+cek "§309 premis: objek yang diadu ≥ 3000" "V >= 3000" "$(echo "$RINGKAS309" | awk '{print $5}')"
+cek "§309 INTI: nol nilai yang tipenya berbeda dari kontraknya" "V == 0" \
+  "$(echo "$RINGKAS309" | awk '{print $6}')"
+cek "§309 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR309"
+[ "$KELUAR309" -ne 0 ] && { echo "── selisih tipe yang dilaporkan §309 ──"; echo "$R309" | grep -v '^RINGKAS '; cat /tmp/adu309.err; }
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

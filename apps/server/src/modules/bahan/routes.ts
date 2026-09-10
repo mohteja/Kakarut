@@ -15,6 +15,7 @@ import {
   type BahanLangkahRow,
   type BahanResepRow,
   type BahanSupplierDto,
+  type BahanImportResult,
   type RakLokasi,
   type JejakBahanDto,
   type JejakBahanRow,
@@ -1153,7 +1154,7 @@ export const bahanRoutes = new Hono<AppEnv>()
         gagal.push({ nama: b.nama, alasan: alasanGagalBaris(e, "gagal ditambah") });
       }
     }
-    return c.json({ ditambah, diperbarui, dipulihkan, dilewati, gagal });
+    return c.json({ ditambah, diperbarui, dipulihkan, dilewati, gagal } satisfies BahanImportResult);
   })
   .put(
     "/:id",

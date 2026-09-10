@@ -50,6 +50,117 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kunci diadu dua arah sembilan putaran berturut-turut — TIPE NILAINYA tak sekali pun — server — 2026-09-11
+
+**Vena.** Butir antrean "padanan RUTE → TIPE belum ditegakkan mekanis", lahir
+putaran sebelumnya dari bukti merah yang GAGAL: `satisfies TransferStokDaftar`
+dicabut dari kedua rutenya dan `amplop-berkontrak` tetap hijau, sebab ia
+mencocokkan HIMPUNAN KUNCI dengan interface mana pun dan tak pernah bertanya
+apakah rutenya menyebutnya.
+
+**Populasi, disapu dengan POHON SINTAKS (`test/util/ast`), bukan regex.**
+
+| | jumlah |
+| --- | --- |
+| situs `c.json(…)` di `modules/**/routes.ts` | 296 |
+| menyebut tipe lewat `satisfies` / `as` | 18 |
+| menjangkau tipe lewat deklarasi (mis. `.map((r): X => …)`) | 68 |
+| tak menyebut tipe apa pun | 210 |
+
+Angka ketiga menyesatkan kalau dibaca sendirian — sebagian besarnya pengakuan
+`{ok, …}` dan badan galat, dua kelas yang SENGAJA di luar kontrak. Yang
+menjawab butir antrean itu potongan yang lebih tajam: **amplop yang BENTUKNYA
+cocok persis satu interface kontrak = 22, dan TUJUH di antaranya tak menyebut
+tipe itu di mana pun.** Utangnya dihitung lunas oleh `amplop-berkontrak`, dan
+tak ada apa pun yang menegakkannya.
+
+**Menegakkannya seketika melahirkan temuan.** Menambahkan `satisfies` pada
+ketujuhnya membuat typecheck memerah SATU: `AnomaliKiriman.rows` dijanjikan
+`KirimanMenggantung[]`, sementara rutenya merakitnya dari
+`daftar.map(({ total_baris, total_qty, ...r }) => r)` — SEBARAN atas baris
+`db.execute(sql`…`)`, yang tipenya `Record<string, unknown>`. Bentuk balasan
+di sana ditentukan SELECT-nya, bukan penulisnya: kolom yang ditambahkan besok
+ikut terkirim tanpa satu keputusan pun. Itu kelas yang SAMA dengan `select()`
+telanjang yang ATURAN A larang sejak lama — lewat pintu yang tak dilihat
+pemindai mana pun, sebab SQL mentah tak punya `select({…})` untuk dibaca.
+
+**Temuan kedua, dan ini yang melahirkan penjaga barunya.** Sembilan putaran
+memaku KUNCI balasan dua arah — `selisih296`, `medanInterface`, fikstur ponsel
+— dan tak sekali pun TIPE NILAINYA. `qty: "15000"` alih-alih `15000` lolos
+setiap penjaga yang ada: kuncinya benar, jumlahnya benar, namanya benar.
+
+Dan jalan masuknya nyata, terukur dari basis data sungguhan:
+
+```
+qty_stock_opname   number  600        ← numeric, lewat setTypeParser(1700)
+literal_numeric    number  1.5
+hitung_bigint      string  "235"      ← count(*), OID 20, TAK terdaftar
+```
+
+Yang menjaga `numeric` jadi `number` cuma SATU BARIS di `db/client.ts`. OID 20
+(`bigint`/`int8`) tidak terdaftar sama sekali, jadi tiap `count(*)` dari SQL
+mentah memulangkan STRING. Repo ini lolos hari ini karena tiap situsnya
+menulis `Number(…)` atau `COUNT(*)::int` **dengan tangan** — dan "dengan
+tangan" persis keadaan yang gerbang ada untuk menggantikan.
+
+**Yang dikerjakan.**
+
+- **Ketujuh situs dipaku `satisfies`**, dan yang memerah diperbaiki dengan
+  perakit tunggal `barisMenggantung()` yang menyebut kedua belas medannya satu
+  per satu. Nol perubahan kawat (kedua belas medan itu persis yang SELECT-nya
+  pulangkan); yang berubah, kolom ke-13 kelak tak bisa lolos diam-diam.
+- **Penjaga baru `adu-tipe-kawat`** — pembanding TIPE NILAI di kawat dengan
+  tipe di kontrak. Ia tak butuh peta rute→tipe (yang memang belum ada): tiap
+  objek disidik dari HIMPUNAN KUNCI-nya, dan yang cocok satu interface diadu
+  medan demi medan. Rumahnya verify-api **§309**, sebab ia butuh kawat.
+- **Penjaga atas penjaga** (`adu-tipe-kawat.test.ts`, 10 uji): verify-api
+  benar-benar memanggilnya, ketiga perannya dioper, token kasirnya `$REISS105`
+  (bukan `$KASIR` yang mati sejak §105 — pelajaran §303), dan daftar rutenya
+  **SAMA PERSIS** dengan daftar GET tanpa parameter, dua arah.
+
+**SAPUANNYA BERSIH, dan itu dinyatakan dengan detektor yang dibuktikan bisa
+menuduh — tiga kali, dua arah.**
+
+| yang disuntik | hasil |
+| --- | --- |
+| `StokRowDto.saldo: number` → `string` di KONTRAK | **merah**, 40 baris `/stok` |
+| `qty: String(row.qty)` di RUTE (server benar-benar mengirim string) | **merah**, menyebut interface, medan, tipe kontrak, nilai kawat, rutenya; keluar 1 |
+| satu rute dicabut dari daftar sapuan | **merah**, uji cakupan menyebut jalurnya |
+| `--uji-diri` dicabut dari §309 | **merah**, penjaga atas penjaga menyebutnya |
+
+Terukur bersih: **72/72 rute terambil · 102 interface tersidik · 3.861 objek
+diadu · 0 selisih.**
+
+**Batas yang diakui, dan disebut di berkasnya sendiri.**
+
+- **Yang tak tersidik DILEWATI.** Objek yang himpunan kuncinya tak cocok
+  interface mana pun tak punya pembanding — dan itu populasi vena "amplop
+  tanpa kontrak", bukan kebetulan. Kedua vena saling melengkapi persis di
+  garis itu.
+- **`sah()` memulangkan `undefined` untuk anotasi yang tak bisa dinilai dari
+  JSON saja** (union bernama, interface bersarang), dan `adu` memperlakukannya
+  sebagai LOLOS. Penjaga yang menebak menuduh kode yang benar, dan tuduhan
+  palsu mengajari orang mengabaikannya. Harganya disebut: `KonfirmasiStatus`
+  yang berisi teks karangan TIDAK tertangkap di sini — yang menjaganya
+  `status-satu-kontrak` + fikstur status ponsel.
+- **Tiga sidik dipakai dua interface** (`CustomerDetail`/`ShiftDetail`,
+  `PermintaanStokBagian`/…Perlengkapan, `PermintaanStokDaftar`/`BeliPerlengkapanDaftar`).
+  Dinilai PERMISIF: sah menurut salah satunya = lolos. Diuji langsung.
+- **Hanya GET tanpa parameter.** Rute ber-`:id` dan seluruh balasan POST/PATCH
+  di luar sapuan — mereka butuh fikstur, dan fikstur di dalam alat ukur adalah
+  cara alat ukur mulai punya pendapat. Antrean.
+- **`/penerimaan/anomali` barisnya KOSONG di DB gerbang** saat sapuan berjalan
+  (§157 menutup fikstur menggantungnya lebih awal), jadi `KirimanMenggantung`
+  tak pernah ikut terbanding. Perbaikan perakitnya dijaga typecheck, bukan
+  oleh §309.
+- **OID 20 masih tak terdaftar** di `setTypeParser`. Mendaftarkannya akan
+  mengubah `count(*)` jadi number di SELURUH repo sekaligus — perubahan sikap,
+  bukan perbaikan, dan pantas jadi keputusan sadar. Antrean.
+
+**Gerbang**: typecheck bersih · verify-api **3.731 / 0** (+8, seluruhnya §309) · vitest **258 berkas / 3.143 uji** (+1 berkas, +10 uji) · invarian **27 / 0** · Playwright **48 lolos**. §309 dari dalam gerbang: 72/72 rute, 102 interface, **3.880 objek**, 0 selisih.
+
+---
+
 ## Amplop yang tak bernama, di KEDUA ujung kawat — dan bendera yang dikirim sejak putaran 23 tanpa pernah sampai ke satu layar pun — server + web + ponsel — 2026-09-11
 
 **Vena.** Butir antrean "salinan bentuk di web", sasaran `StokAwalTersimpan` —
@@ -14114,16 +14225,34 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
-- [ ] **Padanan RUTE → TIPE belum ditegakkan mekanis** — lahir #109, terukur
-      di sana. `amplop-berkontrak` mencocokkan HIMPUNAN KUNCI sebuah `c.json`
-      dengan interface kontrak MANA PUN; ia tak pernah bertanya apakah rutenya
-      benar-benar menyebut tipe itu. Bukti merah pertama #109 gagal justru
-      karena ini: `satisfies TransferStokDaftar` dicabut dari kedua rutenya,
-      penjaganya tetap hijau. Penyimpangan bentuk tetap tertangkap (begitu
-      kuncinya berbeda, utangnya bertambah), tapi penyimpangan TIPE — `qty`
-      yang berubah jadi string, misalnya — tidak. Yang setara di ujung web
-      punya batas yang sama: `api<PenerimaanRow[]>` yang menyebut tipe SALAH
-      lolos mulus
+- [x] ~~**Padanan RUTE → TIPE belum ditegakkan mekanis**~~ — DIBAYAR #110,
+      lihat entri di atas. Terukur: 296 situs `c.json`, **22 amplop yang
+      bentuknya cocok persis satu interface**, **7** di antaranya tak menyebut
+      tipe itu di mana pun. Ketujuhnya dipaku `satisfies`, dan satu langsung
+      memerah — `AnomaliKiriman.rows` dijanjikan `KirimanMenggantung[]` tapi
+      dirakit dari SEBARAN baris SQL mentah. Arah TIPE NILAI-nya kini dijaga
+      dari kawat (`adu-tipe-kawat` + §309): 72 rute, 102 interface, 3.880
+      objek, 0 selisih. Sisa batasnya dicatat sebagai butir tersendiri di bawah
+- [ ] **§309 hanya menyapu GET TANPA PARAMETER** — 72 rute. Rute ber-`:id` dan
+      SELURUH balasan POST/PATCH/PUT di luar sapuan, sebab menembaknya menuntut
+      fikstur — dan fikstur di dalam alat ukur adalah cara alat ukur mulai
+      punya pendapat. Yang paling layak ditimbang lebih dulu: balasan tulis
+      yang bentuknya sudah bernama (`SaleResult`, `KaryawanBaruResult`,
+      `DaftarResult`), sebab di sanalah `Number(...)` paling sering ditulis
+      tangan
+- [ ] **OID 20 (`bigint`/`int8`) tak terdaftar di `setTypeParser`** — terukur
+      #110 dari basis data sungguhan: `count(*)` lewat `db.execute` memulangkan
+      `"235"`, sebuah STRING, sementara `numeric` (OID 1700) diparse jadi
+      number oleh satu baris di `db/client.ts`. Repo ini lolos hari ini karena
+      tiap situsnya menulis `Number(…)` atau `COUNT(*)::int` dengan tangan.
+      Mendaftarkan OID 20 akan mengubah SELURUH repo sekaligus — perubahan
+      sikap, bukan perbaikan, jadi ia keputusan pemilik. Yang menahan sementara
+      ini: §309 dari kawat
+- [ ] **`KirimanMenggantung` tak pernah ikut terbanding §309** — barisnya
+      KOSONG di DB gerbang saat sapuan berjalan (§157 menutup fikstur
+      menggantungnya lebih awal). Perakit barunya dijaga typecheck, bukan oleh
+      kawat. Menembaknya menuntut §309 dijalankan pada titik yang lain, atau
+      fikstur menggantung yang sengaja disisakan
 - [ ] **Spanduk pemotongan Transfer Stok belum pernah terlihat di DOM** —
       dirender #109, dibuktikan dari kawat lewat `per_page=1` (§308), tapi DB
       gerbang cuma punya 16 faktur transfer jadi benderanya tak pernah menyala

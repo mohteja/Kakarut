@@ -1,5 +1,11 @@
 import { halamanQuery } from "../../lib/halaman-query";
-import type { PenerimaanRow } from "@kakarut/shared";
+import type {
+  AnomaliKiriman,
+  KirimanMenggantung,
+  KonfirmasiStatus,
+  PenerimaanRow,
+  TutupAnomaliHasil,
+} from "@kakarut/shared";
 import { tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
@@ -101,6 +107,42 @@ const BATAS_FAKTUR_ANOMALI = 2000;
 const MENGGANTUNG = sql`g.lolos_gerbang = false
         AND g.asal_faktur IS NOT NULL
         AND g.asal_faktur <> g.branch_id`;
+
+/**
+ * SATU-SATUNYA penulis baris kiriman menggantung.
+ *
+ * Barisnya lahir dari `db.execute(sql\`…\`)`, dan baris SQL mentah tak membawa
+ * tipe apa pun — ia `Record<string, unknown>`. Sampai 2026-09-11 baris itu
+ * disebarkan apa adanya (`{ ...r }`) ke dalam balasan, jadi bentuk yang sampai
+ * ke klien ditentukan oleh SELECT-nya, bukan oleh siapa pun yang memutuskannya.
+ * Itu kelas yang SAMA dengan `select()` telanjang yang ATURAN A larang; yang
+ * membedakan cuma pintunya, dan pintu itu tak dilihat pemindai mana pun.
+ *
+ * Menyebutnya medan demi medan membuat `satisfies AnomaliKiriman` di rutenya
+ * berarti sesuatu: kolom SQL yang hilang jadi galat tipe, dan kolom baru tak
+ * ikut terkirim tanpa ada yang menuliskannya di sini lebih dulu.
+ */
+function barisMenggantung(r: Record<string, unknown>): KirimanMenggantung {
+  return {
+    id: String(r.id),
+    faktur_id: String(r.faktur_id),
+    nomor: r.nomor === null || r.nomor === undefined ? null : String(r.nomor),
+    tipe: r.tipe as JenisPengadaan,
+    status: r.status as KonfirmasiStatus,
+    qty: Number(r.qty),
+    // `waktu` kolom timestamp: pg memulangkan `Date`, dan yang dijanjikan
+    // kontrak ISO-8601. Diterjemahkan di sini, bukan diserahkan ke
+    // serialisasi JSON — kelas yang sudah lima putaran berturut-turut muncul.
+    waktu: r.waktu instanceof Date ? r.waktu.toISOString() : String(r.waktu),
+    bahan: String(r.bahan),
+    satuan: String(r.satuan),
+    posisi_sekarang:
+      r.posisi_sekarang === null || r.posisi_sekarang === undefined ? null : String(r.posisi_sekarang),
+    dikirim_dari:
+      r.dikirim_dari === null || r.dikirim_dari === undefined ? null : String(r.dikirim_dari),
+    umur_hari: Number(r.umur_hari),
+  };
+}
 
 const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() }).strict();
 
@@ -551,10 +593,14 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       jumlah,
       qty_total: Number(daftar[0]?.total_qty ?? 0),
       // Medan bantu window tak ikut keluar — ia jawaban atas populasi, bukan
-      // milik barisnya.
-      rows: daftar.map(({ total_baris: _a, total_qty: _b, ...r }) => r),
+      // milik barisnya. Dan barisnya DISEBUT medan demi medan, bukan
+      // `{ ...r }`: sebaran atas baris SQL mentah membuat bentuk balasan
+      // mengikuti SELECT-nya, jadi kolom yang ditambahkan besok ikut terkirim
+      // tanpa satu keputusan pun — kelas yang sama dengan `select()` telanjang
+      // yang ATURAN A larang, cuma lewat pintu yang tak dilihatnya.
+      rows: daftar.map(barisMenggantung),
       terpotong: jumlah > daftar.length,
-    });
+    } satisfies AnomaliKiriman);
   })
   /**
    * TUTUP kiriman menggantung — hapuskan (soft-delete → Tempat Sampah).
@@ -645,7 +691,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       // digagalkan: kalau satu id basi membatalkan seluruh permintaan, orang
       // akan mencoba lagi dengan daftar yang sama dan macet selamanya.
       dilewati: ids.length - hasil.baris.length,
-    });
+    } satisfies TutupAnomaliHasil);
   })
   /** Terima SEMUA barang kiriman → masuk stok. */
   .post("/:fakturId/terima", async (c) => {

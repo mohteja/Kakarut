@@ -5,7 +5,12 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { KaryawanBaruResult, KaryawanRow, UndanganKaryawanRow } from "@kakarut/shared";
+import type {
+  KaryawanBaruResult,
+  KaryawanRow,
+  KaryawanTempatDto,
+  UndanganKaryawanRow,
+} from "@kakarut/shared";
 import { appBaseUrl } from "../../lib/base-url";
 import { kunciAntrean } from "../../lib/kunci";
 import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
@@ -475,7 +480,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       .from(memberships)
       .where(and(eq(memberships.userId, userId), eq(memberships.companyId, auth.company_id!)));
     if (!member) throw new HTTPException(404, { message: "Karyawan tidak ditemukan" });
-    if (!member.branchId) return c.json({ assigned: [], tersedia: [] });
+    if (!member.branchId) return c.json({ assigned: [], tersedia: [] } satisfies KaryawanTempatDto);
     const tersedia = await db
       .select({ id: storageLocations.id, nama: storageLocations.nama })
       .from(storageLocations)
@@ -498,7 +503,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
         ),
       );
     const assigned = rows.map((r) => r.locId).filter((id) => tersediaIds.has(id));
-    return c.json({ assigned, tersedia });
+    return c.json({ assigned, tersedia } satisfies KaryawanTempatDto);
   })
   /**
    * Ganti seluruh penugasan tempat SO karyawan (dalam cabangnya). Menulis ke

@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import type { BranchRingkas } from "@kakarut/shared";
 import { cabangDto } from "./dto";
 import { and, asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -226,7 +227,7 @@ export const cabangRoutes = new Hono<AppEnv>()
         await seedMejaDefault(tx, auth.company_id!, b.id);
         return b;
       });
-      return c.json({ id: row.id, nama: row.nama }, 201);
+      return c.json({ id: row.id, nama: row.nama } satisfies BranchRingkas, 201);
     },
   )
   .patch(
