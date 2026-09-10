@@ -17961,6 +17961,73 @@ cek "§303 storage_mode adalah salah satu dari dua nilai kontraknya" "V == 1" \
 cek "§303 owner akses panel sistem → 403" "V == 403" "$(status_code "$OWNER" GET /admin/sistem)"
 cek "§303 kasir akses panel sistem → 403" "V == 403" "$(status_code "$REISS105" GET /admin/sistem)"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §304 — AMPLOP DAFTAR: dua pintu, satu bentuk, dan medan yang dikirim tanpa nama
+# ═══════════════════════════════════════════════════════════════════════════
+# `/register` dan `/resend-verification` memulangkan bentuk yang SAMA PERSIS,
+# dan itu SYARAT — bukan kebetulan. Respons yang berbeda antar pintu membuka
+# kembali enumerasi akun yang seluruh rute di sekitarnya susah payah tutup.
+# §299 sudah memaku kosakata `sebab`-nya; yang tak pernah dipaku siapa pun:
+# HIMPUNAN KUNCINYA.
+#
+# Terukur 2026-09-11: `dev_verify_url` DIKIRIM berdampingan dengan
+# `dev_verify_kode` yang disebut, tapi tak dideklarasikan di mana pun — tipe
+# lokal web menyatakan lima medan, kawat mengirim enam, dan ponsel mencatatnya
+# sebagai hantu beralasan. Ia lolos penghitung amplop pula: dua kunci dev
+# menumpang sebaran bersyarat (`...(dev ? {…} : {})`), jadi pemindainya membaca
+# empat kunci dan mengecualikannya sebagai pengakuan `{ok, …}`.
+#
+# IP SENDIRI, dan sebabnya sudah tertulis dua kali di berkas ini. `batasRegister`
+# berkuota 20/IP/jam; skrip ini memakai hampir semuanya, dan §304 berjalan
+# PALING AKHIR — jadi jalan pertamanya memerah TIGA lengan dengan pendaftaran
+# yang dijawab 429, persis kegagalan yang menimpa §299 versi pertama dan yang
+# komentar `daftar_verif` peringatkan ("berjalan TEPAT DI TEPI kuota itu").
+# Pola `X-Forwarded-For` ini dipinjam dari §284/§285/§299.
+XFF304="X-Forwarded-For: 203.0.113.104"
+reg304() { curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -H "$XFF304" -d "$1"; }
+rs304() { curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' -H "$XFF304" -d "$1"; }
+K304=$(medan296 DaftarResult)
+cek "§304 premis: kontrak DaftarResult terbaca dari types.ts (6 medan)" "V == 6" \
+  "$(echo "$K304" | grep -c .)"
+# Email BARU: jalur yang benar-benar mengirim kode, jadi blok dev ikut terisi.
+# `@example.com` & unik per jalan, sebagaimana §299 — supaya tak menabrak akun
+# uji lain di seksi mana pun.
+E304="vena304-$(date +%s)@example.com"
+R304=$(reg304 "{\"nama\":\"Uji 304\",\"email\":\"$E304\",\"password\":\"Rahasia304!\"}")
+cek "§304 premis: pendaftaran barunya berhasil (kalau 429, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R304" | jq '(.ok == true)|if . then 1 else 0 end')"
+cek "§304 /register == DaftarResult, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R304" | jq -r 'keys[]')" "$K304")"
+# `dev_verify_url` DIPAKU BERNAMA — dan bedanya dengan yang sudah ada layak
+# disebut supaya lengan ini tak terbaca lebih besar dari yang benar. §106f dan
+# §281 sudah MEMAKAI nilainya, jadi kalau ia dicabut keduanya ikut memerah
+# (terukur: pencabutannya memerahkan 7 lengan, 4 di antaranya lengan lama).
+# Yang TAK pernah ada: satu pun asersi bahwa NAMANYA milik sebuah bentuk yang
+# dideklarasikan. Lengan lama menangkap "medannya hilang"; ia tak akan
+# menangkap medan yang DITAMBAH, diganti nama, atau bercabang antar-pintu.
+cek "§304 /register membawa dev_verify_url (medan yang dulu tanpa nama)" "V == 1" \
+  "$(echo "$R304" | jq '(has("dev_verify_url") and (.dev_verify_url|type == "string"))|if . then 1 else 0 end')"
+cek "§304 dev_verify_kode & dev_verify_url datang BERSAMA, tak pernah sendiri" "V == 1" \
+  "$(echo "$R304" | jq '(has("dev_verify_kode") == has("dev_verify_url"))|if . then 1 else 0 end')"
+# Kirim ulang pada email yang SAMA: jaraknya menahan, jadi blok dev TAK ada —
+# dan justru itu bentuk yang perlu dipaku, sebab medan opsional yang hilang
+# adalah cara bentuk diam-diam bercabang jadi dua.
+U304=$(rs304 "{\"email\":\"$E304\"}")
+cek "§304 kirim ulang (jarak menahan): tiap kunci ADA di DaftarResult" "V == 0" \
+  "$(comm -23 <(echo "$U304" | jq -r 'keys[]' | sort -u) <(printf '%s\n' "$K304") | bocorkan)"
+cek "§304 kirim ulang tetap membawa keempat medan WAJIB" "V == 1" \
+  "$(echo "$U304" | jq '(has("ok") and has("sebab") and has("message") and has("retry_after_detik"))|if . then 1 else 0 end')"
+# DUA PINTU, SATU BENTUK — dipaku dengan membandingkan keduanya langsung.
+# Kalau salah satunya kelak bercabang, enumerasi akun terbuka lagi lewat selisih
+# BENTUK, bukan lewat isi.
+E304B="vena304b-$(date +%s)@example.com"
+R304B=$(reg304 "{\"nama\":\"Uji 304b\",\"email\":\"$E304B\",\"password\":\"Rahasia304!\"}")
+U304B=$(rs304 "{\"email\":\"tak-ada-304-$(date +%s)@example.com\"}")
+cek "§304 kirim ulang email TAK DIKENAL: bentuknya sama dengan yang dikenal" "V == 1" \
+  "$([ "$(echo "$U304" | jq -S 'keys')" = "$(echo "$U304B" | jq -S 'keys')" ] && echo 1 || echo 0)"
+cek "§304 /register email BARU: bentuknya sama dengan pendaftaran baru lain" "V == 1" \
+  "$([ "$(echo "$R304" | jq -S 'keys')" = "$(echo "$R304B" | jq -S 'keys')" ] && echo 1 || echo 0)"
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

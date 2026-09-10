@@ -25,6 +25,39 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Balasan `/register` & `/resend-verification` akhirnya bernama: `DaftarResult` (6 kunci, termasuk `dev_verify_url`) — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: amplop netral kedua
+> pintu daftar akhirnya **dideklarasikan** di `types.ts`, jadi ikut Lampiran A
+> dan fikstur kunci ponsel — termasuk satu medan yang selama ini **dikirim
+> tanpa pernah disebut tipe mana pun**.
+
+**Yang layak dicek meski ⚪️: `dev_verify_url`.** Ia dikirim berdampingan
+dengan `dev_verify_kode` yang memang disebut, tapi tak ada tipe yang
+menyatakannya — web mendeklarasikan lima medan, kawat mengirim enam, dan
+ponsel mencatatnya di `hantuDiketahui` justru karena ia tak punya rumah. Kini
+keduanya di kontrak, dan **dicabut dari daftar hantu** (36 → 33 bersama
+entri lain).
+
+Bentuknya, apa adanya — **sama persis di kedua pintu**, dan itu syarat bukan
+kebetulan (respons yang berbeda antar pintu membuka kembali enumerasi akun):
+
+```
+ok  sebab  message  retry_after_detik
+dev_verify_kode?  dev_verify_url?     ← hanya di dev (email belum diatur)
+```
+
+Satu pengecualian yang tak berubah: `/register` untuk akun yang **sudah
+terverifikasi dengan password yang cocok** memulangkan SESI (`SesiLogin`) plus
+`sudah_aktif: true`, bukan bentuk ini. Pembeda yang dipakai kedua klien tetap
+`"token" in hasil`.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci bertambah **6**; ponsel sudah
+mengurai lima dari enam medannya. Yang keenam (`ok`) tercatat beralasan: ia
+selalu `true` di kedua pintu — bentuknya netral justru supaya tak ada yang bisa
+dibedakan darinya — jadi membacanya tak menambah satu keputusan pun di layar.
+Yang dipakai untuk bercabang tetap `sebab`. Nol baris `lib/` berubah.
+
 ## ⚪️ Amplop panel sistem akhirnya bernama: `SistemStatusDto` (6 kunci) + `MigrasiStatusDto` / `MigrasiEntriDto` — tak ada perubahan di kawat
 
 > Tidak ada bentuk balasan yang berubah. Yang berubah: amplop

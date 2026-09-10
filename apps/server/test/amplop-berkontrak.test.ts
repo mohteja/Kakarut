@@ -45,7 +45,11 @@ const TIPE = "packages/shared/src/types.ts";
  * UTANG YANG DIIZINKAN — hanya boleh turun.
  *
  * 21 saat diukur dengan pemindai yang BENAR; `GET /admin/sistem` dibayar
- * putaran ini → 20.
+ * 2026-09-10 → 20. Sehari kemudian pemindainya diperbaiki lagi (ia buta
+ * terhadap sebaran bersyarat, lihat `kunciSebaranBersyarat`) → **22**, lalu
+ * kedua amplop `/auth` dibayar → **20** lagi. Angkanya kembali ke tempat yang
+ * sama, tapi yang DILIHATNYA bertambah dua — dan itulah yang membedakan
+ * ratchet dari angka yang kebetulan tak berubah.
  *
  * Angka 19 yang sempat kutulis salah, dan salahnya instruktif: sapuan Python
  * pertamaku menuntut TITIK DUA untuk mengenali kunci, jadi properti ringkas
@@ -95,6 +99,43 @@ export function bentukKontrak(tipe: string): Set<string> {
   return keluar;
 }
 
+/** Isi literal `{ … }` yang dimulai di `awal`, termasuk kurung penutupnya. */
+function badanLiteral(s: string, awal: number): string {
+  let d = 0;
+  for (let j = awal; j < s.length; j++) {
+    if (s[j] === "{") d++;
+    else if (s[j] === "}") {
+      d--;
+      if (d === 0) return s.slice(awal, j + 1);
+    }
+  }
+  return "";
+}
+
+/**
+ * Kunci yang HANYA muncul lewat sebaran bersyarat — `...(x ? { a, b } : {})`.
+ *
+ * `kunciObjek` tak melihatnya, dan itu bukan cacatnya: ia mengurai kunci
+ * tingkat atas, dan kunci-kunci ini secara sintaksis ada di objek LAIN.
+ * Tapi mereka SAMPAI KE KAWAT, dan akibatnya terukur pada 2026-09-10 — sehari
+ * sesudah berkas ini lahir. Amplop `/auth/register` terbaca empat kunci
+ * (`ok, sebab, message, retry_after_detik`) sehingga lolos sebagai
+ * "pengakuan `{ok, …}` ≤ 4", padahal ia mengirim ENAM: `dev_verify_kode` dan
+ * `dev_verify_url` menumpang sebaran itu. Yang terakhir bahkan **tak
+ * dideklarasikan di mana pun** — ponsel mencatatnya sebagai hantu beralasan,
+ * dan tipe lokal web tak menyebutnya sama sekali.
+ *
+ * Jadi pengecualian yang kutulis kemarin memutuskan atas himpunan yang SALAH.
+ * Bukan ratchet-nya yang lunak; pembacanya yang rabun.
+ */
+export function kunciSebaranBersyarat(badan: string): string[] {
+  const keluar: string[] = [];
+  for (const m of badan.matchAll(/\.\.\.\([^)]*\?\s*\{([^}]*)\}/g)) {
+    for (const k of m[1].matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:/g)) keluar.push(k[1]);
+  }
+  return keluar;
+}
+
 /** Amplop `c.json({…})` berkunci ≥2 yang bentuknya tak ada di kontrak. */
 export function amplopTanpaKontrak(
   sumber: Record<string, string>,
@@ -105,7 +146,10 @@ export function amplopTanpaKontrak(
     const buta = butaKomentar(mentah);
     for (const m of buta.matchAll(/c\.json\(\s*\{/g)) {
       const i = buta.indexOf("{", m.index!);
-      const ks = [...new Set(kunciObjek(buta, i))].sort();
+      // Himpunan PENUH: kunci tingkat atas + yang menumpang sebaran bersyarat.
+      const ks = [
+        ...new Set([...kunciObjek(buta, i), ...kunciSebaranBersyarat(badanLiteral(buta, i))]),
+      ].sort();
       if (ks.length < 2) continue;
       if (bentuk.has(ks.join(","))) continue;
       if (kelasDikecualikan(ks)) continue;
@@ -186,6 +230,44 @@ describe("amplop balasan: disebut penulisnya BELUM berarti disebut kontrak", () 
     expect(sp).not.toMatch(/interface MigrationEntry\s*\{/);
   });
 
+  it("INTI: kedua amplop `/auth` bernama, dan web berhenti mengetiknya ulang", () => {
+    /*
+     * `/register` dan `/resend-verification` memulangkan bentuk yang SAMA
+     * PERSIS, dan itu syarat — bukan kebetulan. Respons yang berbeda antar
+     * pintu membuka kembali enumerasi akun yang seluruh rute di sekitarnya
+     * susah payah tutup. Satu tipe untuk keduanya memaku kesamaan itu.
+     */
+    const auth = butaKomentar(readFileSync(AKAR + MODUL + "/auth/routes.ts", "utf8"));
+    expect(
+      (auth.match(/\} satisfies DaftarResult\)/g) ?? []).length,
+      "kedua amplop /auth harus menyatakan tipenya, bukan cuma satu",
+    ).toBe(2);
+    const kontrak = medanInterface(tipe, "DaftarResult");
+    expect(kontrak.sort()).toEqual([
+      "dev_verify_kode",
+      "dev_verify_url",
+      "message",
+      "ok",
+      "retry_after_detik",
+      "sebab",
+    ]);
+    // `dev_verify_url` medan yang DIKIRIM tapi tak dideklarasikan di mana pun
+    // sampai putaran ini — kalau ia lenyap lagi dari kontrak, uji ini menyebut
+    // namanya alih-alih membiarkannya jadi hantu untuk kedua kalinya.
+    expect(kontrak, "dev_verify_url — medan yang dulu dikirim tanpa nama").toContain(
+      "dev_verify_url",
+    );
+    const ctx = butaKomentar(
+      readFileSync(AKAR + "apps/web/src/context/AuthContext.tsx", "utf8"),
+    );
+    expect(ctx, "web masih mengetik DaftarResult sendiri").not.toMatch(
+      /interface DaftarResult\s*\{/,
+    );
+    expect(ctx, "web tak menurunkan DaftarResult dari kontrak").toMatch(
+      /export type \{ DaftarResult \}/,
+    );
+  });
+
   it("PASANGAN: pemindainya menuduh — dan mengecualikan dengan alasan", () => {
     const b = new Set(["a,b"]);
     // Amplop data tanpa kontrak: TERTUDUH.
@@ -211,5 +293,28 @@ describe("amplop balasan: disebut penulisnya BELUM berarti disebut kontrak", () 
     expect(amplopTanpaKontrak({ "k.ts": "// c.json({ rows: r, total: t })" }, b)).toEqual([]);
     // Satu kunci bukan "bentuk".
     expect(amplopTanpaKontrak({ "s.ts": "return c.json({ rows: r });" }, b)).toEqual([]);
+    /*
+     * SEBARAN BERSYARAT — kelas yang membuat pemindai ini rabun selama sehari.
+     * Empat kunci tingkat atas termasuk `ok` LOLOS sebagai pengakuan; begitu
+     * dua kunci yang menumpang `...(dev ? {…} : {})` ikut dihitung, himpunannya
+     * enam dan pengecualiannya tak lagi berlaku. Diuji sebagai PERILAKU
+     * pemindainya, bukan disimpulkan dari kodenya.
+     */
+    expect(kunciSebaranBersyarat("{ ok: true, ...(dev ? { a: 1, b: 2 } : {}) }")).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(kunciSebaranBersyarat("{ ok: true }")).toEqual([]);
+    const rabun = "return c.json({ ok: true, sebab, message: m, retry_after_detik: n });";
+    const penuh =
+      "return c.json({ ok: true, sebab, message: m, retry_after_detik: n, " +
+      "...(dev ? { dev_verify_kode: k, dev_verify_url: u } : {}) });";
+    expect(amplopTanpaKontrak({ "r.ts": rabun }, b), "empat kunci + ok = pengakuan").toEqual([]);
+    expect(
+      amplopTanpaKontrak({ "p.ts": penuh }, b),
+      "enam kunci — pengecualian pengakuan tak lagi berlaku",
+    ).toEqual([
+      "p.ts:1 [dev_verify_kode,dev_verify_url,message,ok,retry_after_detik,sebab]",
+    ]);
   });
 });

@@ -1659,6 +1659,7 @@ import type {
   PengajuanKategori,
   PengajuanStatus,
   ProduksiDi,
+  SebabDaftar,
   StokStatus,
   UserRole,
 } from "./constants";
@@ -1985,6 +1986,53 @@ export interface TemuanSetelanDto {
 }
 
 /** Satu entri migrasi basis data, sebagaimana panel sistem melihatnya. */
+/**
+ * BALASAN NETRAL `/api/auth/register` dan `/api/auth/resend-verification`.
+ *
+ * Kedua pintu memulangkan bentuk yang SAMA PERSIS — itu bukan kebetulan
+ * melainkan syaratnya: respons yang berbeda antar-pintu (atau antara email
+ * terdaftar dan tidak) membuka kembali enumerasi akun yang seluruh rute di
+ * sekitarnya susah payah tutup. Karena itu satu tipe, satu perakit.
+ *
+ * SATU PENGECUALIAN yang disengaja: `/register` untuk akun yang sudah
+ * terverifikasi DAN passwordnya cocok memulangkan SESI (`SesiLogin`) plus
+ * `sudah_aktif: true`, bukan bentuk ini. Pemanggil membedakannya dengan
+ * memeriksa `"token" in hasil`.
+ *
+ * `dev_verify_url` sampai 2026-09-11 DIKIRIM TAPI TAK DIDEKLARASIKAN di mana
+ * pun: tipe lokal web tak menyebutnya, dan ponsel mencatatnya sebagai hantu
+ * beralasan. Ia bukan tak terpakai — §106f dan §281 sudah membaca NILAInya,
+ * jadi mencabutnya memang memerahkan gerbang. Yang tak pernah ada: asersi
+ * bahwa NAMANYA milik sebuah bentuk yang dideklarasikan, dan itulah bedanya
+ * antara menangkap medan yang HILANG dan medan yang DITAMBAH. Ia lolos penghitung amplop pula — dua kunci dev menumpang sebaran
+ * bersyarat (`...(dev ? {…} : {})`), jadi pemindainya membaca empat kunci dan
+ * mengecualikannya sebagai pengakuan `{ok, …}`. Bukan ratchet-nya yang lunak;
+ * pembacanya yang rabun.
+ */
+export interface DaftarResult {
+  ok: boolean;
+  /**
+   * KODE keadaan — sejak 2026-09-05 kedua pintu menyebutkannya (keputusan
+   * pemilik; sebelumnya tiga belas keadaan dijawab satu kalimat netral).
+   * Yang bercabang WAJIB memakai ini, bukan mencocokkan `message`.
+   */
+  sebab: SebabDaftar;
+  message: string;
+  /**
+   * Jarak minimum sebelum kode berikutnya boleh diminta, dalam detik.
+   *
+   * Datang dari SERVER, bukan disalin ke klien: server yang menahannya, jadi
+   * angka kedua di sisi klien hanya akan menyimpang diam-diam. Nilainya TETAP
+   * untuk email mana pun — terdaftar atau tidak — jadi ia tak membocorkan apa
+   * pun.
+   */
+  retry_after_detik: number;
+  /** Hanya di dev (email belum diatur) — kode verifikasi 6 digit langsung. */
+  dev_verify_kode?: string;
+  /** Hanya di dev — tautan verifikasi siap klik, pasangan `dev_verify_kode`. */
+  dev_verify_url?: string;
+}
+
 export interface MigrasiEntriDto {
   tag: string;
   /** timestamp pembuatan berkas migrasi (dari journal drizzle) */

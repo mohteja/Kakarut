@@ -50,6 +50,103 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Ratchet yang kubuat kemarin ternyata rabun — dan medan yang dikirim tanpa pernah punya nama — server + web + ponsel — 2026-09-11
+
+**Vena.** Butir antrean "salinan bentuk di web", sasaran `DaftarResult`. Yang
+ditemukan dua hal, dan yang pertama tentang alat ukur yang **baru berumur satu
+hari**.
+
+**TEMUAN 1 — pengecualian ratchet memutuskan atas himpunan yang SALAH.**
+`amplop-berkontrak.test.ts` (#103) mengecualikan "pengakuan `{ok, …}` ≤ 4
+kunci" dengan alasan tertulis. Amplop `/auth/register` terbaca **empat** kunci
+(`ok, sebab, message, retry_after_detik`) → dikecualikan. Ia mengirim **enam**:
+`dev_verify_kode` dan `dev_verify_url` menumpang sebaran bersyarat
+`...(dev ? {…} : {})`, yang `kunciObjek` tak lihat — dan itu bukan cacat
+`kunciObjek`, sebab kunci-kunci itu secara sintaksis ada di objek LAIN.
+
+Bukan ratchet-nya yang lunak; **pembacanya yang rabun**. Disapu: dari 134
+literal `c.json` bertutup, **tiga** menyembunyikan kunci begitu — semuanya di
+`auth/routes.ts` (dua amplop verifikasi + `dev_reset_url` pada
+`/forgot-password`). Sesudah pemindainya melihat sebaran: utang **20 → 22**,
+lalu kedua amplop `/auth` dibayar → **20** lagi. Angkanya kembali ke tempat
+semula, tapi yang DILIHATNYA bertambah dua — dan itulah bedanya ratchet dari
+angka yang kebetulan tak berubah.
+
+**TEMUAN 2 — `dev_verify_url` dikirim tanpa pernah punya nama.** Tipe lokal web
+menyatakan lima medan; kawat mengirim enam. Ponsel mencatatnya di
+`hantuDiketahui` **justru karena ia tak punya rumah**, dengan alasan yang sudah
+benar sejak awal ("hanya dikirim server saat email belum dikonfigurasi").
+
+Dan di sini ada nuansa yang wajib ditulis supaya temuannya tak terbaca lebih
+besar dari yang benar: **ia bukan tak terjaga sama sekali.** §106f dan §281
+sudah membaca NILAInya, jadi mencabutnya memang memerahkan gerbang — terukur,
+pencabutannya memerahkan **7 lengan, 4 di antaranya lengan lama**. Yang tak
+pernah ada: satu pun asersi bahwa NAMANYA milik bentuk yang dideklarasikan.
+Lengan lama menangkap medan yang HILANG; tak satu pun akan menangkap medan yang
+DITAMBAH, diganti nama, atau bercabang antar-pintu.
+
+**Kenapa "bercabang antar-pintu" bukan kekhawatiran teoretis.** `/register` dan
+`/resend-verification` memulangkan bentuk yang SAMA PERSIS, dan itu **syarat**:
+respons yang berbeda antar pintu — atau antara email terdaftar dan tidak —
+membuka kembali enumerasi akun yang seluruh rute di sekitarnya susah payah
+tutup. §299 memaku kosakata `sebab`-nya sejak 2026-09-05; **himpunan kuncinya
+tak dipaku siapa pun**.
+
+**Yang dikerjakan.**
+
+- **`types.ts`**: `DaftarResult` (6 medan, `sebab`/`message`/`retry_after_detik`
+  dinaikkan dari opsional jadi WAJIB — ketiganya selalu dikirim sejak
+  2026-09-05). Kedua amplop dinyatakan `satisfies` di rutenya.
+- **Web**: salinan lokal dicabut, diekspor ulang dari kontrak supaya pemanggil
+  lama tak ikut berubah pada putaran yang sama dengan perubahan bentuknya.
+- **Pemindai amplop** kini melihat sebaran bersyarat (`kunciSebaranBersyarat`),
+  dan perilakunya diuji sebagai PERILAKU — empat kunci + `ok` lolos, enam kunci
+  tidak — bukan disimpulkan dari kodenya.
+- **Ponsel**: fikstur +6; `dev_verify_kode` & `dev_verify_url` **dicabut** dari
+  `hantuDiketahui` (35 → 33); `ok` dicatat beralasan. Nol baris `lib/`.
+
+**Penjaganya.** Enam uji di `amplop-berkontrak.test.ts` (bertambah satu untuk
+vena ini) + **§304** (10 lengan) yang mengadu kedua pintu dua arah, memaku
+`dev_verify_kode`/`dev_verify_url` datang BERSAMA, dan membandingkan bentuk
+kedua pintu **secara langsung** — supaya percabangan terdeteksi lewat selisih
+BENTUK, bukan lewat isi.
+
+**Penjaga & pengetahuan LAMA menuduh saya lagi, dan tepat lagi.** §304 jalan
+pertama memerah tiga lengan: pendaftarannya dijawab **429**. `batasRegister`
+berkuota 20/IP/jam, skrip ini memakai hampir semuanya, dan §304 berjalan paling
+akhir. Kegagalan yang **identik** dengan §299 versi pertama, dan komentar
+`daftar_verif` sudah memperingatkannya bertahun-tahun: *"berjalan TEPAT DI TEPI
+kuota itu"*. Diperbaiki dengan pola yang sudah ada — `X-Forwarded-For` sendiri,
+dipinjam dari §284/§285/§299.
+
+**Bukti merah**, tiap berkas dipulihkan `cmp`: satu amplop berhenti menyatakan
+tipenya (1) · `dev_verify_url` lenyap lagi dari kontrak (2) · web mengetiknya
+ulang (1) · dan dari kawat, mencabut `dev_verify_url` memerahkan 7 lengan.
+
+**Gerbang** (sesudah tuduhan kuota diperbaiki): typecheck bersih · verify-api
+**3.671 / 0** (+10) · vitest **254 berkas / 3.113 uji** · invarian **27 / 0** ·
+Playwright **48 lolos**.
+
+**Batas yang diakui.**
+
+- **`/forgot-password` (`{ok, dev_reset_url}`) TIDAK dibayar.** Ia tetap
+  dikecualikan sebagai pengakuan (`ok` + 2 kunci), dan `dev_reset_url` karena
+  itu masih medan tanpa nama. Keputusan pemilik 2026-09-03 menjaga netralitas
+  pintu itu, jadi menyentuhnya butuh putarannya sendiri — masuk antrean, bukan
+  diselundupkan ke sini.
+- **Pemindai sebaran hanya mengenali bentuk `...(x ? { … } : {})`.** Sebaran
+  dari variabel (`...tambahan`) atau fungsi (`...bikin()`) tetap tak terlihat.
+  Disapu: nol di repo hari ini, tapi itu keadaan — bukan jaminan.
+- **`sebab`/`message`/`retry_after_detik` dinaikkan jadi WAJIB** berdasar
+  pembacaan kode dan §299, bukan sapuan atas seluruh riwayat balasan. Kalau
+  suatu jalur lama masih memulangkannya kosong, §304 yang akan mengatakannya.
+- **Angka utang kembali ke 20**, jadi ratchet-nya sendiri tak berubah warna
+  oleh putaran ini — yang berubah cakupan pembacanya. Ratchet yang mengukur
+  dengan pembaca yang salah adalah ratchet yang menjanjikan lebih dari yang
+  diberinya, dan itu kelas yang sama dengan `has($k)` di §273.
+
+---
+
 ## "Disebut penulisnya" ≠ "disebut kontrak" — 21 amplop tanpa tipe, dan dua halaman yang menamai bentuk berbeda dengan nama yang sama — server + web + ponsel — 2026-09-10
 
 **Vena.** Butir teratas antrean menyebut sasarannya: `SistemStatus`, dua salinan
@@ -13541,7 +13638,7 @@ berlaku di situ).
       (`harga_tebakan`, `pengadaan`, `qty_setara`), 1 bacaan hantu ponsel
       (`asal_cabang`, ×2 rute). Kini di shared + Lampiran A, dijaga dua arah
       statis + §295, fikstur ponsel +61
-- [ ] **3 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
+- [ ] **4 SALINAN bentuk di web + 47 `api<{…}>` inline — rute INTI tanpa tipe
       bersama** — diukur ulang 2026-09-10 SESUDAH #101, dan alat ukurnya ikut
       diperbaiki: sapuan lama tak bisa membedakan **salinan bentuk** dari
       **alias kontrak** (`type X = Pick<…>`), jadi ia menghitung hasil vena
@@ -13555,9 +13652,12 @@ berlaku di situ).
       `StokAwalTersimpan`, `Tenant`, `DaftarResult`. `SistemStatus` (2 salinan)
       dibayar #103 — dan di sana pun bukan salinannya yang paling mahal
       melainkan bahwa KEDUANYA memakai nama yang SAMA untuk himpunan kunci yang
-      SALING LEPAS. Sisa **3**: `PenerimaanRow`, `DanaEntri`,
-      `StokAwalTersimpan`, `Tenant`, `DaftarResult`. Berikutnya `DaftarResult`
-      (ia sudah membawa `sebab` dari kontrak; bentuknya sendiri belum). Catatan lama, masih berlaku: diukur ulang 2026-09-06
+      SALING LEPAS. `DaftarResult` dibayar #105 — dan di sana pun bukan
+      salinannya yang paling mahal melainkan `dev_verify_url`, medan yang
+      dikirim tanpa pernah punya nama. Sisa **4**: `PenerimaanRow`, `DanaEntri`,
+      `StokAwalTersimpan`, `Tenant`. Berikutnya `PenerimaanRow`.
+      (Angka "3" yang sempat tertulis di sini SALAH: daftarnya memuat lima
+      nama. Disapu ulang tiap putaran sejak.) Catatan lama, masih berlaku: diukur ulang 2026-09-06
       SESUDAH #99. Angka "15" pada
       pengukuran pertama terlalu besar: sapuan `api<T>` memungut `Record`/`Pick`
       (bawaan TS) dan `AuthState`/`Cabang` yang sejak #95 sudah jadi ALIAS.
@@ -13569,6 +13669,15 @@ berlaku di situ).
       `Tenant`, `DaftarResult` — plus 47 `api<{…}>` inline tanpa nama.
       Berikutnya `KaryawanRow`/`Karyawan` (tiga salinan satu bentuk, pola yang
       sama persis dengan `Company` di #99)
+- [ ] **`/forgot-password` (`{ok, dev_reset_url}`) masih tanpa tipe** —
+      dikecualikan penghitung amplop sebagai pengakuan (`ok` + 2 kunci), jadi
+      `dev_reset_url` masih medan tanpa nama, kelas yang sama dengan
+      `dev_verify_url` yang dibayar #105. Keputusan pemilik 2026-09-03 menjaga
+      netralitas pintu itu, jadi menyentuhnya butuh putarannya sendiri
+- [ ] **Pemindai sebaran hanya mengenali `...(x ? { … } : {})`** — lahir #105.
+      Sebaran dari variabel (`...tambahan`) atau fungsi (`...bikin()`) tetap
+      tak terlihat penghitung amplop. Disapu: nol di repo hari ini, tapi itu
+      keadaan — bukan jaminan
 - [ ] **20 amplop balasan masih tanpa tipe kontrak** — ratchet
       `amplop-berkontrak.test.ts` (`MAKS_UTANG = 20`) menghitungnya sejak #103
       dan mencetak daftarnya tiap kali merah. Yang terbesar

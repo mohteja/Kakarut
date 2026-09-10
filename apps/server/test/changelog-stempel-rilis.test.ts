@@ -47,6 +47,9 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
+  // BELUM DI-MERGE (2026-09-11): amplop daftar masuk Lampiran A — nol
+  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## ⚪️ Balasan `/register` & `/resend-verification` akhirnya bernama: `DaftarResult` (6 kunci, termasuk `dev_verify_url`) — tak ada perubahan di kawat",
   // BELUM DI-MERGE (2026-09-10): amplop panel sistem masuk Lampiran A — nol
   // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
   "## ⚪️ Amplop panel sistem akhirnya bernama: `SistemStatusDto` (6 kunci) + `MigrasiStatusDto` / `MigrasiEntriDto` — tak ada perubahan di kawat",
