@@ -4,9 +4,12 @@ import { describe, expect, it } from "vitest";
 import {
   DETAIL,
   KECUALI,
+  KECUALI_BIAYA,
   RUTE,
   adu,
   aduRekaman,
+  bocorBiaya,
+  medanKebijakan,
   kontrakTipe,
   petaSidik,
   petik,
@@ -151,6 +154,67 @@ describe("rekaman balasan (`ADU_TIPE=`) — jalur yang menjangkau rute TULIS", (
     });
     const r = aduRekaman(isi, kontrak, sidik);
     expect(r.stempel.map((t) => t.jalur)).toEqual(["waktu"]);
+  });
+});
+
+describe("sapuan kebijakan biaya dari kawat (§313)", () => {
+  const vapi = readFileSync(AKAR + "scripts/verify-api.sh", "utf8");
+  const sumberBiaya = readFileSync(AKAR + "packages/shared/src/biaya.ts", "utf8");
+
+  it("§313 ada di verify-api dan memakai token KASIR yang hidup", () => {
+    expect(vapi).toContain("§313");
+    expect(vapi).toContain("--biaya");
+    // `$KASIR` MATI sejak §105 (ganti password menaikkan token_version), dan
+    // kematiannya menyamar jadi gerbang peran yang bocor — pelajaran §303.
+    expect(vapi).toMatch(/--biaya .*--kasir "\$REISS105"/);
+  });
+
+  it("nama medan kebijakan dibaca DARI daftarnya, bukan diketik ulang", () => {
+    /*
+     * Diketik ulang berarti dua daftar yang bisa berselisih — dan yang satu
+     * akan diam saat yang lain bertambah. Itu persis bentuk kegagalan yang
+     * melahirkan lengan ini.
+     */
+    const k = medanKebijakan(sumberBiaya);
+    expect(k.size).toBeGreaterThanOrEqual(10);
+    for (const m of ["hpp", "harga_beli", "harga_per_unit", "targetPenjualan", "foodCostMaks"]) {
+      expect(k.has(m), `${m} tak terbaca dari daftar kebijakan`).toBe(true);
+    }
+    // medan yang cuma dinihilkan penyaringnya tanpa masuk daftar mana pun
+    expect(k.has("total_harga"), "medan yang dinihilkan penyaring tak ikut terbaca").toBe(true);
+    // …dan nama biasa TIDAK ikut
+    expect(k.has("nama")).toBe(false);
+    expect(k.has("saldo")).toBe(false);
+  });
+
+  it("PASANGAN: pemindainya menuduh nilai yang ADA, dan melewati `null`", () => {
+    const k = new Set(["harga_beli"]);
+    expect([...bocorBiaya("/x", [{ harga_beli: 100 }], k).keys()]).toEqual(["/x · harga_beli"]);
+    expect([...bocorBiaya("/x", [{ harga_beli: null }], k).keys()]).toEqual([]);
+    expect([...bocorBiaya("/x", [{ harga_beli: undefined }], k).keys()]).toEqual([]);
+    // bersarang, dan nama lain tak ikut
+    expect([...bocorBiaya("/x", { rows: [{ a: { harga_beli: 1 } }] }, k).keys()]).toEqual([
+      "/x · harga_beli",
+    ]);
+    expect([...bocorBiaya("/x", [{ saldo: 100 }], k).keys()]).toEqual([]);
+    // nol BUKAN null: angka nyata yang tercetak "Rp 0" dan dipercaya orang
+    expect([...bocorBiaya("/x", [{ harga_beli: 0 }], k).keys()]).toEqual(["/x · harga_beli"]);
+  });
+
+  it("tiap pengecualian kebijakan punya ALASAN, dan menunjuk utang yang tertulis", () => {
+    // Daftar pengecualian tanpa alasan pelan-pelan jadi tong sampah — dan
+    // medan yang masuk ke sana diam-diam berhenti dijaga.
+    expect(Object.keys(KECUALI_BIAYA).length).toBeGreaterThan(0);
+    for (const [k, alasan] of Object.entries(KECUALI_BIAYA)) {
+      expect(alasan.length, `${k} tercatat tanpa alasan yang memadai`).toBeGreaterThan(60);
+    }
+    // Satu-satunya pengecualian hari ini menunjuk utang bersyarat yang syarat
+    // pencabutannya memang tertulis — dan uji itu masih ada.
+    expect(KECUALI_BIAYA["/stok · harga_per_unit"]).toContain("UTANG BERSYARAT");
+    expect(
+      readFileSync(AKAR + "apps/server/test/biaya-hanya-manajemen.test.ts", "utf8"),
+      "utang bersyarat `/stok` hilang dari penjaganya — cabut juga pengecualiannya",
+    ).toContain("UTANG BERSYARAT: `/stok` masih mengirim harga per bahan");
   });
 });
 

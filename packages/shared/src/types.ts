@@ -3635,7 +3635,16 @@ export interface PerlengkapanRowDto {
   id: string;
   nama: string;
   satuan: string;
-  harga_beli: number;
+  /**
+   * Harga beli acuan; `null` untuk peran non-manajemen (`bolehLihatBiaya`).
+   *
+   * Rute ini SATU-SATUNYA pintu perlengkapan tanpa `requireRole` — ia melayani
+   * tab Stok → Perlengkapan yang dipakai semua peran untuk pakai/opname. Yang
+   * ditutup ANGKANYA, seperti `harga_beli` bahan sejak 2026-08-26. Layar
+   * manajemen membacanya dari `/perlengkapan/master` & `/perlengkapan/beli`,
+   * keduanya sudah `requireRole("owner","admin")`.
+   */
+  harga_beli: number | null;
   stok_minimum: number;
   catatan: string | null;
   saldo: number;

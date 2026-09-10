@@ -17,6 +17,7 @@ import { z } from "zod";
 import {
   bolehLihatBiaya,
   tanpaBiayaKartuPerlengkapan,
+  tanpaBiayaPerlengkapan,
   type BeliPerlengkapanDaftar,
   type RiwayatHargaDto,
   type RiwayatHargaLot,
@@ -273,7 +274,15 @@ export const perlengkapanRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     const branchId = await resolveBranchId(c);
     await terapkanKonsumsiOtomatis(auth.company_id!, branchId);
-    return c.json(await saldoPerlengkapan(auth.company_id!, branchId));
+    const rows = await saldoPerlengkapan(auth.company_id!, branchId);
+    /*
+     * SATU-SATUNYA pintu perlengkapan tanpa `requireRole` — ia melayani tab
+     * Stok → Perlengkapan yang dipakai semua peran untuk pakai/opname, jadi
+     * pintunya memang harus terbuka. Yang ditutup ANGKANYA, persis seperti
+     * `harga_beli` bahan sejak 2026-08-26 dan kartu perlengkapan di rute
+     * `:id/kartu` di bawah.
+     */
+    return c.json(bolehLihatBiaya(auth.role) ? rows : rows.map(tanpaBiayaPerlengkapan));
   })
   // Ringkasan belanja perlengkapan per rentang tanggal (default bulan berjalan).
   // Didefinisikan SEBELUM rute :id agar "belanja" tak tertangkap sebagai id.

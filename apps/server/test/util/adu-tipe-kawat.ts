@@ -389,6 +389,101 @@ export function aduRekaman(
   return { hasil, stempel, pola, baris, lewat };
 }
 
+/**
+ * SAPUAN KEBIJAKAN "ANGKA BIAYA HANYA UNTUK MANAJEMEN", DARI KAWAT.
+ *
+ * Aturannya punya rumah (`bolehLihatBiaya`) dan penjaga statis sejak
+ * 2026-08-26. Yang tak pernah ada: pengukuran yang menagih KELENGKAPAN
+ * POPULASINYA. Dua putaran berturut-turut menemukan medan yang lolos justru
+ * karena daftarnya digambar sekali lalu tak diukur ulang — `/company`
+ * (2026-09-11) dan `/perlengkapan` (hari yang sama, satu lapis lebih dekat:
+ * modulnya SUDAH punya penyaring, yang terlewat rute daftarnya sendiri).
+ *
+ * Yang dilakukan di sini membalik arahnya: nama medan diambil dari daftar
+ * kebijakan itu sendiri, lalu SETIAP rute yang boleh diketuk kasir disapu.
+ * Medan berbunyi nama kebijakan yang datang BUKAN `null` = tuduhan.
+ */
+export const KECUALI_BIAYA: Record<string, string> = {
+  /*
+   * DUA DI BAWAH BUKAN UTANG — mereka BATAS DETEKTORNYA, dan pantas dibaca
+   * begitu. Sapuan ini berkunci NAMA, dan nama yang sama bisa berarti hal yang
+   * berbeda di tempat yang berbeda. `total_harga` masuk populasi kebijakan
+   * karena `tanpaBiayaKartuPerlengkapan` menihilkannya DI KARTU PERLENGKAPAN —
+   * di sana ia rekap belanja. Di penerimaan ia nilai baris kiriman yang
+   * SEDANG DIPERIKSA orang yang menerimanya, dan kedua klien merendernya:
+   * `PenerimaanPage.tsx:335` dan `penerimaan_page.dart` (yang bahkan
+   * menjumlahkannya jadi "Total Rp …" di kartu). Menutupnya hari ini
+   * memadamkan angka yang dipakai mencocokkan barang dengan suratnya.
+   *
+   * Repo ini sudah pernah digigit kelas ini: entri hantu `nominal` di ponsel
+   * dicabut karena TABRAKAN NAMA, bukan karena utangnya lunas.
+   *
+   * KEPUTUSAN PEMILIK, tercatat di antrean: apakah penerima barang boleh
+   * melihat nilai kirimannya. Sampai dijawab, keduanya SAH — dan sengaja
+   * ditulis dua baris, bukan satu pola, supaya rute penerimaan ketiga tak ikut
+   * lolos diam-diam.
+   */
+  "/penerimaan · total_harga":
+    "BATAS DETEKTOR berkunci nama, bukan utang: di kartu perlengkapan " +
+    "`total_harga` rekap belanja (dijaga), di sini nilai baris kiriman yang " +
+    "sedang diperiksa penerimanya — dirender kedua klien. Keputusan pemilik.",
+  "/penerimaan/riwayat · total_harga":
+    "Sama dengan `/penerimaan` di atas: riwayat kiriman yang sudah diterima, " +
+    "dan `penerimaan_page.dart` menjumlahkannya jadi 'Total Rp …' di kartunya. " +
+    "Keputusan pemilik, tercatat di antrean.",
+  "/stok · harga_per_unit":
+    "UTANG BERSYARAT bertanggal, tertulis di `biaya-hanya-manajemen.test.ts`: " +
+    "kartu 'Nilai stok' ponsel build 1.0.0+10 menghitung totalnya sendiri dari " +
+    "medan ini, dan menahannya hari ini memadamkan kartu itu di lapangan. " +
+    "Syarat pencabutannya sudah ditulis di sana.",
+};
+
+/** Nama medan yang daftar kebijakan `MEDAN_*` sudah nyatakan milik manajemen. */
+export function medanKebijakan(sumberBiaya: string): Set<string> {
+  const out = new Set<string>();
+  for (const blok of sumberBiaya.matchAll(/export const (MEDAN_\w+) = \[([^\]]*)\]/g)) {
+    for (const m of blok[2].matchAll(/"([^"]+)"/g)) out.add(m[1]);
+  }
+  /*
+   * …plus medan yang PENYARINGNYA nihilkan tanpa tercantum di daftar mana pun.
+   * Dua di antaranya bersarang di dalam `.map(…)` — `komponen[].harga_per_unit`
+   * dan `mutasi[].total_harga` — jadi polanya TIDAK boleh menuntut awal baris:
+   * versi pertama menuntutnya, dan `total_harga` lolos dari populasi kebijakan
+   * yang justru dibangun untuk melihat medan yang lolos.
+   */
+  for (const m of sumberBiaya.matchAll(/(\w+): null[,\s)}]/g)) out.add(m[1]);
+  return out;
+}
+
+export interface Bocor {
+  rute: string;
+  medan: string;
+  nilai: unknown;
+}
+
+/** Telusuri satu balasan; catat medan kebijakan yang TIDAK null. */
+export function bocorBiaya(
+  rute: string,
+  v: unknown,
+  kebijakan: Set<string>,
+  keluar: Map<string, Bocor> = new Map(),
+  dalam = 0,
+): Map<string, Bocor> {
+  if (dalam > 8 || v === null || typeof v !== "object") return keluar;
+  if (Array.isArray(v)) {
+    for (const x of v.slice(0, 40)) bocorBiaya(rute, x, kebijakan, keluar, dalam + 1);
+    return keluar;
+  }
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (kebijakan.has(k) && x !== null && x !== undefined) {
+      const kunci = `${rute} · ${k}`;
+      if (!keluar.has(kunci)) keluar.set(kunci, { rute, medan: k, nilai: x });
+    }
+    bocorBiaya(rute, x, kebijakan, keluar, dalam + 1);
+  }
+  return keluar;
+}
+
 async function utama(): Promise<void> {
   const arg = (n: string): string | undefined => {
     const i = process.argv.indexOf(n);
@@ -396,6 +491,64 @@ async function utama(): Promise<void> {
   };
   const kontrak = kontrakTipe();
   const sidik = petaSidik(kontrak);
+
+  if (process.argv.includes("--biaya")) {
+    const basis = arg("--basis") ?? "http://127.0.0.1:3000/api";
+    const kasir = arg("--kasir");
+    if (!kasir) {
+      process.stderr.write("--biaya menuntut --kasir <token>\n");
+      process.exit(2);
+    }
+    const kebijakan = medanKebijakan(
+      readFileSync(fileURLToPath(new URL("../../../../packages/shared/src/biaya.ts", import.meta.url)), "utf8"),
+    );
+    const bocor = new Map<string, Bocor>();
+    let diketuk = 0;
+    let ditolak = 0;
+    const ambilKasir = async (jalur: string): Promise<unknown> => {
+      const r = await fetch(basis + jalur, { headers: { Authorization: `Bearer ${kasir}` } });
+      if (r.status === 403) {
+        ditolak += 1;
+        return undefined;
+      }
+      if (!r.ok) return undefined;
+      try {
+        return await r.json();
+      } catch {
+        return undefined;
+      }
+    };
+    for (const r of RUTE) {
+      const b = await ambilKasir(r.jalur);
+      if (b === undefined) continue;
+      diketuk += 1;
+      bocorBiaya(r.jalur, b, kebijakan, bocor);
+    }
+    const cache = new Map<string, unknown>();
+    for (const d of DETAIL) {
+      if (!cache.has(d.dari)) cache.set(d.dari, await ambilKasir(d.dari));
+      const id = petik(cache.get(d.dari), d.sel);
+      if (!id) continue;
+      let jalur = d.jalur;
+      for (const [nm, nilai] of Object.entries(d.tetap ?? {})) jalur = jalur.replace(`:${nm}`, nilai);
+      jalur = jalur.replace(/:[A-Za-z]+/, id);
+      const b = await ambilKasir(jalur);
+      if (b === undefined) continue;
+      diketuk += 1;
+      bocorBiaya(d.jalur, b, kebijakan, bocor);
+    }
+    const liar = [...bocor.keys()].filter((k) => !(k in KECUALI_BIAYA)).sort();
+    for (const k of liar) process.stdout.write(`BOCOR ${k} = ${JSON.stringify(bocor.get(k)!.nilai)}\n`);
+    // Pengecualian yang sudah TIDAK bocor = catatan basi; ratchet menuntutnya dicabut.
+    const basi = Object.keys(KECUALI_BIAYA).filter((k) => !bocor.has(k)).sort();
+    for (const k of basi) process.stdout.write(`BASI ${k}\n`);
+    process.stderr.write(
+      `kebijakan ${kebijakan.size} medan · rute diketuk sbg kasir ${diketuk} (403: ${ditolak})` +
+        ` · bocor liar ${liar.length} · pengecualian basi ${basi.length}\n`,
+    );
+    process.stdout.write(`BIAYA ${kebijakan.size} ${diketuk} ${liar.length} ${basi.length}\n`);
+    process.exit(liar.length === 0 && basi.length === 0 ? 0 : 1);
+  }
 
   const berkas = arg("--berkas");
   if (berkas) {

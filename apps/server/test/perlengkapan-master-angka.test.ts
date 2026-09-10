@@ -112,9 +112,20 @@ describe("harga beli & stok minimum master juga ditahan", () => {
   });
 
   it("harga beli 0 memang merambat ke tempat lain — itu sebabnya dijaga", () => {
-    // Perkiraan di modal Stok Masuk lahir dari harga beli master.
-    expect(tanpaKomentar(baca("../../web/src/pages/stok/StokPerlengkapanTab.tsx"))).toMatch(
-      /angkaDari\(qty\) \* item\.harga_beli/,
-    );
+    /*
+     * Perkiraan di modal Stok Masuk lahir dari harga beli master.
+     *
+     * ALAMATNYA BERGESER 2026-09-11, dan uji ini merah karenanya — bukan
+     * hampa. `harga_beli` kini `null` untuk peran non-manajemen (§313), jadi
+     * pembacanya menempuh satu const bernama (`hargaAcuan = item.harga_beli
+     * ?? 0`) alih-alih menyentuh medannya langsung di dalam perkalian. Yang
+     * dijaga TETAP sama — bahwa perkiraan itu lahir dari harga beli master —
+     * dan karena itu DUA LAPIS yang dipaku: dari mana `hargaAcuan` berasal,
+     * dan bahwa perkaliannya memakai dia. Memaku satu lapis saja akan lolos
+     * pada const yang diam-diam berhenti membaca `harga_beli`.
+     */
+    const tab = tanpaKomentar(baca("../../web/src/pages/stok/StokPerlengkapanTab.tsx"));
+    expect(tab).toMatch(/const hargaAcuan = item\.harga_beli \?\? 0;/);
+    expect(tab).toMatch(/angkaDari\(qty\) \* hargaAcuan/);
   });
 });

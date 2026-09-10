@@ -25,6 +25,40 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 `GET /api/perlengkapan` berhenti mengirim `harga_beli` ke peran non-manajemen
+
+🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa: disapu, tak ada layar
+ponsel yang merender `harga_beli` dari rute INI.
+
+**Yang berubah** (`GET /api/perlengkapan`, peran SELAIN owner/admin):
+
+| medan | sebelum | sesudah |
+| --- | --- | --- |
+| `harga_beli` | angka penuh (terukur: 100) | **`null`** |
+
+Tipe kontraknya ikut dilonggarkan: `PerlengkapanRowDto.harga_beli: number | null`.
+Bentuknya tidak berubah — kuncinya tetap ada, isinya yang `null`, persis
+seperti `harga_beli` bahan sejak 2026-08-26.
+
+**Kenapa.** Rute ini SATU-SATUNYA pintu perlengkapan tanpa `requireRole` — ia
+melayani tab Stok → Perlengkapan yang dipakai semua peran untuk pakai/opname,
+jadi pintunya memang harus terbuka. Yang ditutup angkanya. Modul ini sudah
+punya penyaringnya (`tanpaBiayaKartuPerlengkapan`, terpasang di
+`/perlengkapan/:id/kartu`); yang terlewat rute daftarnya sendiri, tetangga
+sebelahnya.
+
+**Layar manajemen tak kehilangan apa pun.** `/api/perlengkapan/master` dan
+`/api/perlengkapan/beli` sudah `requireRole("owner","admin")`, dan keduanya
+yang dibaca halaman Beli Perlengkapan & Master Perlengkapan di kedua klien.
+
+**Untuk tim mobile.** `PerlengkapanRow.hargaBeli` diurai
+(`perlengkapan_models.dart:120`) tapi tak dirender satu layar pun — `?? 0`
+sudah ada di parsernya, jadi tak ada yang patah. `PerlengkapanMaster.hargaBeli`
+(dari `/master`) dan `BeliPerlengkapanRow.hargaBeli` (dari `/beli`) tak
+tersentuh.
+
+**Nol kunci kontrak baru**; fikstur kunci ponsel tak berubah satu baris pun.
+
 ## 🟡 `GET /api/company` berhenti mengirim angka perencanaan usaha ke peran non-manajemen
 
 🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa di ponsel; disebut

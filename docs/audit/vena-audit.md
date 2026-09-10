@@ -50,6 +50,124 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kebijakan yang dijaga daftarnya, bukan kawatnya — dan penyaring yang terpasang di rute sebelahnya — server + web — 2026-09-11
+
+**Vena.** Butir antrean yang kutulis sendiri sehari sebelumnya: *"Tak ada
+penjaga mekanis yang menagih KELENGKAPAN populasi `MEDAN_*`… populasi
+berikutnya bisa digambar salah dengan cara yang persis sama."* Putaran ini
+membangunnya — dan ia langsung menuduh.
+
+**Sapuannya membalik arah.** Nama medan diambil dari daftar kebijakan ITU
+SENDIRI (`MEDAN_*` di `packages/shared/src/biaya.ts`), lalu setiap rute yang
+boleh diketuk kasir disapu dari kawat. Medan berbunyi nama kebijakan yang
+datang BUKAN `null` = tuduhan.
+
+| | jumlah |
+| --- | --- |
+| medan kebijakan terbaca | 13 |
+| rute diketuk sebagai kasir | 57 (43 lainnya 403) |
+| **medan kebijakan yang sampai ke kasir** | **4** |
+
+Dari keempatnya: satu **utang bersyarat bertanggal** yang memang tertulis
+(`/stok · harga_per_unit`), dua **batas detektor** (di bawah), dan satu
+**temuan**:
+
+```
+/perlengkapan · harga_beli = 100
+```
+
+**Dan itu di modul yang penyaringnya SUDAH ADA.**
+`tanpaBiayaKartuPerlengkapan` terpasang di `/perlengkapan/:id/kartu` —
+tetangga sebelahnya. Yang terlewat rute DAFTARNYA, dan ia satu-satunya pintu
+perlengkapan tanpa `requireRole`: enam pintu lain di modul yang sama
+(`/master`, `/beli`, `/belanja`, …) semuanya `requireRole("owner","admin")`.
+Kelalaian yang sama dengan `/company` sehari sebelumnya, satu lapis lebih
+dekat.
+
+**PEMBACANYA DIPERIKSA LEBIH DULU, dan instrumenku salah — lagi.** Sapuan
+`grep` pertamaku bilang tak ada layar semua-peran yang membacanya. **Typecheck
+membantahnya**: `StokPerlengkapanTab.tsx:468` memakainya untuk perkiraan
+harga di modal Stok Masuk. Diperiksa ulang dengan tangan: tombol yang membuka
+modal itu digerbangi `isManajemen` (baris 246), jadi nilainya memang selalu
+ada di sana — tapi yang menemukannya kompilator, bukan sapuanku. Kelima
+kalinya sesi ini instrumen sekali-pakai keliru dan penjaga rumah yang benar.
+
+**Dua "kebocoran" yang BUKAN utang — dan itu batas detektornya, ditulis
+sebagai batas, bukan disembunyikan di daftar pengecualian.** Sapuan ini
+berkunci NAMA, dan nama yang sama berarti hal berbeda di tempat berbeda:
+
+```
+/penerimaan          · total_harga = 400
+/penerimaan/riwayat  · total_harga = 150
+```
+
+`total_harga` masuk populasi kebijakan karena
+`tanpaBiayaKartuPerlengkapan` menihilkannya DI KARTU PERLENGKAPAN — di sana ia
+rekap belanja. Di penerimaan ia nilai baris kiriman yang SEDANG DIPERIKSA
+orang yang menerimanya, dan **kedua klien merendernya**
+(`PenerimaanPage.tsx:335`; `penerimaan_page.dart` bahkan menjumlahkannya jadi
+"Total Rp …" di kartunya). Menutupnya hari ini memadamkan angka yang dipakai
+mencocokkan barang dengan suratnya. Repo ini sudah pernah digigit kelas ini:
+entri hantu `nominal` di ponsel dicabut karena TABRAKAN NAMA, bukan karena
+utangnya lunas. **Keputusan pemilik**, tercatat di antrean; sampai dijawab,
+keduanya sah — dan sengaja ditulis DUA BARIS, bukan satu pola, supaya rute
+penerimaan ketiga tak ikut lolos diam-diam.
+
+**Yang dikerjakan.**
+
+- **`tanpaBiayaPerlengkapan`** di shared, bersebelahan dengan saudaranya;
+  dipasang di `GET /perlengkapan`. Kontraknya dilonggarkan
+  (`harga_beli: number | null`) — `null`, bukan kunci yang dicabut.
+- **verify-api §313** (8 lengan): sapuan kebijakan dari kawat, plus PASANGAN
+  bahwa owner TETAP menerima angkanya — tanpa itu "nol bocor" cuma berarti
+  medannya mati untuk semua orang.
+- **RATCHET DUA ARAH**: pengecualian yang sudah TIDAK bocor dilaporkan BASI,
+  jadi utang yang lunas tak bisa menggantung sebagai izin permanen. Dan
+  `KECUALI_BIAYA` untuk `/stok` menunjuk utang bersyarat yang syarat
+  pencabutannya memang tertulis — uji menagih tulisan itu masih ada.
+- **Penjaga statis** untuk rute daftarnya, termasuk asersi bahwa keenam pintu
+  manajemen tetap bergerbang PERAN (menukar gerbang pintu dengan penyaring
+  medan akan membuka daftar master se-perusahaan untuk peran mana pun).
+
+**GERBANGNYA MERAH DULU, dan penjaganya benar — untuk ketujuh kalinya.**
+`perlengkapan-master-angka` memaku ejaan `angkaDari(qty) * item.harga_beli`
+sebagai bukti bahwa harga beli master MERAMBAT ke perkiraan Stok Masuk;
+refactor null-safe-ku memindahkannya ke sebuah const bernama. Tak ada yang
+didorong. Penjaganya diarahkan ke alamat baru — dan dikencangkan jadi DUA
+LAPIS (dari mana `hargaAcuan` berasal, dan bahwa perkaliannya memakai dia),
+sebab memaku satu lapis akan lolos pada const yang diam-diam berhenti membaca
+`harga_beli`.
+
+**Bukti merah** (semuanya dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| penyaring dicabut dari `GET /perlengkapan`, server dijalankan ulang | §313 dari kawat | **merah**, `BOCOR /perlengkapan · harga_beli = 100`, keluar 1 |
+| …cacat yang sama | penjaga statis | **merah**, menyebut baris yang hilang |
+| satu entri `KECUALI_BIAYA` dicabut | §313 | **merah**, medannya kembali jadi bocor liar |
+| judul utang bersyarat `/stok` diubah | silang-rujuk pengecualian | **merah**, menuntut pengecualiannya ikut dicabut |
+| `hargaAcuan` berhenti membaca `harga_beli` | `perlengkapan-master-angka` | **merah** |
+
+**Gerbang**: typecheck bersih · verify-api **3.759 / 0** (+8, seluruhnya §313) · vitest **259 berkas / 3.168 uji** (+5 uji) · invarian **27 / 0** · Playwright **48 lolos**. §313 dari dalam gerbang: 13 medan kebijakan, **60 rute** diketuk sbg kasir, 0 bocor liar, 0 pengecualian basi.
+
+**Batas yang diakui.**
+
+- **Sapuan ini berkunci NAMA.** Dua dari empat temuannya tabrakan nama, bukan
+  utang — dan itu proporsi yang pantas disebut, bukan disembunyikan. Penjaga
+  yang berkunci nama menuduh konsep yang kebetulan senama; yang menahannya
+  bukan pemindainya melainkan daftar pengecualian yang tiap barisnya beralasan.
+- **Kasir SATU-SATUNYA peran yang disapu.** `bar`, `kitchen`, dan `tim` juga
+  non-manajemen, dan pintu yang terbuka bagi mereka belum tentu sama. Menyapu
+  keempatnya menuntut empat token hidup di verify-api; hari ini cuma kasir yang
+  punya. Antrean.
+- **Yang dijaga ADANYA daftar, bukan MUTU keputusannya.** `MEDAN_*` tetap
+  ditulis tangan; yang berubah, ia kini diadu dengan kawat alih-alih dipercaya.
+- **`/stok · harga_per_unit` masih bocor dengan sengaja** — syarat
+  pencabutannya tanggal rilis ponsel, dan kini tercatat DI DUA TEMPAT yang
+  saling menagih.
+
+---
+
 ## Aturan yang benar dengan populasi yang digambar sekali — target omzet di tablet kasir — server + web + ponsel — 2026-09-11
 
 **Vena.** Butir antrean "`GET /company` `[any]`: kasir menerima 22 kunci,
@@ -14845,11 +14963,25 @@ berlaku di situ).
       KEPUTUSAN lebih dulu `/stok/nilai`: kartu "Nilai stok" ponsel memakai
       rute itu justru sebagai pengganti perhitungan lokal, jadi menutupnya
       berarti memutuskan siapa yang boleh melihat kartu itu sama sekali
-- [ ] **Tak ada penjaga mekanis yang menagih KELENGKAPAN populasi
-      `MEDAN_*`** — lahir #114. Penjaga biaya menagih tiap medan di daftarnya
-      benar-benar dinihilkan, tapi tak ada yang menagih bahwa medan manajemen
-      BARU masuk daftarnya. Populasi berikutnya bisa digambar salah dengan cara
-      yang persis sama, dan itu justru pelajaran putaran itu
+- [x] ~~**Tak ada penjaga mekanis yang menagih KELENGKAPAN populasi
+      `MEDAN_*`**~~ — DIBAYAR #115, lihat entri di atas. §313 membalik arahnya:
+      nama medan diambil dari daftar kebijakan itu sendiri, lalu tiap rute yang
+      boleh diketuk kasir disapu dari kawat. Ia langsung menuduh —
+      `/perlengkapan · harga_beli`, di modul yang penyaringnya SUDAH terpasang
+      di rute sebelahnya
+- [ ] **KEPUTUSAN PEMILIK: bolehkah penerima barang melihat nilai
+      kirimannya?** — lahir #115. `total_harga` di `/penerimaan` (400) &
+      `/penerimaan/riwayat` (150) sampai ke peran non-manajemen, dan KEDUA
+      klien merendernya (`PenerimaanPage.tsx:335`; `penerimaan_page.dart`
+      menjumlahkannya jadi "Total Rp …"). Ia masuk populasi kebijakan lewat
+      TABRAKAN NAMA — di kartu perlengkapan `total_harga` rekap belanja, di
+      sini nilai baris yang sedang diperiksa. Menutupnya memadamkan angka yang
+      dipakai mencocokkan barang dengan suratnya, jadi ini keputusan, bukan
+      perbaikan. Tercatat dua baris di `KECUALI_BIAYA` beserta alasannya
+- [ ] **§313 cuma menyapu peran KASIR** — `bar`, `kitchen`, dan `tim` juga
+      non-manajemen, dan pintu yang terbuka bagi mereka belum tentu sama.
+      Menyapu keempatnya menuntut empat token hidup di verify-api; hari ini
+      cuma kasir yang punya
 - [ ] **Satu perusahaan, dua bentuk: `CompanyRow` camelCase vs `CompanyDto`
       snake_case** — keduanya di kontrak sejak #99, dan berdampingan itulah
       yang membuat `kasir_models.dart` menerima DUA ejaan untuk medan yang

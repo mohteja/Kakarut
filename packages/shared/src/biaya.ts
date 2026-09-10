@@ -5,6 +5,7 @@ import type {
   KartuPerlengkapanDto,
   MenuDto,
   MenuDtoPenuh,
+  PerlengkapanRowDto,
 } from "./types";
 
 /**
@@ -118,6 +119,23 @@ export function tanpaAngkaManajemenCompany(c: CompanyRow): CompanyRow {
 /** Bahan tanpa harga beli. Takaran, satuan, dan saldo tetap utuh. */
 export function tanpaBiayaBahan(dto: BahanDtoPenuh): BahanDto {
   return { ...dto, harga_beli: null, harga_per_unit: null };
+}
+
+/**
+ * Baris perlengkapan tanpa harga beli — untuk `GET /perlengkapan`.
+ *
+ * Terukur 2026-09-11 dengan sapuan KEBIJAKAN dari kawat (§313): dari 57 rute
+ * yang boleh diketuk kasir, DUA memulangkan medan yang namanya sudah ada di
+ * `MEDAN_*` — `harga_beli` di sini, dan `harga_per_unit` di `GET /stok` yang
+ * memang utang bersyarat bertanggal. Yang ini tak tercatat di mana pun.
+ *
+ * Kelalaian yang sama dengan `/company` sehari sebelumnya, satu lapis lebih
+ * dekat: modul ini SUDAH punya penyaingnya (`tanpaBiayaKartuPerlengkapan`,
+ * dipasang di `/perlengkapan/:id/kartu`) — yang terlewat rute daftarnya
+ * sendiri, tetangga sebelahnya.
+ */
+export function tanpaBiayaPerlengkapan(r: PerlengkapanRowDto): PerlengkapanRowDto {
+  return { ...r, harga_beli: null };
 }
 
 /**

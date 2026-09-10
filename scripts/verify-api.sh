@@ -18395,6 +18395,45 @@ cek "§312 /auth/me kasir tetap membawa setelan operasionalnya" "V == 1" \
   "$(api "$REISS105" GET /auth/me | jq '((.company.diskon_maks_persen != null) and (.company.pb1_rate != null))|if . then 1 else 0 end')"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# §313 — KEBIJAKAN "angka biaya hanya untuk manajemen", DIUKUR DARI KAWAT
+# ═══════════════════════════════════════════════════════════════════════════
+# Aturannya punya rumah (`bolehLihatBiaya`) dan penjaga statis sejak
+# 2026-08-26. Yang tak pernah ada: pengukuran yang menagih KELENGKAPAN
+# POPULASINYA — dan dua putaran berturut-turut menemukan medan yang lolos
+# justru karena daftarnya digambar sekali lalu tak diukur ulang:
+#
+#   #114  GET /company        targetPenjualan 15.000.000 ke tablet kasir
+#   #115  GET /perlengkapan   harga_beli — di modul yang penyaringnya SUDAH ada,
+#                             terpasang di `/perlengkapan/:id/kartu` sebelahnya
+#
+# Lengan ini membalik arahnya: nama medan diambil dari daftar kebijakan itu
+# sendiri (`MEDAN_*` di `packages/shared/src/biaya.ts`), lalu SETIAP rute yang
+# boleh diketuk kasir disapu. Medan berbunyi nama kebijakan yang datang BUKAN
+# `null` = tuduhan, kecuali yang tercatat di `KECUALI_BIAYA` beserta alasannya.
+#
+# Ratchetnya dua arah: pengecualian yang sudah TIDAK bocor dilaporkan BASI,
+# jadi utang yang lunas tak bisa menggantung sebagai izin permanen.
+B313=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --biaya --basis "$BASE/api" --kasir "$REISS105" 2>/tmp/biaya313.err)
+KELUAR313=$?
+RINGKAS313=$(echo "$B313" | grep '^BIAYA ' | head -1)
+cek "§313 premis: pemindainya jalan (baris BIAYA ada)" "V == 1" \
+  "$([ -n "$RINGKAS313" ] && echo 1 || echo 0)"
+cek "§313 premis: daftar kebijakan terbaca ≥ 10 medan" "V >= 10" "$(echo "$RINGKAS313" | awk '{print $2}')"
+cek "§313 premis: rute yang diketuk sbg kasir ≥ 50" "V >= 50" "$(echo "$RINGKAS313" | awk '{print $3}')"
+cek "§313 INTI: nol medan kebijakan yang sampai ke kasir BUKAN null" "V == 0" \
+  "$(echo "$RINGKAS313" | awk '{print $4}')"
+cek "§313 RATCHET: nol pengecualian BASI (utang lunas tak boleh menggantung)" "V == 0" \
+  "$(echo "$RINGKAS313" | awk '{print $5}')"
+cek "§313 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR313"
+[ "$KELUAR313" -ne 0 ] && { echo "── kebocoran yang dilaporkan §313 ──"; echo "$B313" | grep -v '^BIAYA '; cat /tmp/biaya313.err; }
+# PASANGAN: owner TETAP menerima angkanya — kalau tidak, "nol bocor" cuma
+# berarti medannya mati untuk semua orang.
+cek "§313 PASANGAN: owner tetap menerima harga_beli perlengkapan" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan | jq '([.[]|select(.harga_beli != null)]|length) > 0 | if . then 1 else 0 end')"
+cek "§313 PASANGAN: kasir menerima barisnya, dengan harga_beli null" "V == 1" \
+  "$(api "$REISS105" GET /perlengkapan | jq '(((.|length) > 0) and ([.[]|select(.harga_beli != null)]|length) == 0)|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════
 # §309/§310 mengetuk rutenya SENDIRI, jadi jangkauannya berhenti di yang bisa

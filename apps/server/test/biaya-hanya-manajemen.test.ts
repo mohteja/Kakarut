@@ -213,6 +213,32 @@ describe("angka biaya hanya untuk manajemen", () => {
     ).not.toContain("bolehLihatBiaya");
   });
 
+  it("`GET /perlengkapan` — pintu tanpa `requireRole` — menyaring harga belinya", () => {
+    /*
+     * Modul ini SUDAH punya penyaringnya (`tanpaBiayaKartuPerlengkapan`,
+     * terpasang di `/perlengkapan/:id/kartu`) — yang terlewat rute DAFTARNYA
+     * sendiri, tetangga sebelahnya, dan ia satu-satunya pintu perlengkapan
+     * tanpa `requireRole`. Terukur 2026-09-11 dari kawat dengan token kasir:
+     * `harga_beli` 100 utuh.
+     *
+     * Layar manajemen tak kehilangan apa pun: `/perlengkapan/master` dan
+     * `/perlengkapan/beli` sudah `requireRole("owner","admin")`, dan keduanya
+     * yang dibaca halaman Beli Perlengkapan di kedua klien.
+     */
+    const rute = baca("modules/perlengkapan/routes.ts");
+    expect(rute).toContain(
+      "bolehLihatBiaya(auth.role) ? rows : rows.map(tanpaBiayaPerlengkapan)",
+    );
+    const biaya = baca("biaya.ts", SHARED);
+    expect(biaya).toContain("export function tanpaBiayaPerlengkapan(");
+    // …dan kedua pintu manajemennya TETAP bergerbang peran, bukan penyaring:
+    // menukar gerbang pintu dengan penyaring medan akan membuka daftar master
+    // se-perusahaan untuk peran mana pun.
+    for (const pintu of ['.get("/master", requireRole("owner", "admin")', '.get("/beli", requireRole("owner", "admin")']) {
+      expect(rute, `${pintu} kehilangan gerbang perannya`).toContain(pintu);
+    }
+  });
+
   it("UTANG BERSYARAT: `/stok` masih mengirim harga per bahan", () => {
     /*
      * Satu-satunya medan biaya yang SENGAJA belum ditahan, dan alasannya
