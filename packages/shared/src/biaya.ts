@@ -1,6 +1,7 @@
 import type {
   BahanDto,
   BahanDtoPenuh,
+  CompanyRow,
   KartuPerlengkapanDto,
   MenuDto,
   MenuDtoPenuh,
@@ -55,6 +56,62 @@ export function tanpaBiayaMenu(dto: MenuDtoPenuh): MenuDto {
     harga_jual_bulat: null,
     food_cost_persen: null,
     komponen: dto.komponen.map((k) => ({ ...k, harga_per_unit: null })),
+  };
+}
+
+/**
+ * Medan `CompanyRow` yang HANYA untuk manajemen — angka perencanaan usaha,
+ * bukan angka yang dipakai melayani tamu.
+ *
+ * Terukur 2026-09-11 dengan token kasir sungguhan: `GET /company` memulangkan
+ * KEDUA PULUH DUA kuncinya utuh ke tiap peran — `targetPenjualan` 15.000.000,
+ * `foodCostMaks` 40, `metodeHpp`, `planExpiresAt` — di layar yang paling
+ * sering terbuka di tablet bersama.
+ *
+ * Kenapa penjaga biaya yang sudah ada tak melihatnya: populasinya digambar
+ * SEKALI, mengelilingi harga pokok (`MEDAN_BIAYA_MENU`/`_BAHAN`), dan tak
+ * pernah diukur ulang. Bentuk kelalaian yang sama dengan ATURAN A yang
+ * melapor nol sementara dua baris tabel telanjang berjalan di kawat.
+ *
+ * KEEMPATNYA DIPILIH DARI PEMBACANYA, bukan dari firasat — disapu di web dan
+ * ponsel:
+ *
+ *   · `targetPenjualan` — NOL pembaca di kedua klien. Servernya membaca
+ *     kolomnya langsung (`rekomendasi/routes.ts`); web cuma MENULISnya lewat
+ *     PATCH.
+ *   · `planExpiresAt` — NOL pembaca di kedua klien.
+ *   · `foodCostMaks` — web: `PerusahaanPage` + `MenuListPage`, keduanya
+ *     digerbangi `isManajemen`. Ponsel membaca `food_cost_maks` (snake) dari
+ *     rute LAIN, bukan yang ini.
+ *   · `metodeHpp` — web: `PerusahaanPage` saja. Ponsel membaca `metode_hpp`
+ *     (snake) dari `/stok/fifo/:id`.
+ *
+ * Yang TIDAK disentuh, dan sebabnya: `pb1Rate`/`pb1Enabled`/`receiptFooter`/
+ * `receiptShowAlamat`/`logoUrl`/`alamat`/`telepon`/`nama` dipakai KASIR untuk
+ * mencetak struk — `kasir_models.dart` mengurai persis kedelapan itu.
+ * `plan`/`mode`/`isActive` menggerbangi fitur di seluruh layar.
+ */
+export const MEDAN_MANAJEMEN_COMPANY = [
+  "targetPenjualan",
+  "foodCostMaks",
+  "metodeHpp",
+  "planExpiresAt",
+] as const;
+
+/**
+ * Perusahaan tanpa angka perencanaan usaha.
+ *
+ * `null`, bukan kunci yang dicabut: bentuknya tetap `CompanyRow` utuh, jadi
+ * tak satu klien pun patah dan kontraknya tak berubah — persis alasan yang
+ * sama dengan `tanpaBiayaMenu` di atas. Yang berubah cuma isinya.
+ */
+export function tanpaAngkaManajemenCompany(c: CompanyRow): CompanyRow {
+  return {
+    ...c,
+    targetPenjualan: null,
+    foodCostMaks: null,
+    metodeHpp: null,
+    planExpiresAt: null,
   };
 }
 

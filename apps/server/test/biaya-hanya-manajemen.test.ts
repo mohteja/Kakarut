@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { bolehLihatBiaya, MEDAN_BIAYA_BAHAN, MEDAN_BIAYA_MENU } from "@kakarut/shared";
+import {
+  bolehLihatBiaya,
+  MEDAN_BIAYA_BAHAN,
+  MEDAN_BIAYA_MENU,
+  MEDAN_MANAJEMEN_COMPANY,
+  tanpaAngkaManajemenCompany,
+} from "@kakarut/shared";
 import { butaKomentar } from "../src/scripts/buta-komentar";
 
 const SRV = fileURLToPath(new URL("../src", import.meta.url));
@@ -136,6 +142,58 @@ describe("angka biaya hanya untuk manajemen", () => {
     // harga di dalam komponen resep ikut, kalau tidak struktur biayanya bisa
     // disusun ulang dari balasan yang katanya sudah disaring
     expect(biaya).toContain("harga_per_unit: null");
+  });
+
+  it("keluaran `GET /company` melewati `saringCompany`", () => {
+    /*
+     * POPULASI ATURAN INI DIGAMBAR SEKALI, MENGELILINGI HARGA POKOK — dan tak
+     * pernah diukur ulang. Terukur 2026-09-11 dengan token kasir sungguhan:
+     * `GET /company` memulangkan KEDUA PULUH DUA kuncinya utuh ke tiap peran,
+     * termasuk `targetPenjualan` 15.000.000 dan `foodCostMaks`. Bentuk
+     * kelalaian yang sama dengan ATURAN A yang melapor nol sementara dua baris
+     * tabel telanjang berjalan di kawat: aturannya benar, jangkauannya kurang.
+     */
+    const rute = baca("modules/company/routes.ts");
+    expect(rute).toContain("function saringCompany(");
+    expect(rute).toContain("c.json(saringCompany(auth.role, companyRow(row)))");
+    // `companyRow` sendiri TIDAK boleh menyaring — panel super-admin
+    // memanggilnya, dan `bolehLihatBiaya(null)` (peran super-admin) akan
+    // menihilkan justru bagi satu-satunya orang yang berhak melihat semuanya.
+    const pembangun = rute.slice(rute.indexOf("export function companyRow("));
+    expect(
+      pembangun.slice(0, pembangun.indexOf("\n}")),
+      "companyRow ikut menyaring — panel penyewa super-admin akan kehilangan angkanya",
+    ).not.toContain("bolehLihatBiaya");
+  });
+
+  it("penyaring perusahaan menihilkan SELURUH medan manajemen", () => {
+    const kosong = tanpaAngkaManajemenCompany({
+      id: "x", nama: "x", metodeHpp: "average", slug: "x", alamat: null, telepon: null,
+      logoUrl: null, timezone: "Asia/Jakarta", pb1Enabled: true, pb1Rate: 10,
+      receiptFooter: "kaki", receiptShowAlamat: true, diskonMaksPersen: 100,
+      blokirJualMinus: false, targetPenjualan: 15_000_000, foodCostMaks: 40,
+      plan: "pro", planExpiresAt: "2027-01-01T00:00:00.000Z", isActive: true,
+      createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+      mode: "pro",
+    });
+    for (const m of MEDAN_MANAJEMEN_COMPANY) {
+      expect(kosong[m], `${m} tak dinihilkan`).toBeNull();
+    }
+    /*
+     * PASANGAN ANTI-RUSAK: medan CETAK harus tetap utuh. `kasir_models.dart`
+     * mengurai delapan medan dari rute ini untuk kepala & kaki struk — kalau
+     * penyaring ini kelak melebar ke sana, struk di lapangan kehilangan nama,
+     * alamat, dan tarif PB1 tanpa satu galat pun muncul.
+     */
+    expect(kosong.nama).toBe("x");
+    expect(kosong.pb1Rate).toBe(10);
+    expect(kosong.pb1Enabled).toBe(true);
+    expect(kosong.receiptFooter).toBe("kaki");
+    expect(kosong.receiptShowAlamat).toBe(true);
+    // …dan gerbang fitur Lite/Pro juga, yang dibaca SEMUA peran
+    expect(kosong.plan).toBe("pro");
+    expect(kosong.mode).toBe("pro");
+    expect(kosong.isActive).toBe(true);
   });
 
   it("papan pesanan TIDAK ikut tertutup — pasangan anti-rusak", () => {

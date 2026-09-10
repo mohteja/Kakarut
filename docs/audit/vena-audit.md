@@ -50,6 +50,120 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Aturan yang benar dengan populasi yang digambar sekali — target omzet di tablet kasir — server + web + ponsel — 2026-09-11
+
+**Vena.** Butir antrean "`GET /company` `[any]`: kasir menerima 22 kunci,
+termasuk `targetPenjualan`/`foodCostMaks`/`plan`/`planExpiresAt`" — dicatat
+2026-09-06 apa adanya, bukan diubah diam-diam, dengan catatan *"tak ada yang
+membuktikan kliennya butuh medan-medan itu"*. Putaran ini membuktikannya.
+
+**Populasi, disapu dari KAWAT dengan token owner DAN token kasir sungguhan
+atas 65 rute daftar:**
+
+| | jumlah |
+| --- | --- |
+| kasir DITOLAK 403 | 25 |
+| kasir menerima **bentuk yang sama persis** | **40** |
+| kasir menerima bentuk berbeda | **0** |
+
+Tak satu rute pun menyempitkan BENTUKNYA per peran — dan itu memang benar,
+sebab aturan repo ini menyempitkan ISI, bukan bentuk. Yang perlu diperiksa
+karena itu nilainya, dan di situ hasilnya terbelah:
+
+```
+/menu   hpp           owner 2000        kasir null   ← dijaga sejak 2026-08-26
+/bahan  harga_beli    owner 35000       kasir null   ← dijaga
+/company targetPenjualan owner 15000000 kasir 15000000  ← TIDAK
+```
+
+**Aturannya benar, penjaganya bekerja, jangkauannya kurang.** `bolehLihatBiaya`
+punya rumah, `biaya-hanya-manajemen.test.ts` menagih kelengkapan, dan §261
+mengukurnya dari kawat — tapi POPULASINYA digambar SEKALI, mengelilingi harga
+pokok (`MEDAN_BIAYA_MENU`/`_BAHAN`), lalu tak pernah diukur ulang. Bentuk
+kelalaian yang sama persis dengan ATURAN A yang melapor NOL sementara dua baris
+tabel telanjang berjalan di kawat: bukan aturannya salah, melainkan
+populasinya.
+
+Target omzet bulanan Rp 15.000.000 terbaca di layar yang paling sering terbuka
+di tablet bersama.
+
+**KEEMPAT MEDANNYA DIPILIH DARI PEMBACANYA, bukan dari firasat** — disapu di
+`apps/web/src` dan di `lib/` ponsel:
+
+| medan | web | ponsel |
+| --- | --- | --- |
+| `targetPenjualan` | **NOL pembaca** (cuma ditulis lewat PATCH) | **NOL** |
+| `planExpiresAt` | **NOL pembaca** | **NOL** |
+| `foodCostMaks` | `PerusahaanPage` + `MenuListPage`, keduanya digerbangi `isManajemen` | membaca `food_cost_maks` dari rute LAIN |
+| `metodeHpp` | `PerusahaanPage` saja | membaca `metode_hpp` dari `/stok/fifo/:id` |
+
+`targetPenjualan` bahkan tak dibaca siapa pun di kedua klien: servernya
+membaca kolomnya langsung di `rekomendasi/routes.ts`.
+
+**PINTUNYA SENGAJA TETAP TERBUKA.** Kasir memanggil rute ini untuk kepala &
+kaki struk — `kasir_models.dart` mengurai DELAPAN medan cetak dari sana.
+Menutup pintunya akan menghentikan pekerjaan harian; yang ditutup ANGKANYA.
+Dan itu dipaku dua kali sebagai lengan PASANGAN (statis + kawat), sebab
+penyaring yang kelak melebar ke medan cetak akan memadamkan nama, alamat, dan
+tarif PB1 di struk lapangan **tanpa satu galat pun muncul**.
+
+**Yang dikerjakan.**
+
+- **`MEDAN_MANAJEMEN_COMPANY` + `tanpaAngkaManajemenCompany`** di
+  `packages/shared/src/biaya.ts`, bersebelahan dengan saudaranya. `null`, bukan
+  kunci yang dicabut — bentuknya tetap `CompanyRow` utuh, jadi tak satu klien
+  pun patah.
+- **`saringCompany` di batas rute**, bukan di `companyRow`: panel penyewa
+  super-admin memanggil perakit itu, dan `bolehLihatBiaya(null)` — peran
+  super-admin — akan menihilkan justru bagi satu-satunya orang yang berhak
+  melihat seluruhnya. Dipaku asersi tersendiri.
+- **Kontraknya dilonggarkan** (`foodCostMaks: number | null`,
+  `metodeHpp: MetodeHpp | null`) — dan typecheck bersih tanpa satu perubahan
+  klien pun, sebab kedua pembacanya sudah menulis `?? 40` / `?? "average"`
+  sejak lama. Bentuk yang sejak awal opsional, akhirnya mengaku.
+- **Penjaganya dilebarkan** ke `/company` (2 uji baru) + **verify-api §312**
+  (8 lengan), termasuk PASANGAN medan cetak dan PASANGAN `/auth/me` yang tak
+  ikut tersentuh.
+
+**Bukti merah** (semuanya dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| `saringCompany` dicabut dari rutenya | `biaya-hanya-manajemen` | **merah**, menyebut baris yang hilang |
+| `foodCostMaks: null` dicabut dari penyaringnya | uji kelengkapan medan | **merah**, "expected 40 to be null" |
+| — | pengukuran SEBELUM perbaikan | inilah keadaan merahnya, terukur dari kawat |
+
+**Gerbang**: typecheck bersih · verify-api **3.751 / 0** (+8, seluruhnya §312) · vitest **259 berkas / 3.163 uji** (+4 uji) · invarian **27 / 0** · Playwright **48 lolos**.
+
+**Batas yang diakui — dan tiga di antaranya TERUKUR, bukan didugaan.**
+
+Sapuan yang sama menemukan tiga situs lain yang nilainya identik bagi kasir,
+dan ketiganya dicatat di antrean dengan angkanya, bukan diperbaiki diam-diam
+di putaran ini:
+
+```
+/stok/nilai          nilai  Rp 9.880.678       (owner == kasir)
+/perlengkapan[]      harga_beli 100            (owner == kasir)
+/shift[]             selisih −100.000, kas_sistem 100.000   (owner == kasir)
+```
+
+`/stok/nilai` yang paling perlu KEPUTUSAN lebih dulu, bukan perbaikan: kartu
+"Nilai stok" ponsel memakai rute itu justru sebagai pengganti perhitungan
+lokal, dan menutupnya bagi peran tertentu berarti memutuskan siapa yang boleh
+melihat kartu itu sama sekali.
+
+- **Yang dijaga ADANYA KEPUTUSAN, bukan mutunya.** Empat medan ini dipilih
+  karena pembacanya nol atau digerbangi manajemen; `diskonMaksPersen` dan
+  `blokirJualMinus` juga cuma dibaca layar manajemen dari rute ini, tapi
+  keduanya SETELAN OPERASIONAL yang kasir terima lewat `/auth/me` — memblokir
+  di satu rute sementara membuka di rute lain adalah pagar yang menyesatkan.
+- **Sapuan peran ini berkunci BENTUK, lalu nilai diperiksa TANGAN.** Tak ada
+  penjaga mekanis yang menagih "medan manajemen baru wajib masuk salah satu
+  `MEDAN_*`". Populasi berikutnya bisa digambar salah dengan cara yang persis
+  sama — dan itu justru pelajaran putaran ini.
+
+---
+
 ## Alat ukur yang tak bisa mengetuk 170 rute tulis — jadi servernya yang merekam, dan verify-api jadi fiksturnya — server — 2026-09-11
 
 **Vena.** Butir antrean "balasan TULIS masih di luar sapuan §309/§310", lahir
@@ -14717,12 +14831,25 @@ berlaku di situ).
       multi-lokasi (CK/cabang/kantor). Bukan cacat kontrak — pembedaan yang
       belum pernah dibawa ke ponsel; yang perlu diputuskan lebih dulu: apakah
       ponsel MEMANG harus membedakannya, atau memang cukup satu tampilan
-- [ ] **`GET /company` `[any]`: kasir menerima 22 kunci, termasuk
-      `targetPenjualan`/`foodCostMaks`/`plan`/`planExpiresAt`** — terukur
-      2026-09-06 dan dicatat apa adanya di kontrak, bukan diubah diam-diam.
-      Menyempitkannya ke peran manajemen perubahan kawat tersendiri; kelas yang
-      sama dengan gerbang biaya `strukPenjualan` di #97, dan bedanya di sini
-      tak ada yang membuktikan kliennya butuh medan-medan itu
+- [x] ~~**`GET /company` `[any]`: kasir menerima 22 kunci**~~ — DIBAYAR #114,
+      lihat entri di atas. Keempat medannya dipilih DARI PEMBACANYA:
+      `targetPenjualan` & `planExpiresAt` nol pembaca di kedua klien,
+      `foodCostMaks` & `metodeHpp` cuma di layar bergerbang `isManajemen`.
+      Pintunya sengaja tetap terbuka (struk kasir mengurai 8 medan cetak dari
+      rute ini) — yang ditutup angkanya. Aturannya sudah benar sejak Agustus;
+      yang kurang JANGKAUAN populasinya
+- [ ] **Tiga situs pengungkapan lain, TERUKUR #114 dan belum diputuskan** —
+      sapuan peran yang sama menemukan nilai identik bagi kasir di
+      `/stok/nilai` (`nilai` Rp 9.880.678), `/perlengkapan[]` (`harga_beli`),
+      dan `/shift[]` (`selisih` −100.000, `kas_sistem`). Yang paling perlu
+      KEPUTUSAN lebih dulu `/stok/nilai`: kartu "Nilai stok" ponsel memakai
+      rute itu justru sebagai pengganti perhitungan lokal, jadi menutupnya
+      berarti memutuskan siapa yang boleh melihat kartu itu sama sekali
+- [ ] **Tak ada penjaga mekanis yang menagih KELENGKAPAN populasi
+      `MEDAN_*`** — lahir #114. Penjaga biaya menagih tiap medan di daftarnya
+      benar-benar dinihilkan, tapi tak ada yang menagih bahwa medan manajemen
+      BARU masuk daftarnya. Populasi berikutnya bisa digambar salah dengan cara
+      yang persis sama, dan itu justru pelajaran putaran itu
 - [ ] **Satu perusahaan, dua bentuk: `CompanyRow` camelCase vs `CompanyDto`
       snake_case** — keduanya di kontrak sejak #99, dan berdampingan itulah
       yang membuat `kasir_models.dart` menerima DUA ejaan untuk medan yang

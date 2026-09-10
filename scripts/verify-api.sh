@@ -18350,6 +18350,51 @@ cek "§310 INTI: nol stempel waktu yang bukan ISO-8601 di 108 rute GET" "V == 0"
   "$(echo "$RINGKAS309" | awk '{print $7}')"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# §312 — ANGKA PERENCANAAN USAHA hanya untuk manajemen
+# ═══════════════════════════════════════════════════════════════════════════
+# Aturan "angka biaya hanya untuk manajemen" sudah punya rumah (`bolehLihatBiaya`)
+# dan penjaga (§261 + `biaya-hanya-manajemen.test.ts`) sejak 2026-08-26. Yang
+# tak pernah diukur ulang POPULASINYA: ia digambar sekali mengelilingi harga
+# pokok (`MEDAN_BIAYA_MENU`/`_BAHAN`), dan `GET /company` tak pernah masuk.
+#
+# Terukur 2026-09-11 dengan token kasir sungguhan: rute itu memulangkan KEDUA
+# PULUH DUA kuncinya utuh ke tiap peran — `targetPenjualan` 15.000.000,
+# `foodCostMaks` 40, `metodeHpp`, `planExpiresAt` — di layar yang paling sering
+# terbuka di tablet bersama.
+#
+# PINTUNYA SENGAJA TETAP TERBUKA: kasir memanggilnya untuk kepala & kaki struk
+# (`kasir_models.dart` mengurai delapan medan cetak). Yang ditutup ANGKANYA,
+# dan lengan PASANGAN di bawah memaku bahwa medan cetaknya TIDAK ikut tertutup.
+MJ312=$(awk '/^export const MEDAN_MANAJEMEN_COMPANY = \[/{f=1;next} f&&/^\] as const;/{exit} f{gsub(/[ ",]/,"");if($0!="")print}' packages/shared/src/biaya.ts)
+cek "§312 premis: MEDAN_MANAJEMEN_COMPANY terbaca dari shared (4 medan)" "V == 4" \
+  "$(echo "$MJ312" | grep -c .)"
+CO312=$(api "$OWNER" GET /company)
+CK312=$(api "$REISS105" GET /company)
+cek "§312 premis: kasir MASIH boleh memanggilnya (pintunya terbuka)" "V == 200" \
+  "$(status_code "$REISS105" GET /company)"
+# Bentuknya TIDAK berubah — `null`, bukan kunci yang dicabut. Kalau kuncinya
+# hilang, `kasir_models.dart` diam-diam memakai bawaannya dan tak ada yang tahu.
+cek "§312 bentuknya SAMA PERSIS untuk kedua peran (null, bukan kunci dicabut)" "V == 0" \
+  "$(selisih296 "$(echo "$CO312" | jq -r 'keys[]')" "$(echo "$CK312" | jq -r 'keys[]'|sort -u)")"
+# Owner melihat angkanya…
+cek "§312 owner: targetPenjualan & foodCostMaks & metodeHpp TERISI" "V == 1" \
+  "$(echo "$CO312" | jq '((.targetPenjualan != null) and (.foodCostMaks != null) and (.metodeHpp != null))|if . then 1 else 0 end')"
+# …kasir tidak, keempat-empatnya.
+cek "§312 kasir: keempat medan manajemen NULL" "V == 4" \
+  "$(echo "$CK312" | jq '[.targetPenjualan, .foodCostMaks, .metodeHpp, .planExpiresAt]|map(select(. == null))|length')"
+# PASANGAN ANTI-RUSAK: medan CETAK harus tetap utuh untuk kasir, kalau tidak
+# struk di lapangan kehilangan nama/alamat/tarif PB1 tanpa satu galat pun.
+cek "§312 PASANGAN: delapan medan cetak kasir SAMA PERSIS dengan owner" "V == 1" \
+  "$([ "$(echo "$CK312" | jq -S '{nama,alamat,telepon,logoUrl,receiptFooter,receiptShowAlamat,pb1Rate,pb1Enabled}')" = "$(echo "$CO312" | jq -S '{nama,alamat,telepon,logoUrl,receiptFooter,receiptShowAlamat,pb1Rate,pb1Enabled}')" ] && echo 1 || echo 0)"
+# …dan gerbang fitur Lite/Pro, yang dibaca SEMUA peran di seluruh layar.
+cek "§312 PASANGAN: plan/mode/isActive kasir SAMA PERSIS dengan owner" "V == 1" \
+  "$([ "$(echo "$CK312" | jq -S '{plan,mode,isActive,timezone,diskonMaksPersen,blokirJualMinus}')" = "$(echo "$CO312" | jq -S '{plan,mode,isActive,timezone,diskonMaksPersen,blokirJualMinus}')" ] && echo 1 || echo 0)"
+# Dan jalur SESI tak ikut tersentuh: `/auth/me` memakai `CompanyDto` (snake,
+# 9 medan) yang memang tak memuat angka perencanaan sama sekali.
+cek "§312 /auth/me kasir tetap membawa setelan operasionalnya" "V == 1" \
+  "$(api "$REISS105" GET /auth/me | jq '((.company.diskon_maks_persen != null) and (.company.pb1_rate != null))|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════
 # §309/§310 mengetuk rutenya SENDIRI, jadi jangkauannya berhenti di yang bisa

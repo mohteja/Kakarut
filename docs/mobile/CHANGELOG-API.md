@@ -25,6 +25,47 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 `GET /api/company` berhenti mengirim angka perencanaan usaha ke peran non-manajemen
+
+🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa di ponsel; disebut
+karena isinya memang berubah untuk sebagian peran.
+
+**Yang berubah** (`GET /api/company`, peran SELAIN owner/admin):
+
+| medan | sebelum | sesudah |
+| --- | --- | --- |
+| `targetPenjualan` | angka penuh | **`null`** |
+| `foodCostMaks` | angka penuh | **`null`** |
+| `metodeHpp` | `"average"`/`"fifo"` | **`null`** |
+| `planExpiresAt` | stempel/`null` | **`null`** |
+
+**Bentuknya TIDAK berubah.** Keempatnya tetap ada sebagai kunci, isinya yang
+`null` — persis seperti `hpp`/`harga_beli` sejak 2026-08-26. Tipe kontraknya
+ikut dilonggarkan: `foodCostMaks: number | null`, `metodeHpp: MetodeHpp | null`.
+
+**Kenapa.** Aturan "angka biaya hanya untuk manajemen" sudah punya rumah
+(`bolehLihatBiaya`) dan penjaga sejak Agustus — tapi POPULASINYA digambar
+sekali mengelilingi harga pokok, dan rute ini tak pernah masuk. Terukur dengan
+token kasir sungguhan: ia memulangkan **kedua puluh dua kuncinya utuh** ke tiap
+peran, termasuk target omzet bulanan, di layar yang paling sering terbuka di
+tablet bersama.
+
+**Pintunya SENGAJA tetap terbuka.** Kasir memanggil rute ini untuk kepala &
+kaki struk, dan `kasir_models.dart` mengurai delapan medan cetak dari sana —
+`nama`, `alamat`, `telepon`, `logoUrl`, `receiptFooter`, `receiptShowAlamat`,
+`pb1Rate`, `pb1Enabled`. **Kedelapannya tak tersentuh**, dan verify-api §312
+memakunya dengan lengan PASANGAN: kalau penyaring ini kelak melebar ke sana,
+struk di lapangan kehilangan nama dan tarif PB1 tanpa satu galat pun muncul.
+`plan`/`mode`/`isActive` juga utuh — ketiganya menggerbangi fitur di semua
+peran.
+
+**Untuk tim mobile — tidak ada yang perlu dikerjakan.** Disapu: ponsel tak
+membaca satu pun dari keempat medan itu dari rute ini. `metode_hpp` yang
+dipakai layar Kartu FIFO datang dari `/stok/fifo/:id`, dan `food_cost_maks` di
+layar pengadaan dari rute pengadaan — keduanya snake_case, rute lain.
+
+**Nol kunci kontrak baru**; fikstur kunci ponsel tak berubah satu baris pun.
+
 ## 🟡 `GET /api/penerimaan/riwayat` mengirim `waktu` ISO-8601 — sebelumnya keluaran `Date.toString()` yang Dart tak bisa urai
 
 🟡 **PERLU DICEK** — dan layar Riwayat Penerimaan di ponsel **membaik tanpa

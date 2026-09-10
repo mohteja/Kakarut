@@ -50,7 +50,13 @@ export type ModeCompany = "lite" | "pro";
 export interface CompanyRow {
   id: string;
   nama: string;
-  metodeHpp: MetodeHpp;
+  /**
+   * `null` untuk peran non-manajemen (`bolehLihatBiaya`) — lihat
+   * `MEDAN_MANAJEMEN_COMPANY`. Nol bukan "tidak tahu"; `null` memaksa layarnya
+   * memilih, dan ponsel membaca metode HPP-nya dari `/stok/fifo/:id`
+   * (`metode_hpp`), bukan dari sini.
+   */
+  metodeHpp: MetodeHpp | null;
   slug: string;
   alamat: string | null;
   telepon: string | null;
@@ -62,10 +68,17 @@ export interface CompanyRow {
   receiptShowAlamat: boolean;
   diskonMaksPersen: number;
   blokirJualMinus: boolean;
-  /** target omzet bulanan; `null` = belum diatur */
+  /**
+   * target omzet bulanan; `null` = belum diatur ATAU peminta bukan manajemen
+   * (`MEDAN_MANAJEMEN_COMPANY`). Terukur 2026-09-11: NOL klien membacanya —
+   * servernya membaca kolomnya langsung di `rekomendasi/routes.ts`, dan web
+   * cuma MENULISnya lewat PATCH.
+   */
   targetPenjualan: number | null;
-  foodCostMaks: number;
+  /** ambang food cost sehat; `null` untuk peran non-manajemen */
+  foodCostMaks: number | null;
   plan: string;
+  /** `null` bila tak berbatas ATAU peminta bukan manajemen */
   planExpiresAt: string | null;
   isActive: boolean;
   createdAt: string;
