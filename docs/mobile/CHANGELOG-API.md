@@ -31,6 +31,8 @@ tanpa akses repo server.
 > (`POST`, tapi tak menulis apa pun) yang menjawab **kecukupan stok SELURUH
 > keranjang** — pertanyaan yang `GET /menu/ketersediaan` tak bisa jawab.
 
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); aplikasi ponsel lewat merge `c751fc3` di repo ponsel (CI #56).
+
 **Kenapa rute baru, padahal ketersediaan sudah ada.** `/menu/ketersediaan`
 menjawab PER MENU: "menu ini bisa dibuat berapa porsi lagi". Yang dihadapi
 kasir adalah "keranjang INI muat atau tidak", dan keduanya menyimpang persis
@@ -83,6 +85,8 @@ sempat terunduh.
 > jadi ikut Lampiran A dan fikstur kunci ponsel. Kuncinya **camelCase** —
 > baris tabel apa adanya — dan tetap begitu.
 
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
+
 Terukur lewat HTTP (DB gerbang): **22 kunci**, dan rutenya `[any]` sehingga
 **kasir menerimanya utuh** (kuncinya identik dengan owner). Dua hal yang layak
 diketahui tim ponsel:
@@ -120,6 +124,8 @@ hilang atau berubah tipe. Status tetap **200**, `ok` tetap `true`,
 `retry_after_detik` tetap. Aplikasi yang mengabaikan medan baru tetap jalan
 persis seperti sekarang — tapi ia akan terus menampilkan layar kode untuk
 keadaan yang tak mengirim kode, dan itulah yang perlu dicek.
+
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); aplikasi ponsel lewat merge `c751fc3` di repo ponsel (CI #56).
 
 **Yang berubah.** Kedua pintu memulangkan `sebab` (kode untuk mesin) dan
 `message` (kalimat untuk manusia). Tujuh nilai, kosakata `SEBAB_DAFTAR` —
@@ -164,6 +170,8 @@ tak ikut) dan verify-api §299 (13 lengan dari kawat).
 🟡 **PERLU DICEK** — ini perubahan **di kawat**, bukan sekadar penamaan tipe
 seperti dua entri di bawah. Dua kunci yang selama ini berisi ANGKA kini
 `null` untuk peran non-manajemen.
+
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
 
 **Yang berubah.** `sale.totalHpp` dan `items[].hppSatuan` pada balasan `POST
 /api/penjualan` (dan perintah `penjualan` di `POST /api/sync`) kini **ditahan**
@@ -224,6 +232,8 @@ terbukti gerbang, bukan penghapus).
 > `nilai-stok.ts`, berkas yang fikstur dan Lampiran tak pernah baca; kelima
 > kuncinya karena itu tercatat ponsel sebagai hantu meski dikirim tiap hari.
 
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); aplikasi ponsel lewat merge `c751fc3` di repo ponsel (CI #56).
+
 Terukur lewat HTTP (owner, DB gerbang): `/laporan/bep` **8 kunci** —
 `biaya_tetap`, `basis`, `periode {dari, sampai}`, `rata_harga_jual`,
 `rata_margin_kontribusi`, `porsi_untuk_bep`, `omzet_untuk_bep`,
@@ -260,6 +270,8 @@ owner dan kasir).
 > medannya ada di kontrak: `SesiLogin` hidup di server saja, web mengetik
 > ulang sesinya sendiri, ponsel mengurai `CompanyDto`/`BranchDto` lokal.
 
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
+
 Terukur lewat HTTP terhadap DB gerbang (owner): `/auth/login` **4 kunci
 atas** (`token`, `user`, `company`, `branch`), `/auth/me` 3 (tanpa `token`),
 `.user` 7 (= `AuthUser`), `.company` **9**, `/cabang` 31 baris × **14 kunci**.
@@ -292,6 +304,8 @@ seluruh `apps/server/src`, web memakai tipe kontrak) dan verify-api §296
 > akhirnya **dideklarasikan** di `packages/shared` (jadi ikut Lampiran A dan
 > fikstur kunci ponsel). Sampai 2026-09-05 ia hidup sebagai DTO lokal halaman
 > web, dan itu berarti tak satu pun fikstur bisa menagihnya.
+
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
 
 Terukur lewat HTTP terhadap DB gerbang (237 baris, 2 rute): **55 kunci per
 baris**, 52 dideklarasikan web. Tiga yang dikirim sejak lama tanpa pernah

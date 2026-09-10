@@ -47,27 +47,6 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
-  // BELUM DI-MERGE (2026-09-06): rute pracek stok keranjang — bentuk lama tak
-  // berubah; menunggu rilis berikutnya bersama cabang `claude`.
-  "## 🟢 Rute BARU `POST /api/penjualan/cek-stok` — kasir bisa tahu keranjangnya akan ditolak SEBELUM menekan Bayar",
-  // BELUM DI-MERGE (2026-09-06): baris perusahaan masuk Lampiran A — nol
-  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ `GET /company` akhirnya bernama: `CompanyRow` (22 kunci) — tak ada perubahan di kawat",
-  // BELUM DI-MERGE (2026-09-05): kedua pintu daftar menyebut sebabnya
-  // (keputusan pemilik); menunggu rilis berikutnya bersama cabang `claude`.
-  "## 🟡 `/register` & `/resend-verification` kini MENYEBUT sebabnya — tiga belas keadaan berhenti dijawab satu kalimat",
-  // BELUM DI-MERGE (2026-09-05): struk penjualan masuk Lampiran A + biaya
-  // berhenti terkirim ke kasir lewat POST; menunggu rilis bersama `claude`.
-  "## 🟡 Struk penjualan bernama di Lampiran A — dan BIAYA berhenti terkirim ke kasir lewat `POST /penjualan`",
-  // BELUM DI-MERGE (2026-09-05): BEP & nilai stok masuk Lampiran A — nol
-  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ `BepResult` & `NilaiStokRingkas` kini ada di Lampiran A — dan `basis` BEP layak ditampilkan",
-  // BELUM DI-MERGE (2026-09-05): sesi & cabang masuk Lampiran A — nol
-  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ Sesi & cabang kini ada di Lampiran A: `SesiLogin`, `SesiDto`, `CompanyDto`, `CabangDto` — tak ada perubahan di kawat",
-  // BELUM DI-MERGE (2026-09-05): tipe baris pengadaan masuk Lampiran A — nol
-  // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ `StokMasukRow` & `StokMasukPage` kini ada di Lampiran A — tak ada perubahan di kawat",
   /*
    * PARUH "belum di-merge" KOSONG sejak 2026-08-31 — dan kosongnya bukan
    * kerapian. Entri "Angka BIAYA hanya untuk manajemen" tercantum di sini
@@ -101,6 +80,15 @@ const BELUM_TAYANG = new Set([
   // BELUM DI-MERGE (2026-09-04): pintu riwayat resep & harga. Aturan pemilik
   // berlaku — tak ada yang tayang sampai ia meminta rilis. Stempelnya dipasang
   // DAN baris ini dihapus pada commit yang sama dengan merge-nya.
+  //
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-09-10 — KETUJUH entri
+  // (pracek stok keranjang, `CompanyRow`, sebab penolakan dua pintu daftar,
+  // struk + biaya yang berhenti bocor ke kasir, `BepResult`/`NilaiStokRingkas`,
+  // sesi & cabang, `StokMasukRow`) tayang lewat merge `42e048b` / CI #495 —
+  // deploy-nya ikut hijau, webhook Dokploy menjawab "Compose deployed
+  // successfully" — dan ponselnya lewat `c751fc3` / CI #56. Stempelnya dipasang
+  // pada commit yang SAMA dengan penghapusan baris-baris ini; memisahkan
+  // keduanya adalah cara berkas ini pernah salah selama empat hari.
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

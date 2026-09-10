@@ -50,6 +50,108 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## RILIS 2026-09-10 — sembilan vena tayang, dan gerbang yang hasilnya bergantung pada sisa jalan sebelumnya — web + ponsel — 2026-09-10
+
+- **Diminta pemilik**: *"rilis production"*. Aturan berdirinya — tak ada yang
+  tayang sampai ia meminta — terpenuhi oleh kalimat itu.
+
+- **Yang tayang**, sembilan commit di web + tiga belas di ponsel:
+
+  | | commit merge | induk | CI |
+  | --- | --- | --- | --- |
+  | web → `production` | `42e048b` | `fcf6c64` + `74948b5` | **#495 hijau**, termasuk build image + redeploy Dokploy |
+  | ponsel → `Production` | `c751fc3` | `d606025` + `2b1c3fa` | **#56 hijau** |
+
+  Isinya: lima bentuk balasan pindah ke `packages/shared` (pengadaan · sesi &
+  cabang · BEP + nilai stok · struk penjualan · baris perusahaan) · HPP berhenti
+  bocor ke kasir lewat `POST /penjualan` · dua pintu daftar menyebut sebab
+  penolakannya · `POST /penjualan/cek-stok`, pracek stok SELURUH keranjang.
+
+- **Hasil merge byte-identik dengan `claude` di kedua repo**, dan dibuktikan
+  dua kali di sisi web (sebelum dan sesudah kontainer didaur ulang) lewat
+  `git diff HEAD origin/claude` yang kosong. Di sisi ponsel dibuktikan pada
+  **klon segar penuh** dengan SHA eksplisit `2b1c3fa`, bukan lewat ref pelacak
+  — klon satu-cabang pernah memberi konfirmasi palsu dua rilis berturut-turut,
+  dan yang membongkarnya waktu itu baris **induk** SHA, bukan diff-nya. Induk
+  commit merge ponsel diperiksa lagi di sini: `d606025 2b1c3fa`, benar.
+
+- **Gerbang penuh dijalankan di atas commit merge yang persis didorong**, bukan
+  di atas cabang kerja: typecheck hijau · verify-api **3.620 / 0** · vitest
+  **251 berkas / 3.087 uji** · invarian **27 / 0** · Playwright **48 lolos**.
+  CI #495 mengulang verify-api + e2e di runner-nya sendiri dan hijau —
+  konfirmasi independen di atas toolchain yang bukan milik saya.
+
+- **TEMUAN, dan sasarannya gerbang itu sendiri: hasilnya bergantung pada SISA
+  jalan sebelumnya.** Jalan pertama sesudah kontainer didaur ulang MERAH di
+  tiga lengan verify-api — `HTML shell tetap no-cache`, `health menyertakan
+  build id (dist tersedia)`, `header X-Kakarut-Build sama dengan build health`.
+  Ketiganya membaca `apps/web/dist` **saat server boot**, dan skrip gerbangnya
+  mem-boot SEBELUM membangun apa pun. Jalan hijau sebelumnya lolos karena
+  `dist` **tertinggal** dari build manual. Byte yang sama persis, dua warna.
+
+  Ini kelas yang sama dengan temuan yang justru sedang dirilis: `npm run e2e`
+  tak membangun apa pun, jadi tahap e2e tiap putaran bisa hijau sambil menguji
+  bundel kemarin. Perbaikan itu (`test:e2e` membangun lebih dulu, dipaku
+  `e2e-bundel-segar.test.ts`) hidup di repo dan ikut tayang. Perbaikan yang INI
+  tidak: skrip gerbangnya scratchpad, bukan milik repo — `rm -rf apps/web/dist`
+  lalu `npm run build` SEBELUM boot, supaya ketergantungan itu jadi mustahil
+  alih-alih sekadar tak terjadi. **Yang setara di dalam repo belum ada**, dan
+  bentuknya sudah jelas: `verify-api.sh` harus menyatakan "dist tak ada"
+  sebagai PREMIS yang gagal keras, alih-alih tiga lengan yang membingungkan.
+  Masuk antrean sebagai vena alat ukur; tidak diselundupkan ke dalam rilis.
+
+- **e2e 48/48 gagal, dan bukan asersinya**: peramban tak pernah diluncurkan.
+  `npm install` di kontainer baru menarik `@playwright/test` **1.61.1**, yang
+  menuntut chromium build **1228**; yang ada di lingkungan ini **1194**.
+  `playwright.config.ts` sudah menyediakan pintunya bertahun-tahun
+  (`E2E_CHROMIUM_PATH`) — jadi ini bukan cacat repo, melainkan pengingat bahwa
+  **versi peramban tak dipatok bersama versi Playwright**. Dicatat, tak
+  diperbaiki di rilis.
+
+- **Kontainer didaur ulang di TENGAH rilis, untuk kedua kalinya berturut-turut
+  pada rilis.** Yang hilang: klon ponsel, `node_modules`, Postgres, scratchpad
+  sebagian. Yang TIDAK hilang, dan itulah yang membuat pemulihannya murah:
+  commit merge lokal `42e048b`, dan fakta bahwa **belum ada satu byte pun yang
+  didorong** — `origin/production` masih `fcf6c64` saat diperiksa ulang. Aturan
+  "jangan dorong apa pun yang gerbangnya merah" yang membuat itu benar.
+
+- **Ref lokal `claude/fnb-pos-saas-platform-frzh8s` menghalangi `refs/heads/claude`.**
+  `git checkout claude` gagal keras: *"cannot lock ref … exists"*. Isinya
+  ternyata penunjuk ke `fcf6c64` — rilis LAMA — dan nol commit unik terhadap
+  `origin/claude`; di remote ia tak ada sama sekali. Diganti nama jadi
+  `claude-frzh8s-lama-fcf6c64`, tidak dihapus. Sepupu ketiga dari kelas yang
+  sama dalam tiga hari: **nama yang ada tak berarti ia menunjuk ke tempat yang
+  benar** (ref pelacak ponsel basi ×2, `origin/claude/…` basi, dan kini ini).
+
+- **Bukti tayang: CI, bukan kawat — dan itu batas yang nyata.** Rencana rilis
+  ini menuntut mengetuk `/api/health` dan `POST /penjualan/cek-stok` dari luar
+  (401, bukan 404). **Tak bisa dijalankan**: jaringan keluar kontainer ini
+  ditutup untuk semua host — `https://example.com` pun memulangkan `000`, jadi
+  bukan soal alamat produksinya tak diketahui. Yang dipunya sebagai gantinya
+  bukan simpulan dari push yang sukses, melainkan jawaban sistem deploy
+  sendiri: langkah `Picu redeploy Dokploy` mengirim webhook-nya dan menerima
+  **`{"message":"Compose deployed successfully"}`** pada 03:43:50Z. Lebih lemah
+  daripada mengetuk rutenya; disebut apa adanya.
+
+- **Stempel changelog** dipasang untuk KETUJUH entri pada commit yang SAMA
+  dengan penghapusannya dari `BELUM_TAYANG`. Stempel ini sendiri ikut ke
+  `production` pada rilis berikutnya — pola yang sama dengan `278158e` dan
+  `e6f1d8e`.
+
+- **Batas yang diakui.** APK toko tidak ikut terkirim (CI ponsel hanya
+  analyze + test; `scripts/build-rilis.sh` manual) — sampai APK tiap perangkat
+  diperbarui, peringatan keranjang & sebab penolakan daftar belum sampai ke
+  kasir, tapi TAK ADA yang putus sebab rilis ini nol perubahan memutus ·
+  enumerasi akun kini terbuka di production lewat `/register` &
+  `/resend-verification` (keputusan pemilik 2026-09-05), disebut supaya
+  tayangnya tidak senyap · peringatan keranjang masih tanpa lengan peramban,
+  dijaga penjaga statis + §300 dari kawat, DOM sungguhannya belum pernah
+  diuji · empat entri LAMA di changelog memuat **`**Belum tayang.**` di bawah
+  stempel "sudah di-merge"** — kontradiksi yang penjaganya tak lihat sebab
+  `STEMPEL` cuma mencari satu arah; masuk antrean, tidak dirapikan di sini.
+
+---
+
 ## Peringatan yang dijanjikan `blokir_jual_minus` — dan cek per-menu yang komentar servernya sendiri sudah bilang tak setara — server + web + ponsel — 2026-09-06
 
 **Vena.** Butir antrean **KEPUTUSAN PEMILIK 2026-09-05** ("bangun peringatannya"),
