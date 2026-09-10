@@ -97,7 +97,14 @@ jobs:
           # JEJAK_RUTE: tiap permintaan dicatat (metode, POLA rute, status, ms)
           # supaya langkah "Cakupan rute" di bawah bisa MENGUKUR ULANG
           # docs/audit/rute-diketuk.txt alih-alih mempercayainya.
-          JEJAK_RUTE=/tmp/jejak-rute.tsv npm run start -w @kakarut/server > /tmp/server.log 2>&1 &
+          #
+          # ADU_TIPE: badan balasan JSON direkam (paling banyak 2 per pola rute)
+          # supaya §311 di dalam verify-api bisa mengadu TIPE NILAI di kawat
+          # dengan tipe di kontrak pada SELURUH permukaan — termasuk 170 rute
+          # tulis, yang tak satu pun bisa diketuk pembanding itu sendiri tanpa
+          # berhenti jadi alat ukur.
+          JEJAK_RUTE=/tmp/jejak-rute.tsv ADU_TIPE=/tmp/adu-tipe.jsonl \
+            npm run start -w @kakarut/server > /tmp/server.log 2>&1 &
           echo "$!" > /tmp/server.pid
           for i in $(seq 1 60); do
             if curl -sf http://localhost:3000/api/health >/dev/null 2>&1; then
@@ -107,7 +114,7 @@ jobs:
           done
           curl -sf http://localhost:3000/api/health
           npm run seed
-          bash scripts/verify-api.sh
+          ADU_TIPE=/tmp/adu-tipe.jsonl bash scripts/verify-api.sh
       # ─────────────────────────────────────────────────────────────────────
       # AUDIT INVARIAN — SESUDAH verify-api, dan itu seluruh alasannya.
       #

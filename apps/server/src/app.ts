@@ -357,6 +357,80 @@ export function createApp() {
     });
   }
 
+  /*
+   * REKAM BALASAN — MATI secara bawaan, menyala hanya lewat env `ADU_TIPE`.
+   *
+   * Kenapa ia ada. Pembanding "tipe nilai di kawat vs tipe di kontrak"
+   * (verify-api §309/§310) mengetuk rutenya SENDIRI, jadi jangkauannya
+   * terbatas pada yang bisa diketuk tanpa menulis apa pun: 108 dari 110 GET,
+   * dan NOL dari 170 rute tulis (POST/PATCH/PUT/DELETE). Alat ukur yang
+   * MENULIS ke basis data berhenti jadi alat ukur.
+   *
+   * Yang sudah mengetuk semuanya justru verify-api itu sendiri — 3.700 lengan,
+   * ~8.000 permintaan, seluruh alur tulis lengkap dengan prasyaratnya. Maka
+   * jalan yang benar bukan memperbesar daftar rute pembanding, melainkan
+   * MENUMPANG jalan yang sudah ada: server merekam balasannya, pembanding
+   * membacanya sesudahnya.
+   *
+   * Yang direkam POLA rutenya (bukan jalur ber-UUID), metode, status, dan
+   * badan JSON-nya. Dibatasi dua arah supaya tak pernah jadi beban:
+   *   · paling banyak `MAKS_REKAM_PER_RUTE` rekaman per `metode+pola` —
+   *     balasan ke-101 sebuah rute tak menyatakan apa pun yang baru;
+   *   · badan di atas `MAKS_BADAN_BYTE` dilewati (dicatat sebagai dilewati,
+   *     bukan dibuang diam-diam).
+   *
+   * Hanya JSON. Aliran berkas (unduh cadangan), HTML, dan aset statis tak
+   * punya bentuk untuk diadu.
+   *
+   * `clone()` sebelum membaca: badan balasan aliran sekali-pakai, dan alat
+   * ukur yang MENGONSUMSI yang diukurnya bukan alat ukur. Ditulis dengan
+   * `appendFile` yang tak ditunggu, sama seperti jejak rute di atas.
+   */
+  const aduBerkas = process.env.ADU_TIPE;
+  if (aduBerkas) {
+    const MAKS_REKAM_PER_RUTE = 2;
+    const MAKS_BADAN_BYTE = 128 * 1024;
+    const cacah = new Map<string, number>();
+    app.use("*", async (c, next) => {
+      await next();
+      try {
+        const tipe = c.res.headers.get("content-type") ?? "";
+        if (!tipe.includes("application/json")) return;
+        const kunci = `${c.req.method} ${c.req.routePath}`;
+        const n = cacah.get(kunci) ?? 0;
+        if (n >= MAKS_REKAM_PER_RUTE) return;
+        cacah.set(kunci, n + 1);
+        const salinan = c.res.clone();
+        void salinan
+          .text()
+          .then((teks) => {
+            if (teks.length > MAKS_BADAN_BYTE) {
+              return appendFile(
+                aduBerkas,
+                JSON.stringify({ metode: c.req.method, pola: c.req.routePath, status: c.res.status, lewat: "terlalu besar" }) + "\n",
+              );
+            }
+            return appendFile(
+              aduBerkas,
+              JSON.stringify({ metode: c.req.method, pola: c.req.routePath, status: c.res.status, badan: teks }) + "\n",
+            );
+          })
+          // DITELAN DENGAN SADAR, dan alasannya sama dengan jejak rute di atas:
+          // ini alat ukur yang menumpang jalur permintaan. Kegagalan menulis
+          // rekaman (disk penuh, berkas terkunci) TIDAK boleh menggagalkan
+          // permintaan yang sedang diukurnya. Yang kehilangan kabar bukan
+          // pemakai melainkan §311, dan ia punya penjaganya sendiri: lantai
+          // "pola rute terekam ≥ 250" memerah begitu rekamannya menyusut,
+          // jadi telanan ini tak bisa menyembunyikan dirinya.
+          .catch(() => {});
+      } catch {
+        // Sama, untuk jalur sinkronnya (mis. `clone()` pada badan yang sudah
+        // dikonsumsi middleware lain): alat ukur tak boleh menggagalkan yang
+        // diukurnya, dan lantai §311 yang menagih kalau ia diam terlalu sering.
+      }
+    });
+  }
+
   // ETag + 304 untuk endpoint DAFTAR master data. Aplikasi mobile merevalidasi
   // cache-nya di latar belakang; tanpa ini tiap revalidasi menarik badan penuh
   // walau tak ada yang berubah — mahal di sinyal buruk, dan itu justru saat

@@ -50,6 +50,112 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Alat ukur yang tak bisa mengetuk 170 rute tulis — jadi servernya yang merekam, dan verify-api jadi fiksturnya — server — 2026-09-11
+
+**Vena.** Butir antrean "balasan TULIS masih di luar sapuan §309/§310", lahir
+satu putaran sebelumnya beserta rancangannya. Batasnya nyata: pembanding tipe
+mengetuk rutenya SENDIRI, dan **alat ukur yang MENULIS ke basis data berhenti
+jadi alat ukur**.
+
+| | jumlah |
+| --- | --- |
+| rute GET yang bisa diketuk pembanding sendiri | 108 dari 110 |
+| **rute TULIS (POST/PATCH/PUT/DELETE)** | **170**, dan NOL tersapu |
+
+**Yang sudah mengetuk semuanya justru verify-api itu sendiri** — 3.736 lengan,
+~8.000 permintaan, seluruh alur tulis lengkap dengan prasyaratnya. Jadi jalan
+yang benar bukan memperbesar daftar rute pembanding, melainkan MENUMPANG jalan
+yang sudah ada: **server merekam balasannya, pembanding membacanya sesudahnya.**
+
+Bentuknya meniru `JEJAK_RUTE` yang sudah ada di berkas yang sama — mati secara
+bawaan, menyala lewat env, ditulis `appendFile` yang tak ditunggu.
+
+**Terukur atas satu jalan verify-api penuh:**
+
+| | §309/§310 (mengetuk sendiri) | §311 (rekaman) |
+| --- | --- | --- |
+| pola rute | 108 | **261** |
+| interface tersidik | 133 | **157** |
+| objek diadu | 4.079 | 2.762 |
+| berkas rekaman | — | **902 KB** |
+
+Keduanya saling melengkapi, dan itu bukan kebetulan: yang mengetuk sendiri
+melihat LEBIH BANYAK OBJEK per rute (ia menarik daftar penuh), yang merekam
+melihat LEBIH BANYAK RUTE (ia ikut ke mana pun verify-api pergi).
+
+**SAPUANNYA BERSIH** — nol selisih tipe, nol stempel salah bentuk atas 261
+pola rute. Dan bukti merahnya kali ini yang paling tajam dari seluruh deretan
+ini, sebab ia membuktikan JANGKAUANNYA, bukan cuma kepekaannya:
+
+```
+POST /api/satuan  →  {"…","dipakai":"0"}     ← disuntik, string
+GET  /api/satuan  →  {"…","dipakai":0}       ← jalur §309, BENAR
+```
+
+Cacat yang cuma hidup di jalur TULIS. **§309 tetap hijau** — ia memang tak
+pernah bisa melihatnya. §311 menuduhnya dengan nama interface, medan, tipe
+kontrak, nilai kawat, dan **metode + pola rutenya**: `SatuanDto.dipakai …
+(POST /api/satuan)`.
+
+**Yang dikerjakan.**
+
+- **Middleware `ADU_TIPE=` di `app.ts`** — merekam metode, POLA rute (bukan
+  jalur ber-UUID), status, dan badan JSON. Berbatas dua arah: paling banyak
+  **2 rekaman per `metode+pola`** (balasan ke-101 sebuah rute tak menyatakan
+  apa pun yang baru) dan badan di atas **128 KB** dilewati — dicatat sebagai
+  dilewati, bukan dibuang diam-diam. Hanya JSON. `c.res.clone()` sebelum
+  membaca: badan balasan aliran sekali-pakai, dan alat ukur yang MENGONSUMSI
+  yang diukurnya bukan alat ukur.
+- **`--berkas` di pembandingnya** — membaca rekaman, melewati badan galat
+  (4xx/5xx: bentuknya `{error}`/`{kode}`, dipaku dari sisi lain), mengadu
+  sisanya dengan kedua detektor.
+- **verify-api §311** (6 lengan) — dan rekaman yang HILANG memerahkannya,
+  bukan melewatinya: seksi yang melewati dirinya sendiri adalah seksi yang
+  berhenti bisa menuduh.
+- **`ci.yml` menyalakannya** di server DAN mengopernya ke verify-api, dengan
+  jangkar uji atas keduanya — kelas yang sama dengan suite Playwright yang
+  membusuk bertahun-tahun karena tak ada yang menjalankannya.
+
+**Bukti merah** (semuanya dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| `dipakai: String(…)` HANYA di `POST /satuan` | §311 dari rekaman | **merah**, menyebut metode + polanya, keluar 1 |
+| …cacat yang sama | §309 (mengetuk sendiri) | **hijau** — jangkauannya memang tak sampai |
+
+**GERBANGNYA MERAH DULU, dan penjaganya benar — untuk keenam kalinya dalam
+deretan ini.** `galat-ditelan-beralasan` menuduh middleware baruku dua kali:
+sebuah `.catch(() => {})` tanpa satu kata pun alasan, dan cacah telanan
+`server/app.ts` yang terdaftar 1 sementara kini 3. Tak ada yang didorong;
+alasannya ditulis (dan bukan formalitas — yang menagih kalau perekamnya diam
+terlalu sering memang bukan berkas itu melainkan lantai "pola rute terekam
+≥ 250" di §311), cacahnya dinaikkan beserta sebabnya, lalu gerbangnya
+dijalankan ulang penuh.
+
+**Gerbang**: typecheck bersih · verify-api **3.743 / 0** (+7, seluruhnya §311) · vitest **259 berkas / 3.159 uji** (+5 uji) · invarian **27 / 0** · Playwright **48 lolos**. §311 dari dalam gerbang: **261 pola rute**, 157 interface, 2.762 objek, 0 selisih, 0 stempel salah bentuk.
+
+**Batas yang diakui.**
+
+- **Jangkauannya = jangkauan verify-api.** Rute yang tak pernah diketuk skrip
+  itu tetap tak terekam. Itu bukan kelemahan baru melainkan batas yang SUDAH
+  diukur dan dijaga di tempat lain (`cakupan-rute.test.ts` +
+  `docs/audit/rute-diketuk.txt`); kedua penjaga kini bertumpu pada mekanisme
+  yang sama, dan itu disebut supaya tak terbaca sebagai dua jaminan terpisah.
+- **Dua rekaman per pola rute.** Cacat yang cuma muncul pada balasan ke-tiga
+  dan seterusnya (mis. hanya saat larik kosong) tak terlihat. Angkanya konstan
+  bernama, dan uji menagihnya tetap ada.
+- **Badan > 128 KB dilewati** — satu di jalan yang diukur. Ia dicatat, jadi
+  jumlahnya bisa dibaca, tapi isinya memang tak diadu.
+- **Middleware ini hidup di jalur permintaan.** Ia mati secara bawaan, dan
+  uji memaku bahwa ia mati secara bawaan; tapi kode yang berjalan di jalur
+  permintaan selalu punya harga yang tak nol, dan itu pantas disebut alih-alih
+  disembunyikan di balik "toh cuma dev".
+- **Badan galat tak diadu.** Bentuk `{error}`/`{kode}` dipaku dari sisi lain
+  (kosakata `kode` diadu dua arah di uji status), jadi melewatkannya di sini
+  bukan lubang — tapi ia juga bukan jaminan yang diberikan seksi ini.
+
+---
+
 ## Sepertiga rute GET tak pernah tersapu siapa pun — dan di sanalah bentuk terkaya tinggal — server — 2026-09-11
 
 **Vena.** Butir antrean "§309 hanya menyapu GET TANPA PARAMETER", lahir dua
@@ -14460,18 +14566,23 @@ berlaku di situ).
       dibuktikan menuduh pada rute detail itu sendiri (`SupplierKartu`
       mustahil tertuduh sebelumnya). Dua yang tersisa disebut: satu aliran
       berkas (`KECUALI`, beralasan), satu tanpa data di DB gerbang
-- [ ] **Balasan TULIS masih di luar sapuan §309/§310** — 113 POST, 17 PATCH,
-      16 PUT, 24 DELETE. Idnya tak bisa dipetik dari daftar, dan alat ukur yang
-      MENULIS ke DB berhenti jadi alat ukur. Jalan yang masuk akal bukan
-      memperbesar daftar rutenya melainkan menumpang verify-api yang SUDAH
-      mengetuknya 3.700 kali: middleware dev-only (`ADU_TIPE=`, seidiom
-      `JEJAK_RUTE=` yang sudah ada di `app.ts`) yang mengadu tiap balasan JSON
-      saat gerbang berjalan. Hambatannya nyata: pembandingnya membaca
-      `types.ts` lewat pohon sintaks yang tinggal di `test/util/ast.ts`,
-      sementara `src/` TIDAK PERNAH mengimpor dari `test/` — invarian yang
-      sudah diperiksa. Pilihannya memindahkan `ast.ts` ke `src/scripts/`
-      (5 pengimpor, sebelah `buta-komentar.ts` yang presedennya persis sama)
-      atau membangkitkan tabel sidik sebagai JSON berpenjaga kesegaran
+- [x] ~~**Balasan TULIS masih di luar sapuan §309/§310**~~ — DIBAYAR #113,
+      lihat entri di atas. Hambatan layering-nya ternyata bisa dilewati tanpa
+      memindahkan apa pun: middleware-nya cuma MEREKAM (metode, pola, status,
+      badan JSON), dan pembandingnya membaca rekaman itu dari pohon uji tempat
+      `ast.ts` sudah tinggal. Jangkauan **108 → 261 pola rute**, 157 interface,
+      2.762 objek. Bukti merahnya membuktikan jangkauannya, bukan cuma
+      kepekaannya: cacat yang cuma hidup di `POST /satuan` memerahkan §311
+      sementara §309 tetap hijau
+- [ ] **Jangkauan §311 = jangkauan verify-api** — rute yang tak pernah diketuk
+      skrip itu tetap tak terekam. Bukan kelemahan baru (itu batas yang sudah
+      diukur `cakupan-rute.test.ts` + `docs/audit/rute-diketuk.txt`), tapi kini
+      DUA penjaga bertumpu pada mekanisme yang sama, dan itu pantas disebut
+      alih-alih terbaca sebagai dua jaminan terpisah
+- [ ] **§311 merekam paling banyak 2 balasan per pola rute** — cacat yang cuma
+      muncul pada balasan ketiga dan seterusnya (mis. hanya saat lariknya
+      kosong) tak terlihat. Angkanya konstan bernama di `app.ts`; menaikkannya
+      menukar jangkauan dengan ukuran berkas (902 KB pada dua rekaman)
 - [ ] **`/kebersihan/:id` tak pernah teruji dari kawat** — DB gerbang tak punya
       satu pun laporan kebersihan, jadi idnya tak bisa dipetik. Diratchet ≤ 1
       di §309 supaya rute detail kedua yang senasib tak lahir diam-diam

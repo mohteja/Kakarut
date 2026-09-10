@@ -1,7 +1,17 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { DETAIL, KECUALI, RUTE, adu, kontrakTipe, petaSidik, petik, sah } from "./util/adu-tipe-kawat";
+import {
+  DETAIL,
+  KECUALI,
+  RUTE,
+  adu,
+  aduRekaman,
+  kontrakTipe,
+  petaSidik,
+  petik,
+  sah,
+} from "./util/adu-tipe-kawat";
 import { semuaRute } from "./util/rute";
 
 /**
@@ -52,6 +62,95 @@ describe("verify-api memanggil pembanding tipe kawat", () => {
     // (ganti password menaikkan token_version), dan kematiannya menyamar jadi
     // gerbang peran yang bocor — pelajaran §303.
     expect(vapi).toMatch(/--kasir "\$REISS105"/);
+  });
+});
+
+describe("rekaman balasan (`ADU_TIPE=`) — jalur yang menjangkau rute TULIS", () => {
+  const vapi = readFileSync(AKAR + "scripts/verify-api.sh", "utf8");
+  const app = readFileSync(AKAR + "apps/server/src/app.ts", "utf8");
+  const ci = readFileSync(AKAR + ".github/workflows/ci.yml", "utf8");
+
+  it("middleware perekamnya ada, MATI secara bawaan, dan berbatas dua arah", () => {
+    /*
+     * Alat ukur yang tak berbatas berhenti jadi alat ukur: rekaman tanpa
+     * langit-langit menumbuhkan berkas ratusan MB pada jalan verify-api, dan
+     * badan raksasa membuat pembandingnya jadi jalur yang paling lambat.
+     * Keduanya dipaku — dan "mati secara bawaan" dipaku juga, sebab jalur ini
+     * TIDAK boleh hidup di produksi.
+     */
+    expect(app).toContain("const aduBerkas = process.env.ADU_TIPE;");
+    expect(app).toContain("if (aduBerkas) {");
+    expect(app).toMatch(/const MAKS_REKAM_PER_RUTE = \d+;/);
+    expect(app).toMatch(/const MAKS_BADAN_BYTE = /);
+    // Badan balasan aliran SEKALI PAKAI — alat ukur yang mengonsumsi yang
+    // diukurnya bukan alat ukur.
+    expect(app).toContain("c.res.clone()");
+    // Hanya JSON: aliran berkas & HTML tak punya bentuk untuk diadu.
+    expect(app).toContain('tipe.includes("application/json")');
+  });
+
+  it("§311 ada di verify-api dan membaca rekamannya", () => {
+    expect(vapi).toContain("§311");
+    expect(vapi).toContain("--berkas");
+    expect(vapi).toContain('REKAM311="${ADU_TIPE:-/tmp/adu-tipe.jsonl}"');
+    // Rekaman yang HILANG harus MERAH, bukan dilewati — seksi yang melewati
+    // dirinya sendiri adalah seksi yang berhenti bisa menuduh.
+    expect(vapi).toContain("rekaman balasan TIDAK ADA");
+  });
+
+  it("CI benar-benar menyalakannya — di server DAN di verify-api", () => {
+    // Tanpa jangkar ini, `ADU_TIPE=` bisa dicabut dari ci.yml dan §311 diam
+    // seketika: rekamannya kosong, dan seksinya cuma melapor "tidak ada".
+    // Kelas yang sama dengan suite Playwright yang membusuk bertahun-tahun.
+    expect(ci, "ADU_TIPE tak dinyalakan saat server diboot").toMatch(/ADU_TIPE=\S+\s*\\?\s*\n?\s*npm run start/);
+    expect(ci, "ADU_TIPE tak dioper ke verify-api").toContain("ADU_TIPE=/tmp/adu-tipe.jsonl bash scripts/verify-api.sh");
+  });
+
+  it("pembacanya melewati badan galat & yang dilewati, dan menuduh yang salah tipe", () => {
+    const kontrak = kontrakTipe();
+    const sidik = petaSidik(kontrak);
+    const baris = (o: unknown) => JSON.stringify(o);
+    const isi = [
+      // badan galat 4xx: bentuknya `{error}`, dipaku dari sisi lain
+      baris({ metode: "GET", pola: "/api/x", status: 404, badan: '{"error":"tak ada"}' }),
+      // rekaman yang dilewati karena badannya raksasa
+      baris({ metode: "GET", pola: "/api/y", status: 200, lewat: "terlalu besar" }),
+      // yang benar
+      baris({
+        metode: "GET",
+        pola: "/api/stok/awal",
+        status: 200,
+        badan: '{"tanggal":"2026-09-11","items":[{"ingredient_id":"a","qty":1,"tanggal":"2026-09-11"}]}',
+      }),
+      // yang SALAH tipe
+      baris({
+        metode: "POST",
+        pola: "/api/stok/awal",
+        status: 200,
+        badan: '{"tanggal":"2026-09-11","items":[{"ingredient_id":"a","qty":"1","tanggal":"2026-09-11"}]}',
+      }),
+    ].join("\n");
+    const r = aduRekaman(isi, kontrak, sidik);
+    expect(r.baris).toBe(4);
+    expect(r.lewat).toBe(1);
+    expect(r.pola.has("GET /api/stok/awal")).toBe(true);
+    expect(r.pola.has("GET /api/x"), "badan galat tak boleh ikut dihitung").toBe(false);
+    expect(r.hasil.selisih.map((s) => `${s.rute} ${s.iface}.${s.medan}`)).toEqual([
+      "POST /api/stok/awal StokAwalItem.qty",
+    ]);
+  });
+
+  it("…dan menuduh stempel salah bentuk dari rekaman juga", () => {
+    const kontrak = kontrakTipe();
+    const sidik = petaSidik(kontrak);
+    const isi = JSON.stringify({
+      metode: "POST",
+      pola: "/api/z",
+      status: 201,
+      badan: '{"waktu":"Thu Sep 10 2026 14:37:32 GMT+0000 (Coordinated Universal Time)"}',
+    });
+    const r = aduRekaman(isi, kontrak, sidik);
+    expect(r.stempel.map((t) => t.jalur)).toEqual(["waktu"]);
   });
 });
 

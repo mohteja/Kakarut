@@ -18349,6 +18349,43 @@ cek "§310 PASANGAN: ISO lolos, keluaran Date.toString tertuduh" "V == 1" \
 cek "§310 INTI: nol stempel waktu yang bukan ISO-8601 di 108 rute GET" "V == 0" \
   "$(echo "$RINGKAS309" | awk '{print $7}')"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
+# ═══════════════════════════════════════════════════════════════════════════
+# §309/§310 mengetuk rutenya SENDIRI, jadi jangkauannya berhenti di yang bisa
+# diketuk tanpa menulis apa pun: 108 dari 110 GET, dan NOL dari 170 rute tulis.
+# Alat ukur yang MENULIS ke basis data berhenti jadi alat ukur.
+#
+# Yang sudah mengetuk semuanya justru skrip ini — 3.700 lengan, ~8.000
+# permintaan, seluruh alur tulis lengkap dengan prasyaratnya. Maka servernya
+# yang merekam (`ADU_TIPE=` di `app.ts`, seidiom `JEJAK_RUTE=`), dan
+# pembandingnya membaca rekaman itu di sini.
+#
+# Terukur 2026-09-11 atas satu jalan penuh: 582 rekaman, **261 POLA RUTE** —
+# lebih dari dua kali lipat jangkauan §309 — 157 interface, 2.762 objek.
+REKAM311="${ADU_TIPE:-/tmp/adu-tipe.jsonl}"
+cek "§311 premis: servernya benar-benar merekam (berkas ada & berisi)" "V == 1" \
+  "$([ -s "$REKAM311" ] && echo 1 || echo 0)"
+if [ -s "$REKAM311" ]; then
+  R311=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --berkas "$REKAM311" 2>/tmp/adu311.err)
+  KELUAR311=$?
+  RINGKAS311=$(echo "$R311" | grep '^REKAM ' | head -1)
+  # Rekaman yang menyusut = sapuan yang menyusut, dan sapuan yang menyusut
+  # LULUS tanpa memeriksa apa pun. Lantainya dipatok dari pengukuran.
+  cek "§311 premis: pola rute terekam ≥ 250 (§309 cuma menjangkau 108)" "V >= 250" \
+    "$(echo "$RINGKAS311" | awk '{print $3}')"
+  cek "§311 premis: interface tersidik ≥ 150" "V >= 150" "$(echo "$RINGKAS311" | awk '{print $4}')"
+  cek "§311 premis: objek yang diadu ≥ 2500" "V >= 2500" "$(echo "$RINGKAS311" | awk '{print $5}')"
+  cek "§311 INTI: nol selisih tipe di SELURUH permukaan (termasuk rute tulis)" "V == 0" \
+    "$(echo "$RINGKAS311" | awk '{print $6}')"
+  cek "§311 INTI: nol stempel salah bentuk di seluruh permukaan" "V == 0" \
+    "$(echo "$RINGKAS311" | awk '{print $7}')"
+  cek "§311 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR311"
+  [ "$KELUAR311" -ne 0 ] && { echo "── selisih yang dilaporkan §311 ──"; echo "$R311" | grep -v '^REKAM '; cat /tmp/adu311.err; }
+else
+  gagal "§311 rekaman balasan TIDAK ADA di $REKAM311 — server tak diboot dengan ADU_TIPE="
+fi
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

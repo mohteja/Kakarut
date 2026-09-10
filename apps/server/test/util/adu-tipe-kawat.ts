@@ -342,6 +342,53 @@ export function petik(v: unknown, sel: string): string | null {
   return jalan(v, 0);
 }
 
+/**
+ * BACA REKAMAN BALASAN (`ADU_TIPE=` di server) dan adu seluruhnya.
+ *
+ * Ini jalur yang menjangkau rute TULIS: pembanding ini tak pernah bisa
+ * mengetuk `POST /penjualan` sendiri tanpa berhenti jadi alat ukur, tapi
+ * verify-api sudah mengetuknya — lengkap dengan prasyaratnya — 3.700 kali.
+ */
+export function aduRekaman(
+  isi: string,
+  kontrak: Map<string, Medan[]>,
+  sidik: Map<string, string[]>,
+): { hasil: Hasil; stempel: Stempel[]; pola: Set<string>; baris: number; lewat: number } {
+  const hasil: Hasil = { selisih: [], cocok: new Map() };
+  const stempel: Stempel[] = [];
+  const pola = new Set<string>();
+  let baris = 0;
+  let lewat = 0;
+  for (const l of isi.split("\n")) {
+    if (!l.trim()) continue;
+    baris += 1;
+    let rec: { metode: string; pola: string; status: number; badan?: string; lewat?: string };
+    try {
+      rec = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    if (rec.lewat !== undefined || rec.badan === undefined) {
+      lewat += 1;
+      continue;
+    }
+    // Badan GALAT (4xx/5xx) tak diadu: bentuknya `{error}`/`{kode}`, dipaku
+    // dari sisi lain (kosakata `kode` diadu dua arah di uji status).
+    if (rec.status >= 400) continue;
+    let badan: unknown;
+    try {
+      badan = JSON.parse(rec.badan);
+    } catch {
+      continue;
+    }
+    const nama = `${rec.metode} ${rec.pola}`;
+    pola.add(nama);
+    adu(nama, badan, kontrak, sidik, hasil);
+    sapuStempel(nama, badan, stempel);
+  }
+  return { hasil, stempel, pola, baris, lewat };
+}
+
 async function utama(): Promise<void> {
   const arg = (n: string): string | undefined => {
     const i = process.argv.indexOf(n);
@@ -349,6 +396,28 @@ async function utama(): Promise<void> {
   };
   const kontrak = kontrakTipe();
   const sidik = petaSidik(kontrak);
+
+  const berkas = arg("--berkas");
+  if (berkas) {
+    const r = aduRekaman(readFileSync(berkas, "utf8"), kontrak, sidik);
+    for (const s of r.hasil.selisih) {
+      process.stdout.write(`${s.iface}.${s.medan}: kontrak \`${s.tipe}\` · kawat ${s.nilai}  (${s.rute})\n`);
+    }
+    const uniq = new Map<string, Stempel>();
+    for (const t of r.stempel) uniq.set(`${t.rute} ${t.jalur}`, t);
+    for (const t of uniq.values()) {
+      process.stdout.write(`STEMPEL ${t.rute} · ${t.jalur} = ${JSON.stringify(t.nilai)}\n`);
+    }
+    const objek = [...r.hasil.cocok.values()].reduce((a, b) => a + b, 0);
+    process.stderr.write(
+      `rekaman ${r.baris} baris (lewat ${r.lewat}) · pola rute ${r.pola.size} · interface ${r.hasil.cocok.size}` +
+        ` · objek ${objek} · selisih ${r.hasil.selisih.length} · stempel salah bentuk ${uniq.size}\n`,
+    );
+    process.stdout.write(
+      `REKAM ${r.baris} ${r.pola.size} ${r.hasil.cocok.size} ${objek} ${r.hasil.selisih.length} ${uniq.size}\n`,
+    );
+    process.exit(r.hasil.selisih.length === 0 && uniq.size === 0 ? 0 : 1);
+  }
 
   if (process.argv.includes("--uji-diri")) {
     // PASANGAN dari kawat: contoh yang SENGAJA salah tipe harus tertuduh, dan
