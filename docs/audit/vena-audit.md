@@ -50,6 +50,117 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Penghalang yang dicatat tanpa pernah dibandingkan dengan spec yang sudah lewat jalan itu — dan premis yang cuma benar di atas basis data yang AUS — web (uji) — 2026-09-11
+
+**Vena.** Butir antrean "lengan peramban untuk peringatan keranjang", ditulis
+sendiri pada 2026-09-06 lengkap dengan gejalanya: *"Spec-nya ditulis dan
+DICABUT: `pilihMeja` menggantung sesudah `masukLewatSesi` (kombinasi yang tak
+satu spec pun pernah lalui — yang memakai `pilihMeja` memakai layar `login`)"*.
+
+**Gejala itu salah, dan memeriksanya butuh satu grep.** `printer.spec.ts`
+memakai kombinasi itu sejak lama, DUA kali (`e2e/printer.spec.ts:47-52` dan
+`:117-120`). Yang hilang di spec yang dicabut bukan kombinasinya melainkan satu
+baris di ANTARA keduanya:
+
+```
+await masukLewatSesi(page, request, KASIR_EMAIL, KASIR_PASS);
+await page.goto("/kasir");        // ← baris yang hilang
+await pilihMeja(page, "Meja 2");
+```
+
+`masukLewatSesi` berakhir di `page.goto("/")`, dan modal meja cuma hidup di
+layar kasir. Tanpa `goto("/kasir")`, `pilihMeja` menunggu modal yang memang tak
+akan pernah datang — dan "menggantung" adalah apa yang terlihat oleh orang yang
+tak membandingkan spec-nya dengan tetangga yang sudah berhasil. Kelasnya layak
+punya nama: **penghalang dicatat, tetangganya tak pernah dibaca.** Biayanya
+lima hari utang; harganya satu baris.
+
+**DAN YANG DITINGGALKANNYA LEBIH TELANJANG DARI YANG TERTULIS.** Entri yang
+sama menyebut klaim "kalimat server sampai ke layar" ditahan *"penjaga
+STATIS"*. Diukur ulang hari ini, mekanis, atas SELURUH pohon uji:
+
+| populasi | jumlah |
+| --- | --- |
+| berkas uji yang menyebut `cekStok` (apa pun bentuknya) | **0** |
+| berkas uji yang menyebut kalimat spanduknya | **0** |
+| berkas uji yang memaku `POST /penjualan/cek-stok` di SERVER | 3 |
+
+Ketiga yang server memaku aritmetika dan gerbangnya (`cek-stok-satu-aritmetika`,
+`blokir-jual-minus`, `sesi-cabang-dto-utuh`) — tak satu pun menyentuh apakah
+jawabannya DIRENDER. Jadi bukan "penjaga statis yang tak bisa membedakan
+dirender dari dirender di cabang mati": **tak ada penjaga sama sekali** di
+kedua cabang `KasirPage.tsx:1470-1496`. Sebuah `return null` di sana akan lolos
+seluruh gerbang, dan §300 tetap hijau sebab ia mengetuk kawat, bukan DOM.
+
+**Yang dikerjakan.** Satu berkas baru, nol baris produk:
+`apps/web/e2e/peringatan-keranjang.spec.ts` — kasir sungguhan, keranjang yang
+melebihi stok, DUA cabang dalam satu test:
+
+- setelan `blokir_jual_minus` **MATI** → spanduk kuning *"Keranjang ini membuat
+  stok minus"*, memuat nama bahan pembatas yang DIHITUNG SERVER, plus kalimat
+  *"…setelan … sedang mati"*;
+- setelan **MENYALA** (lewat `PATCH /company`, lalu satu klik `+` supaya kunci
+  query `cek-stok` yang memuat badan keranjang benar-benar menarik jawaban
+  baru) → spanduk merah *"Pesanan ini akan DITOLAK saat Bayar"*, dan spanduk
+  kuningnya `toHaveCount(0)`.
+
+Menguji satu cabang saja tak menyatakan apa pun: hijau tak akan membedakan
+spanduk yang MENGIKUTI setelan dari spanduk yang selalu sama.
+
+**Bukti merah** (dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik ke `KasirPage.tsx` | hasil |
+| --- | --- |
+| `{cekStok.pesan}` cabang merah diganti kalimat rakitan sendiri | **merah** — `spandukMerah` 0 elemen (diulang di atas data seed SEGAR, merah lagi) |
+| `cekStok.akan_ditolak ?` → `true ?` (spanduk berhenti mengikuti setelan) | **merah** — lengan kuningnya tak pernah menemukan spanduknya |
+
+**DUA CACAT DI ALAT UKUR SENDIRI, keduanya ketahuan sebelum di-commit.**
+
+1. **Asersi yang tak berpagar hijau tanpa spanduk apa pun.** Versi pertama
+   memakai `page.getByText(new RegExp(bahanKurang))` — dan Playwright sendiri
+   yang menegurnya dengan *strict mode violation*: nama bahan itu muncul DUA
+   kali di halaman, sekali di spanduk dan sekali di lencana stok grid menu
+   (`Habis · Baso aci original`). Di basis data yang stoknya belum habis,
+   lencana itu tak ada dan asersinya akan HIJAU walau spanduknya lupa menyebut
+   kalimat server sama sekali. Dibayar dengan memaku KETERSATUAN-nya:
+   `getByText(bahan).filter({ hasText: /…DITOLAK…/ })` — satu elemen yang
+   memuat keduanya.
+2. **Premisnya cuma benar di atas basis data yang AUS.** Versi pertama memaku
+   `porsi <= 5`, dan lolos — sebab basis data pengembangan sudah dipakai
+   berkali-kali jalan e2e sebelumnya (`porsi` 0, saldo bahannya **-115**). Di
+   seed SEGAR angka yang sama adalah **23**, dan premisnya runtuh. Ini persis
+   kelas yang baru dirilis 2026-09-10 tentang skrip gerbang: *hasil yang
+   bergantung pada sisa keadaan jalan sebelumnya bisa hijau atau merah tanpa
+   satu byte kode pun berubah.* Dibayar dengan memakai ANGKA DARI KAWAT
+   (`GET /menu/ketersediaan`) sebagai jumlah klik, batas 30 sebagai premis yang
+   gagal keras, dan `Math.max(0, porsi)` supaya stok yang sudah minus pun
+   tetap diuji.
+
+**Gerbang**: typecheck bersih · verify-api **3.759 / 0** · vitest **261 berkas / 3.178 uji** (tak berubah) ·
+invarian **27 / 0** · Playwright **49 lolos** (48 → 49).
+
+**Batas yang diakui.**
+
+- **Satu menu, satu cabang, satu meja.** Yang dibuktikan: kalimat server sampai
+  ke DOM dan warnanya mengikuti setelan. TIDAK dibuktikan: perilakunya di
+  cabang lain, di menu tanpa pembatas, atau saat `cek-stok` sendiri gagal
+  (cermin `gagalSisa` di bawah spanduk itu tetap tanpa lengan peramban).
+- **Spec ini MEMUTASI setelan perusahaan** dan mengembalikannya di `finally` —
+  termasuk saat asersinya gagal. Itu kopling keadaan yang nyata di suite
+  ber-`workers: 1`; ia akan jadi masalah pada hari seseorang menaikkan
+  workernya, dan itu sudah tercatat di `playwright.config.ts`.
+- **Utang lengan peramban yang SATUNYA belum dibayar**: spanduk pemotongan
+  (`rows_terpotong`) masih dibuktikan dari kawat lewat `per_page=1` (§308),
+  bukan dari DOM. Butir antrean itu menyebut utang ini sebagai sekelasnya —
+  yang ini lunas, yang itu belum.
+- **Peringatan PER-BARIS tidak disentuh.** Yang diuji spanduk SELURUH
+  keranjang; peringatan per-baris (`Stok hanya sisa N`) punya penjaga sendiri
+  dan tak ikut diperiksa di sini.
+- **Nol baris produk, nol perubahan kawat, nol baris ponsel** — dan karena itu
+  tak ada entri changelog: yang bertambah kemampuan menuduh, bukan perilaku.
+
+---
+
 ## Aturan yang diputuskan dari SISANYA — dan tipe cabang keempat yang akan lolos tanpa ada yang memutuskannya — web — 2026-09-11
 
 **Vena.** Butir antrean `StokPage:58`, lahir dari entri "Central Kitchen
