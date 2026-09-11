@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nilaiProxy } from "../src/lib/pemeriksaan-setelan";
+import { cadanganSeemberPublik, nilaiProxy } from "../src/lib/pemeriksaan-setelan";
 import { amatiProxy, pengamatanProxy, resetPengamatanProxy } from "../src/lib/pengamatan-proxy";
 
 /**
@@ -142,6 +142,54 @@ describe("nilaiProxy: setelan proxy versus lalu lintas nyata", () => {
     expect(nilaiProxy(0, amatan(100, 89))).toBeNull();
     expect(nilaiProxy(1, amatan(100, 10))?.kode).toBe("proxy_hops_terlalu_tinggi");
     expect(nilaiProxy(1, amatan(100, 11))).toBeNull();
+  });
+});
+
+describe("cadanganSeemberPublik: cadangan yang menumpang bucket publik", () => {
+  const keadaan = (o: Partial<Parameters<typeof cadanganSeemberPublik>[0]> = {}) =>
+    cadanganSeemberPublik({
+      aktif: true,
+      mode: "r2",
+      bucketCadangan: undefined,
+      urlPublik: "https://cdn.contoh.id",
+      ...o,
+    });
+
+  it("INTI: R2 + bucket cadangan kosong + bucket unggahan dilayani publik → menuduh", () => {
+    const v = keadaan();
+    expect(v).not.toBeNull();
+    // Vonisnya menyebut ASAL publiknya — orang yang membacanya harus bisa
+    // langsung memeriksa sendiri, bukan disuruh percaya.
+    expect(v!.rincian).toContain("https://cdn.contoh.id");
+    expect(v!.rincian).toContain("backups/");
+  });
+
+  it("DIAM saat bucket cadangan DIISI — itu justru perbaikannya", () => {
+    expect(keadaan({ bucketCadangan: "kakarut-cadangan" })).toBeNull();
+    // Spasi saja bukan pengisian.
+    expect(keadaan({ bucketCadangan: "   " })).not.toBeNull();
+  });
+
+  it("DIAM saat bucket unggahan TAK dilayani publik", () => {
+    // Tanpa asal publik, objeknya hanya terjangkau lewat kredensial S3 —
+    // keadaan yang berbeda, dan menuduhnya akan melatih orang mengabaikan panel.
+    expect(keadaan({ urlPublik: undefined })).toBeNull();
+    expect(keadaan({ urlPublik: "  " })).toBeNull();
+  });
+
+  it("DIAM saat cadangan tak aktif, atau saat tujuannya disk lokal", () => {
+    expect(keadaan({ aktif: false })).toBeNull();
+    // Mode lokal punya temuannya SENDIRI (`cadangan_lokal`); dua temuan untuk
+    // satu keadaan membuat panel berisik tanpa menambah kebenaran.
+    expect(keadaan({ mode: "local" })).toBeNull();
+  });
+
+  it("TERPASANG: pemeriksaannya benar-benar dipanggil, bukan cuma ada", () => {
+    const AKAR = fileURLToPath(new URL("../", import.meta.url));
+    const sumber = readFileSync(`${AKAR}src/lib/pemeriksaan-setelan.ts`, "utf8");
+    expect(sumber).toContain("cadanganSeemberPublik({");
+    expect(sumber).toContain('kode: "cadangan_seember_publik"');
+    expect(sumber).toContain('tingkat: "kritis"');
   });
 });
 

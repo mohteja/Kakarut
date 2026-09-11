@@ -50,6 +50,119 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Setelan yang dibaca kode tapi TAK PUNYA JALAN ke produksi — 15 dari 30, dan salah satunya menaruh seluruh database di asal publik — server + deploy — 2026-09-11
+
+**Vena.** Bukan dari antrean: pemilik bertanya lapis mana dari "Full-Stack
+Production Reality" yang sudah ada. Menjawabnya menuntut membaca berkas stack
+deploy — dan di sanalah sapuannya menemukan kelas yang tak pernah diperiksa
+siapa pun di repo ini.
+
+**Dua berkas yang WAJIB sepakat, dan nol uji yang membandingkannya.**
+`config/env.ts` menyatakan setelan apa yang DIBACA aplikasi; `docker-compose.yml`
+adalah satu-satunya jembatan dari panel Environment Dokploy ke dalam kontainer.
+Jembatan itu tidak otomatis: `docker stack deploy` hanya mengganti `${VAR}` yang
+BENAR-BENAR DITULIS di berkas stack. Kunci yang tak disebut di sana **bukan
+"belum disetel" — ia tidak bisa disetel**, seberapa pun rapi diketik di panel,
+dan tak ada satu pun galat yang mengatakannya.
+
+| populasi | jumlah |
+| --- | --- |
+| setelan dibaca (`EnvSchema`) | **30** |
+| dioper stack deploy | 17 |
+| **tak terjangkau** | **15** |
+| uji yang pernah membaca `docker-compose.yml` | **0** |
+
+**Dipilah tangan, dan empat di antaranya mengubah perilaku produksi diam-diam:**
+
+- **`R2_BACKUP_BUCKET`** — kosongnya memaksa cadangan menumpang bucket
+  UNGGAHAN dengan prefiks `backups/`. Bucket itu justru yang dilayani publik di
+  `R2_PUBLIC_URL`, dan nama objeknya hanya stempel waktu dari jadwal harian
+  yang diketahui. Seluruh isi database berjarak satu tebakan nama berkas, tanpa
+  satu pun kredensial.
+- **`APP_BASE_URL` / `APP_HOST_DIPERCAYA`** — temuan KRITIS milik panel super
+  admin sendiri (`tautan_email_dari_header`: tautan reset password diturunkan
+  dari `Host` yang dikendalikan peminta) **mustahil dipadamkan di produksi**,
+  sebab satu-satunya penawarnya tak punya jalan masuk.
+- **`TRUST_PROXY_HOPS`** — identitas alamat klien untuk batas percobaan login;
+  tak bisa dinaikkan bila kelak ada CDN di depan Traefik.
+- **`SEED_DEMO_STOCK`** — bawaannya AKTIF, jadi deploy pertama yang datanya
+  sungguhan tetap mendapat stok demo, dan tak ada cara berkata tidak.
+
+**REPO INI MENGATAKAN SEBALIKNYA, di tiga tempat.** README dan
+`backup-storage.ts` sama-sama menulis cadangan *"tidak pernah dilayani lewat URL
+publik"*. Kalimat itu BENAR tentang aplikasinya dan tidak menjawab pertanyaan
+yang berbeda: yang melayani bucket publik bukan aplikasi ini. Kalimat yang benar
+tentang hal yang salah adalah cara temuan begini bertahan bertahun-tahun.
+
+**Diukur dari kawat, tiga kali boot** — bukan dari pembacaan kode. Konfigurasi
+persis seperti yang dikirim stack (R2 terisi, `R2_PUBLIC_URL` terisi):
+
+| konfigurasi | temuan `GET /admin/sistem` |
+| --- | --- |
+| seperti stack terkirim | **3 kritis** — termasuk `cadangan_seember_publik` yang baru |
+| + `R2_BACKUP_BUCKET` | 2 kritis |
+| + `APP_BASE_URL` | **1** (password super admin bawaan — artefak seed lokal) |
+
+**Yang dikerjakan.**
+
+- **13 kunci ditambahkan ke `docker-compose.yml`**, tiap kelompok dengan sebab
+  tertulis. Tersisa dua yang SENGAJA tidak dioper (`UPLOAD_DIR`, `BACKUP_DIR`) —
+  knop mode LOKAL pada stack yang sengaja tanpa volume; alasannya ada di daftar
+  pengecualian, bukan di kepala saya.
+- **Pemeriksaan setelan baru `cadangan_seember_publik` (kritis)**, vonisnya
+  dipisah sebagai fungsi murni `cadanganSeemberPublik()` seperti `nilaiProxy` —
+  truth-table-nya bisa diuji tanpa menyalakan server maupun R2. Ia DIAM saat
+  bucket cadangan diisi, saat tak ada asal publik, dan saat mode lokal (keadaan
+  itu punya temuannya sendiri).
+- **Gerbang `env-sampai-produksi.test.ts`**, menjaga DUA arah: setelan yang
+  dibaca tapi tak terjangkau, DAN kunci yang dioper tapi tak dibaca siapa pun
+  (setelan mati yang menipu pengisinya). Daftar pengecualiannya wajib menyebut
+  sebab, dan uji terpisah menagih daftar itu tak menyimpan kunci yang ternyata
+  sudah beres.
+- **Tiga kalimat dokumentasi dibetulkan** di tempat orang benar-benar
+  membacanya sebelum memutuskan: README, `.env.example`, `backup-storage.ts`.
+
+**Bukti merah** (dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| `R2_BACKUP_BUCKET` dicabut dari compose | gerbang baru | **merah 2 lengan**, menyebut kuncinya |
+| setelan baru ditambah ke `env.ts` tanpa compose | gerbang baru | **merah**, menyebut namanya |
+| pemeriksa berhenti peduli bucket cadangan yang DIISI | uji fungsi murni | **merah** — menuduh penyebaran yang sudah benar |
+| panggilan pemeriksanya dicabut (fungsinya tetap ada) | uji "TERPASANG" | **merah** |
+
+**Gerbang**: typecheck bersih · verify-api **3.759 / 0** · vitest **262 berkas / 3.191 uji** (+1 berkas, +13 uji) · invarian
+**27 / 0** · Playwright **49 lolos**.
+
+**GERBANG SEMPAT MERAH, dan dua kali karena saya sendiri.** Pertama: fikstur
+kontrak status di repo ponsel menyalin daftar kode temuan, dan kode baru ini
+belum ada di sana — `status-satu-kontrak.test.ts` menagihnya, tepat. Kedua:
+saya menjalankan gerbang KEDUA sementara yang pertama masih di tahap e2e, jadi
+keduanya berebut satu basis data dan satu `dist`. Hasil keduanya dibuang, bukan
+ditafsirkan; angka di atas dari SATU jalan bersih tanpa proses lain.
+
+**Batas yang diakui.**
+
+- **PRODUKSI TAK BISA DIKETUK DARI SESI INI** — kebijakan jaringan menolak
+  domainnya (403 dari proxy agen). Jadi yang dibuktikan bukan "produksi
+  terekspos", melainkan **konfigurasi yang dipaksakan stack**: sampai putaran
+  ini, `R2_BACKUP_BUCKET` tak punya jalan masuk sama sekali. Apakah cadangan
+  benar-benar terjangkau publik hari ini bergantung pada apakah bucket
+  unggahannya memang dilayani publik — dan itu hanya bisa dilihat pemiliknya.
+  Diberi tahu terpisah, bukan disimpan di entri ini saja.
+- **Pemeriksanya bisa keliru ke arah aman**: bila `R2_PUBLIC_URL` menunjuk
+  domain kustom yang dibatasi per-jalur oleh aturan Cloudflare, temuannya jadi
+  positif palsu. Dipilih begitu dengan sadar — arah kesalahan yang sebaliknya
+  menyembunyikan seluruh database.
+- **Gerbangnya hanya membaca blok `environment:` service `app`.** Override di
+  sisi Dokploy, service lain, atau `env_file` tak terlihat olehnya.
+- **Nol perubahan BENTUK kawat**; yang bertambah satu nilai `kode` pada
+  `GET /admin/sistem`, dan ponsel tak menyentuh rute admin.
+- **Tak ada lengan peramban** untuk kartu temuan barunya; yang dipaku
+  balasan rutenya, bukan DOM panel.
+
+---
+
 ## Penghalang yang dicatat tanpa pernah dibandingkan dengan spec yang sudah lewat jalan itu — dan premis yang cuma benar di atas basis data yang AUS — web (uji) — 2026-09-11
 
 **Vena.** Butir antrean "lengan peramban untuk peringatan keranjang", ditulis

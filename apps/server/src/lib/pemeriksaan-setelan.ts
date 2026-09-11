@@ -27,6 +27,48 @@ import { pengamatanProxy, type PengamatanProxy } from "./pengamatan-proxy";
 const KODE_DEFAULT_SUPERADMIN = "SuperAdmin123!";
 
 /**
+ * CADANGAN SEEMBER DENGAN UNGGAHAN PUBLIK — vonisnya, dipisah sebagai fungsi
+ * murni supaya truth-table-nya bisa diuji tanpa menyalakan server maupun R2.
+ *
+ * `backup-storage.ts` memakai `R2_BACKUP_BUCKET` bila diisi, dan kalau kosong
+ * ia jatuh ke bucket UNGGAHAN dengan prefiks `backups/`. Itu bawaan yang masuk
+ * akal sampai satu fakta kedua ditambahkan: bucket unggahan dilayani PUBLIK di
+ * `R2_PUBLIC_URL` — itulah gunanya variabel tersebut. Objek cadangan bernama
+ * `backups/kakarut-<stempel ISO>.jsonl.gz`, dan stempel itu bisa ditebak
+ * (jadwalnya harian pada jam yang diketahui), jadi seluruh basis data platform
+ * berjarak satu tebakan nama berkas — tanpa satu pun kredensial.
+ *
+ * Kenapa komentar di repo ini tak menyelamatkannya: README dan
+ * `backup-storage.ts` sama-sama berkata cadangan *"tidak pernah dilayani lewat
+ * URL publik"*. Itu benar TENTANG APLIKASINYA, dan tidak menjawab pertanyaan
+ * yang berbeda — yang melayani bucket publik bukan aplikasi ini.
+ *
+ * Tak menuduh saat `R2_PUBLIC_URL` kosong: tanpa asal publik, objeknya hanya
+ * terjangkau lewat kredensial S3, dan itu keadaan yang berbeda.
+ */
+export function cadanganSeemberPublik(opts: {
+  aktif: boolean;
+  mode: "r2" | "local";
+  bucketCadangan?: string;
+  urlPublik?: string;
+}): { rincian: string } | null {
+  if (!opts.aktif || opts.mode !== "r2") return null;
+  if (opts.bucketCadangan && opts.bucketCadangan.trim()) return null;
+  const publik = opts.urlPublik?.trim();
+  if (!publik) return null;
+  return {
+    rincian:
+      "R2_BACKUP_BUCKET kosong, jadi cadangan ditulis ke bucket UNGGAHAN dengan prefiks " +
+      `\`backups/\` — bucket yang sama dengan yang dilayani publik di ${publik}. Nama objeknya ` +
+      "hanya stempel waktu, dan jadwalnya harian pada jam yang diketahui, jadi seluruh isi " +
+      "database bisa diunduh siapa pun yang menebak satu nama berkas. Aplikasi ini memang tak " +
+      "pernah memulangkan URL publik untuk cadangan — tapi yang melayani bucket publik bukan " +
+      "aplikasi ini.",
+  };
+}
+
+
+/**
  * Verdict soal proxy — DIPISAH sebagai fungsi murni supaya bisa diuji tanpa
  * menyalakan server: yang menentukan benar-salahnya adalah aritmetika sederhana
  * atas cacahan, dan justru aritmetika itu yang mudah keliru.
@@ -326,6 +368,32 @@ export async function periksaSetelan(): Promise<TemuanSetelanDto[]> {
       judul: "TRUST_PROXY_HOPS tak cocok dengan lalu lintas yang masuk",
       rincian: proxy.rincian,
       tindakan: "Sesuaikan TRUST_PROXY_HOPS dengan jumlah proxy yang benar-benar ada di depan aplikasi.",
+    });
+  }
+
+  /*
+   * 8. CADANGAN MENUMPANG BUCKET YANG DILAYANI PUBLIK.
+   *
+   * Dua setelan yang masing-masing benar, bertemu jadi pengungkapan: prefiks
+   * `backups/` di bucket unggahan (bawaan yang wajar) + bucket itu dilayani
+   * publik (justru gunanya R2_PUBLIC_URL).
+   */
+  const seember = cadanganSeemberPublik({
+    aktif: env.BACKUP_ENABLED,
+    mode: getCadanganStorage().mode,
+    bucketCadangan: env.R2_BACKUP_BUCKET,
+    urlPublik: env.R2_PUBLIC_URL,
+  });
+  if (seember) {
+    temuan.push({
+      kode: "cadangan_seember_publik",
+      tingkat: "kritis",
+      judul: "Cadangan database berada di bucket yang dilayani publik",
+      rincian: seember.rincian,
+      tindakan:
+        "Buat bucket R2 kedua yang PRIVAT khusus cadangan, lalu isi R2_BACKUP_BUCKET dengan " +
+        "namanya dan restart. Bila cadangan sudah terlanjur ada di bucket publik, pindahkan " +
+        "atau hapus objek berprefiks `backups/` di sana.",
     });
   }
 
