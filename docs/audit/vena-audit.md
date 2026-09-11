@@ -50,6 +50,91 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Kalimat yang hanya muncul saat datanya BESAR — enam bendera, tujuh layar, nol mata yang pernah melihatnya — web (uji) — 2026-09-11
+
+**Vena.** Butir antrean "spanduk pemotongan belum punya lengan peramban",
+dicatat sebagai kembaran utang peringatan keranjang yang dibayar putaran #118.
+
+**Populasi, disapu mekanis dari kontrak ke layar:**
+
+| | jumlah |
+| --- | --- |
+| bendera `*_terpotong` di kontrak | **6** |
+| interface pemiliknya | 6 (`TransferStokDaftar`, `SupplierKartu`, `CustomerDetail`, `LaporanDurasiPesanan`, `ShiftDetail`, `RiwayatHargaDto`) |
+| situs render di web | 7 |
+| **spec peramban yang menyebut satu pun** | **0** |
+| penjaga yang menagih bendera punya LAYAR | **0** |
+
+**Sebabnya struktural, bukan kelalaian.** Bendera-bendera itu baru menyala di
+atas ambang 50–500 baris, jadi memunculkannya dari data sungguhan menuntut
+membuat ratusan baris di basis data yang dipakai bersama seluruh suite. Itulah
+kenapa tak satu pun pernah terlihat mata siapa pun — dan kenapa kelasnya
+bertahan bertahun-tahun.
+
+**Kenapa kalimat itu penting**, dan ini tertulis di komentar tiap situsnya:
+agregat di atas dihitung TANPA batas sementara daftar di bawahnya dipotong.
+Dua angka berselisih yang berdiri di satu layar tanpa kalimat penaut terbaca
+sebagai data yang HILANG — dan yang dicurigai orang adalah pembukuannya
+sendiri. Di kartu supplier bahkan disebut harfiah: *"orang mencocokkan
+totalnya dengan baris yang terlihat, tak menemukan selisihnya, lalu mengira
+pembukuannya yang salah."*
+
+**Yang dikerjakan.**
+
+- **Lengan peramban `spanduk-terpotong.spec.ts`** untuk TIGA bendera
+  (`/transfer-stok`, kartu supplier, laporan durasi pesanan), masing-masing
+  DUA ARAH. Caranya: balasan SERVER diambil apa adanya lewat `route.fetch()`,
+  lalu SATU medan boolean-nya dibalik sebelum diteruskan. Tak ada baris
+  karangan yang bisa basi saat kontraknya berubah, dan yang diuji persis
+  pertanyaannya — *kalau server berkata daftarnya terpotong, apakah layarnya
+  mengatakannya?* Di laporan durasi kedua arahnya punya KALIMAT sendiri, jadi
+  layar yang lupa bercabang tertangkap dua kali.
+- **Penjaga `spanduk-terpotong-terpasang.test.ts`**: tiap bendera di kontrak
+  wajib disebut setidaknya satu berkas web. Ia menjaga keenamnya — termasuk
+  tiga yang hidup di dalam modal dan belum punya lengan peramban — dan menagih
+  lengan peramban itu sendiri tetap berdiri.
+
+**Bukti merah** (dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | penjaga | hasil |
+| --- | --- | --- |
+| spanduk `/transfer-stok` dicabut | lengan peramban | **merah** |
+| spanduk kartu supplier SELALU tampil (`{true && …}`) | lengan peramban | **merah** (sesudah dibetulkan — lihat di bawah) |
+| laporan selalu berkata "seluruhnya" | lengan peramban | **merah DUA lengan** |
+| `lots_terpotong` kehilangan layarnya | penjaga baru | **merah**, menyebut `RiwayatHargaDto.lots_terpotong` |
+
+**BUKTI MERAH KEDUA GAGAL LEBIH DULU, dan itu temuan tentang spec saya
+sendiri.** Asersi "spanduknya tak ada" memakai `toHaveCount(0)` tepat sesudah
+`goto` — dan itu HIJAU pada DOM yang masih kosong, sebelum balasan servernya
+tiba. Spanduk yang selalu tampil pun lolos. Dibayar dengan menunggu penanda
+bahwa datanya sudah dirender lebih dulu (`Total belanja (diterima ✓)` untuk
+kartu, salah satu dari dua cabang pasca-muat untuk riwayat transfer), dan
+bentuk itu dipisah jadi satu fungsi supaya kelalaian yang sama tak bisa
+diulang diam-diam di lengan berikutnya. Kelasnya layak dicatat: **asersi
+KETIADAAN yang tak berjangkar tidak menyatakan apa pun.**
+
+**Gerbang**: typecheck bersih · verify-api **3.759 / 0** · vitest **264 berkas / 3.202 uji** (+1 berkas, +4 uji) · invarian
+**27 / 0** · Playwright **50 lolos** (49 → 50).
+
+**Batas yang diakui.**
+
+- **TIGA dari enam bendera belum punya lengan peramban**: `ShiftDetail`,
+  `CustomerDetail`, dan `RiwayatHargaDto` dirender di dalam MODAL, jadi
+  lengannya menuntut langkah pembuka sendiri. Ketiganya kini dijaga penjaga
+  statis — yang membuktikan medannya DISEBUT, bukan kalimatnya SAMPAI.
+- **Lengan ini tak membuktikan server benar-benar memotong pada ambangnya.**
+  Itu dipaku verify-api §308 dari kawat (`per_page=1`); keduanya dua
+  pertanyaan yang berbeda, dan masing-masing setengah rantainya.
+- **Penjaga statisnya berkunci NAMA MEDAN** (`.lots_terpotong` dst). Layar
+  yang menyebut medannya tapi merender kalimat yang salah tetap lolos.
+- **Spec ini bergantung pada adanya SATU supplier** di basis data uji —
+  premisnya gagal keras, bukan `skip`. Supplier itu lahir dari verify-api,
+  yang di CI memang berjalan di job yang SAMA sebelum e2e (tertulis di
+  `ci.yml`); di luar urutan itu spec ini akan merah dengan sebab yang jelas.
+- **Nol perubahan produk, nol perubahan kawat, nol baris ponsel.**
+
+---
+
 ## Idiom yang dipakai 66 kali dan tak pernah ditagih siapa pun — dan satu assertion yang ditandatangani kompilator padahal bohong — server — 2026-09-11
 
 **Vena.** Butir antrean "daftarkan OID 20 di `setTypeParser`", yang selama ini
