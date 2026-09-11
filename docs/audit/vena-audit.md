@@ -50,6 +50,69 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## RILIS 2026-09-11 — dua puluh vena tayang, dan gerbang yang dijalankan DUA KALI karena saya menumpuknya sendiri — server + web + ponsel — 2026-09-11
+
+**Pemicu.** Pemilik meminta rilis. Aturan tetap *"jangan dulu rilis apa pun
+sampai saya minta"* berlaku sampai detik itu, dan dua puluh vena menunggu di
+`claude` sejak rilis sebelumnya (`42e048b`, CI #495).
+
+**Isi rilis**: 21 commit, `42e048b..6c4d72d`. Sebelas vena menamai bentuk
+balasan yang tak dideklarasikan di mana pun; lima menemukan kelas *aturannya
+benar, populasinya digambar sekali*; empat terakhir menemukan yang paling
+sunyi — **apa yang tak pernah dilihat siapa pun**: spanduk keranjang tanpa
+penjaga apa pun, 15 dari 30 setelan tanpa jalan ke produksi, idiom `::int`
+yang dipakai 66 kali tanpa penagih, dan enam bendera pemotongan dengan nol
+mata yang pernah melihatnya.
+
+**Urutan yang dijalankan**, dan tiap langkahnya menahan yang berikutnya:
+
+| langkah | hasil |
+| --- | --- |
+| merge `claude` → `production` (`21467eb`) | `git diff HEAD origin/claude` **KOSONG** — byte-identik, dibuktikan bukan diasumsikan |
+| gerbang penuh DI ATAS hasil merge | typecheck bersih · verify-api **3.759 / 0** · vitest **264 / 3.202** · invarian **27 / 0** · Playwright **50 lolos** |
+| dorong `production` | `42e048b..21467eb` |
+| CI GitHub #496 | quality **hijau** · verify-api + cakupan rute + invarian + Playwright **hijau** · build image + webhook Dokploy **hijau** |
+| ponsel `claude` → `Production` (`9b49b31`) | byte-identik dengan `claude`; CI ponsel **#66 hijau** |
+| stempel changelog di `claude` | 12 entri |
+
+**Gerbangnya dijalankan DUA KALI, dan yang pertama gagal karena saya.**
+Postgres mati di antara putaran vena terakhir dan rilis ini, jadi jalan
+pertama berhenti di "POSTGRES TIDAK HIDUP" sebelum satu uji pun berjalan.
+Itu bukan temuan tentang repo — itu catatan bahwa gerbang ini bergantung pada
+basis data yang hidup di kontainer yang sama, dan kontainer itu sudah
+didaur ulang sekali di tengah sesi.
+
+**Dua belas entri changelog distempel**, dan penghapusan judulnya dari
+`BELUM_TAYANG` dilakukan pada commit yang SAMA — memisahkan keduanya adalah
+cara berkas itu pernah salah selama empat hari, dan aturan itu tertulis di
+kepala daftarnya sendiri. Dua entri sengaja tetap tanpa stempel: keduanya
+BUKAN rilis (koreksi keterangan, dan petunjuk pemeliharaan berkas itu).
+
+**Batas yang diakui.**
+
+- **TAK ADA KETUKAN DARI KAWAT SESUDAH DEPLOY.** Kebijakan jaringan sesi ini
+  menolak domain produksi (403 dari proxy agen), jadi "tayang" di entri ini
+  bersandar pada CI GitHub — build image + webhook Dokploy — bukan pada
+  balasan HTTP dari server yang sungguhan. Rilis sebelumnya bisa mengetuk;
+  yang ini tidak. Disebut supaya bedanya tidak hilang.
+- **Batas laju API GitHub tercapai** di tengah rilis, sesudah `production`
+  terdorong. Ia tak mengubah apa pun yang sudah berjalan — CI tetap jalan —
+  tapi ia menunda pembacaan verdiknya dan merge ponsel.
+- **APK ponsel tidak ikut terkirim**: CI `Production` hanya analyze + test;
+  build store manual (`scripts/build-rilis.sh`). Perubahan ponsel di rilis ini
+  **nol baris `lib/`** — hanya fikstur kontrak — jadi tak ada perilaku aplikasi
+  yang berubah.
+- **Enumerasi akun terbuka di produksi** lewat `/register` &
+  `/resend-verification` (keputusan pemilik 2026-09-05). Disebut lagi supaya
+  tayangnya tidak senyap.
+- **Cadangan mungkin duduk di bucket publik** sampai pemilik memeriksa R2 —
+  temuan putaran #119 yang kini ikut tayang bersama pemeriksanya. Panel super
+  admin akan menandainya KRITIS begitu deploy hidup, dan itu justru gunanya.
+- **Tak ada staging**; `production` satu-satunya tujuan, dan branch-nya tak
+  diproteksi. Keduanya tercatat di audit tiga belas lapis, belum dikerjakan.
+
+---
+
 ## Kalimat yang hanya muncul saat datanya BESAR — enam bendera, tujuh layar, nol mata yang pernah melihatnya — web (uji) — 2026-09-11
 
 **Vena.** Butir antrean "spanduk pemotongan belum punya lengan peramban",

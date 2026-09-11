@@ -30,6 +30,8 @@ tanpa akses repo server.
 🟢 **BARU** — additif, tak ada yang berubah bentuk. Dan ini pekerjaan yang
 memang PANTAS dibawa ke ponsel, sebab layarnya hari ini menebak sendiri.
 
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
+
 **Yang bertambah** (`GET /api/penerimaan/anomali`, tiap `rows[]`):
 
 | medan | isi |
@@ -61,6 +63,8 @@ boleh ditampilkan di sebelahnya seperti di layar Stok Masuk.
 
 🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa: disapu, tak ada layar
 ponsel yang merender `harga_beli` dari rute INI.
+
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
 
 **Yang berubah** (`GET /api/perlengkapan`, peran SELAIN owner/admin):
 
@@ -95,6 +99,8 @@ tersentuh.
 
 🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa di ponsel; disebut
 karena isinya memang berubah untuk sebagian peran.
+
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
 
 **Yang berubah** (`GET /api/company`, peran SELAIN owner/admin):
 
@@ -137,6 +143,8 @@ layar pengadaan dari rute pengadaan — keduanya snake_case, rute lain.
 🟡 **PERLU DICEK** — dan layar Riwayat Penerimaan di ponsel **membaik tanpa
 perubahan kode**, tapi baca alasannya sebelum menganggapnya kosmetik.
 
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
+
 **Yang berubah** (`GET /api/penerimaan/riwayat`, `rows[].waktu`):
 
 | | nilai |
@@ -176,6 +184,8 @@ non-ISO di seluruh 72 rute) dan oleh penjaga statis `stempel-iso.test.ts`.
 
 🟡 **PERLU DICEK** — **nol perubahan di kawat**, tapi asumsi lama pada layar
 Transfer Stok memang keliru, jadi ini bukan sekadar penamaan.
+
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
 
 **Yang bertambah di Lampiran A** (bentuk kawatnya SAMA PERSIS seperti sebelumnya):
 
@@ -218,6 +228,8 @@ yang memanggil rute ini**: web hanya memakai `PATCH`-nya, ponsel tak
 menyentuhnya sama sekali. Disebut sebagai 🟡 karena bentuknya memang berubah,
 bukan karena ada yang perlu dikerjakan.
 
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
+
 **Yang berubah** (`GET /api/admin/tenants/:id`, super-admin saja):
 
 | medan | sebelum | sesudah |
@@ -247,6 +259,8 @@ pun selain super-admin). Nol baris `lib/` berubah.
 > Tidak ada bentuk balasan yang berubah. Yang berubah: amplop
 > `GET /api/{produksi|pembelian}/dana/:fakturId` dan barisnya akhirnya
 > **dideklarasikan** di `types.ts`, berikut kosakata `tipe`-nya.
+
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
 
 **Vena paling tipis dari deretannya, dan itu ditulis apa adanya:** barisnya
 cocok satu-satu dengan kawat sejak awal — tak ada medan yang dikirim tanpa
@@ -284,6 +298,8 @@ NAMA, jadi ratchet-nya menuntut pencabutan. Utang refund tetap di antrean.
 > jadi ikut Lampiran A dan fikstur kunci ponsel — termasuk **empat medan yang
 > dikirim tanpa pernah disebut tipe mana pun**.
 
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
+
 **Yang layak dibaca meski ⚪️: `qty_teks`.** Handler-nya menyebar hasil `select`
 (`{ ...r, qty_teks, qty_setara, qty_dipesan_teks }`), dan halaman web mengetik
 ulang **21 dari 25** medan. Keempat yang tak disebutnya: `satuan_beli`,
@@ -320,6 +336,8 @@ Nol baris `lib/` berubah.
 > dan fikstur kunci ponsel — termasuk satu medan yang selama ini **dikirim
 > tanpa pernah disebut tipe mana pun**.
 
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
+
 **Yang layak dicek meski ⚪️: `dev_verify_url`.** Ia dikirim berdampingan
 dengan `dev_verify_kode` yang memang disebut, tapi tak ada tipe yang
 menyatakannya — web mendeklarasikan lima medan, kawat mengirim enam, dan
@@ -352,6 +370,8 @@ Yang dipakai untuk bercabang tetap `sebab`. Nol baris `lib/` berubah.
 > `GET /api/admin/sistem` akhirnya **dideklarasikan** di `types.ts`, jadi ikut
 > Lampiran A dan fikstur kunci ponsel. Rutenya **super-admin saja** — ponsel
 > tak punya layar itu, jadi entri ini murni catatan kontrak.
+
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
 
 **Kenapa entri ini layak dibaca meski ⚪️.** Daun-daun amplop itu sudah lama di
 kontrak (`TemuanSetelanDto`, `PercobaanEmailDto`); amplop yang membungkusnya
@@ -389,6 +409,8 @@ baris `lib/` berubah.
 🟡 **PERLU DICEK** — bentuknya **BERTAMBAH** satu kunci pada dua pintu; tak ada
 yang hilang, berubah tipe, atau berganti nama. Aplikasi yang mengabaikan medan
 baru berjalan persis seperti sekarang.
+
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
 
 **Yang berubah.** `POST /api/satuan` (201) dan `PATCH /api/satuan/:id`
 memulangkan `dipakai` — jumlah bahan yang memakai satuan itu — sama seperti
@@ -434,6 +456,8 @@ tanpa satu penjaga pun berubah warna. Kini kunci yang sama memerahkan
 > `GET /api/karyawan` pulangkan — **rute inti modulnya** — akhirnya
 > **dideklarasikan** di `types.ts`, jadi ikut Lampiran A dan fikstur kunci
 > ponsel. Balasan 201 `POST /api/karyawan` ikut bernama.
+
+**Sudah di-merge ke production.** Tayang lewat merge `21467eb` (CI #496, termasuk build image + redeploy Dokploy); fikstur kontrak ponsel lewat merge `9b49b31` di repo ponsel (CI #66).
 
 **Kenapa entri ini layak dibaca meski ⚪️.** Tetangga rute ini sudah lama di
 kontrak — `UndanganKaryawanRow`, `AktivitasRow`, `KaryawanTempatDto`, **17
