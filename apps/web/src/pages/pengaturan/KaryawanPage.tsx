@@ -13,25 +13,18 @@ import {
   inputClass,
 } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
-import type { AktivitasRow, KaryawanTempatDto, UndanganKaryawanRow } from "@kakarut/shared";
+import type {
+  AktivitasRow,
+  KaryawanRow,
+  KaryawanTempatDto,
+  UndanganKaryawanRow,
+  UserRole,
+} from "@kakarut/shared";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
 import { AreaCetak } from "../../components/AreaCetak";
-
-interface Karyawan {
-  user_id: string;
-  nama: string;
-  email: string;
-  is_active: boolean;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
-  branch_id: string | null;
-  cabang: string | null;
-  employee_code: string | null;
-  /** terisi = karyawan sudah diarsipkan (keluar; riwayat tetap tersimpan) */
-  archived_at: string | null;
-}
 
 interface FormState {
   /** terisi = mode ubah (PATCH); kosong = tambah karyawan baru */
@@ -40,7 +33,7 @@ interface FormState {
   email: string;
   /** saat ubah: kosongkan bila password tidak diganti */
   password: string;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
+  role: UserRole;
   branch_id: string;
 }
 
@@ -121,7 +114,7 @@ function AksiMenu({
  * karyawan (kasir/tim). Menulis ke tabel petugas yang sama dengan halaman
  * Tempat Penyimpanan → konsisten dua arah.
  */
-function TempatSOModal({ karyawan, onClose }: { karyawan: Karyawan; onClose: () => void }) {
+function TempatSOModal({ karyawan, onClose }: { karyawan: KaryawanRow; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data, isLoading, error: tempatGagal } = useQuery({
     queryKey: ["karyawan-tempat", karyawan.user_id],
@@ -232,12 +225,12 @@ export function KaryawanPage() {
   const queryClient = useQueryClient();
   const { data: karyawan, isLoading, error: gagalMuat } = useQuery({
     queryKey: ["karyawan"],
-    queryFn: () => api<Karyawan[]>("/karyawan"),
+    queryFn: () => api<KaryawanRow[]>("/karyawan"),
   });
   // arsip = karyawan yang sudah keluar; riwayatnya tetap bisa dilihat
   const { data: arsip = [], error: arsipGagal } = useQuery({
     queryKey: ["karyawan", "arsip"],
-    queryFn: () => api<Karyawan[]>("/karyawan?arsip=true"),
+    queryFn: () => api<KaryawanRow[]>("/karyawan?arsip=true"),
   });
   // undangan pending (alur "menunggu diundang") + form undang via email
   const { data: undangan = [], error: undanganGagal } = useQuery({
@@ -252,12 +245,12 @@ export function KaryawanPage() {
     branch_id: string;
   } | null>(null);
   // Modal QR karyawan (untuk absensi) + data URL QR yang digenerate
-  const [qrFor, setQrFor] = useState<Karyawan | null>(null);
+  const [qrFor, setQrFor] = useState<KaryawanRow | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   // Modal riwayat kegiatan seorang karyawan (log faktur yang ia lakukan)
-  const [aktivitasFor, setAktivitasFor] = useState<Karyawan | null>(null);
+  const [aktivitasFor, setAktivitasFor] = useState<KaryawanRow | null>(null);
   // Modal penugasan tempat SO (petugas opname) seorang karyawan kasir/tim
-  const [tempatFor, setTempatFor] = useState<Karyawan | null>(null);
+  const [tempatFor, setTempatFor] = useState<KaryawanRow | null>(null);
   const { data: aktivitas, error: aktivitasGagal } = useQuery({
     queryKey: ["karyawan-aktivitas", aktivitasFor?.user_id],
     queryFn: () =>

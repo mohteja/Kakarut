@@ -17761,6 +17761,715 @@ cek "§300 setelan MATI: kekurangan TETAP dihitung & disebut namanya" "V == 1" \
 cek "§300 setelan MATI: keranjang yang SAMA benar-benar diterima (201) — gerbang, bukan penghapus" "V == 201" \
   "$(status_code_body "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"items\":$ITEMS300}")"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# §301 — BARIS KARYAWAN: rute INTI yang bentuknya tak dipaku SIAPA PUN
+# ═══════════════════════════════════════════════════════════════════════════
+# Diukur 2026-09-10, dan angkanya yang membuat seksi ini ada. Sebuah kunci
+# ke-10 disuntikkan ke `select` milik `GET /karyawan`, lalu ketiga gerbang
+# dijalankan penuh:
+#
+#   typecheck hijau · npm test 3.087 hijau · verify-api 3.620 lengan hijau
+#
+# NOL penjaga berubah warna. Lebih buruk daripada temuan §273 di vena #99 —
+# di sana setidaknya 18 dari 22 kunci dipaku (searah); di sini 0 dari 9.
+# Tetangganya sudah lama di kontrak (`UndanganKaryawanRow`, `AktivitasRow`,
+# `KaryawanTempatDto`), barisnya sendiri tidak.
+#
+# Karena itu seksi ini DUA ARAH sejak lahir — `selisih296`, bukan `has($k)`.
+# Pelajaran §273: `has()` menangkap kunci yang DICABUT dan tak pernah yang
+# DITAMBAH, dan itulah cara empat kunci `/company` menyelinap masuk.
+K301=$(medan296 KaryawanRow)
+cek "§301 premis: kontrak KaryawanRow terbaca dari types.ts (9 medan)" "V == 9" \
+  "$(echo "$K301" | grep -c .)"
+R301=$(api "$OWNER" GET /karyawan)
+cek "§301 premis: daftar karyawan tidak kosong (kalau kosong, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R301" | jq '(length >= 1) | if . then 1 else 0 end')"
+# DUA ARAH: kunci di kawat == medan di kontrak, tak ada yang tertinggal di
+# salah satu sisi. Diambil dari GABUNGAN semua baris, bukan baris pertama —
+# baris yang satu bisa kehilangan kunci yang lain punya.
+cek "§301 kunci kawat == KaryawanRow, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R301" | jq -r '[.[]|keys[]]|unique|.[]')" "$K301")"
+# `?arsip=true` bentuknya SAMA — yang berbeda cuma penyaringnya. Kalau kelak
+# ia mengirim bentuk lain, ponsel yang memakai satu `fromJson` untuk keduanya
+# akan diam-diam kehilangan medan.
+R301A=$(api "$OWNER" GET "/karyawan?arsip=true")
+cek "§301 ?arsip=true memakai bentuk yang SAMA (dua arah)" "V == 0" \
+  "$(selisih296 "$(echo "$R301A" | jq -r '[.[]|keys[]]|unique|.[]')" "$K301")"
+# `archived_at` DI KAWAT harus ISO string, bukan objek: kolomnya `timestamp`
+# (Drizzle → `Date`), dan sebelum `karyawanRow` ada, tipe mana pun yang
+# menyatakannya akan berbohong. Diuji pada baris yang benar-benar diarsipkan.
+UARS301=$(echo "$R301" | jq -r '[.[]|select(.role=="cashier")][0].user_id')
+api "$OWNER" PATCH "/karyawan/$UARS301" '{"arsip":true}' > /dev/null
+ARS301=$(api "$OWNER" GET "/karyawan?arsip=true" | jq -r --arg u "$UARS301" '[.[]|select(.user_id==$u)][0].archived_at')
+cek "§301 archived_at terisi bertipe string (bukan objek Date)" "V == 1" \
+  "$(api "$OWNER" GET "/karyawan?arsip=true" | jq -r --arg u "$UARS301" '([.[]|select(.user_id==$u)][0].archived_at|type=="string")|if . then 1 else 0 end')"
+cek "§301 archived_at berbentuk ISO-8601" "V == 1" \
+  "$(printf '%s' "$ARS301" | grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$')"
+api "$OWNER" PATCH "/karyawan/$UARS301" '{"arsip":false}' > /dev/null
+cek "§301 pemulihan arsip: barisnya kembali ke daftar berjalan" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq -r --arg u "$UARS301" '([.[]|select(.user_id==$u)]|length==1)|if . then 1 else 0 end')"
+cek "§301 baris berjalan: archived_at null (bukan hilang)" "V == 1" \
+  "$(api "$OWNER" GET /karyawan | jq -r --arg u "$UARS301" '([.[]|select(.user_id==$u)][0]|has("archived_at") and .archived_at==null)|if . then 1 else 0 end')"
+# Balasan 201 `POST /karyawan` — bentuk KEDUA modul ini yang tak pernah bernama.
+# Ponsel membacanya untuk SATU kunci (`employee_code`, kode absen yang langsung
+# ditampilkan), jadi bentuk yang menyempit di sini menghapus angka dari layar.
+K301B=$(medan296 KaryawanBaruResult)
+cek "§301 premis: kontrak KaryawanBaruResult terbaca (5 medan)" "V == 5" \
+  "$(echo "$K301B" | grep -c .)"
+CB301=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+N301=$(api "$OWNER" POST /karyawan "{\"nama\":\"Vena 301\",\"email\":\"vena301@basooopa.id\",\"password\":\"Vena301Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB301\"}")
+cek "§301 balasan 201 == KaryawanBaruResult, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$N301" | jq -r 'keys[]')" "$K301B")"
+cek "§301 karyawan baru muncul di daftar dengan bentuk yang sama" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /karyawan | jq -r --arg u "$(echo "$N301" | jq -r .user_id)" '[.[]|select(.user_id==$u)][0]|keys[]')" "$K301")"
+# Peran yang dikirim harus ada di kosakata kontrak — union yang sejak putaran
+# ini dieja SATU kali (`UserRole` di constants.ts, terukur 3 ejaan → 1).
+PERAN301=$(awk '/^export type UserRole = /{gsub(/.*= /,"");gsub(/;$/,"");gsub(/ \| /,"\n");gsub(/"/,"");print}' packages/shared/src/constants.ts | sort -u)
+cek "§301 premis: kosakata UserRole terbaca dari shared (6 nilai)" "V == 6" \
+  "$(echo "$PERAN301" | grep -c .)"
+cek "§301 tiap role yang dikirim ada di kosakata UserRole" "V == 0" \
+  "$(comm -23 <(api "$OWNER" GET /karyawan | jq -r '[.[]|.role]|unique|.[]' | sort -u) <(printf '%s\n' "$PERAN301") | bocorkan)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §302 — DAFTAR INDUK: satu bentuk, tiga modul, dan `dipakai` yang dijanjikan
+#        tipe tapi tak pernah dikirim
+# ═══════════════════════════════════════════════════════════════════════════
+# Diukur 2026-09-10. Bentuk `{id, nama, sort_order}` dipulangkan `/kategori`,
+# `/kategori-bahan`, dan jalur tulis `/satuan` — sembilan situs merakitnya
+# dengan tangan, tanpa satu perakit pun, dan bertahan hanya karena kebetulan
+# sama. Kunci ke-4 yang disuntikkan ke `GET /kategori` lolos typecheck, 3.097
+# uji, DAN 3.633 lengan verify-api: nol penjaga berubah warna.
+#
+# Yang paling mahal justru bukan salinannya melainkan `SatuanDto`: ia
+# mendeklarasikan `dipakai: number`, `SatuanSelect.tsx` sudah mengetik balasan
+# POST sebagai `SatuanDto`, dan servernya memulangkan TIGA kunci. Terukur:
+# `has("dipakai")` = false. Lengan 302f–302h yang memakunya.
+K302=$(medan296 KategoriDto)
+cek "§302 premis: kontrak KategoriDto terbaca dari types.ts (3 medan)" "V == 3" \
+  "$(echo "$K302" | grep -c .)"
+K302S=$(medan296 SatuanDto)
+cek "§302 premis: kontrak SatuanDto terbaca (4 medan — `dipakai` yang keempat)" "V == 4" \
+  "$(echo "$K302S" | grep -c .)"
+# DUA RUTE, SATU BENTUK — dan keduanya diadu DUA ARAH. Sampai putaran ini
+# `KategoriDto` dikomentari "Kategori menu" sementara web memakainya untuk
+# `/kategori-bahan`; keduanya lolos hanya karena bentuknya identik. Kalau
+# kelak salah satu menyimpang, lengan inilah yang mengatakannya.
+cek "§302 GET /kategori == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /kategori | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
+cek "§302 GET /kategori-bahan == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /kategori-bahan | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
+# Jalur TULIS kedua modul kategori memakai bentuk yang sama dengan bacanya.
+NK302=$(api "$OWNER" POST /kategori '{"nama":"Vena302"}')
+cek "§302 POST /kategori 201 == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$NK302" | jq -r 'keys[]')" "$K302")"
+IK302=$(echo "$NK302" | jq -r .id)
+cek "§302 PATCH /kategori/:id == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" PATCH "/kategori/$IK302" '{"sort_order":7}' | jq -r 'keys[]')" "$K302")"
+NB302=$(api "$OWNER" POST /kategori-bahan '{"nama":"Vena302B"}')
+cek "§302 POST /kategori-bahan 201 == KategoriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$NB302" | jq -r 'keys[]')" "$K302")"
+# Cabang "sudah ada" pada /kategori-bahan memulangkan 200 dengan baris yang
+# ADA — bentuknya wajib sama dengan cabang 201, kalau tidak klien yang
+# memakai satu pengurai untuk keduanya diam-diam kehilangan medan.
+cek "§302 POST /kategori-bahan yang SUDAH ADA: bentuk sama (dua arah)" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" POST /kategori-bahan '{"nama":"Vena302B"}' | jq -r 'keys[]')" "$K302")"
+
+# ── `dipakai` di KETIGA metode /satuan ────────────────────────────────────
+cek "§302f GET /satuan == SatuanDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /satuan | jq -r '[.[]|keys[]]|unique|.[]')" "$K302S")"
+NS302=$(api "$OWNER" POST /satuan '{"nama":"vena302"}')
+cek "§302g POST /satuan 201 == SatuanDto, dua arah (dulu TIGA kunci)" "V == 0" \
+  "$(selisih296 "$(echo "$NS302" | jq -r 'keys[]')" "$K302S")"
+IS302=$(echo "$NS302" | jq -r .id)
+cek "§302h PATCH /satuan/:id == SatuanDto, dua arah (dulu TIGA kunci)" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" PATCH "/satuan/$IS302" '{"sort_order":9}' | jq -r 'keys[]')" "$K302S")"
+# Satuan yang baru lahir memang belum dipakai bahan mana pun.
+cek "§302 satuan baru: dipakai = 0 (bukan null, bukan hilang)" "V == 0" \
+  "$(echo "$NS302" | jq -r '.dipakai')"
+# DUA ARITMETIKA, SATU JAWABAN. `GET` menghitung seluruh daftar lewat satu
+# sapuan; jalur tulis menghitung satu nama lewat satu kueri. Keduanya
+# mencocokkan NAMA terhadap `ingredients.satuan` DAN `satuan_beli`. Yang
+# membaca angka ini gerbang hapus di web ("satuan masih terpakai"), jadi dua
+# cara yang besok berbeda akan menghapus satuan yang masih dipakai resep.
+NPAKAI302=$(api "$OWNER" GET /satuan | jq -r '[.[]|select(.dipakai>0)][0].nama')
+cek "§302 premis: ada satuan yang benar-benar dipakai bahan (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(api "$OWNER" GET /satuan | jq '([.[]|select(.dipakai>0)]|length>=1)|if . then 1 else 0 end')"
+IP302=$(api "$OWNER" GET /satuan | jq -r --arg n "$NPAKAI302" '[.[]|select(.nama==$n)][0].id')
+GP302=$(api "$OWNER" GET /satuan | jq -r --arg n "$NPAKAI302" '[.[]|select(.nama==$n)][0].dipakai')
+PP302=$(api "$OWNER" PATCH "/satuan/$IP302" '{"sort_order":3}' | jq -r '.dipakai')
+cek "§302 dipakai: sapuan GET == kueri jalur tulis (satuan yang terpakai)" "V == 1" \
+  "$([ "$GP302" = "$PP302" ] && [ "$GP302" -gt 0 ] && echo 1 || echo 0)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §303 — AMPLOP PANEL SISTEM: bentuk yang diketuk tiap jalan, dipaku nol kali
+# ═══════════════════════════════════════════════════════════════════════════
+# `GET /admin/sistem` ADA di `rute-diketuk.txt` — ia memang dilewati tiap
+# jalan verify-api. Yang tak pernah ada: satu pun asersi atas KUNCINYA.
+# Terukur 2026-09-10, kunci ke-7 disuntikkan ke amplopnya: typecheck hijau,
+# 3.106 uji hijau, 3.647 lengan verify-api hijau. Nol penjaga berubah warna.
+# "Diketuk" bukan "dijaga" — dan itu bedanya yang membuat seksi ini ada.
+#
+# Biayanya terlihat di web: DUA halaman mendeklarasikan `SistemStatus` dengan
+# NAMA YANG SAMA untuk himpunan kunci yang SALING LEPAS (5 dan 1), dan tak satu
+# pun menggambarkan balasan yang sebenarnya.
+K303=$(medan296 SistemStatusDto)
+cek "§303 premis: kontrak SistemStatusDto terbaca dari types.ts (6 medan)" "V == 6" \
+  "$(echo "$K303" | grep -c .)"
+R303=$(api "$SA" GET /admin/sistem)
+cek "§303 premis: panel sistem terbaca super-admin (kalau tidak, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R303" | jq '(type == "object" and (keys|length) >= 1)|if . then 1 else 0 end')"
+cek "§303 kunci kawat == SistemStatusDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r 'keys[]')" "$K303")"
+# Amplop BERSARANG ikut dipaku: `migrations` bentuknya sendiri, dan sampai
+# putaran ini ia hidup di `db/migrate.ts` — lapisan basis data, bukan kontrak —
+# sementara `SistemPage.tsx` mengetik ulang entrinya di sebelah sana.
+K303M=$(medan296 MigrasiStatusDto)
+cek "§303 premis: kontrak MigrasiStatusDto terbaca (5 medan)" "V == 5" \
+  "$(echo "$K303M" | grep -c .)"
+cek "§303 migrations == MigrasiStatusDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r '.migrations|keys[]')" "$K303M")"
+K303E=$(medan296 MigrasiEntriDto)
+cek "§303 premis: kontrak MigrasiEntriDto terbaca (3 medan)" "V == 3" \
+  "$(echo "$K303E" | grep -c .)"
+cek "§303 premis: ada entri migrasi (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(echo "$R303" | jq '((.migrations.daftar|length) >= 1)|if . then 1 else 0 end')"
+cek "§303 tiap entri migrasi == MigrasiEntriDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r '[.migrations.daftar[]|keys[]]|unique|.[]')" "$K303E")"
+# Angka ringkasannya harus sepakat dengan daftarnya sendiri. Panel yang
+# menyebut "3 menunggu" sambil mendaftar dua adalah panel yang dibaca orang
+# saat deploy sedang berjalan.
+cek "§303 total == panjang daftar" "V == 1" \
+  "$(echo "$R303" | jq '(.migrations.total == (.migrations.daftar|length))|if . then 1 else 0 end')"
+cek "§303 terpasang + menunggu == total" "V == 1" \
+  "$(echo "$R303" | jq '((.migrations.terpasang + .migrations.menunggu) == .migrations.total)|if . then 1 else 0 end')"
+cek "§303 terpasang == entri berstatus terpasang" "V == 1" \
+  "$(echo "$R303" | jq '(.migrations.terpasang == ([.migrations.daftar[]|select(.status=="terpasang")]|length))|if . then 1 else 0 end')"
+# Daun-daunnya sudah lama di kontrak; sekarang amplopnya juga, jadi keduanya
+# bisa diadu di tempat yang sama.
+K303T=$(medan296 TemuanSetelanDto)
+cek "§303 pemeriksaan: tiap temuan == TemuanSetelanDto, dua arah (bila ada)" "V == 0" \
+  "$(selisih296 "$(echo "$R303" | jq -r 'if (.pemeriksaan|length) > 0 then ([.pemeriksaan[]|keys[]]|unique|.[]) else empty end')" \
+      "$(echo "$R303" | jq -e '(.pemeriksaan|length) > 0' >/dev/null 2>&1 && echo "$K303T" || echo "")")"
+cek "§303 storage_mode adalah salah satu dari dua nilai kontraknya" "V == 1" \
+  "$(echo "$R303" | jq '((.storage_mode == "r2") or (.storage_mode == "local"))|if . then 1 else 0 end')"
+# Peran: panel ini super-admin saja, dan itu dipaku supaya amplop yang kini
+# bernama tak diam-diam terbuka lebih lebar. Token kasirnya `$REISS105`,
+# BUKAN `$KASIR` — yang terakhir mati sejak §105 mengganti passwordnya, dan
+# memakainya memulangkan 401 yang menyamar jadi "gerbang perannya bocor".
+# Jalan pertama seksi ini memakainya; `verify-api-token.test.ts` menuduh
+# dalam hitungan detik, jauh sebelum verify-api sempat mengeluh.
+cek "§303 owner akses panel sistem → 403" "V == 403" "$(status_code "$OWNER" GET /admin/sistem)"
+cek "§303 kasir akses panel sistem → 403" "V == 403" "$(status_code "$REISS105" GET /admin/sistem)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §304 — AMPLOP DAFTAR: dua pintu, satu bentuk, dan medan yang dikirim tanpa nama
+# ═══════════════════════════════════════════════════════════════════════════
+# `/register` dan `/resend-verification` memulangkan bentuk yang SAMA PERSIS,
+# dan itu SYARAT — bukan kebetulan. Respons yang berbeda antar pintu membuka
+# kembali enumerasi akun yang seluruh rute di sekitarnya susah payah tutup.
+# §299 sudah memaku kosakata `sebab`-nya; yang tak pernah dipaku siapa pun:
+# HIMPUNAN KUNCINYA.
+#
+# Terukur 2026-09-11: `dev_verify_url` DIKIRIM berdampingan dengan
+# `dev_verify_kode` yang disebut, tapi tak dideklarasikan di mana pun — tipe
+# lokal web menyatakan lima medan, kawat mengirim enam, dan ponsel mencatatnya
+# sebagai hantu beralasan. Ia lolos penghitung amplop pula: dua kunci dev
+# menumpang sebaran bersyarat (`...(dev ? {…} : {})`), jadi pemindainya membaca
+# empat kunci dan mengecualikannya sebagai pengakuan `{ok, …}`.
+#
+# IP SENDIRI, dan sebabnya sudah tertulis dua kali di berkas ini. `batasRegister`
+# berkuota 20/IP/jam; skrip ini memakai hampir semuanya, dan §304 berjalan
+# PALING AKHIR — jadi jalan pertamanya memerah TIGA lengan dengan pendaftaran
+# yang dijawab 429, persis kegagalan yang menimpa §299 versi pertama dan yang
+# komentar `daftar_verif` peringatkan ("berjalan TEPAT DI TEPI kuota itu").
+# Pola `X-Forwarded-For` ini dipinjam dari §284/§285/§299.
+XFF304="X-Forwarded-For: 203.0.113.104"
+reg304() { curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -H "$XFF304" -d "$1"; }
+rs304() { curl -s -X POST "$BASE/api/auth/resend-verification" -H 'Content-Type: application/json' -H "$XFF304" -d "$1"; }
+K304=$(medan296 DaftarResult)
+cek "§304 premis: kontrak DaftarResult terbaca dari types.ts (6 medan)" "V == 6" \
+  "$(echo "$K304" | grep -c .)"
+# Email BARU: jalur yang benar-benar mengirim kode, jadi blok dev ikut terisi.
+# `@example.com` & unik per jalan, sebagaimana §299 — supaya tak menabrak akun
+# uji lain di seksi mana pun.
+E304="vena304-$(date +%s)@example.com"
+R304=$(reg304 "{\"nama\":\"Uji 304\",\"email\":\"$E304\",\"password\":\"Rahasia304!\"}")
+cek "§304 premis: pendaftaran barunya berhasil (kalau 429, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R304" | jq '(.ok == true)|if . then 1 else 0 end')"
+cek "§304 /register == DaftarResult, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R304" | jq -r 'keys[]')" "$K304")"
+# `dev_verify_url` DIPAKU BERNAMA — dan bedanya dengan yang sudah ada layak
+# disebut supaya lengan ini tak terbaca lebih besar dari yang benar. §106f dan
+# §281 sudah MEMAKAI nilainya, jadi kalau ia dicabut keduanya ikut memerah
+# (terukur: pencabutannya memerahkan 7 lengan, 4 di antaranya lengan lama).
+# Yang TAK pernah ada: satu pun asersi bahwa NAMANYA milik sebuah bentuk yang
+# dideklarasikan. Lengan lama menangkap "medannya hilang"; ia tak akan
+# menangkap medan yang DITAMBAH, diganti nama, atau bercabang antar-pintu.
+cek "§304 /register membawa dev_verify_url (medan yang dulu tanpa nama)" "V == 1" \
+  "$(echo "$R304" | jq '(has("dev_verify_url") and (.dev_verify_url|type == "string"))|if . then 1 else 0 end')"
+cek "§304 dev_verify_kode & dev_verify_url datang BERSAMA, tak pernah sendiri" "V == 1" \
+  "$(echo "$R304" | jq '(has("dev_verify_kode") == has("dev_verify_url"))|if . then 1 else 0 end')"
+# Kirim ulang pada email yang SAMA: jaraknya menahan, jadi blok dev TAK ada —
+# dan justru itu bentuk yang perlu dipaku, sebab medan opsional yang hilang
+# adalah cara bentuk diam-diam bercabang jadi dua.
+U304=$(rs304 "{\"email\":\"$E304\"}")
+cek "§304 kirim ulang (jarak menahan): tiap kunci ADA di DaftarResult" "V == 0" \
+  "$(comm -23 <(echo "$U304" | jq -r 'keys[]' | sort -u) <(printf '%s\n' "$K304") | bocorkan)"
+cek "§304 kirim ulang tetap membawa keempat medan WAJIB" "V == 1" \
+  "$(echo "$U304" | jq '(has("ok") and has("sebab") and has("message") and has("retry_after_detik"))|if . then 1 else 0 end')"
+# DUA PINTU, SATU BENTUK — dipaku dengan membandingkan keduanya langsung.
+# Kalau salah satunya kelak bercabang, enumerasi akun terbuka lagi lewat selisih
+# BENTUK, bukan lewat isi.
+E304B="vena304b-$(date +%s)@example.com"
+R304B=$(reg304 "{\"nama\":\"Uji 304b\",\"email\":\"$E304B\",\"password\":\"Rahasia304!\"}")
+U304B=$(rs304 "{\"email\":\"tak-ada-304-$(date +%s)@example.com\"}")
+cek "§304 kirim ulang email TAK DIKENAL: bentuknya sama dengan yang dikenal" "V == 1" \
+  "$([ "$(echo "$U304" | jq -S 'keys')" = "$(echo "$U304B" | jq -S 'keys')" ] && echo 1 || echo 0)"
+cek "§304 /register email BARU: bentuknya sama dengan pendaftaran baru lain" "V == 1" \
+  "$([ "$(echo "$R304" | jq -S 'keys')" = "$(echo "$R304B" | jq -S 'keys')" ] && echo 1 || echo 0)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §305 — BARIS PENERIMAAN: 25 kunci dikirim, 21 diketik ulang web
+# ═══════════════════════════════════════════════════════════════════════════
+# Handler `GET /penerimaan` menyebar hasil `select` (`{ ...r, qty_teks, … }`),
+# dan `PenerimaanPage.tsx` mengetik ulang 21 dari 25 medan yang benar-benar
+# dikirim. Empat yang tak disebutnya: `satuan_beli`, `qty_teks`, `qty_setara`,
+# `qty_dipesan_teks`.
+#
+# Yang paling mahal `qty_teks`, dan mahalnya bukan kosmetik: karena tipe lokal
+# itu menyembunyikannya, layarnya MERAKIT ULANG `formatAngka(qty) + satuan` di
+# dua panel — persis yang medan itu ada untuk mencegah. Komentar `qtyTeks()`
+# menuliskan kejadiannya: menebak satuan sendiri sudah melahirkan "900 kg"
+# untuk barang yang sebenarnya 900 gr.
+K305=$(medan296 PenerimaanRow)
+cek "§305 premis: kontrak PenerimaanRow terbaca dari types.ts (25 medan)" "V == 25" \
+  "$(echo "$K305" | grep -c .)"
+R305=$(api "$OWNER" GET "/penerimaan?branch_id=all")
+cek "§305 premis: ada kiriman menunggu (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R305" | jq '((.rows|length) >= 1)|if . then 1 else 0 end')"
+cek "§305 kunci kawat == PenerimaanRow, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R305" | jq -r '[.rows[]|keys[]]|unique|.[]')" "$K305")"
+# `qty_teks` DIPAKU ADA DAN TERISI pada tiap baris. Medan yang kosong sama
+# saja dengan medan yang hilang bagi layar yang memakainya apa adanya.
+cek "§305 tiap baris membawa qty_teks bertipe string tak kosong" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.qty_teks|type) == "string" and (.qty_teks|length) > 0)]|length) == (.rows|length) | if . then 1 else 0 end')"
+# …dan ISINYA memang menyebut satuan barisnya — bukan teks apa saja. Inilah
+# yang membedakan "medannya ada" dari "medannya benar".
+# Ikatan `. as $r` WAJIB: di dalam `select(.qty_teks | contains(.satuan))`,
+# `.satuan` dinilai terhadap STRING `qty_teks`, bukan terhadap barisnya — jq
+# melempar dan `cek` melaporkan "nilai: " kosong, yang terbaca seperti asersi
+# gagal padahal ekspresinya yang rusak. Jalan pertama seksi ini kena persis itu.
+cek "§305 qty_teks memuat satuan barisnya sendiri" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[] | . as $r | select($r.qty_teks | contains($r.satuan))] | length) == (.rows|length) | if . then 1 else 0 end')"
+# `waktu` DI KAWAT harus ISO string: kolomnya `timestamp` (Drizzle → Date), dan
+# sebelum perakitnya ada, tipe mana pun yang menyatakannya akan berbohong.
+cek "§305 waktu bertipe string berbentuk ISO-8601" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.waktu|type)=="string" and (.waktu|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))]|length) == (.rows|length) | if . then 1 else 0 end')"
+# `qty_setara` PELENGKAP, bukan pengganti — boleh null, tapi kalau terisi ia
+# harus teks. Dipaku supaya ia tak diam-diam berubah jadi angka.
+cek "§305 qty_setara null atau string (tak pernah angka)" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.qty_setara == null) or ((.qty_setara|type) == "string"))]|length) == (.rows|length) | if . then 1 else 0 end')"
+# `qty_dipesan_teks` mengikuti `qty_dipesan`: dua-duanya ada, atau dua-duanya
+# tidak. Sepasang yang bercabang melahirkan "(dikirim )" kosong di layar.
+cek "§305 qty_dipesan & qty_dipesan_teks selalu sepasang" "V == 1" \
+  "$(echo "$R305" | jq '([.rows[]|select((.qty_dipesan == null) == (.qty_dipesan_teks == null))]|length) == (.rows|length) | if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §306 — BUKU DANA FAKTUR: satu bentuk, dan `kembali` yang DIKURANGKAN
+# ═══════════════════════════════════════════════════════════════════════════
+# Vena paling tipis dari deretannya, dan itu disebut apa adanya: barisnya cocok
+# satu-satu dengan kawat sejak awal. Yang belum ada cuma NAMANYA — amplop
+# `{rows, total}` salah satu dari 20 yang dihitung `amplop-berkontrak`, dan
+# kosakata `tipe` dieja dua kali tanpa rumah bersama.
+#
+# Lengan yang benar-benar menjaga ANGKA yang terakhir: `total` dibaca layar
+# faktur sebagai "dana efektif", dan penjumlahan yang lupa membalik tanda
+# `kembali` memulangkan angka yang terlalu besar — tak ada yang menyadarinya
+# sampai kas tak cocok.
+K306=$(medan296 DanaEntri)
+cek "§306 premis: kontrak DanaEntri terbaca dari types.ts (6 medan)" "V == 6" \
+  "$(echo "$K306" | grep -c .)"
+K306A=$(medan296 BukuDanaFaktur)
+cek "§306 premis: kontrak BukuDanaFaktur terbaca (2 medan)" "V == 2" \
+  "$(echo "$K306A" | grep -c .)"
+# Faktur yang PUNYA entri dana — dicari, bukan diasumsikan.
+FKD306=$(api "$OWNER" GET "/pembelian?per_page=500" | jq -r '[.rows[]|select(.faktur_id != null)|.faktur_id]|unique|.[]' | while read -r f; do
+  n=$(api "$OWNER" GET "/pembelian/dana/$f" | jq '.rows|length')
+  [ "$n" -gt 0 ] && { echo "$f"; break; }
+done)
+cek "§306 premis: ada faktur berbuku dana (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$([ -n "$FKD306" ] && echo 1 || echo 0)"
+R306=$(api "$OWNER" GET "/pembelian/dana/$FKD306")
+cek "§306 amplop == BukuDanaFaktur, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R306" | jq -r 'keys[]')" "$K306A")"
+cek "§306 tiap baris == DanaEntri, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R306" | jq -r '[.rows[]|keys[]]|unique|.[]')" "$K306")"
+# `waktu` ISO string: kolomnya timestamp (Drizzle → Date). Kelas keempat
+# berturut-turut sesudah planExpiresAt (#99), archived_at (#101), waktu
+# penerimaan (#106).
+cek "§306 tiap waktu bertipe string berbentuk ISO-8601" "V == 1" \
+  "$(echo "$R306" | jq '([.rows[]|select((.waktu|type)=="string" and (.waktu|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))]|length) == (.rows|length) | if . then 1 else 0 end')"
+# Kosakata `tipe` DIADU dengan kontrak, dua arah — bukan sekadar "ada".
+KOSA306=$(awk '/^export type TipeDana = /{gsub(/.*= /,"");gsub(/;$/,"");gsub(/ \| /,"\n");gsub(/"/,"");print}' packages/shared/src/types.ts | sort -u)
+cek "§306 premis: kosakata TipeDana terbaca dari kontrak (3 nilai)" "V == 3" \
+  "$(echo "$KOSA306" | grep -c .)"
+cek "§306 tiap tipe yang dikirim ada di kosakata TipeDana" "V == 0" \
+  "$(comm -23 <(echo "$R306" | jq -r '[.rows[]|.tipe]|unique|.[]' | sort -u) <(printf '%s\n' "$KOSA306") | bocorkan)"
+# ARITMETIKA — dihitung ULANG di sini dari `rows`, lalu diadu dengan `total`
+# milik server. Inilah lengan yang menangkap tanda `kembali` yang terbalik.
+HIT306=$(echo "$R306" | jq '[.rows[] | if .tipe == "kembali" then -.nominal else .nominal end] | add // 0')
+cek "§306 total server == cair + tambahan − kembali (dihitung ulang di sini)" "V == 1" \
+  "$([ "$(echo "$R306" | jq -r '.total')" = "$HIT306" ] && echo 1 || echo 0)"
+# …dan penjumlahan NAIF (tanpa membalik `kembali`) HARUS berbeda begitu ada
+# entri `kembali` — kalau tidak, lengan di atas hijau tanpa menyatakan apa pun.
+NAIF306=$(echo "$R306" | jq '[.rows[].nominal] | add // 0')
+ADAK306=$(echo "$R306" | jq '[.rows[]|select(.tipe=="kembali")]|length')
+cek "§306 uji-diri: bila ADA entri kembali, penjumlahan naif berbeda" "V == 1" \
+  "$([ "$ADAK306" -eq 0 ] && echo 1 || { [ "$NAIF306" != "$HIT306" ] && echo 1 || echo 0; })"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §307 — PENYEWA: satu tabel, dua bentuk — dan baris telanjang yang lolos
+#        ATURAN A karena dibungkus literal
+# ═══════════════════════════════════════════════════════════════════════════
+# `bentuk-balasan` memaku ATURAN A dengan MAKS_UTANG = 0: tak boleh ada baris
+# `db.select()` TELANJANG yang sampai ke `c.json`. Ia melaporkan NOL, dan repo
+# ini punya DUA — `GET /admin/tenants/:id` memulangkan `company` (21 kunci
+# camelCase, baris `companies` apa adanya) dan `cabang` (16, baris `branches`).
+#
+# Sebabnya bukan aturannya salah melainkan jangkauannya kurang satu lapis:
+# yang diklasifikasi ARGUMEN LANGSUNG `c.json`. `c.json(baris)` tertangkap;
+# `c.json({ x: baris })` tidak. Dibuktikan: pemindai lama HIJAU atas kode yang
+# sama, pemindai baru menuduh keduanya dengan nama tabelnya.
+#
+# Keduanya kini lewat perakit yang SAMA dengan rute yang menyajikannya
+# sehari-hari — `companyRow` (dari `GET /company`, vena #99) dan `cabangDto`
+# (dari `GET /cabang`, diekstrak putaran ini). Satu tabel tak lagi punya dua
+# bentuk di kawat.
+K307=$(medan296 TenantRow)
+cek "§307 premis: kontrak TenantRow terbaca dari types.ts (9 medan)" "V == 9" \
+  "$(echo "$K307" | grep -c .)"
+R307=$(api "$SA" GET /admin/tenants)
+cek "§307 premis: ada penyewa (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R307" | jq '((length) >= 1)|if . then 1 else 0 end')"
+cek "§307 daftar penyewa == TenantRow, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R307" | jq -r '[.[]|keys[]]|unique|.[]')" "$K307")"
+# `plan_expires_at` DIPAKU BERNAMA: ia dikirim sejak lama dan tipe lokal web
+# menyatakan DELAPAN medan, bukan sembilan. Kelas `dev_verify_url` (#105).
+cek "§307 daftar membawa plan_expires_at (medan yang dulu tanpa nama)" "V == 1" \
+  "$(echo "$R307" | jq '([.[]|select(has("plan_expires_at"))]|length) == (length) | if . then 1 else 0 end')"
+# Stempel waktu ISO — kelas KELIMA berturut-turut.
+cek "§307 created_at tiap baris string ISO-8601" "V == 1" \
+  "$(echo "$R307" | jq '([.[]|select((.created_at|type)=="string" and (.created_at|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))]|length) == (length) | if . then 1 else 0 end')"
+cek "§307 plan_expires_at null atau string ISO (tak pernah objek)" "V == 1" \
+  "$(echo "$R307" | jq '([.[]|select((.plan_expires_at == null) or ((.plan_expires_at|type)=="string"))]|length) == (length) | if . then 1 else 0 end')"
+
+# ── detail: SATU TABEL, SATU BENTUK ──────────────────────────────────────
+TID307=$(echo "$R307" | jq -r '.[0].id')
+D307=$(api "$SA" GET "/admin/tenants/$TID307")
+K307D=$(medan296 TenantDetail)
+cek "§307 premis: kontrak TenantDetail terbaca (3 medan)" "V == 3" \
+  "$(echo "$K307D" | grep -c .)"
+cek "§307 amplop detail == TenantDetail, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r 'keys[]')" "$K307D")"
+# INILAH lengan yang menjaga temuannya: `company` di sini harus bentuk yang
+# SAMA dengan yang `GET /company` sajikan — bukan baris tabel apa adanya.
+K307C=$(medan296 CompanyRow)
+cek "§307 detail.company == CompanyRow, dua arah (bukan baris tabel)" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r '.company|keys[]')" "$K307C")"
+# …dan dibandingkan LANGSUNG dengan rute yang menyajikannya sehari-hari.
+cek "§307 detail.company berkunci SAMA PERSIS dengan GET /company" "V == 1" \
+  "$([ "$(echo "$D307" | jq -S '.company|keys')" = "$(api "$OWNER" GET /company | jq -S 'keys')" ] && echo 1 || echo 0)"
+K307B=$(medan296 CabangDto)
+cek "§307 premis: kontrak CabangDto terbaca (14 medan)" "V == 14" \
+  "$(echo "$K307B" | grep -c .)"
+cek "§307 premis: penyewa ini punya cabang (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(echo "$D307" | jq '((.cabang|length) >= 1)|if . then 1 else 0 end')"
+cek "§307 detail.cabang == CabangDto, dua arah (bukan baris tabel)" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r '[.cabang[]|keys[]]|unique|.[]')" "$K307B")"
+cek "§307 detail.cabang berkunci SAMA PERSIS dengan GET /cabang" "V == 1" \
+  "$([ "$(echo "$D307" | jq -S '.cabang[0]|keys')" = "$(api "$OWNER" GET /cabang | jq -S '.[0]|keys')" ] && echo 1 || echo 0)"
+K307A=$(medan296 TenantAnggota)
+cek "§307 detail.anggota == TenantAnggota, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$D307" | jq -r '[.anggota[]|keys[]]|unique|.[]')" "$K307A")"
+# Peran: panel penyewa super-admin saja.
+cek "§307 owner akses daftar penyewa → 403" "V == 403" "$(status_code "$OWNER" GET /admin/tenants)"
+cek "§307 owner akses detail penyewa → 403" "V == 403" "$(status_code "$OWNER" GET "/admin/tenants/$TID307")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §308 — AMPLOP YANG TAK BERNAMA, DI KEDUA UJUNG KAWAT: bendera yang dikirim
+#        server sejak lama dan tak pernah sampai ke satu layar pun
+# ═══════════════════════════════════════════════════════════════════════════
+# `/transfer-stok` memulangkan `{rows, rows_terpotong}` sejak putaran 23, dan
+# §274 sudah memaku bahwa benderanya DIKIRIM. Yang tak pernah ditanyakan siapa
+# pun: apakah bentuk itu punya NAMA. Ia tak punya — jadi kedua kliennya
+# mengetik ulang `{ rows }` di situs pengambilannya sendiri, dan benderanya
+# lenyap dua kali: web tak bisa melihatnya (typecheck bersaksi untuk balasan
+# yang lebih sempit daripada yang dikirim), ponsel membuangnya di
+# `transfer_repository`. Daftarnya berlangit-langit 50; faktur ke-51 hilang
+# tanpa satu kalimat pun.
+#
+# Yang dipaku di sini: amplopnya kini `TransferStokDaftar` di kontrak, dua
+# arah — dan benderanya BISA menyala, dibuktikan dari kawat dengan memaksa
+# `per_page=1`. Bendera yang tak pernah true akan membuat lengan mana pun di
+# atasnya hijau tanpa menyatakan apa pun.
+K308=$(medan296 TransferStokDaftar)
+cek "§308 premis: kontrak TransferStokDaftar terbaca dari types.ts (2 medan)" "V == 2" \
+  "$(echo "$K308" | grep -c .)"
+R308=$(api "$OWNER" GET /transfer-stok)
+cek "§308 premis: ada faktur transfer (kalau nol, seluruh seksi hampa)" "V == 1" \
+  "$(echo "$R308" | jq '((.rows|length) >= 1)|if . then 1 else 0 end')"
+cek "§308 amplop /transfer-stok == TransferStokDaftar, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R308" | jq -r 'keys[]')" "$K308")"
+cek "§308 rows_terpotong BOOLEAN, bukan sekadar ada" "V == 1" \
+  "$(echo "$R308" | jq '((.rows_terpotong|type)=="boolean")|if . then 1 else 0 end')"
+# Daftar yang MUAT tidak dituduh terpotong…
+cek "§308 daftar bawaan (muat) → rows_terpotong false" "V == 1" \
+  "$(echo "$R308" | jq '(.rows_terpotong == false)|if . then 1 else 0 end')"
+# …dan benderanya benar-benar bisa menyala. Tanpa lengan ini, "false" di atas
+# tak membedakan bendera yang bekerja dari bendera yang mati.
+P308=$(api "$OWNER" GET "/transfer-stok?per_page=1")
+cek "§308 UJI-DIRI: per_page=1 memotong → rows_terpotong true" "V == 1" \
+  "$(echo "$P308" | jq '((.rows_terpotong == true) and ((.rows|length) == 1))|if . then 1 else 0 end')"
+cek "§308 …dan amplop yang terpotong berkunci SAMA (dua arah)" "V == 0" \
+  "$(selisih296 "$(echo "$P308" | jq -r 'keys[]')" "$K308")"
+K308R=$(medan296 TransferStokFaktur)
+cek "§308 baris /transfer-stok == TransferStokFaktur, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$R308" | jq -r '[.rows[]|keys[]]|unique|.[]')" "$K308R")"
+
+# ── saldo: amplop yang menyebut cabang MANA yang dijawab ─────────────────
+K308S=$(medan296 TransferStokSaldo)
+cek "§308 premis: kontrak TransferStokSaldo terbaca (2 medan)" "V == 2" \
+  "$(echo "$K308S" | grep -c .)"
+BR308=$(api "$OWNER" GET /cabang | jq -r '[.[]|select(.is_active)][0].id')
+S308=$(api "$OWNER" GET "/transfer-stok/saldo?branch_id=$BR308")
+cek "§308 amplop /transfer-stok/saldo == TransferStokSaldo, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$S308" | jq -r 'keys[]')" "$K308S")"
+# `branch_id` bukan hiasan: tanpa parameter, server memutuskan cabangnya
+# sendiri, dan daftar saldo tanpa keterangan cabang tak bisa diperiksa.
+cek "§308 saldo menggemakan cabang yang DIMINTA, bukan cabang lain" "V == 1" \
+  "$([ "$(echo "$S308" | jq -r '.branch_id')" = "$BR308" ] && echo 1 || echo 0)"
+
+# ── saldo pembuka: bentuk yang sampai kemarin hanya hidup di halaman web ──
+K308A=$(medan296 StokAwalTersimpan)
+cek "§308 premis: kontrak StokAwalTersimpan terbaca (2 medan)" "V == 2" \
+  "$(echo "$K308A" | grep -c .)"
+A308=$(api "$OWNER" GET /stok/awal)
+cek "§308 amplop /stok/awal == StokAwalTersimpan, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$A308" | jq -r 'keys[]')" "$K308A")"
+cek "§308 premis: ada saldo pembuka tersimpan (kalau nol, lengan berikutnya hampa)" "V == 1" \
+  "$(echo "$A308" | jq '((.items|length) >= 1)|if . then 1 else 0 end')"
+K308I=$(medan296 StokAwalItem)
+cek "§308 baris /stok/awal == StokAwalItem, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$A308" | jq -r '[.items[]|keys[]]|unique|.[]')" "$K308I")"
+# `tanggal` amplop = tanggal saldo pembuka TERKINI, dihitung SERVER. Bila ia
+# diam-diam jadi "hari ini" walau ada item, formulir Stok Awal membuka tanggal
+# yang salah dan penyimpanan berikutnya memindahkan saldo pembuka ke sana.
+cek "§308 tanggal amplop == tanggal item TERBESAR (bukan hari ini)" "V == 1" \
+  "$(echo "$A308" | jq '(.tanggal == ([.items[].tanggal]|max))|if . then 1 else 0 end')"
+cek "§308 tiap tanggal item berbentuk YYYY-MM-DD" "V == 1" \
+  "$(echo "$A308" | jq '([.items[]|select(.tanggal|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))]|length) == (.items|length)|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §309 — TIPE NILAI DI KAWAT, DIADU DENGAN TIPE DI KONTRAK
+# ═══════════════════════════════════════════════════════════════════════════
+# Sembilan putaran memaku KUNCI balasan dua arah dan tak sekali pun TIPE
+# NILAINYA. `qty: "15000"` alih-alih `15000` lolos setiap penjaga yang ada:
+# kuncinya benar, jumlahnya benar, namanya benar.
+#
+# Dan hal itu punya jalan masuk yang nyata: baris `db.execute(sql`…`)`
+# memulangkan `Record<string, unknown>`, jadi `satisfies` di rutenya tak
+# menjamin apa pun tentang isinya. Yang menjaga `numeric` jadi `number` cuma
+# SATU BARIS di `db/client.ts` (`setTypeParser(1700, parseFloat)`) — dan OID 20
+# (`bigint`) tidak terdaftar. Terukur dari kawat: `count(*)` lewat SQL mentah
+# memulangkan `"235"`, sebuah STRING. Repo ini lolos hari ini karena tiap
+# situsnya menulis `Number(…)` atau `::int` dengan tangan.
+#
+# Lengan ini tak butuh peta rute→tipe (yang memang belum ada): tiap objek
+# disidik dari HIMPUNAN KUNCI-nya, dan yang cocok satu interface `types.ts`
+# diadu medan demi medan. Yang tak tersidik DILEWATI — itu batas yang disebut,
+# dan populasinya persis vena "amplop tanpa kontrak".
+ADU309="apps/server/test/util/adu-tipe-kawat.ts"
+# PASANGAN lebih dulu: contoh benar → 0, contoh yang tipenya SENGAJA salah → 1.
+# Tanpa ini "0 selisih" tak membedakan penjaga yang bekerja dari yang mati.
+UJI309=$(npx tsx "$ADU309" --uji-diri 2>/dev/null)
+cek "§309 PASANGAN: contoh benar 0 selisih, contoh salah-tipe 1 selisih" "V == 1" \
+  "$([ "$UJI309" = "0 1 0 1" ] && echo 1 || echo 0)"
+R309=$(npx tsx "$ADU309" --ringkas --basis "$BASE/api" --owner "$OWNER" --sa "$SA" --kasir "$REISS105" 2>/tmp/adu309.err)
+KELUAR309=$?
+RINGKAS309=$(echo "$R309" | grep '^RINGKAS ' | head -1)
+cek "§309 premis: pemindainya benar-benar jalan (baris RINGKAS ada)" "V == 1" \
+  "$([ -n "$RINGKAS309" ] && echo 1 || echo 0)"
+# Rute yang 4xx diam-diam adalah sapuan yang menyusut tanpa suara — dan sapuan
+# yang menyusut LULUS tanpa memeriksa apa pun. Karena itu yang dipaku bukan
+# "≥ sekian" saja, melainkan TERAMBIL == DAFTARNYA.
+cek "§309 premis: SELURUH rute di daftarnya terambil (nol yang 4xx/5xx)" "V == 1" \
+  "$([ "$(echo "$RINGKAS309" | awk '{print $2}')" = "$(echo "$RINGKAS309" | awk '{print $3}')" ] && echo 1 || echo 0)"
+cek "§309 premis: daftar rutenya ≥ 70" "V >= 70" "$(echo "$RINGKAS309" | awk '{print $3}')"
+# ── rute DETAIL (`:id`): 37 rute yang sampai 2026-09-11 tak tersapu siapa pun ──
+# Idnya dipetik DARI KAWAT (dari rute daftar yang baru diambil), bukan dari
+# fikstur — fikstur di dalam alat ukur adalah cara alat ukur mulai punya
+# pendapat sendiri tentang data yang benar.
+cek "§309 premis: SELURUH rute detail terambil, kecuali yang daftarnya kosong" "V == 1" \
+  "$([ "$(echo "$RINGKAS309" | awk '{print $8}')" = "$(echo "$RINGKAS309" | awk '{print $9-$10}')" ] && echo 1 || echo 0)"
+# Daftar yang kosong = rute detail yang tak bisa diketuk sama sekali. Satu hari
+# ini (`/kebersihan/:id`, DB gerbang tak punya laporan kebersihan); ratchet
+# supaya yang kedua tak lahir diam-diam.
+cek "§309 premis: rute detail tanpa data ≤ 1" "V <= 1" "$(echo "$RINGKAS309" | awk '{print $10}')"
+cek "§309 premis: daftar rute detailnya ≥ 35" "V >= 35" "$(echo "$RINGKAS309" | awk '{print $9}')"
+cek "§309 premis: interface tersidik ≥ 130" "V >= 130" "$(echo "$RINGKAS309" | awk '{print $4}')"
+cek "§309 premis: objek yang diadu ≥ 4000" "V >= 4000" "$(echo "$RINGKAS309" | awk '{print $5}')"
+cek "§309 INTI: nol nilai yang tipenya berbeda dari kontraknya" "V == 0" \
+  "$(echo "$RINGKAS309" | awk '{print $6}')"
+cek "§309 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR309"
+[ "$KELUAR309" -ne 0 ] && { echo "── selisih yang dilaporkan §309/§310 ──"; echo "$R309" | grep -v '^RINGKAS '; cat /tmp/adu309.err; }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §310 — STEMPEL WAKTU YANG BUKAN ISO-8601
+# ═══════════════════════════════════════════════════════════════════════════
+# Kelas yang lolos SELURUH penjaga lain, dan itu bukan hipotesis: terukur
+# 2026-09-11 di `/penerimaan/riwayat`, yang mengirim
+#
+#   "waktu": "Thu Sep 10 2026 14:37:32 GMT+0000 (Coordinated Universal Time)"
+#
+# — keluaran `Date.prototype.toString`, sebab rutenya menulis `String(i.waktu)`
+# atas kolom `timestamp`. Kontraknya bilang `string`, kawatnya string, kuncinya
+# benar: §309 diam, `selisih296` diam, fikstur ponsel cuma tahu NAMA kunci.
+# Yang membedakannya cuma ISI-nya.
+#
+# Dan biayanya asimetris — itu yang membuatnya bertahan lama: `new Date(teks)`
+# di peramban MENGURAINYA (format buatan V8 sendiri), sementara
+# `DateTime.tryParse` Dart memulangkan null, jadi layar Riwayat Penerimaan di
+# ponsel memajang kalimat itu utuh. Cacat yang tak terlihat di permukaan yang
+# dipakai penulisnya.
+#
+# Baris yang sama juga MEMBANDINGKAN teks itu (`String(i.waktu) > t`) untuk
+# memilih "keputusan terakhir" — urutan leksikografis atas nama hari.
+cek "§310 PASANGAN: ISO lolos, keluaran Date.toString tertuduh" "V == 1" \
+  "$([ "$UJI309" = "0 1 0 1" ] && echo 1 || echo 0)"
+cek "§310 INTI: nol stempel waktu yang bukan ISO-8601 di 108 rute GET" "V == 0" \
+  "$(echo "$RINGKAS309" | awk '{print $7}')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §312 — ANGKA PERENCANAAN USAHA hanya untuk manajemen
+# ═══════════════════════════════════════════════════════════════════════════
+# Aturan "angka biaya hanya untuk manajemen" sudah punya rumah (`bolehLihatBiaya`)
+# dan penjaga (§261 + `biaya-hanya-manajemen.test.ts`) sejak 2026-08-26. Yang
+# tak pernah diukur ulang POPULASINYA: ia digambar sekali mengelilingi harga
+# pokok (`MEDAN_BIAYA_MENU`/`_BAHAN`), dan `GET /company` tak pernah masuk.
+#
+# Terukur 2026-09-11 dengan token kasir sungguhan: rute itu memulangkan KEDUA
+# PULUH DUA kuncinya utuh ke tiap peran — `targetPenjualan` 15.000.000,
+# `foodCostMaks` 40, `metodeHpp`, `planExpiresAt` — di layar yang paling sering
+# terbuka di tablet bersama.
+#
+# PINTUNYA SENGAJA TETAP TERBUKA: kasir memanggilnya untuk kepala & kaki struk
+# (`kasir_models.dart` mengurai delapan medan cetak). Yang ditutup ANGKANYA,
+# dan lengan PASANGAN di bawah memaku bahwa medan cetaknya TIDAK ikut tertutup.
+MJ312=$(awk '/^export const MEDAN_MANAJEMEN_COMPANY = \[/{f=1;next} f&&/^\] as const;/{exit} f{gsub(/[ ",]/,"");if($0!="")print}' packages/shared/src/biaya.ts)
+cek "§312 premis: MEDAN_MANAJEMEN_COMPANY terbaca dari shared (4 medan)" "V == 4" \
+  "$(echo "$MJ312" | grep -c .)"
+CO312=$(api "$OWNER" GET /company)
+CK312=$(api "$REISS105" GET /company)
+cek "§312 premis: kasir MASIH boleh memanggilnya (pintunya terbuka)" "V == 200" \
+  "$(status_code "$REISS105" GET /company)"
+# Bentuknya TIDAK berubah — `null`, bukan kunci yang dicabut. Kalau kuncinya
+# hilang, `kasir_models.dart` diam-diam memakai bawaannya dan tak ada yang tahu.
+cek "§312 bentuknya SAMA PERSIS untuk kedua peran (null, bukan kunci dicabut)" "V == 0" \
+  "$(selisih296 "$(echo "$CO312" | jq -r 'keys[]')" "$(echo "$CK312" | jq -r 'keys[]'|sort -u)")"
+# Owner melihat angkanya…
+cek "§312 owner: targetPenjualan & foodCostMaks & metodeHpp TERISI" "V == 1" \
+  "$(echo "$CO312" | jq '((.targetPenjualan != null) and (.foodCostMaks != null) and (.metodeHpp != null))|if . then 1 else 0 end')"
+# …kasir tidak, keempat-empatnya.
+cek "§312 kasir: keempat medan manajemen NULL" "V == 4" \
+  "$(echo "$CK312" | jq '[.targetPenjualan, .foodCostMaks, .metodeHpp, .planExpiresAt]|map(select(. == null))|length')"
+# PASANGAN ANTI-RUSAK: medan CETAK harus tetap utuh untuk kasir, kalau tidak
+# struk di lapangan kehilangan nama/alamat/tarif PB1 tanpa satu galat pun.
+cek "§312 PASANGAN: delapan medan cetak kasir SAMA PERSIS dengan owner" "V == 1" \
+  "$([ "$(echo "$CK312" | jq -S '{nama,alamat,telepon,logoUrl,receiptFooter,receiptShowAlamat,pb1Rate,pb1Enabled}')" = "$(echo "$CO312" | jq -S '{nama,alamat,telepon,logoUrl,receiptFooter,receiptShowAlamat,pb1Rate,pb1Enabled}')" ] && echo 1 || echo 0)"
+# …dan gerbang fitur Lite/Pro, yang dibaca SEMUA peran di seluruh layar.
+cek "§312 PASANGAN: plan/mode/isActive kasir SAMA PERSIS dengan owner" "V == 1" \
+  "$([ "$(echo "$CK312" | jq -S '{plan,mode,isActive,timezone,diskonMaksPersen,blokirJualMinus}')" = "$(echo "$CO312" | jq -S '{plan,mode,isActive,timezone,diskonMaksPersen,blokirJualMinus}')" ] && echo 1 || echo 0)"
+# Dan jalur SESI tak ikut tersentuh: `/auth/me` memakai `CompanyDto` (snake,
+# 9 medan) yang memang tak memuat angka perencanaan sama sekali.
+cek "§312 /auth/me kasir tetap membawa setelan operasionalnya" "V == 1" \
+  "$(api "$REISS105" GET /auth/me | jq '((.company.diskon_maks_persen != null) and (.company.pb1_rate != null))|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §313 — KEBIJAKAN "angka biaya hanya untuk manajemen", DIUKUR DARI KAWAT
+# ═══════════════════════════════════════════════════════════════════════════
+# Aturannya punya rumah (`bolehLihatBiaya`) dan penjaga statis sejak
+# 2026-08-26. Yang tak pernah ada: pengukuran yang menagih KELENGKAPAN
+# POPULASINYA — dan dua putaran berturut-turut menemukan medan yang lolos
+# justru karena daftarnya digambar sekali lalu tak diukur ulang:
+#
+#   #114  GET /company        targetPenjualan 15.000.000 ke tablet kasir
+#   #115  GET /perlengkapan   harga_beli — di modul yang penyaringnya SUDAH ada,
+#                             terpasang di `/perlengkapan/:id/kartu` sebelahnya
+#
+# Lengan ini membalik arahnya: nama medan diambil dari daftar kebijakan itu
+# sendiri (`MEDAN_*` di `packages/shared/src/biaya.ts`), lalu SETIAP rute yang
+# boleh diketuk kasir disapu. Medan berbunyi nama kebijakan yang datang BUKAN
+# `null` = tuduhan, kecuali yang tercatat di `KECUALI_BIAYA` beserta alasannya.
+#
+# Ratchetnya dua arah: pengecualian yang sudah TIDAK bocor dilaporkan BASI,
+# jadi utang yang lunas tak bisa menggantung sebagai izin permanen.
+B313=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --biaya --basis "$BASE/api" --kasir "$REISS105" 2>/tmp/biaya313.err)
+KELUAR313=$?
+RINGKAS313=$(echo "$B313" | grep '^BIAYA ' | head -1)
+cek "§313 premis: pemindainya jalan (baris BIAYA ada)" "V == 1" \
+  "$([ -n "$RINGKAS313" ] && echo 1 || echo 0)"
+cek "§313 premis: daftar kebijakan terbaca ≥ 10 medan" "V >= 10" "$(echo "$RINGKAS313" | awk '{print $2}')"
+cek "§313 premis: rute yang diketuk sbg kasir ≥ 50" "V >= 50" "$(echo "$RINGKAS313" | awk '{print $3}')"
+cek "§313 INTI: nol medan kebijakan yang sampai ke kasir BUKAN null" "V == 0" \
+  "$(echo "$RINGKAS313" | awk '{print $4}')"
+cek "§313 RATCHET: nol pengecualian BASI (utang lunas tak boleh menggantung)" "V == 0" \
+  "$(echo "$RINGKAS313" | awk '{print $5}')"
+cek "§313 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR313"
+[ "$KELUAR313" -ne 0 ] && { echo "── kebocoran yang dilaporkan §313 ──"; echo "$B313" | grep -v '^BIAYA '; cat /tmp/biaya313.err; }
+# PASANGAN: owner TETAP menerima angkanya — kalau tidak, "nol bocor" cuma
+# berarti medannya mati untuk semua orang.
+cek "§313 PASANGAN: owner tetap menerima harga_beli perlengkapan" "V == 1" \
+  "$(api "$OWNER" GET /perlengkapan | jq '([.[]|select(.harga_beli != null)]|length) > 0 | if . then 1 else 0 end')"
+cek "§313 PASANGAN: kasir menerima barisnya, dengan harga_beli null" "V == 1" \
+  "$(api "$REISS105" GET /perlengkapan | jq '(((.|length) > 0) and ([.[]|select(.harga_beli != null)]|length) == 0)|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
+# ═══════════════════════════════════════════════════════════════════════════
+# §309/§310 mengetuk rutenya SENDIRI, jadi jangkauannya berhenti di yang bisa
+# diketuk tanpa menulis apa pun: 108 dari 110 GET, dan NOL dari 170 rute tulis.
+# Alat ukur yang MENULIS ke basis data berhenti jadi alat ukur.
+#
+# Yang sudah mengetuk semuanya justru skrip ini — 3.700 lengan, ~8.000
+# permintaan, seluruh alur tulis lengkap dengan prasyaratnya. Maka servernya
+# yang merekam (`ADU_TIPE=` di `app.ts`, seidiom `JEJAK_RUTE=`), dan
+# pembandingnya membaca rekaman itu di sini.
+#
+# Terukur 2026-09-11 atas satu jalan penuh: 582 rekaman, **261 POLA RUTE** —
+# lebih dari dua kali lipat jangkauan §309 — 157 interface, 2.762 objek.
+REKAM311="${ADU_TIPE:-/tmp/adu-tipe.jsonl}"
+cek "§311 premis: servernya benar-benar merekam (berkas ada & berisi)" "V == 1" \
+  "$([ -s "$REKAM311" ] && echo 1 || echo 0)"
+if [ -s "$REKAM311" ]; then
+  R311=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --berkas "$REKAM311" 2>/tmp/adu311.err)
+  KELUAR311=$?
+  RINGKAS311=$(echo "$R311" | grep '^REKAM ' | head -1)
+  # Rekaman yang menyusut = sapuan yang menyusut, dan sapuan yang menyusut
+  # LULUS tanpa memeriksa apa pun. Lantainya dipatok dari pengukuran.
+  cek "§311 premis: pola rute terekam ≥ 250 (§309 cuma menjangkau 108)" "V >= 250" \
+    "$(echo "$RINGKAS311" | awk '{print $3}')"
+  cek "§311 premis: interface tersidik ≥ 150" "V >= 150" "$(echo "$RINGKAS311" | awk '{print $4}')"
+  cek "§311 premis: objek yang diadu ≥ 2500" "V >= 2500" "$(echo "$RINGKAS311" | awk '{print $5}')"
+  cek "§311 INTI: nol selisih tipe di SELURUH permukaan (termasuk rute tulis)" "V == 0" \
+    "$(echo "$RINGKAS311" | awk '{print $6}')"
+  cek "§311 INTI: nol stempel salah bentuk di seluruh permukaan" "V == 0" \
+    "$(echo "$RINGKAS311" | awk '{print $7}')"
+  cek "§311 …dan keluarannya sepakat dengan kode keluar skripnya" "V == 0" "$KELUAR311"
+  [ "$KELUAR311" -ne 0 ] && { echo "── selisih yang dilaporkan §311 ──"; echo "$R311" | grep -v '^REKAM '; cat /tmp/adu311.err; }
+else
+  gagal "§311 rekaman balasan TIDAK ADA di $REKAM311 — server tak diboot dengan ADU_TIPE="
+fi
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "── RINGKASAN $FAIL KEGAGALAN (diulang di sini supaya terlihat dari ekor log) ──"

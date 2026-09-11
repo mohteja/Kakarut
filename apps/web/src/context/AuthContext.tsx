@@ -1,4 +1,7 @@
-import type { SebabDaftar } from "@kakarut/shared";
+import type {
+  DaftarResult,
+  SebabDaftar,
+} from "@kakarut/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
@@ -12,32 +15,18 @@ import {
 import { api, AUTH_STORAGE_KEY, loadAuth, saveAuth, type AuthState } from "../lib/api";
 import { hapusLokal } from "../lib/simpanan";
 
-/**
- * Hasil daftar / kirim-ulang verifikasi (netral, tanpa sesi) — KECUALI satu
- * keadaan: `/register` untuk akun yang sudah terverifikasi dengan password
- * yang cocok memulangkan SESI (bentuk `AuthState`) plus `sudah_aktif: true`.
- * Pemanggil memeriksa `"token" in hasil`.
+/*
+ * `DaftarResult` kini datang dari kontrak (`@kakarut/shared`), bukan diketik
+ * di sini. Salinan lokalnya menyatakan LIMA medan; servernya mengirim ENAM —
+ * `dev_verify_url` tak pernah disebut, meski dikirim berdampingan dengan
+ * `dev_verify_kode` yang disebut. Diekspor ulang supaya pemanggil lama tak
+ * ikut berubah pada putaran yang sama dengan perubahan bentuknya.
+ *
+ * SATU PENGECUALIAN tetap berlaku: `/register` untuk akun yang sudah
+ * terverifikasi dengan password yang cocok memulangkan SESI (`AuthState`)
+ * plus `sudah_aktif: true`. Pemanggil memeriksa `"token" in hasil`.
  */
-export interface DaftarResult {
-  ok: boolean;
-  /**
-   * KODE keadaan — sejak 2026-09-05 kedua pintu menyebutkannya (keputusan
-   * pemilik; sebelumnya tiga belas keadaan dijawab satu kalimat netral).
-   * Yang bercabang WAJIB memakai ini, bukan mencocokkan `message`.
-   */
-  sebab?: SebabDaftar;
-  message?: string;
-  /** Hanya di dev (email belum diatur) — kode verifikasi 6 digit langsung. */
-  dev_verify_kode?: string;
-  /**
-   * Jarak minimum sebelum kode berikutnya boleh diminta, dalam detik.
-   *
-   * Datang dari SERVER, bukan disalin ke klien: server yang menahannya, jadi
-   * angka kedua di sini hanya akan menyimpang diam-diam. Nilainya TETAP untuk
-   * email mana pun — terdaftar atau tidak — jadi ia tak membocorkan apa pun.
-   */
-  retry_after_detik?: number;
-}
+export type { DaftarResult };
 
 interface AuthContextValue {
   auth: AuthState | null;

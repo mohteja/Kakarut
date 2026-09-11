@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import type { ProfilDto } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -52,7 +53,7 @@ export const profilRoutes = new Hono<AppEnv>()
       role: auth.role,
       cabang,
       employee_code: m?.employeeCode ?? null,
-    });
+    } satisfies ProfilDto);
   })
   /** Riwayat kegiatan SENDIRI (log faktur yang dilakukan akun ini). */
   .get("/aktivitas", async (c) => {

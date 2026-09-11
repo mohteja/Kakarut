@@ -15,7 +15,12 @@ import {
   deviceIdField,
 } from "../sync/idempoten";
 import { z } from "zod";
-import type { OpnameRingkasan, OpnameSesiStatus } from "@kakarut/shared";
+import type {
+  OpnameRingkasan,
+  OpnameSesiStatus,
+  StokAwalItem,
+  StokAwalTersimpan,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
   companies,
@@ -658,7 +663,7 @@ export const stokRoutes = new Hono<AppEnv>()
         AND so.session_id IS NULL AND so.penyesuaian_status = 'disetujui'
       ORDER BY so.ingredient_id, so.created_at DESC
     `);
-    const items = res.rows.map((r) => {
+    const items = res.rows.map((r): StokAwalItem => {
       const row = r as Record<string, unknown>;
       return {
         ingredient_id: String(row.ingredient_id),
@@ -668,7 +673,7 @@ export const stokRoutes = new Hono<AppEnv>()
     });
     // Tanggal default form = tanggal saldo pembuka terkini (terkunci), atau hari ini
     const tanggal = items.length ? items.map((i) => i.tanggal).sort().at(-1)! : today;
-    return c.json({ tanggal, items });
+    return c.json({ tanggal, items } satisfies StokAwalTersimpan);
   })
   /**
    * Stok Awal (saldo pembuka): SATU saldo pembuka per bahan, terkunci pada

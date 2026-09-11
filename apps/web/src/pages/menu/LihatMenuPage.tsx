@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MenuDto } from "@kakarut/shared";
+import type {
+  KategoriDto,
+  MenuDto,
+} from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
 import { IKON_MENU_KOSONG } from "../../components/KartuMenuKasir";
 import { useAuth } from "../../context/AuthContext";
@@ -9,19 +12,13 @@ import { api } from "../../lib/api";
 import { formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
 import { AreaCetak } from "../../components/AreaCetak";
 
-interface Kategori {
-  id: string;
-  nama: string;
-  sort_order: number;
-}
-
 const LAIN = "__lain__";
 
 /** Fallback beridentitas tetap — lihat alasannya di pemakaian `kategori`. */
-const KOSONG: Kategori[] = [];
+const KOSONG: KategoriDto[] = [];
 
 /** Urutan menu id per kategori, dari data server (menu aktif). */
-function bangunUrutan(menus: MenuDto[], kategori: Kategori[]): Record<string, string[]> {
+function bangunUrutan(menus: MenuDto[], kategori: KategoriDto[]): Record<string, string[]> {
   const res: Record<string, string[]> = {};
   const dikenal = new Set(kategori.map((k) => k.id));
   const urut = (a: MenuDto, b: MenuDto) =>
@@ -99,7 +96,7 @@ export function LihatMenuPage() {
    */
   const { data: kategoriData, isPending: kategoriPending } = useQuery({
     queryKey: ["kategori"],
-    queryFn: () => api<Kategori[]>("/kategori"),
+    queryFn: () => api<KategoriDto[]>("/kategori"),
   });
   const kategori = kategoriData ?? KOSONG;
 

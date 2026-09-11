@@ -26,6 +26,13 @@ export interface CadanganObjek {
  * URL publik; unduhan hanya lewat endpoint super admin yang meng-stream isinya.
  * R2 (bila dikonfigurasi) memakai bucket khusus `R2_BACKUP_BUCKET` bila diset,
  * atau bucket upload dengan prefix `backups/`. Fallback: disk lokal `BACKUP_DIR`.
+ *
+ * BATAS KALIMAT "SELALU PRIVAT" DI ATAS, dan ia penting: yang dijamin berkas ini
+ * adalah APLIKASINYA tak pernah memulangkan URL publik. Bucket unggahan sendiri
+ * dilayani publik di `R2_PUBLIC_URL` — itulah gunanya — jadi saat
+ * `R2_BACKUP_BUCKET` kosong, objek cadangan duduk di asal publik itu dengan nama
+ * yang cuma stempel waktu. `pemeriksaan-setelan.ts` menandai keadaan itu kritis
+ * (`cadangan_seember_publik`); jangan lemahkan salah satunya tanpa yang lain.
  */
 export interface CadanganStorage {
   readonly mode: "r2" | "local";

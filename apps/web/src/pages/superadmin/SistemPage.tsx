@@ -1,30 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { TemuanSetelanDto } from "@kakarut/shared";
+import type {
+  MigrasiEntriDto,
+  SistemStatusDto,
+  TemuanSetelanDto,
+} from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, SpinnerAtauGalat, btnPrimary } from "../../components/ui";
 import { TabelResponsif } from "../../components/TabelResponsif";
 import { api } from "../../lib/api";
 
-interface MigrationEntry {
-  tag: string;
-  dibuat: string | null;
-  status: "terpasang" | "menunggu";
-}
-
-interface SistemStatus {
-  database_ok: boolean;
-  storage_mode: "r2" | "local";
-  node_version: string;
-  migrations: {
-    total: number;
-    terpasang: number;
-    menunggu: number;
-    terakhir_diterapkan: string | null;
-    daftar: MigrationEntry[];
-  };
-  pemeriksaan: TemuanSetelanDto[];
-  // `email_percobaan` ikut datang di balasan yang sama, tapi dibaca di
-  // `RiwayatEmailPage` — halaman ini tak lagi menampilkannya.
-}
+/**
+ * Halaman ini memakai LIMA dari enam kunci amplopnya; `email_percobaan` ikut
+ * datang di balasan yang sama tapi dibaca `RiwayatEmailPage`.
+ *
+ * `Pick` MENYATAKAN pilihan itu. Sampai 2026-09-10 kedua halaman
+ * mendeklarasikan `SistemStatus` dengan nama yang SAMA untuk himpunan yang
+ * SALING LEPAS, dan tak satu pun menggambarkan balasan yang sebenarnya.
+ */
+type StatusPanel = Pick<
+  SistemStatusDto,
+  "database_ok" | "storage_mode" | "node_version" | "migrations" | "pemeriksaan"
+>;
+type MigrationEntry = MigrasiEntriDto;
 
 
 function InfoCard({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
@@ -46,7 +42,7 @@ export function SistemPage() {
   const queryClient = useQueryClient();
   const { data: sistem, isLoading, error } = useQuery({
     queryKey: ["admin-sistem"],
-    queryFn: () => api<SistemStatus>("/admin/sistem"),
+    queryFn: () => api<StatusPanel>("/admin/sistem"),
   });
 
   const jalankan = useMutation({

@@ -464,8 +464,16 @@ function MasukModal({
   const [qty, setQty] = useState("");
   const [totalHarga, setTotalHarga] = useState("");
   const [catatan, setCatatan] = useState("");
-  // harga default = qty × harga beli item (bisa ditimpa manual)
-  const perkiraan = angkaDari(qty) > 0 && item.harga_beli > 0 ? angkaDari(qty) * item.harga_beli : null;
+  /*
+   * Harga default = qty × harga beli item (bisa ditimpa manual).
+   *
+   * `?? 0` bukan basa-basi: sejak 2026-09-11 `harga_beli` datang `null` untuk
+   * peran non-manajemen. Modal ini sendiri cuma dibuka tombol yang digerbangi
+   * `isManajemen`, jadi hari ini nilainya selalu ada — tapi mengandalkan itu
+   * berarti perkiraannya jadi NaN diam-diam pada hari tombolnya dilonggarkan.
+   */
+  const hargaAcuan = item.harga_beli ?? 0;
+  const perkiraan = angkaDari(qty) > 0 && hargaAcuan > 0 ? angkaDari(qty) * hargaAcuan : null;
   /**
    * Harga yang TERISI tapi tak terbaca sebagai angka ≥ 0.
    *

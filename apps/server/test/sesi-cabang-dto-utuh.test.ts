@@ -30,7 +30,16 @@ import { kunciObjek, medanInterface } from "./kunci-sumber";
  */
 const AKAR = fileURLToPath(new URL("../../../", import.meta.url));
 const SESI = "apps/server/src/modules/auth/session.ts";
-const CABANG = "apps/server/src/modules/branches/routes.ts";
+/*
+ * Perakit `CabangDto` PINDAH RUMAH 2026-09-11: dari literal inline di
+ * `GET /cabang` ke `branches/dto.ts`, sebab pemakainya jadi DUA —
+ * `GET /admin/tenants/:id` dulu memulangkan baris `branches` apa adanya
+ * (16 kunci camelCase, `db.select()` telanjang). Uji ini menuduh pada
+ * jalan pertama sesudah pemindahan, dan tuduhannya tepat: yang dijaganya
+ * memang "di mana bentuk itu dirakit". Yang berubah alamatnya, bukan
+ * aturannya.
+ */
+const CABANG = "apps/server/src/modules/branches/dto.ts";
 const TIPE = "packages/shared/src/types.ts";
 const WEB_API = "apps/web/src/lib/api.ts";
 const WEB_CABANG = "apps/web/src/context/BranchContext.tsx";
@@ -52,8 +61,8 @@ export function kunciCompanyDto(src: string): string[] {
 /** Kunci literal baris yang dipetakan `GET /cabang`. */
 export function kunciBarisCabang(src: string): string[] {
   const buta = butaKomentar(src);
-  const m = /rows\.map\(\(r\): CabangDto => \(\{/.exec(buta);
-  if (!m) throw new Error("`rows.map((r): CabangDto => ({` tak ditemukan di GET /cabang");
+  const m = /export function cabangDto\(r: BarisCabang\): CabangDto \{\s*return \{/.exec(buta);
+  if (!m) throw new Error("perakit `cabangDto` tak ditemukan di branches/dto.ts");
   return kunciObjek(buta, m.index + m[0].length - 1).sort();
 }
 
@@ -183,7 +192,11 @@ describe("CompanyDto / SesiDto / SesiLogin / CabangDto == bentuk yang dibangun s
     expect(kunciCompanyDto(sesiTambah)).toContain("kunci_karangan");
     const sesiKomentar = sesi.replace(/(export function companyDto[^{]*\{\s*return \{)/, "$1\n    // hantu_komentar: 1,");
     expect(kunciCompanyDto(sesiKomentar)).not.toContain("hantu_komentar");
-    const cabTambah = cabang.replace("rows.map((r): CabangDto => ({", "rows.map((r): CabangDto => ({\n        kunci_karangan: 1,");
+    // Alamat suntikan ikut pindah bersama perakitnya (lihat catatan di CABANG).
+    const cabTambah = cabang.replace(
+      "  return {\n    id: r.id,",
+      "  return {\n    kunci_karangan: 1,\n    id: r.id,",
+    );
     expect(kunciBarisCabang(cabTambah)).toContain("kunci_karangan");
     const tipeTambah = tipe.replace("export interface CabangDto {", "export interface CabangDto {\n  medan_karangan: string;");
     expect(medanInterface(tipeTambah, "CabangDto")).toContain("medan_karangan");

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { bolehLihatBiaya, MEDAN_BIAYA_BAHAN, MEDAN_BIAYA_MENU } from "@kakarut/shared";
+import {
+  bolehLihatBiaya,
+  MEDAN_BIAYA_BAHAN,
+  MEDAN_BIAYA_MENU,
+  MEDAN_MANAJEMEN_COMPANY,
+  tanpaAngkaManajemenCompany,
+} from "@kakarut/shared";
 import { butaKomentar } from "../src/scripts/buta-komentar";
 
 const SRV = fileURLToPath(new URL("../src", import.meta.url));
@@ -138,6 +144,58 @@ describe("angka biaya hanya untuk manajemen", () => {
     expect(biaya).toContain("harga_per_unit: null");
   });
 
+  it("keluaran `GET /company` melewati `saringCompany`", () => {
+    /*
+     * POPULASI ATURAN INI DIGAMBAR SEKALI, MENGELILINGI HARGA POKOK — dan tak
+     * pernah diukur ulang. Terukur 2026-09-11 dengan token kasir sungguhan:
+     * `GET /company` memulangkan KEDUA PULUH DUA kuncinya utuh ke tiap peran,
+     * termasuk `targetPenjualan` 15.000.000 dan `foodCostMaks`. Bentuk
+     * kelalaian yang sama dengan ATURAN A yang melapor nol sementara dua baris
+     * tabel telanjang berjalan di kawat: aturannya benar, jangkauannya kurang.
+     */
+    const rute = baca("modules/company/routes.ts");
+    expect(rute).toContain("function saringCompany(");
+    expect(rute).toContain("c.json(saringCompany(auth.role, companyRow(row)))");
+    // `companyRow` sendiri TIDAK boleh menyaring — panel super-admin
+    // memanggilnya, dan `bolehLihatBiaya(null)` (peran super-admin) akan
+    // menihilkan justru bagi satu-satunya orang yang berhak melihat semuanya.
+    const pembangun = rute.slice(rute.indexOf("export function companyRow("));
+    expect(
+      pembangun.slice(0, pembangun.indexOf("\n}")),
+      "companyRow ikut menyaring — panel penyewa super-admin akan kehilangan angkanya",
+    ).not.toContain("bolehLihatBiaya");
+  });
+
+  it("penyaring perusahaan menihilkan SELURUH medan manajemen", () => {
+    const kosong = tanpaAngkaManajemenCompany({
+      id: "x", nama: "x", metodeHpp: "average", slug: "x", alamat: null, telepon: null,
+      logoUrl: null, timezone: "Asia/Jakarta", pb1Enabled: true, pb1Rate: 10,
+      receiptFooter: "kaki", receiptShowAlamat: true, diskonMaksPersen: 100,
+      blokirJualMinus: false, targetPenjualan: 15_000_000, foodCostMaks: 40,
+      plan: "pro", planExpiresAt: "2027-01-01T00:00:00.000Z", isActive: true,
+      createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+      mode: "pro",
+    });
+    for (const m of MEDAN_MANAJEMEN_COMPANY) {
+      expect(kosong[m], `${m} tak dinihilkan`).toBeNull();
+    }
+    /*
+     * PASANGAN ANTI-RUSAK: medan CETAK harus tetap utuh. `kasir_models.dart`
+     * mengurai delapan medan dari rute ini untuk kepala & kaki struk — kalau
+     * penyaring ini kelak melebar ke sana, struk di lapangan kehilangan nama,
+     * alamat, dan tarif PB1 tanpa satu galat pun muncul.
+     */
+    expect(kosong.nama).toBe("x");
+    expect(kosong.pb1Rate).toBe(10);
+    expect(kosong.pb1Enabled).toBe(true);
+    expect(kosong.receiptFooter).toBe("kaki");
+    expect(kosong.receiptShowAlamat).toBe(true);
+    // …dan gerbang fitur Lite/Pro juga, yang dibaca SEMUA peran
+    expect(kosong.plan).toBe("pro");
+    expect(kosong.mode).toBe("pro");
+    expect(kosong.isActive).toBe(true);
+  });
+
   it("papan pesanan TIDAK ikut tertutup — pasangan anti-rusak", () => {
     /*
      * SnackBar "HPP transaksi dihitung ulang → Rp …" untuk dapur/bar adalah
@@ -153,6 +211,32 @@ describe("angka biaya hanya untuk manajemen", () => {
       sajian.slice(0, sajian.indexOf("\n  .")),
       "balasan POST sajian ikut disaring — SnackBar HPP dapur/bar akan mati",
     ).not.toContain("bolehLihatBiaya");
+  });
+
+  it("`GET /perlengkapan` — pintu tanpa `requireRole` — menyaring harga belinya", () => {
+    /*
+     * Modul ini SUDAH punya penyaringnya (`tanpaBiayaKartuPerlengkapan`,
+     * terpasang di `/perlengkapan/:id/kartu`) — yang terlewat rute DAFTARNYA
+     * sendiri, tetangga sebelahnya, dan ia satu-satunya pintu perlengkapan
+     * tanpa `requireRole`. Terukur 2026-09-11 dari kawat dengan token kasir:
+     * `harga_beli` 100 utuh.
+     *
+     * Layar manajemen tak kehilangan apa pun: `/perlengkapan/master` dan
+     * `/perlengkapan/beli` sudah `requireRole("owner","admin")`, dan keduanya
+     * yang dibaca halaman Beli Perlengkapan di kedua klien.
+     */
+    const rute = baca("modules/perlengkapan/routes.ts");
+    expect(rute).toContain(
+      "bolehLihatBiaya(auth.role) ? rows : rows.map(tanpaBiayaPerlengkapan)",
+    );
+    const biaya = baca("biaya.ts", SHARED);
+    expect(biaya).toContain("export function tanpaBiayaPerlengkapan(");
+    // …dan kedua pintu manajemennya TETAP bergerbang peran, bukan penyaring:
+    // menukar gerbang pintu dengan penyaring medan akan membuka daftar master
+    // se-perusahaan untuk peran mana pun.
+    for (const pintu of ['.get("/master", requireRole("owner", "admin")', '.get("/beli", requireRole("owner", "admin")']) {
+      expect(rute, `${pintu} kehilangan gerbang perannya`).toContain(pintu);
+    }
   });
 
   it("UTANG BERSYARAT: `/stok` masih mengirim harga per bahan", () => {

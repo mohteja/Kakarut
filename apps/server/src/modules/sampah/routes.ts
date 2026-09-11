@@ -187,12 +187,20 @@ export const sampahRoutes = new Hono<AppEnv>()
   .post("/kosongkan", async (c) => {
     const companyId = c.get("auth").company_id!;
     const hasil = await db.transaction(async (tx) => {
+      /*
+       * `::int` BUKAN HIASAN. `count()` di Postgres adalah bigint, dan `pg`
+       * memulangkan bigint sebagai STRING — OID 20 tak terdaftar di
+       * `db/client.ts`, yang hanya mendaftarkan `numeric` (1700). Tanpa cast,
+       * assertion `as { penjualan: number }` di bawah ini adalah KEBOHONGAN
+       * yang ditandatangani kompilator: runtime memberi `"12"`, dan penulis
+       * berikutnya yang menjumlahkannya mendapat `"121"`.
+       */
       const [hitung] = (
         await tx.execute(sql`
           SELECT
-            (SELECT COUNT(*) FROM sales
+            (SELECT COUNT(*)::int FROM sales
               WHERE company_id = ${companyId} AND deleted_at IS NOT NULL) AS penjualan,
-            (SELECT COUNT(DISTINCT COALESCE(faktur_id::text, id::text)) FROM productions
+            (SELECT COUNT(DISTINCT COALESCE(faktur_id::text, id::text))::int FROM productions
               WHERE company_id = ${companyId} AND deleted_at IS NOT NULL) AS faktur
         `)
       ).rows as { penjualan: number; faktur: number }[];

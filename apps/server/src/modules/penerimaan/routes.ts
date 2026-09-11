@@ -1,5 +1,14 @@
 import { halamanQuery } from "../../lib/halaman-query";
+import type {
+  AnomaliKiriman,
+  KirimanMenggantung,
+  KonfirmasiStatus,
+  PenerimaanRow,
+  RiwayatPenerimaanFaktur,
+  TutupAnomaliHasil,
+} from "@kakarut/shared";
 import { tanggalQuery } from "../../lib/tanggal-query";
+import { iso } from "../../lib/time";
 import { zValidator } from "../../lib/validator";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -100,6 +109,54 @@ const BATAS_FAKTUR_ANOMALI = 2000;
 const MENGGANTUNG = sql`g.lolos_gerbang = false
         AND g.asal_faktur IS NOT NULL
         AND g.asal_faktur <> g.branch_id`;
+
+/**
+ * SATU-SATUNYA penulis baris kiriman menggantung.
+ *
+ * Barisnya lahir dari `db.execute(sql\`…\`)`, dan baris SQL mentah tak membawa
+ * tipe apa pun — ia `Record<string, unknown>`. Sampai 2026-09-11 baris itu
+ * disebarkan apa adanya (`{ ...r }`) ke dalam balasan, jadi bentuk yang sampai
+ * ke klien ditentukan oleh SELECT-nya, bukan oleh siapa pun yang memutuskannya.
+ * Itu kelas yang SAMA dengan `select()` telanjang yang ATURAN A larang; yang
+ * membedakan cuma pintunya, dan pintu itu tak dilihat pemindai mana pun.
+ *
+ * Menyebutnya medan demi medan membuat `satisfies AnomaliKiriman` di rutenya
+ * berarti sesuatu: kolom SQL yang hilang jadi galat tipe, dan kolom baru tak
+ * ikut terkirim tanpa ada yang menuliskannya di sini lebih dulu.
+ */
+export function barisMenggantung(r: Record<string, unknown>): KirimanMenggantung {
+  const teks = qtyTeks({
+    qty: Number(r.qty),
+    satuan: String(r.satuan),
+    isi: r.isi === null || r.isi === undefined ? null : Number(r.isi),
+    satuanBeli: r.satuan_beli === null || r.satuan_beli === undefined ? null : String(r.satuan_beli),
+  });
+  return {
+    id: String(r.id),
+    faktur_id: String(r.faktur_id),
+    nomor: r.nomor === null || r.nomor === undefined ? null : String(r.nomor),
+    tipe: r.tipe as JenisPengadaan,
+    status: r.status as KonfirmasiStatus,
+    qty: Number(r.qty),
+    // `waktu` kolom timestamp: pg memulangkan `Date`, dan yang dijanjikan
+    // kontrak ISO-8601. Diterjemahkan di sini, bukan diserahkan ke
+    // serialisasi JSON — kelas yang sudah lima putaran berturut-turut muncul.
+    waktu: iso(r.waktu as Date | string),
+    bahan: String(r.bahan),
+    satuan: String(r.satuan),
+    // Ditulis SERVER, sekali, dengan pembantu yang SAMA dengan seluruh repo —
+    // supaya web & ponsel mustahil berbeda satuan. Keduanya merakitnya sendiri
+    // sampai 2026-09-11, dan bukan karena lalai: rute ini memang tak
+    // mengirimnya sama sekali.
+    qty_teks: teks.teks,
+    qty_setara: teks.setara,
+    posisi_sekarang:
+      r.posisi_sekarang === null || r.posisi_sekarang === undefined ? null : String(r.posisi_sekarang),
+    dikirim_dari:
+      r.dikirim_dari === null || r.dikirim_dari === undefined ? null : String(r.dikirim_dari),
+    umur_hari: Number(r.umur_hari),
+  };
+}
 
 const TolakBody = z.object({ alasan: z.string().trim().max(300).nullish() }).strict();
 
@@ -218,7 +275,20 @@ export const penerimaanRoutes = new Hono<AppEnv>()
               isi: r.isi,
               satuanBeli: r.satuan_beli,
             });
-      return { ...r, qty_teks: t.teks, qty_setara: t.setara, qty_dipesan_teks: d?.teks ?? null };
+      /*
+       * `waktu` DITERJEMAHKAN di sini, tidak dibiarkan lewat: kolomnya
+       * `timestamp` (Drizzle → `Date`) sementara yang sampai ke kawat ISO
+       * string. Membiarkannya lewat membuat tipe yang tertulis di kontrak
+       * berbohong tentang apa yang dikirim — persis cacat yang anotasi
+       * `CompanyRow` (#99) dan `KaryawanRow` (#101) temukan.
+       */
+      return {
+        ...r,
+        waktu: r.waktu.toISOString(),
+        qty_teks: t.teks,
+        qty_setara: t.setara,
+        qty_dipesan_teks: d?.teks ?? null,
+      } satisfies PenerimaanRow;
     });
     return c.json({ rows: rowsTeks });
   })
@@ -366,7 +436,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       byFaktur.set(b.faktur_id!, kump);
     }
 
-    const rows = ids.map((fakturId) => {
+    const rows = ids.map((fakturId): RiwayatPenerimaanFaktur => {
       const items = byFaktur.get(fakturId) ?? [];
       const p = items[0];
       const ditolak = items.filter((i) => i.status === "ditolak");
@@ -381,6 +451,22 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       );
       const hasil =
         diterima.length === 0 ? "ditolak" : ditolak.length > 0 || adaKurang ? "sebagian" : "diterima";
+      /*
+       * Waktu keputusan TERAKHIR — sebuah faktur bisa diterima bertahap.
+       *
+       * DIBANDINGKAN SEBAGAI `Date`, lalu diubah ke ISO sekali di ujung.
+       * Versi sebelumnya membandingkan `String(i.waktu)` — keluaran
+       * `Date.prototype.toString` — secara LEKSIKOGRAFIS, jadi urutannya
+       * ditentukan NAMA HARI: "Fri Sep 11 2026" < "Thu Sep 10 2026", dan
+       * faktur yang tahap terakhirnya jatuh Jumat memajang stempel Kamis.
+       * Teks yang sama juga terkirim apa adanya ke klien — dan `DateTime`
+       * Dart tak bisa menguraikannya, jadi layar Riwayat Penerimaan di ponsel
+       * memajang kalimat "Thu Sep 10 2026 14:37:32 GMT+0000 (…)" utuh.
+       */
+      const waktuTerakhir = items.reduce<Date | null>(
+        (t, i) => (i.waktu && (!t || i.waktu > t) ? i.waktu : t),
+        null,
+      );
       return {
         faktur_id: fakturId,
         nomor: p?.nomor ?? null,
@@ -388,11 +474,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
         jalur: p?.jalur ?? "beli",
         cabang: p?.cabang ?? null,
         supplier: p?.supplier ?? null,
-        // waktu keputusan TERAKHIR — sebuah faktur bisa diterima bertahap
-        waktu: items.reduce<string | null>(
-          (t, i) => (i.waktu && (!t || String(i.waktu) > t) ? String(i.waktu) : t),
-          null,
-        ),
+        waktu: waktuTerakhir === null ? null : iso(waktuTerakhir),
         oleh: items.find((i) => i.oleh)?.oleh ?? null,
         alasan_tolak: items.find((i) => i.alasan_tolak)?.alasan_tolak ?? null,
         hasil,
@@ -491,7 +573,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
     const rows = await db.execute(sql`
       ${cteMenggantung(auth.company_id!)}
       SELECT g.id, g.faktur_id, g.tipe, g.status, g.qty, g.waktu,
-             i.nama AS bahan, i.satuan,
+             i.nama AS bahan, i.satuan, i.isi, i.satuan_beli,
              bp.nama AS posisi_sekarang,
              ba.nama AS dikirim_dari,
              dn.nomor_teks AS nomor,
@@ -537,10 +619,14 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       jumlah,
       qty_total: Number(daftar[0]?.total_qty ?? 0),
       // Medan bantu window tak ikut keluar — ia jawaban atas populasi, bukan
-      // milik barisnya.
-      rows: daftar.map(({ total_baris: _a, total_qty: _b, ...r }) => r),
+      // milik barisnya. Dan barisnya DISEBUT medan demi medan, bukan
+      // `{ ...r }`: sebaran atas baris SQL mentah membuat bentuk balasan
+      // mengikuti SELECT-nya, jadi kolom yang ditambahkan besok ikut terkirim
+      // tanpa satu keputusan pun — kelas yang sama dengan `select()` telanjang
+      // yang ATURAN A larang, cuma lewat pintu yang tak dilihatnya.
+      rows: daftar.map(barisMenggantung),
       terpotong: jumlah > daftar.length,
-    });
+    } satisfies AnomaliKiriman);
   })
   /**
    * TUTUP kiriman menggantung — hapuskan (soft-delete → Tempat Sampah).
@@ -631,7 +717,7 @@ export const penerimaanRoutes = new Hono<AppEnv>()
       // digagalkan: kalau satu id basi membatalkan seluruh permintaan, orang
       // akan mencoba lagi dengan daftar yang sama dan macet selamanya.
       dilewati: ids.length - hasil.baris.length,
-    });
+    } satisfies TutupAnomaliHasil);
   })
   /** Terima SEMUA barang kiriman → masuk stok. */
   .post("/:fakturId/terima", async (c) => {

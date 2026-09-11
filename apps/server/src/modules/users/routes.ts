@@ -5,7 +5,12 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { UndanganKaryawanRow } from "@kakarut/shared";
+import type {
+  KaryawanBaruResult,
+  KaryawanRow,
+  KaryawanTempatDto,
+  UndanganKaryawanRow,
+} from "@kakarut/shared";
 import { appBaseUrl } from "../../lib/base-url";
 import { kunciAntrean } from "../../lib/kunci";
 import { bentrokUnikPada, tanpaBentrok } from "../../lib/pg-galat";
@@ -147,6 +152,47 @@ function pastikanPeranCocokCabang(role: string, tipe: string) {
   }
 }
 
+/**
+ * SATU-SATUNYA PERAKIT baris karyawan untuk kawat.
+ *
+ * Sampai 2026-09-10 tak ada: `GET /karyawan` memulangkan hasil `select` apa
+ * adanya lewat `c.json(rows)`, jadi bentuknya ditentukan daftar kolom dan
+ * tak dinyatakan di mana pun. Terukur hari itu, dan angkanya yang membuat
+ * perakit ini ada: kunci ke-10 yang disuntikkan ke `select` di bawah lolos
+ * `npm run typecheck`, LOLOS 3.087 uji, dan LOLOS 3.620 lengan verify-api —
+ * nol penjaga berubah warna. Sementara itu web mengetik bentuk yang sama tiga
+ * kali dengan lebar 9/7/4, dan ponsel merawat cerminnya dengan tangan.
+ *
+ * `archived_at` DITERJEMAHKAN di sini, tidak dibiarkan lewat: kolomnya
+ * `timestamp` (Drizzle → `Date | null`) sementara yang sampai ke kawat ISO
+ * string. Membiarkannya lewat membuat tipe yang tertulis di kontrak berbohong
+ * tentang apa yang dikirim — persis cacat yang anotasi `CompanyRow` temukan
+ * pada `planExpiresAt` (vena #99).
+ */
+export function karyawanRow(row: {
+  user_id: string;
+  nama: string;
+  email: string;
+  is_active: boolean;
+  role: KaryawanRow["role"];
+  branch_id: string | null;
+  cabang: string | null;
+  employee_code: string | null;
+  archived_at: Date | null;
+}): KaryawanRow {
+  return {
+    user_id: row.user_id,
+    nama: row.nama,
+    email: row.email,
+    is_active: row.is_active,
+    role: row.role,
+    branch_id: row.branch_id,
+    cabang: row.cabang,
+    employee_code: row.employee_code,
+    archived_at: row.archived_at === null ? null : row.archived_at.toISOString(),
+  };
+}
+
 export const karyawanRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
     const auth = c.get("auth");
@@ -173,7 +219,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
           lihatArsip ? isNotNull(memberships.archivedAt) : isNull(memberships.archivedAt),
         ),
       );
-    return c.json(rows);
+    return c.json(rows.map(karyawanRow));
   })
   .post("/", zValidator("json", KaryawanBody), async (c) => {
     const auth = c.get("auth");
@@ -199,7 +245,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
     // pembuatan bersamaan dgn inisial sama bisa memilih kode yang sama → coba
     // ulang (resolveKodeKaryawan membaca ulang & menomori BS2, dst.).
     const passwordHash = bcrypt.hashSync(body.password, 10);
-    let result: { user_id: string; email: string; nama: string; role: string; employee_code: string } | undefined;
+    let result: KaryawanBaruResult | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         result = await db.transaction(async (tx) => {
@@ -434,7 +480,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       .from(memberships)
       .where(and(eq(memberships.userId, userId), eq(memberships.companyId, auth.company_id!)));
     if (!member) throw new HTTPException(404, { message: "Karyawan tidak ditemukan" });
-    if (!member.branchId) return c.json({ assigned: [], tersedia: [] });
+    if (!member.branchId) return c.json({ assigned: [], tersedia: [] } satisfies KaryawanTempatDto);
     const tersedia = await db
       .select({ id: storageLocations.id, nama: storageLocations.nama })
       .from(storageLocations)
@@ -457,7 +503,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
         ),
       );
     const assigned = rows.map((r) => r.locId).filter((id) => tersediaIds.has(id));
-    return c.json({ assigned, tersedia });
+    return c.json({ assigned, tersedia } satisfies KaryawanTempatDto);
   })
   /**
    * Ganti seluruh penugasan tempat SO karyawan (dalam cabangnya). Menulis ke

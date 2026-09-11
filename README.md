@@ -114,9 +114,12 @@ karena sudah tersimpan durable di R2.
   default `2`), `BACKUP_TIMEZONE` (opsional, paksa zona waktu jadwal),
   `BACKUP_KEEP` (retensi, default `14`), `BACKUP_DIR` (folder
   saat mode lokal — arahkan ke volume ter-mount di kontainer), dan
-  `R2_BACKUP_BUCKET` (opsional: bucket R2 privat khusus cadangan; bila kosong
-  memakai `R2_BUCKET` dengan prefix `backups/`). Cadangan **tidak pernah**
-  dilayani lewat URL publik — hanya diunduh lewat endpoint super-admin.
+  `R2_BACKUP_BUCKET` (bucket R2 **privat** khusus cadangan; bila kosong memakai
+  `R2_BUCKET` dengan prefix `backups/`). **Isi `R2_BACKUP_BUCKET` bila
+  `R2_PUBLIC_URL` dipakai**: aplikasi ini tak pernah memulangkan URL publik
+  untuk cadangan — hanya endpoint super-admin — tapi yang melayani bucket
+  publik bukan aplikasi ini, dan nama objek cadangan hanya stempel waktu yang
+  bisa ditebak. Panel super-admin menandainya sebagai temuan kritis.
 - **Pulihkan** dari berkas cadangan (⚠️ menimpa DB tujuan):
 
   ```sh

@@ -43,7 +43,12 @@ import { situsDitelan } from "./util/galat-ditelan";
  * ia menaikkan angka di sini dan menagih satu keputusan.
  */
 const PER_BERKAS = new Map<string, number>([
-  ["server/app.ts", 1],
+  // 1 → 3 pada 2026-09-11: middleware perekam balasan (`ADU_TIPE=`) menambah
+  // dua telanan, keduanya alat ukur yang menumpang jalur permintaan dan tak
+  // boleh menggagalkan yang diukurnya. Yang menagih kalau ia diam terlalu
+  // sering bukan berkas ini melainkan lantai "pola rute terekam ≥ 250" di
+  // §311 — rekaman yang menyusut memerahkan gerbang.
+  ["server/app.ts", 3],
   ["server/config/env.ts", 1],
   ["server/db/migrate.ts", 1],
   ["server/lib/backup.ts", 3],

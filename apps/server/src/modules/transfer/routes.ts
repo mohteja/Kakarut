@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { halamanQuery } from "../../lib/halaman-query";
+import { iso } from "../../lib/time";
 import { BATAS_QTY_STOK } from "../../lib/batas-angka";
 import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -11,8 +12,10 @@ import {
   qtyTeks,
   wajibKelipatanKirim,
   type KonfirmasiStatus,
+  type TransferStokDaftar,
   type TransferStokFaktur,
   type TransferStokItemRow,
+  type TransferStokSaldo,
   type TransferStokSaldoRow,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -131,7 +134,8 @@ export const transferRoutes = new Hono<AppEnv>()
     const branchId = await resolveBranchId(c);
     const saldo = await hitungSaldoCabang(auth.company_id!, branchId);
     const ids = saldo.filter((r) => r.saldo > 0).map((r) => r.ingredient_id);
-    if (ids.length === 0) return c.json({ branch_id: branchId, rows: [] });
+    if (ids.length === 0)
+      return c.json({ branch_id: branchId, rows: [] } satisfies TransferStokSaldo);
     const master = await db
       .select({
         id: ingredients.id,
@@ -183,7 +187,7 @@ export const transferRoutes = new Hono<AppEnv>()
           tersedia_setara: t.setara,
         };
       });
-    return c.json({ branch_id: branchId, rows });
+    return c.json({ branch_id: branchId, rows } satisfies TransferStokSaldo);
   })
   /** Daftar faktur transfer (terbaru dulu) — dikelompokkan per faktur. */
   .get("/", async (c) => {
@@ -227,7 +231,8 @@ export const transferRoutes = new Hono<AppEnv>()
     const fakturIds = (terpotong ? fakturTerbaru.slice(0, perPage) : fakturTerbaru)
       .map((f) => f.faktur_id)
       .filter((id): id is string => !!id);
-    if (fakturIds.length === 0) return c.json({ rows: [], rows_terpotong: false });
+    if (fakturIds.length === 0)
+      return c.json({ rows: [], rows_terpotong: false } satisfies TransferStokDaftar);
     const rows = await db
       .select({
         id: productions.id,
@@ -277,7 +282,7 @@ export const transferRoutes = new Hono<AppEnv>()
         f = {
           faktur_id: key,
           nomor: r.nomor,
-          waktu: r.waktu instanceof Date ? r.waktu.toISOString() : String(r.waktu),
+          waktu: iso(r.waktu),
           prod_date: r.prod_date,
           asal_branch_id: r.asal_branch_id,
           asal_cabang: r.asal_cabang,
@@ -312,7 +317,7 @@ export const transferRoutes = new Hono<AppEnv>()
     }
     const daftar = [...byFaktur.values()];
     for (const f of daftar) f.status = statusFaktur(f.items);
-    return c.json({ rows: daftar, rows_terpotong: terpotong });
+    return c.json({ rows: daftar, rows_terpotong: terpotong } satisfies TransferStokDaftar);
   })
   /** Buat faktur transfer + langsung KIRIM (menunggu diterima di tujuan). */
   .post("/", zValidator("json", TransferBody), async (c) => {

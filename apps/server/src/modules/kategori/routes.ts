@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { barisMaster } from "../../lib/baris-master";
 import { BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, asc, count, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -35,7 +36,7 @@ export const kategoriRoutes = new Hono<AppEnv>()
         asc(menuCategories.id),
       );
     return c.json(
-      rows.map((r) => ({ id: r.id, nama: r.nama, sort_order: r.sortOrder })),
+      rows.map(barisMaster),
     );
   })
   .post(
@@ -56,7 +57,7 @@ export const kategoriRoutes = new Hono<AppEnv>()
         .returning();
       if (!row) throw new HTTPException(409, { message: "Kategori sudah ada" });
       return c.json(
-        { id: row.id, nama: row.nama, sort_order: row.sortOrder },
+        barisMaster(row),
         201,
       );
     },
@@ -87,7 +88,7 @@ export const kategoriRoutes = new Hono<AppEnv>()
       );
       if (!row)
         throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
-      return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder });
+      return c.json(barisMaster(row));
     },
   )
   .delete("/:id", requireRole("owner", "admin"), async (c) => {

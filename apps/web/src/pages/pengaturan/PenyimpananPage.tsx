@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
-import type { BahanDto, PenyimpananDto, PerlengkapanMasterRow } from "@kakarut/shared";
+import type {
+  BahanDto,
+  KaryawanRow,
+  PenyimpananDto,
+  PerlengkapanMasterRow,
+} from "@kakarut/shared";
 import {
   ErrorText,
   Modal,
@@ -21,15 +26,16 @@ interface FormState {
   catatan: string;
 }
 
-interface KaryawanRow {
-  user_id: string;
-  nama: string;
-  email: string;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
-  is_active: boolean;
-  branch_id: string | null;
-  cabang: string | null;
-}
+/**
+ * Halaman ini memakai TUJUH dari sembilan medan `GET /karyawan`; `Pick`
+ * menyatakan pilihannya alih-alih menyalin bentuknya. Salinan penuhnya dulu
+ * tak menyebut `employee_code`/`archived_at`, jadi baris yang sudah diarsipkan
+ * tak bisa dibedakan dari yang berjalan tanpa membaca ulang rutenya.
+ */
+type PetugasRow = Pick<
+  KaryawanRow,
+  "user_id" | "nama" | "email" | "role" | "is_active" | "branch_id" | "cabang"
+>;
 
 const roleLabel = (r: string) =>
   r === "owner"
@@ -49,7 +55,7 @@ function PetugasModal({ tempat, onClose }: { tempat: PenyimpananDto; onClose: ()
   const queryClient = useQueryClient();
   const { data: karyawan = [] } = useQuery({
     queryKey: ["karyawan"],
-    queryFn: () => api<KaryawanRow[]>("/karyawan"),
+    queryFn: () => api<PetugasRow[]>("/karyawan"),
   });
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(tempat.petugas.map((p) => p.user_id)),

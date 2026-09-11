@@ -14,7 +14,11 @@ import {
   tdClass,
   thClass,
 } from "../../components/ui";
-import type { JenisPengadaan, RiwayatPenerimaanFaktur } from "@kakarut/shared";
+import type {
+  JenisPengadaan,
+  PenerimaanRow,
+  RiwayatPenerimaanFaktur,
+} from "@kakarut/shared";
 import { useCabangData } from "../../context/BranchContext";
 import { useAuth } from "../../context/AuthContext";
 import { CabangDataBar } from "../../components/CabangDataBar";
@@ -23,32 +27,6 @@ import { galatTerbaru } from "../../lib/galat";
 import { KUNCI_ANOMALI, useKirimanMenggantung } from "../../lib/menggantung";
 import { formatAngka, formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
-interface PenerimaanRow {
-  id: string;
-  ingredient_id: string;
-  bahan: string;
-  isi: number;
-  satuan: string;
-  qty: number;
-  total_harga: number | null;
-  is_batch: boolean;
-  catatan: string | null;
-  waktu: string;
-  prod_date: string;
-  faktur_id: string | null;
-  no_faktur: string | null;
-  /** nomor faktur asal (PB-/PR-) — "dari faktur nomor berapa" */
-  nomor?: string | null;
-  status: KonfirmasiStatus;
-  supplier: string | null;
-  tempat: string | null;
-  qty_dipesan: number | null;
-  alasan_tolak: string | null;
-  /** jalur kiriman: 🛒 beli (pemasok) / 🏭 produksi (Central Kitchen) */
-  jalur?: JenisPengadaan;
-  /** cabang penerima (utk tampilan Kantor "semua cabang") */
-  cabang?: string | null;
-}
 
 interface KirimanGroup {
   key: string;
@@ -332,7 +310,7 @@ export function PenerimaanPage() {
                       <tr key={r.id}>
                         <td className={`${tdClass} font-medium`}>{r.bahan}</td>
                         <td className={`${tdClass} text-right`}>
-                          {formatAngka(r.qty)} {r.satuan}
+                          {r.qty_teks}
                         </td>
                         {modeSebagian && (
                           <td className={`${tdClass} text-right`}>
@@ -520,7 +498,7 @@ export function PenerimaanPage() {
                   <li key={r.id} className="flex justify-between py-1.5">
                     <span className="font-medium">{r.bahan}</span>
                     <span className="text-stone-500">
-                      {formatAngka(r.qty)} {r.satuan}
+                      {r.qty_teks}
                     </span>
                   </li>
                 ))}
@@ -809,8 +787,12 @@ function PanelMenggantung() {
               />
             )}
             <span className="font-medium text-stone-800">{r.bahan}</span>
+            {/* `qty_teks` milik server — jangan dirakit ulang. Sampai
+                2026-09-11 rute ini memang tak mengirimnya dan baris di sini
+                merakitnya sendiri; kini ia datang, dan pagarnya tetap
+                dipertahankan untuk balasan dari server versi lama. */}
             <span className="text-stone-600">
-              {formatAngka(r.qty)} {r.satuan}
+              {r.qty_teks ?? `${formatAngka(r.qty)} ${r.satuan}`}
             </span>
             {r.nomor && (
               <span className="rounded bg-white px-1.5 py-0.5 font-mono text-xs font-bold text-orange-800">

@@ -67,7 +67,7 @@ export function DokumenKirimModal({
               <td className="w-6 py-1 align-top">☐</td>
               <td className="py-1 pr-2 font-medium">{r.bahan}</td>
               <td className="whitespace-nowrap py-1 pr-2 text-right">
-                {formatAngka(r.qty)} {r.satuan}
+                {r.qty_teks ?? `${formatAngka(r.qty)} ${r.satuan}`}
                 {kemasan(r) && (
                   <div className={`text-[11px] ${cetak ? "" : "text-stone-400"}`}>
                     {kemasan(r)}

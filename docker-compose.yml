@@ -19,12 +19,50 @@ services:
       # Jalankan seed sekali saat deploy pertama (set true), lalu kembalikan false.
       RUN_SEED: ${RUN_SEED:-false}
 
+      # ASAL KANONIK + tautan email. KOSONGNYA BUKAN NETRAL: tanpa ini base URL
+      # tautan verifikasi/reset password diturunkan dari header permintaan, yang
+      # dikendalikan PEMINTA — permintaan reset ber-Host palsu membuat surat
+      # korban menunjuk domain penyerang, lengkap dengan token yang masih hidup.
+      # Panel super admin menandainya KRITIS; sampai kunci ini ada di sini,
+      # temuan itu tak bisa dipadamkan dari panel Dokploy.
+      APP_BASE_URL: ${APP_BASE_URL:-}
+      APP_HOST_DIPERCAYA: ${APP_HOST_DIPERCAYA:-}
+
+      # Berapa proxy di depan aplikasi. Bawaan 1 cocok dengan stack ini (satu
+      # Traefik). Naikkan ke 2 bila ada CDN di depannya — salah angka berarti
+      # alamat klien salah, dan batas percobaan login ikut salah.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      # Sakelar darurat; biarkan kosong agar bawaannya (aktif) berlaku.
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-}
+      # Migrasi in-process saat boot. Kosong = aktif. Setel false untuk deploy
+      # yang sengaja tak boleh menyentuh skema.
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-}
+
       # Cloudflare R2 (penyimpanan upload).
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
       R2_BUCKET: ${R2_BUCKET}
       R2_PUBLIC_URL: ${R2_PUBLIC_URL}
+
+      # BUCKET CADANGAN — PRIVAT, DAN TERPISAH DARI BUCKET UNGGAHAN.
+      # Bila kosong, cadangan jatuh ke R2_BUCKET dengan prefiks `backups/` —
+      # bucket yang SAMA dengan yang dilayani publik lewat R2_PUBLIC_URL. Nama
+      # objeknya `backups/kakarut-<stempel waktu>.jsonl.gz`, dan stempel itu
+      # bisa ditebak: seluruh basis data platform jadi sejauh satu tebakan nama
+      # berkas. Aplikasi memang tak pernah memulangkan URL publik untuk
+      # cadangan — tapi yang melayani bucket publik bukan aplikasi.
+      R2_BACKUP_BUCKET: ${R2_BACKUP_BUCKET:-}
+
+      # Pencadangan otomatis (semuanya opsional; bawaan di config/env.ts).
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-}
+      BACKUP_HOUR: ${BACKUP_HOUR:-}
+      BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-}
+      BACKUP_KEEP: ${BACKUP_KEEP:-}
+      BACKUP_ALERT_DAYS: ${BACKUP_ALERT_DAYS:-}
+
+      # Pengirim email cadangan bila SMTP belum diatur di panel super admin.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
 
       # Override kredensial seed (opsional; default ada di config/env.ts).
       SEED_SUPERADMIN_EMAIL: ${SEED_SUPERADMIN_EMAIL:-}
@@ -33,6 +71,9 @@ services:
       SEED_OWNER_PASSWORD: ${SEED_OWNER_PASSWORD:-}
       SEED_KASIR_EMAIL: ${SEED_KASIR_EMAIL:-}
       SEED_KASIR_PASSWORD: ${SEED_KASIR_PASSWORD:-}
+      # Bawaannya AKTIF: seed membuat stok demo. Setel false untuk deploy
+      # pertama yang datanya sungguhan.
+      SEED_DEMO_STOCK: ${SEED_DEMO_STOCK:-}
     expose:
       - "3000"
     # ports:

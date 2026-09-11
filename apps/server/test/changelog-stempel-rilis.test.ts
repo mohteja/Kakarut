@@ -47,27 +47,46 @@ const MD = readFileSync(
  *     memastikan judul yang tak lagi cocok tak bisa menggantung diam-diam.
  */
 const BELUM_TAYANG = new Set([
-  // BELUM DI-MERGE (2026-09-06): rute pracek stok keranjang — bentuk lama tak
-  // berubah; menunggu rilis berikutnya bersama cabang `claude`.
-  "## 🟢 Rute BARU `POST /api/penjualan/cek-stok` — kasir bisa tahu keranjangnya akan ditolak SEBELUM menekan Bayar",
-  // BELUM DI-MERGE (2026-09-06): baris perusahaan masuk Lampiran A — nol
+  // BELUM DI-MERGE (2026-09-11): baris kiriman menggantung akhirnya membawa
+  // teks jumlahnya; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟢 `GET /api/penerimaan/anomali` akhirnya mengirim `qty_teks` + `qty_setara` — layar kiriman menggantung berhenti menebak satuan",
+  // BELUM DI-MERGE (2026-09-11): harga beli perlengkapan berhenti dikirim ke
+  // peran non-manajemen; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟡 `GET /api/perlengkapan` berhenti mengirim `harga_beli` ke peran non-manajemen",
+  // BELUM DI-MERGE (2026-09-11): angka perencanaan usaha berhenti dikirim ke
+  // peran non-manajemen; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟡 `GET /api/company` berhenti mengirim angka perencanaan usaha ke peran non-manajemen",
+  // BELUM DI-MERGE (2026-09-11): `waktu` riwayat penerimaan berhenti dikirim
+  // sebagai keluaran `Date.toString()`; menunggu rilis berikutnya bersama
+  // cabang `claude`.
+  "## 🟡 `GET /api/penerimaan/riwayat` mengirim `waktu` ISO-8601 — sebelumnya keluaran `Date.toString()` yang Dart tak bisa urai",
+  // BELUM DI-MERGE (2026-09-11): amplop /transfer-stok & /stok/awal masuk
+  // Lampiran A — nol perubahan kawat, tapi `rows_terpotong` akhirnya
+  // terlihat; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟡 Amplop `/api/transfer-stok` akhirnya bernama — dan `rows_terpotong` yang selama ini dibuang ponsel jadi terlihat",
+  // BELUM DI-MERGE (2026-09-11): panel penyewa berhenti mengirim baris
+  // tabel apa adanya; menunggu rilis berikutnya bersama cabang `claude`.
+  "## 🟡 `GET /api/admin/tenants/:id` berhenti mengirim BARIS TABEL apa adanya — `company` & `cabang` kini bentuk yang sama dengan rute yang menyajikannya",
+  // BELUM DI-MERGE (2026-09-11): buku dana faktur masuk Lampiran A — nol
   // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ `GET /company` akhirnya bernama: `CompanyRow` (22 kunci) — tak ada perubahan di kawat",
-  // BELUM DI-MERGE (2026-09-05): kedua pintu daftar menyebut sebabnya
-  // (keputusan pemilik); menunggu rilis berikutnya bersama cabang `claude`.
-  "## 🟡 `/register` & `/resend-verification` kini MENYEBUT sebabnya — tiga belas keadaan berhenti dijawab satu kalimat",
-  // BELUM DI-MERGE (2026-09-05): struk penjualan masuk Lampiran A + biaya
-  // berhenti terkirim ke kasir lewat POST; menunggu rilis bersama `claude`.
-  "## 🟡 Struk penjualan bernama di Lampiran A — dan BIAYA berhenti terkirim ke kasir lewat `POST /penjualan`",
-  // BELUM DI-MERGE (2026-09-05): BEP & nilai stok masuk Lampiran A — nol
+  "## ⚪️ Buku dana faktur akhirnya bernama: `BukuDanaFaktur` + `DanaEntri` + `TipeDana` — tak ada perubahan di kawat",
+  // BELUM DI-MERGE (2026-09-11): baris penerimaan masuk Lampiran A — nol
   // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ `BepResult` & `NilaiStokRingkas` kini ada di Lampiran A — dan `basis` BEP layak ditampilkan",
-  // BELUM DI-MERGE (2026-09-05): sesi & cabang masuk Lampiran A — nol
+  "## ⚪️ Baris penerimaan akhirnya bernama: `PenerimaanRow` (25 kunci) — tak ada perubahan di kawat",
+  // BELUM DI-MERGE (2026-09-11): amplop daftar masuk Lampiran A — nol
   // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ Sesi & cabang kini ada di Lampiran A: `SesiLogin`, `SesiDto`, `CompanyDto`, `CabangDto` — tak ada perubahan di kawat",
-  // BELUM DI-MERGE (2026-09-05): tipe baris pengadaan masuk Lampiran A — nol
+  "## ⚪️ Balasan `/register` & `/resend-verification` akhirnya bernama: `DaftarResult` (6 kunci, termasuk `dev_verify_url`) — tak ada perubahan di kawat",
+  // BELUM DI-MERGE (2026-09-10): amplop panel sistem masuk Lampiran A — nol
   // perubahan kawat; menunggu rilis berikutnya bersama cabang `claude`.
-  "## ⚪️ `StokMasukRow` & `StokMasukPage` kini ada di Lampiran A — tak ada perubahan di kawat",
+  "## ⚪️ Amplop panel sistem akhirnya bernama: `SistemStatusDto` (6 kunci) + `MigrasiStatusDto` / `MigrasiEntriDto` — tak ada perubahan di kawat",
+  // BELUM DI-MERGE (2026-09-10): `dipakai` ikut dikirim dua pintu tulis
+  // /satuan — bentuk BERTAMBAH, tak ada yang hilang; menunggu rilis
+  // berikutnya bersama cabang `claude`.
+  "## 🟡 `POST` & `PATCH /api/satuan` kini ikut mengirim `dipakai` — tipe yang sudah menjanjikannya akhirnya benar",
+  // BELUM DI-MERGE (2026-09-10): baris karyawan + balasan 201 pembuatannya
+  // masuk Lampiran A — nol perubahan kawat; menunggu rilis berikutnya
+  // bersama cabang `claude`.
+  "## ⚪️ Baris karyawan akhirnya bernama: `KaryawanRow` (9 kunci) + `KaryawanBaruResult` — tak ada perubahan di kawat",
   /*
    * PARUH "belum di-merge" KOSONG sejak 2026-08-31 — dan kosongnya bukan
    * kerapian. Entri "Angka BIAYA hanya untuk manajemen" tercantum di sini
@@ -101,6 +120,15 @@ const BELUM_TAYANG = new Set([
   // BELUM DI-MERGE (2026-09-04): pintu riwayat resep & harga. Aturan pemilik
   // berlaku — tak ada yang tayang sampai ia meminta rilis. Stempelnya dipasang
   // DAN baris ini dihapus pada commit yang sama dengan merge-nya.
+  //
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-09-10 — KETUJUH entri
+  // (pracek stok keranjang, `CompanyRow`, sebab penolakan dua pintu daftar,
+  // struk + biaya yang berhenti bocor ke kasir, `BepResult`/`NilaiStokRingkas`,
+  // sesi & cabang, `StokMasukRow`) tayang lewat merge `42e048b` / CI #495 —
+  // deploy-nya ikut hijau, webhook Dokploy menjawab "Compose deployed
+  // successfully" — dan ponselnya lewat `c751fc3` / CI #56. Stempelnya dipasang
+  // pada commit yang SAMA dengan penghapusan baris-baris ini; memisahkan
+  // keduanya adalah cara berkas ini pernah salah selama empat hari.
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

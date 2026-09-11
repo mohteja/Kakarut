@@ -1,6 +1,8 @@
-import type { CompanyRow, ModeCompany } from "@kakarut/shared";
+import type { CompanyRow, ModeCompany, UserRole } from "@kakarut/shared";
+import { bolehLihatBiaya, tanpaAngkaManajemenCompany } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
 import { BATAS_UANG } from "../../lib/batas-angka";
+import { iso } from "../../lib/time";
 import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -30,6 +32,11 @@ type BarisCompany = typeof companies.$inferSelect;
  * yang ditulis di satu tempat membuat penambahan berikutnya tertagih
  * penyusun, bukan menunggu ada yang memperhatikan.
  */
+/** `CompanyRow` untuk peran ini — angka perencanaan usaha dinihilkan bila bukan manajemen. */
+function saringCompany(role: UserRole | null, c: CompanyRow): CompanyRow {
+  return bolehLihatBiaya(role) ? c : tanpaAngkaManajemenCompany(c);
+}
+
 export function companyRow(row: BarisCompany): CompanyRow {
   return {
     id: row.id,
@@ -55,11 +62,6 @@ export function companyRow(row: BarisCompany): CompanyRow {
     updatedAt: iso(row.updatedAt),
     mode: modeDariPlan(row.plan),
   };
-}
-
-/** Stempel waktu jadi ISO 8601 — ditulis, bukan diserahkan ke serialisasi. */
-function iso(t: Date | string): string {
-  return t instanceof Date ? t.toISOString() : t;
 }
 
 /** Mode aplikasi diturunkan dari plan: 'pro' = multi-lokasi, selainnya Lite. */
@@ -97,7 +99,20 @@ export const companyRoutes = new Hono<AppEnv>()
       .from(companies)
       .where(eq(companies.id, auth.company_id!));
     if (!row) throw new HTTPException(404, { message: "Perusahaan tidak ditemukan" });
-    return c.json(companyRow(row));
+    /*
+     * ANGKA PERENCANAAN USAHA hanya untuk manajemen — disaring DI SINI, di
+     * batas rute, sama seperti `saringMenu`/`saringBahan`.
+     *
+     * PINTUNYA SENGAJA TETAP TERBUKA: kasir memanggil rute ini untuk kepala &
+     * kaki struk (`kasir_models.dart` mengurai delapan medan cetak), jadi
+     * menutupnya akan menghentikan pekerjaan harian. Yang ditutup ANGKANYA.
+     *
+     * `companyRow` sendiri TIDAK menyaring: `GET /admin/tenants/:id`
+     * memanggilnya untuk panel super-admin, dan `bolehLihatBiaya(null)` —
+     * peran super-admin — akan menihilkan justru bagi satu-satunya orang yang
+     * memang berhak melihat seluruhnya.
+     */
+    return c.json(saringCompany(auth.role, companyRow(row)));
   })
   // Ganti mode Lite ↔ Pro. Upgrade ke Pro memprovisikan tata lokasi baku
   // (Central Kitchen + Cabang 2 + Kantor) SEKALI — idempoten via cek CK.

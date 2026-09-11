@@ -25,11 +25,471 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 `GET /api/penerimaan/anomali` akhirnya mengirim `qty_teks` + `qty_setara` — layar kiriman menggantung berhenti menebak satuan
+
+🟢 **BARU** — additif, tak ada yang berubah bentuk. Dan ini pekerjaan yang
+memang PANTAS dibawa ke ponsel, sebab layarnya hari ini menebak sendiri.
+
+**Yang bertambah** (`GET /api/penerimaan/anomali`, tiap `rows[]`):
+
+| medan | isi |
+| --- | --- |
+| `qty_teks` | jumlah + satuan yang sudah ditulis server, mis. `"900 gr"` |
+| `qty_setara` | setara kemasan, mis. `"≈ 0,9 kg"`; `null` bila tak berkemasan |
+
+**Kenapa.** `qty_teks` ada di repo ini justru supaya web & ponsel MUSTAHIL
+berbeda satuan — aturannya tertulis di tiga tempat. Rute ini satu-satunya
+pengirim baris ber-`qty` yang tak pernah mengirimnya, jadi kedua klien merakit
+`formatAngka(qty) + satuan` sendiri: `PenerimaanPage.tsx:795` dan
+`anomali_page.dart:216`. Bukan kelalaian — tak ada pilihan lain.
+
+Menebak satuan sendiri **sudah pernah melahirkan "900 kg" untuk barang yang
+sebenarnya 900 gr**, tercatat di komentar `qtyTeks()` sebagai kejadian, bukan
+kekhawatiran. Kasus itu kini diuji harfiah (`kiriman-menggantung-utuh.test.ts`).
+
+**Yang perlu dikerjakan tim mobile** (tidak wajib, tidak memutus): ganti
+`'${r.bahan} · ${formatQty(r.qty)} ${r.satuan}'` di `anomali_page.dart:216`
+dengan `r.qtyTeks`, dengan pagar `?? …` untuk balasan server versi lama —
+bentuk yang sama dengan yang sudah dipakai layar Penerimaan. `qty_setara`
+boleh ditampilkan di sebelahnya seperti di layar Stok Masuk.
+
+**Fikstur kunci ponsel +2 baris**, dan **nol nama kunci baru**: `qty_teks` dan
+`qty_setara` sudah ada dari `StokMasukRow`, `PenerimaanRow`, dan
+`TransferStokItemRow`.
+
+## 🟡 `GET /api/perlengkapan` berhenti mengirim `harga_beli` ke peran non-manajemen
+
+🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa: disapu, tak ada layar
+ponsel yang merender `harga_beli` dari rute INI.
+
+**Yang berubah** (`GET /api/perlengkapan`, peran SELAIN owner/admin):
+
+| medan | sebelum | sesudah |
+| --- | --- | --- |
+| `harga_beli` | angka penuh (terukur: 100) | **`null`** |
+
+Tipe kontraknya ikut dilonggarkan: `PerlengkapanRowDto.harga_beli: number | null`.
+Bentuknya tidak berubah — kuncinya tetap ada, isinya yang `null`, persis
+seperti `harga_beli` bahan sejak 2026-08-26.
+
+**Kenapa.** Rute ini SATU-SATUNYA pintu perlengkapan tanpa `requireRole` — ia
+melayani tab Stok → Perlengkapan yang dipakai semua peran untuk pakai/opname,
+jadi pintunya memang harus terbuka. Yang ditutup angkanya. Modul ini sudah
+punya penyaringnya (`tanpaBiayaKartuPerlengkapan`, terpasang di
+`/perlengkapan/:id/kartu`); yang terlewat rute daftarnya sendiri, tetangga
+sebelahnya.
+
+**Layar manajemen tak kehilangan apa pun.** `/api/perlengkapan/master` dan
+`/api/perlengkapan/beli` sudah `requireRole("owner","admin")`, dan keduanya
+yang dibaca halaman Beli Perlengkapan & Master Perlengkapan di kedua klien.
+
+**Untuk tim mobile.** `PerlengkapanRow.hargaBeli` diurai
+(`perlengkapan_models.dart:120`) tapi tak dirender satu layar pun — `?? 0`
+sudah ada di parsernya, jadi tak ada yang patah. `PerlengkapanMaster.hargaBeli`
+(dari `/master`) dan `BeliPerlengkapanRow.hargaBeli` (dari `/beli`) tak
+tersentuh.
+
+**Nol kunci kontrak baru**; fikstur kunci ponsel tak berubah satu baris pun.
+
+## 🟡 `GET /api/company` berhenti mengirim angka perencanaan usaha ke peran non-manajemen
+
+🟡 **PERLU DICEK** — dan hampir pasti tidak perlu apa-apa di ponsel; disebut
+karena isinya memang berubah untuk sebagian peran.
+
+**Yang berubah** (`GET /api/company`, peran SELAIN owner/admin):
+
+| medan | sebelum | sesudah |
+| --- | --- | --- |
+| `targetPenjualan` | angka penuh | **`null`** |
+| `foodCostMaks` | angka penuh | **`null`** |
+| `metodeHpp` | `"average"`/`"fifo"` | **`null`** |
+| `planExpiresAt` | stempel/`null` | **`null`** |
+
+**Bentuknya TIDAK berubah.** Keempatnya tetap ada sebagai kunci, isinya yang
+`null` — persis seperti `hpp`/`harga_beli` sejak 2026-08-26. Tipe kontraknya
+ikut dilonggarkan: `foodCostMaks: number | null`, `metodeHpp: MetodeHpp | null`.
+
+**Kenapa.** Aturan "angka biaya hanya untuk manajemen" sudah punya rumah
+(`bolehLihatBiaya`) dan penjaga sejak Agustus — tapi POPULASINYA digambar
+sekali mengelilingi harga pokok, dan rute ini tak pernah masuk. Terukur dengan
+token kasir sungguhan: ia memulangkan **kedua puluh dua kuncinya utuh** ke tiap
+peran, termasuk target omzet bulanan, di layar yang paling sering terbuka di
+tablet bersama.
+
+**Pintunya SENGAJA tetap terbuka.** Kasir memanggil rute ini untuk kepala &
+kaki struk, dan `kasir_models.dart` mengurai delapan medan cetak dari sana —
+`nama`, `alamat`, `telepon`, `logoUrl`, `receiptFooter`, `receiptShowAlamat`,
+`pb1Rate`, `pb1Enabled`. **Kedelapannya tak tersentuh**, dan verify-api §312
+memakunya dengan lengan PASANGAN: kalau penyaring ini kelak melebar ke sana,
+struk di lapangan kehilangan nama dan tarif PB1 tanpa satu galat pun muncul.
+`plan`/`mode`/`isActive` juga utuh — ketiganya menggerbangi fitur di semua
+peran.
+
+**Untuk tim mobile — tidak ada yang perlu dikerjakan.** Disapu: ponsel tak
+membaca satu pun dari keempat medan itu dari rute ini. `metode_hpp` yang
+dipakai layar Kartu FIFO datang dari `/stok/fifo/:id`, dan `food_cost_maks` di
+layar pengadaan dari rute pengadaan — keduanya snake_case, rute lain.
+
+**Nol kunci kontrak baru**; fikstur kunci ponsel tak berubah satu baris pun.
+
+## 🟡 `GET /api/penerimaan/riwayat` mengirim `waktu` ISO-8601 — sebelumnya keluaran `Date.toString()` yang Dart tak bisa urai
+
+🟡 **PERLU DICEK** — dan layar Riwayat Penerimaan di ponsel **membaik tanpa
+perubahan kode**, tapi baca alasannya sebelum menganggapnya kosmetik.
+
+**Yang berubah** (`GET /api/penerimaan/riwayat`, `rows[].waktu`):
+
+| | nilai |
+| --- | --- |
+| sebelum | `"Thu Sep 10 2026 14:37:32 GMT+0000 (Coordinated Universal Time)"` |
+| sesudah | `"2026-09-10T14:37:32.997Z"` |
+
+**Kenapa ini bukan sekadar format.** Rutenya menulis `String(i.waktu)` atas
+kolom `timestamp` — dan `String(new Date())` memulangkan keluaran
+`Date.prototype.toString`, bukan ISO. Kontraknya bilang `string`, kawatnya
+memang string, kuncinya benar: tak satu penjaga pun bisa melihatnya.
+
+Biayanya asimetris, dan itu yang membuatnya bertahan lama. `new Date(teks)` di
+peramban MENGURAINYA — itu format buatan V8 sendiri — jadi layar web tampak
+benar. `DateTime.tryParse` di Dart memulangkan **null**, dan `formatWaktu`
+memulangkan masukannya apa adanya bila gagal urai, jadi kartu riwayat di
+ponsel memajang kalimat lengkap itu sebagai "jam". Cacat yang TIDAK TERLIHAT
+di permukaan yang dipakai penulisnya.
+
+**Cacat kedua di baris yang sama, dan ini soal ISI.** Teks itu juga
+DIBANDINGKAN untuk memilih "waktu keputusan TERAKHIR" (`String(i.waktu) > t`)
+— perbandingan leksikografis atas keluaran `toString`, jadi urutannya
+ditentukan **nama hari**: `"Fri Sep 11 2026"` < `"Thu Sep 10 2026"`. Faktur
+yang diterima bertahap dan tahap terakhirnya jatuh hari Jumat memajang stempel
+hari Kamis. Kini dibandingkan sebagai `Date` dan diubah ke ISO sekali di ujung.
+
+**Untuk tim mobile — tidak wajib.** `formatWaktu(row.waktu)` mulai bekerja
+dengan sendirinya. Yang perlu ditinjau: kode yang MEMBANDINGKAN atau
+MENGURUTKAN `waktu` riwayat penerimaan sebagai teks — dulu perbandingan itu
+selalu salah, sekarang benar, jadi urutan yang tampil bisa berubah.
+
+**Nol kunci kontrak baru.** `RiwayatPenerimaanFaktur` tak berubah bentuk; yang
+berubah nilainya. Dijaga dari kawat oleh verify-api **§310** (nol stempel
+non-ISO di seluruh 72 rute) dan oleh penjaga statis `stempel-iso.test.ts`.
+
+## 🟡 Amplop `/api/transfer-stok` akhirnya bernama — dan `rows_terpotong` yang selama ini dibuang ponsel jadi terlihat
+
+🟡 **PERLU DICEK** — **nol perubahan di kawat**, tapi asumsi lama pada layar
+Transfer Stok memang keliru, jadi ini bukan sekadar penamaan.
+
+**Yang bertambah di Lampiran A** (bentuk kawatnya SAMA PERSIS seperti sebelumnya):
+
+| tipe | rute | isi |
+| --- | --- | --- |
+| **`TransferStokDaftar`** | `GET /api/transfer-stok` | `rows: TransferStokFaktur[]`, `rows_terpotong: boolean` |
+| **`TransferStokSaldo`** | `GET /api/transfer-stok/saldo` | `branch_id: string`, `rows: TransferStokSaldoRow[]` |
+| **`StokAwalTersimpan`** / **`StokAwalItem`** | `GET /api/stok/awal` | `tanggal`, `items[]` (`ingredient_id`, `qty`, `tanggal`) |
+
+**Kenapa ini 🟡 dan bukan ⚪️.** `rows_terpotong` dikirim server sejak putaran
+23 dan dipaku §274 verify-api — tapi ia tak pernah punya nama, jadi kedua
+kliennya mengetik ulang `{ rows }` sendiri di situs pengambilannya dan
+benderanya lenyap di kedua ujung. Di ponsel ia dibuang di
+`transfer_repository.dart:51`; di web ia bahkan tak ada bagi typecheck.
+
+Akibatnya sama di kedua aplikasi: daftar transfer **berlangit-langit**, bukan
+berhalaman (bawaan `per_page=50`, maksimum 200). Faktur ke-51 tidak ada di
+layar dan tidak ada satu kalimat pun yang mengatakannya. Ponsel bahkan meminta
+`per_page=50` secara eksplisit padahal servernya sanggup 200.
+
+**Yang perlu dikerjakan tim mobile** (tidak wajib, tidak memutus): urai
+`rows_terpotong` di `transfer_repository`, lalu tampilkan spanduk "menampilkan
+N transfer terbaru" seperti yang sudah dilakukan `sampah_page.dart`. Halaman
+Transfer Stok web sudah merendernya pada rilis ini.
+
+**`GET /api/stok/awal`** ikut bernama pada putaran yang sama — bentuknya sampai
+kemarin hanya hidup sebagai `interface` lokal di halaman web. `tanggal` pada
+amplop adalah tanggal saldo pembuka TERKINI (terbesar di antara `items`), atau
+hari ini bila belum ada satu pun — dan "hari ini" itu dihitung server di zona
+perusahaan, bukan zona peramban.
+
+**Fikstur kunci ponsel:** tak ada kunci baru (`rows`, `rows_terpotong`,
+`branch_id`, `tanggal`, `items`, `ingredient_id`, `qty` semuanya sudah ada dari
+kontrak lain).
+
+## 🟡 `GET /api/admin/tenants/:id` berhenti mengirim BARIS TABEL apa adanya — `company` & `cabang` kini bentuk yang sama dengan rute yang menyajikannya
+
+🟡 **PERLU DICEK** — dan hampir pasti tidak, sebab **tak ada satu klien pun
+yang memanggil rute ini**: web hanya memakai `PATCH`-nya, ponsel tak
+menyentuhnya sama sekali. Disebut sebagai 🟡 karena bentuknya memang berubah,
+bukan karena ada yang perlu dikerjakan.
+
+**Yang berubah** (`GET /api/admin/tenants/:id`, super-admin saja):
+
+| medan | sebelum | sesudah |
+| --- | --- | --- |
+| `company` | 21 kunci camelCase — baris tabel `companies` apa adanya | **`CompanyRow`** (22, sama persis dengan `GET /api/company`) |
+| `cabang[]` | 16 kunci camelCase — baris tabel `branches` apa adanya | **`CabangDto`** (14 snake_case, sama persis dengan `GET /api/cabang`) |
+| `anggota[]` | — | kini bernama `TenantAnggota` (tak berubah isinya) |
+
+**Kenapa.** Keduanya lahir dari `db.select()` **telanjang**: bentuknya
+mengikuti SKEMA, jadi kolom yang ditambahkan besok ikut terkirim tanpa ada yang
+memutuskannya. Satu tabel karena itu punya DUA bentuk di kawat — satu yang
+dipilih penulisnya (`GET /company`, `GET /cabang`) dan satu yang mengikuti
+tabel. Kini keduanya lewat perakit yang sama.
+
+**Dan `GET /api/admin/tenants` (daftar) mendapat nama tanpa berubah bentuk:**
+`TenantRow`, 9 kunci. Salah satunya — `plan_expires_at` — dikirim sejak lama
+sementara tipe lokal web menyatakan **delapan** medan. Kelas yang sama dengan
+`dev_verify_url` dan `qty_teks`. `created_at` & `plan_expires_at` kini
+diterjemahkan perakitnya ke ISO-8601, bukan diserahkan ke serialisasi.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci **+16**; tiga nama tercatat
+beralasan (ponsel tak punya layar super-admin, dan rutenya 403 untuk peran mana
+pun selain super-admin). Nol baris `lib/` berubah.
+
+## ⚪️ Buku dana faktur akhirnya bernama: `BukuDanaFaktur` + `DanaEntri` + `TipeDana` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: amplop
+> `GET /api/{produksi|pembelian}/dana/:fakturId` dan barisnya akhirnya
+> **dideklarasikan** di `types.ts`, berikut kosakata `tipe`-nya.
+
+**Vena paling tipis dari deretannya, dan itu ditulis apa adanya:** barisnya
+cocok satu-satu dengan kawat sejak awal — tak ada medan yang dikirim tanpa
+disebut, tak ada layar yang menghitung ulang. Yang belum ada cuma namanya.
+
+**Bentuknya:**
+
+```
+{ rows: DanaEntri[], total }
+DanaEntri = { id, tipe, nominal, catatan, oleh, waktu }
+TipeDana  = "cair" | "tambahan" | "kembali"
+```
+
+`total` dihitung SERVER dengan **`kembali` dikurangkan**, bukan dijumlahkan —
+itu sebabnya ia dikirim alih-alih dibiarkan klien menjumlahkan `rows` sendiri.
+Penjumlahan yang lupa membalik tandanya memulangkan "dana efektif" yang terlalu
+besar di layar faktur, dan tak ada yang menyadarinya sampai kas tak cocok.
+
+`waktu` kini **diterjemahkan** perakitnya (kolom `timestamp` → ISO-8601) — sama
+seperti `archived_at`, `planExpiresAt`, dan `waktu` penerimaan.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci **+8**, fikstur status **+3**
+(`union:TipeDana`). Nol baris `lib/` berubah.
+
+**Satu catatan yang WAJIB dibaca sebelum dianggap utang lunas:** entri hantu
+`nominal` dicabut dari `hantuDiketahui`, tapi **bukan karena balasan REFUND
+mendapat DTO** — ia masih tanpa tipe. Yang terjadi: `nominal` kini ada di
+kontrak lewat `DanaEntri`, bentuk yang sama sekali lain. Berkas itu berkunci
+NAMA, jadi ratchet-nya menuntut pencabutan. Utang refund tetap di antrean.
+
+## ⚪️ Baris penerimaan akhirnya bernama: `PenerimaanRow` (25 kunci) — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: baris yang
+> `GET /api/penerimaan` pulangkan akhirnya **dideklarasikan** di `types.ts`,
+> jadi ikut Lampiran A dan fikstur kunci ponsel — termasuk **empat medan yang
+> dikirim tanpa pernah disebut tipe mana pun**.
+
+**Yang layak dibaca meski ⚪️: `qty_teks`.** Handler-nya menyebar hasil `select`
+(`{ ...r, qty_teks, qty_setara, qty_dipesan_teks }`), dan halaman web mengetik
+ulang **21 dari 25** medan. Keempat yang tak disebutnya: `satuan_beli`,
+`qty_teks`, `qty_setara`, `qty_dipesan_teks`.
+
+Akibatnya bukan kosmetik. Karena tipe lokal itu menyembunyikan `qty_teks`,
+layar Penerimaan **merakit ulang** `formatAngka(qty) + satuan` di dua panel —
+persis yang medan itu ada untuk mencegah. Komentar `qtyTeks()` menuliskan
+kejadiannya, bukan kekhawatiran: menebak satuan sendiri sudah melahirkan
+**"900 kg" untuk barang yang sebenarnya 900 gr**, dan "batch" untuk barang
+bersatuan gram.
+
+**Bentuknya, apa adanya:**
+
+```
+id  ingredient_id  bahan  isi  satuan  satuan_beli  qty  total_harga
+is_batch  catatan  waktu  prod_date  faktur_id  no_faktur  nomor
+status  jalur  cabang  supplier  tempat  qty_dipesan  alasan_tolak
+qty_teks  qty_setara  qty_dipesan_teks
+```
+
+`waktu` kini **diterjemahkan** perakitnya, bukan diserahkan ke serialisasi:
+kolomnya `timestamp` (Drizzle → `Date`), yang sampai ke kawat ISO-8601. Sama
+seperti `archived_at` (`KaryawanRow`) dan `planExpiresAt` (`CompanyRow`).
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci bertambah **25**; tak satu pun
+nama baru yang perlu keputusan (semuanya sudah disentuh `lib/` lewat DTO lain).
+Nol baris `lib/` berubah.
+
+## ⚪️ Balasan `/register` & `/resend-verification` akhirnya bernama: `DaftarResult` (6 kunci, termasuk `dev_verify_url`) — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: amplop netral kedua
+> pintu daftar akhirnya **dideklarasikan** di `types.ts`, jadi ikut Lampiran A
+> dan fikstur kunci ponsel — termasuk satu medan yang selama ini **dikirim
+> tanpa pernah disebut tipe mana pun**.
+
+**Yang layak dicek meski ⚪️: `dev_verify_url`.** Ia dikirim berdampingan
+dengan `dev_verify_kode` yang memang disebut, tapi tak ada tipe yang
+menyatakannya — web mendeklarasikan lima medan, kawat mengirim enam, dan
+ponsel mencatatnya di `hantuDiketahui` justru karena ia tak punya rumah. Kini
+keduanya di kontrak, dan **dicabut dari daftar hantu** (36 → 33 bersama
+entri lain).
+
+Bentuknya, apa adanya — **sama persis di kedua pintu**, dan itu syarat bukan
+kebetulan (respons yang berbeda antar pintu membuka kembali enumerasi akun):
+
+```
+ok  sebab  message  retry_after_detik
+dev_verify_kode?  dev_verify_url?     ← hanya di dev (email belum diatur)
+```
+
+Satu pengecualian yang tak berubah: `/register` untuk akun yang **sudah
+terverifikasi dengan password yang cocok** memulangkan SESI (`SesiLogin`) plus
+`sudah_aktif: true`, bukan bentuk ini. Pembeda yang dipakai kedua klien tetap
+`"token" in hasil`.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci bertambah **6**; ponsel sudah
+mengurai lima dari enam medannya. Yang keenam (`ok`) tercatat beralasan: ia
+selalu `true` di kedua pintu — bentuknya netral justru supaya tak ada yang bisa
+dibedakan darinya — jadi membacanya tak menambah satu keputusan pun di layar.
+Yang dipakai untuk bercabang tetap `sebab`. Nol baris `lib/` berubah.
+
+## ⚪️ Amplop panel sistem akhirnya bernama: `SistemStatusDto` (6 kunci) + `MigrasiStatusDto` / `MigrasiEntriDto` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: amplop
+> `GET /api/admin/sistem` akhirnya **dideklarasikan** di `types.ts`, jadi ikut
+> Lampiran A dan fikstur kunci ponsel. Rutenya **super-admin saja** — ponsel
+> tak punya layar itu, jadi entri ini murni catatan kontrak.
+
+**Kenapa entri ini layak dibaca meski ⚪️.** Daun-daun amplop itu sudah lama di
+kontrak (`TemuanSetelanDto`, `PercobaanEmailDto`); amplop yang membungkusnya
+tidak. Bentuk migrasinya bahkan hidup di `db/migrate.ts` — lapisan basis data,
+bukan kontrak — sementara halaman web mengetik ulang entrinya.
+
+Terukur 2026-09-10 dengan menyuntikkan kunci ke-7 ke amplopnya:
+
+| gerbang | hasil dengan kunci ke-7 |
+| --- | --- |
+| `npm run typecheck` | **hijau** |
+| `npm test` (3.106 uji) | **hijau** |
+| `verify-api` (3.647 lengan) | **hijau** |
+
+Nol penjaga berubah warna — dan kali ini pada rute yang **memang diketuk** tiap
+jalan verify-api. **"Diketuk" bukan "dijaga".**
+
+**Bentuknya, apa adanya:**
+
+```
+database_ok  storage_mode  node_version
+migrations { total, terpasang, menunggu, terakhir_diterapkan, daftar[] }
+pemeriksaan[]      → TemuanSetelanDto
+email_percobaan[]  → PercobaanEmailDto
+```
+
+**Untuk ponsel — tidak wajib, dan kemungkinan besar tak akan pernah.** Fikstur
+kunci bertambah **14**; kesepuluh nama yang belum punya pembaca tercatat
+beralasan di `kunci-belum-dibaca.txt`. Ponsel tak punya layar super-admin sama
+sekali, dan panel ini dibuka saat deploy sedang berjalan — dari komputer. Nol
+baris `lib/` berubah.
+
+## 🟡 `POST` & `PATCH /api/satuan` kini ikut mengirim `dipakai` — tipe yang sudah menjanjikannya akhirnya benar
+
+🟡 **PERLU DICEK** — bentuknya **BERTAMBAH** satu kunci pada dua pintu; tak ada
+yang hilang, berubah tipe, atau berganti nama. Aplikasi yang mengabaikan medan
+baru berjalan persis seperti sekarang.
+
+**Yang berubah.** `POST /api/satuan` (201) dan `PATCH /api/satuan/:id`
+memulangkan `dipakai` — jumlah bahan yang memakai satuan itu — sama seperti
+`GET /api/satuan` selama ini. Ketiganya kini `SatuanDto` yang sama:
+
+```
+{ id, nama, sort_order, dipakai }
+```
+
+**Kenapa ini perbaikan, bukan penambahan fitur.** `SatuanDto` sudah
+mendeklarasikan `dipakai: number` sejak lama, dan web sudah mengetik balasan
+`POST` sebagai `SatuanDto`. Servernya memulangkan tiga kunci. Terukur dari
+kawat 2026-09-10: `POST /satuan` → `["id","nama","sort_order"]`,
+`has("dipakai")` = **false**. **Tipenya berbohong**, dan yang menahannya dari
+jadi bug hanya kebetulan bahwa satu-satunya pembacanya `.nama`. Klien yang
+menyisipkan hasil `POST` ke dalam daftar hasil `GET` menaruh baris cacat di
+sana — `dipakai` `undefined`, sementara TypeScript bilang `number`.
+
+Diperbaiki dari sisi **server**, bukan dengan memperlemah tipenya: bentuk yang
+dikirim disamakan, bukan janjinya yang dikecilkan.
+
+**`dipakai` pada `PATCH` bukan hiasan.** Ia dihitung dengan mencocokkan NAMA
+satuan terhadap kolom `satuan` dan `satuan_beli` di tabel bahan — dan `PATCH`
+boleh mengganti nama. Jadi angkanya memang bisa berubah oleh permintaan itu
+sendiri. Untuk satuan yang baru dibuat nilainya `0` (bukan `null`, bukan
+hilang), kecuali namanya kebetulan sudah dipakai bahan sebagai teks bebas.
+
+**Untuk ponsel — tidak wajib.** Ponsel tak memanggil `/satuan` sama sekali, dan
+`dipakai` memang sudah tercatat di `kunci-belum-dibaca.txt`. Nol perubahan
+fikstur, nol baris `lib/`.
+
+**Sambil lalu, tanpa perubahan kawat:** bentuk `{id, nama, sort_order}` yang
+dipulangkan `/kategori`, `/kategori-bahan`, dan jalur tulis `/satuan` kini
+punya **satu perakit** (`barisMaster`). Sebelumnya diketik ulang dengan tangan
+di **sembilan** situs di tiga modul. Terukur: satu kunci ke-4 yang disuntikkan
+ke `GET /kategori` lolos typecheck, 3.097 uji, DAN 3.633 lengan verify-api
+tanpa satu penjaga pun berubah warna. Kini kunci yang sama memerahkan
+**sembilan** lengan.
+
+## ⚪️ Baris karyawan akhirnya bernama: `KaryawanRow` (9 kunci) + `KaryawanBaruResult` — tak ada perubahan di kawat
+
+> Tidak ada bentuk balasan yang berubah. Yang berubah: baris yang
+> `GET /api/karyawan` pulangkan — **rute inti modulnya** — akhirnya
+> **dideklarasikan** di `types.ts`, jadi ikut Lampiran A dan fikstur kunci
+> ponsel. Balasan 201 `POST /api/karyawan` ikut bernama.
+
+**Kenapa entri ini layak dibaca meski ⚪️.** Tetangga rute ini sudah lama di
+kontrak — `UndanganKaryawanRow`, `AktivitasRow`, `KaryawanTempatDto`, **17
+kunci** di fikstur ponsel. Barisnya sendiri **nol**. Terukur 2026-09-10 dengan
+menyuntikkan satu kunci ke-10 ke `select`-nya lalu menjalankan ketiga gerbang:
+
+| gerbang | hasil dengan kunci ke-10 |
+| --- | --- |
+| `npm run typecheck` | **hijau** |
+| `npm test` (3.087 uji) | **hijau** |
+| `verify-api` (3.620 lengan) | **hijau** |
+
+Nol penjaga berubah warna. Bentuk ini bisa bertambah atau menyusut tanpa satu
+pun alat di repo mengatakannya — termasuk ke ponsel, yang merawat cerminnya
+dengan tangan (`karyawan_models.dart`, komentarnya sendiri: *"cermin GET
+/karyawan"*).
+
+**Bentuknya, apa adanya** (`GET /api/karyawan`, dan `?arsip=true` **sama
+persis** — yang berbeda cuma penyaringnya):
+
+```
+user_id  nama  email  is_active  role
+branch_id  cabang  employee_code  archived_at
+```
+
+`POST /api/karyawan` → **201** `{ user_id, email, nama, role, employee_code }`.
+Bentuknya sengaja BUKAN `KaryawanRow`: yang baru dibuat belum punya nama cabang
+terpetakan, dan `employee_code` justru satu-satunya alasan balasan ini dibaca.
+
+**Satu hal yang benar-benar diperbaiki, dan ponsel sudah benar duluan.**
+`archived_at` kolomnya `timestamp`; Drizzle menyimpulkannya `Date | null`,
+sementara yang sampai ke kawat ISO-8601 (`"2026-09-10T06:29:33.540Z"`).
+Sebelum putaran ini tak ada tipe yang menyatakan itu, jadi tak ada yang bisa
+salah — dan tak ada yang bisa benar. Kini perakit tunggal `karyawanRow` yang
+menerjemahkannya, dan kontrak menyebut `string | null`. Ponsel sudah membacanya
+`String?` sejak awal, jadi **tak ada yang perlu diubah** di sana.
+
+**Untuk ponsel — tidak wajib.** Fikstur kunci bertambah **14**
+(`KaryawanRow` 9 + `KaryawanBaruResult` 5), dan `archived_at` **dicabut** dari
+`hantuDiketahui` (36 → 35) karena kini ia ada di kontrak. Nol baris `lib/`
+berubah.
+
+**Sekalian, satu ejaan yang berhenti bercabang.** Union peran
+(`"owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar"`) punya rumah sejak
+lama — `UserRole` di `packages/shared/src/constants.ts` — tapi tak pernah punya
+gerbang. Terukur **tiga ejaan**; dua di antaranya hidup bertahun-tahun tepat di
+sebelah impor `@kakarut/shared` yang sudah ada di berkasnya sendiri. Kini
+**satu**, dan dijaga. Nilainya tidak berubah, jadi ponsel tak terpengaruh.
+
 ## 🟢 Rute BARU `POST /api/penjualan/cek-stok` — kasir bisa tahu keranjangnya akan ditolak SEBELUM menekan Bayar
 
 > Bentuk lama tidak berubah sama sekali. Yang bertambah: satu rute BACA
 > (`POST`, tapi tak menulis apa pun) yang menjawab **kecukupan stok SELURUH
 > keranjang** — pertanyaan yang `GET /menu/ketersediaan` tak bisa jawab.
+
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); aplikasi ponsel lewat merge `c751fc3` di repo ponsel (CI #56).
 
 **Kenapa rute baru, padahal ketersediaan sudah ada.** `/menu/ketersediaan`
 menjawab PER MENU: "menu ini bisa dibuat berapa porsi lagi". Yang dihadapi
@@ -83,6 +543,8 @@ sempat terunduh.
 > jadi ikut Lampiran A dan fikstur kunci ponsel. Kuncinya **camelCase** —
 > baris tabel apa adanya — dan tetap begitu.
 
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
+
 Terukur lewat HTTP (DB gerbang): **22 kunci**, dan rutenya `[any]` sehingga
 **kasir menerimanya utuh** (kuncinya identik dengan owner). Dua hal yang layak
 diketahui tim ponsel:
@@ -120,6 +582,8 @@ hilang atau berubah tipe. Status tetap **200**, `ok` tetap `true`,
 `retry_after_detik` tetap. Aplikasi yang mengabaikan medan baru tetap jalan
 persis seperti sekarang — tapi ia akan terus menampilkan layar kode untuk
 keadaan yang tak mengirim kode, dan itulah yang perlu dicek.
+
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); aplikasi ponsel lewat merge `c751fc3` di repo ponsel (CI #56).
 
 **Yang berubah.** Kedua pintu memulangkan `sebab` (kode untuk mesin) dan
 `message` (kalimat untuk manusia). Tujuh nilai, kosakata `SEBAB_DAFTAR` —
@@ -164,6 +628,8 @@ tak ikut) dan verify-api §299 (13 lengan dari kawat).
 🟡 **PERLU DICEK** — ini perubahan **di kawat**, bukan sekadar penamaan tipe
 seperti dua entri di bawah. Dua kunci yang selama ini berisi ANGKA kini
 `null` untuk peran non-manajemen.
+
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
 
 **Yang berubah.** `sale.totalHpp` dan `items[].hppSatuan` pada balasan `POST
 /api/penjualan` (dan perintah `penjualan` di `POST /api/sync`) kini **ditahan**
@@ -224,6 +690,8 @@ terbukti gerbang, bukan penghapus).
 > `nilai-stok.ts`, berkas yang fikstur dan Lampiran tak pernah baca; kelima
 > kuncinya karena itu tercatat ponsel sebagai hantu meski dikirim tiap hari.
 
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); aplikasi ponsel lewat merge `c751fc3` di repo ponsel (CI #56).
+
 Terukur lewat HTTP (owner, DB gerbang): `/laporan/bep` **8 kunci** —
 `biaya_tetap`, `basis`, `periode {dari, sampai}`, `rata_harga_jual`,
 `rata_margin_kontribusi`, `porsi_untuk_bep`, `omzet_untuk_bep`,
@@ -260,6 +728,8 @@ owner dan kasir).
 > medannya ada di kontrak: `SesiLogin` hidup di server saja, web mengetik
 > ulang sesinya sendiri, ponsel mengurai `CompanyDto`/`BranchDto` lokal.
 
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
+
 Terukur lewat HTTP terhadap DB gerbang (owner): `/auth/login` **4 kunci
 atas** (`token`, `user`, `company`, `branch`), `/auth/me` 3 (tanpa `token`),
 `.user` 7 (= `AuthUser`), `.company` **9**, `/cabang` 31 baris × **14 kunci**.
@@ -292,6 +762,8 @@ seluruh `apps/server/src`, web memakai tipe kontrak) dan verify-api §296
 > akhirnya **dideklarasikan** di `packages/shared` (jadi ikut Lampiran A dan
 > fikstur kunci ponsel). Sampai 2026-09-05 ia hidup sebagai DTO lokal halaman
 > web, dan itu berarti tak satu pun fikstur bisa menagihnya.
+
+**Sudah di-merge ke production.** Tayang lewat merge `42e048b` (CI #495, termasuk build image + redeploy Dokploy); fikstur kunci ponsel lewat merge `c751fc3` (CI #56).
 
 Terukur lewat HTTP terhadap DB gerbang (237 baris, 2 rute): **55 kunci per
 baris**, 52 dideklarasikan web. Tiga yang dikirim sejak lama tanpa pernah

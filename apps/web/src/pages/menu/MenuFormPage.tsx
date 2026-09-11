@@ -12,6 +12,7 @@ import {
   hargaSaranPaket,
   hitungHpp,
   type BahanDto,
+  type KategoriDto,
   type MenuDto,
 } from "@kakarut/shared";
 import { BahanPicker } from "../../components/BahanPicker";
@@ -38,12 +39,6 @@ import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { useCompanyMode } from "../../lib/useCompanyMode";
 
-interface Kategori {
-  id: string;
-  nama: string;
-  sort_order: number;
-}
-
 interface KomponenForm {
   ingredient_id: string;
   qty: string;
@@ -62,7 +57,7 @@ export function MenuFormPage() {
   });
   const { data: kategori, error: kategoriGagal } = useQuery({
     queryKey: ["kategori"],
-    queryFn: () => api<Kategori[]>("/kategori"),
+    queryFn: () => api<KategoriDto[]>("/kategori"),
   });
   const { data: menus } = useQuery({
     queryKey: ["menu"],

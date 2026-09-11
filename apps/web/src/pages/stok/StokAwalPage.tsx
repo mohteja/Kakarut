@@ -1,18 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { StokRowDto } from "@kakarut/shared";
+import type { StokAwalTersimpan, StokRowDto } from "@kakarut/shared";
 import { angkaDari, teksAngka } from "@kakarut/shared";
 import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch, useCabangData } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatAngka, formatTanggal, hariIniWIB } from "../../lib/format";
-
-interface StokAwalTersimpan {
-  tanggal: string;
-  items: { ingredient_id: string; qty: number; tanggal: string }[];
-}
 
 /**
  * Stok Awal (saldo pembuka): catat stok yang SUDAH ADA sebelum memakai

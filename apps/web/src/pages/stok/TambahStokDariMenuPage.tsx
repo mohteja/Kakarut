@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type {
+  KaryawanRow,
   MenuDto,
   MenuStokDto,
   PerlengkapanRowDto,
@@ -28,12 +29,12 @@ import { api } from "../../lib/api";
 import { formatAngka, formatRupiah } from "../../lib/format";
 import { uuidV4 } from "../../lib/idempoten";
 
-interface Karyawan {
-  user_id: string;
-  nama: string;
-  role: "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
-  is_active: boolean;
-}
+/**
+ * Pemilih pelaksana: butuh EMPAT dari sembilan medan `GET /karyawan`. `Pick`
+ * menyatakan itu; salinan lokalnya dulu tak bisa dibedakan dari bentuk penuh
+ * saat dibaca sepintas.
+ */
+type PelaksanaRow = Pick<KaryawanRow, "user_id" | "nama" | "role" | "is_active">;
 
 /**
  * KELOMPOK AKSI (Dikirim / Diproduksi / Dibeli) — pembungkus sub-bagian per
@@ -227,7 +228,7 @@ export function TambahStokDariMenuPage() {
   });
   const { data: karyawan = [] } = useQuery({
     queryKey: ["karyawan"],
-    queryFn: () => api<Karyawan[]>("/karyawan"),
+    queryFn: () => api<PelaksanaRow[]>("/karyawan"),
   });
   const { data: suppliers = [] } = useQuery({
     queryKey: ["supplier"],

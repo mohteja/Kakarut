@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
+import type { DaftarResult } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
@@ -611,7 +612,7 @@ export const authRoutes = new Hono<AppEnv>()
       // ulang" yang tampak siap ditekan akan ditolak diam-diam oleh jaraknya.
       retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
       ...(dev ? { dev_verify_kode: dev.kode, dev_verify_url: dev.url } : {}),
-    });
+    } satisfies DaftarResult);
   })
   // Lupa password: selalu balas 200 (jangan bocorkan apakah email terdaftar).
   // Bila akun ada & aktif, buat token reset + kirim tautan via email. Saat email
@@ -929,7 +930,7 @@ export const authRoutes = new Hono<AppEnv>()
         message: PESAN_DAFTAR[sebab],
         retry_after_detik: JEDA_KIRIM_ULANG_DETIK,
         ...(dev ? { dev_verify_kode: dev.kode, dev_verify_url: dev.url } : {}),
-      });
+      } satisfies DaftarResult);
     },
   )
   /**

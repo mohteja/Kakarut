@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { barisMaster } from "../../lib/baris-master";
 import { BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, asc, count, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -37,7 +38,7 @@ export const kategoriBahanRoutes = new Hono<AppEnv>()
         asc(ingredientCategories.nama),
       );
     return c.json(
-      rows.map((r) => ({ id: r.id, nama: r.nama, sort_order: r.sortOrder })),
+      rows.map(barisMaster),
     );
   })
   .post(
@@ -58,12 +59,7 @@ export const kategoriBahanRoutes = new Hono<AppEnv>()
             sql`lower(${ingredientCategories.nama}) = lower(${body.nama})`,
           ),
         );
-      if (ada)
-        return c.json({
-          id: ada.id,
-          nama: ada.nama,
-          sort_order: ada.sortOrder,
-        });
+      if (ada) return c.json(barisMaster(ada));
       const [row] = await db
         .insert(ingredientCategories)
         .values({
@@ -75,7 +71,7 @@ export const kategoriBahanRoutes = new Hono<AppEnv>()
         .returning();
       if (!row) throw new HTTPException(409, { message: "Kategori sudah ada" });
       return c.json(
-        { id: row.id, nama: row.nama, sort_order: row.sortOrder },
+        barisMaster(row),
         201,
       );
     },
@@ -106,7 +102,7 @@ export const kategoriBahanRoutes = new Hono<AppEnv>()
       );
       if (!row)
         throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
-      return c.json({ id: row.id, nama: row.nama, sort_order: row.sortOrder });
+      return c.json(barisMaster(row));
     },
   )
   .delete("/:id", requireRole("owner", "admin"), async (c) => {

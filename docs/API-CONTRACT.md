@@ -1659,6 +1659,7 @@ import type {
   PengajuanKategori,
   PengajuanStatus,
   ProduksiDi,
+  SebabDaftar,
   StokStatus,
   UserRole,
 } from "./constants";
@@ -1700,7 +1701,13 @@ export type ModeCompany = "lite" | "pro";
 export interface CompanyRow {
   id: string;
   nama: string;
-  metodeHpp: MetodeHpp;
+  /**
+   * `null` untuk peran non-manajemen (`bolehLihatBiaya`) — lihat
+   * `MEDAN_MANAJEMEN_COMPANY`. Nol bukan "tidak tahu"; `null` memaksa layarnya
+   * memilih, dan ponsel membaca metode HPP-nya dari `/stok/fifo/:id`
+   * (`metode_hpp`), bukan dari sini.
+   */
+  metodeHpp: MetodeHpp | null;
   slug: string;
   alamat: string | null;
   telepon: string | null;
@@ -1712,10 +1719,17 @@ export interface CompanyRow {
   receiptShowAlamat: boolean;
   diskonMaksPersen: number;
   blokirJualMinus: boolean;
-  /** target omzet bulanan; `null` = belum diatur */
+  /**
+   * target omzet bulanan; `null` = belum diatur ATAU peminta bukan manajemen
+   * (`MEDAN_MANAJEMEN_COMPANY`). Terukur 2026-09-11: NOL klien membacanya —
+   * servernya membaca kolomnya langsung di `rekomendasi/routes.ts`, dan web
+   * cuma MENULISnya lewat PATCH.
+   */
   targetPenjualan: number | null;
-  foodCostMaks: number;
+  /** ambang food cost sehat; `null` untuk peran non-manajemen */
+  foodCostMaks: number | null;
   plan: string;
+  /** `null` bila tak berbatas ATAU peminta bukan manajemen */
   planExpiresAt: string | null;
   isActive: boolean;
   createdAt: string;
@@ -1743,8 +1757,19 @@ export interface CompanyDto {
   /**
    * Setelan "tolak jual saat stok minus". Dikirim supaya kasir bisa
    * MEMPERINGATKAN sebelum tombol Bayar; penegakannya tetap di server
-   * (`penjualan/service.ts`). Terukur 2026-09-05: tak satu klien pun membaca
-   * medan ini — peringatan yang dijanjikan belum pernah dibuat (antrean vena).
+   * (`penjualan/service.ts`).
+   *
+   * Terukur 2026-09-05: tak satu klien pun membacanya. Itu MASIH benar
+   * 2026-09-11, tapi sebabnya sudah berganti dan catatan lamanya
+   * ("peringatan yang dijanjikan belum pernah dibuat") kini menyesatkan:
+   * peringatannya ADA, lewat `POST /penjualan/cek-stok` yang menjawab
+   * pertanyaan yang lebih tajam — bahan MANA dan kurang berapa — dengan
+   * predikat gerbang yang sama (`gerbangBerlaku`). Bendera ini tinggal
+   * pintasan yang tak diperlukan pemanggil `cek-stok`.
+   *
+   * Sampai 2026-09-11 ia juga MUSTAHIL dibaca di layar yang paling
+   * membutuhkannya: `KasirPage` mengetik ulang tiga medan `company` di situs
+   * `api<…>("/auth/me")`-nya, jadi enam medan sisanya tak ada bagi typecheck.
    */
   blokir_jual_minus: boolean;
   timezone: string;
@@ -1835,6 +1860,129 @@ export interface UndanganKaryawanRow {
   cabang_nama: string | null;
   status: InvitationStatus;
   diundang_pada: string;
+}
+
+/**
+ * SATU BARIS KARYAWAN sebagaimana `GET /api/karyawan` mengirimnya (9 kunci,
+ * snake_case). `?arsip=true` memulangkan bentuk yang SAMA — yang berbeda cuma
+ * penyaringnya.
+ *
+ * Bentuk ini rute INTI modulnya, dan sampai 2026-09-10 ia satu-satunya di
+ * modul itu yang TIDAK ada di kontrak: tetangganya `UndanganKaryawanRow`,
+ * `AktivitasRow`, dan `KaryawanTempatDto` sudah lama di sini (17 kunci di
+ * fikstur ponsel), sementara barisnya sendiri nol. Akibatnya web mengetiknya
+ * ulang TIGA kali dengan lebar berbeda-beda — 9, 7, dan 4 medan — dan ponsel
+ * merawat cerminnya dengan tangan (`karyawan_models.dart`, yang komentarnya
+ * sendiri berbunyi "cermin GET /karyawan").
+ *
+ * `archived_at` sengaja `string`, bukan `Date`: kolomnya `timestamp` dan
+ * Drizzle menyimpulkannya `Date | null`, tapi yang sampai ke kawat ISO-8601
+ * (terukur 2026-09-10: `"2026-09-10T06:29:33.540Z"`). Perakitnya
+ * (`karyawanRow`) yang menerjemahkan, supaya tipe yang tertulis di sini adalah
+ * tipe yang benar-benar dikirim — pelajaran `planExpiresAt` pada `CompanyRow`.
+ */
+export interface KaryawanRow {
+  user_id: string;
+  nama: string;
+  email: string;
+  is_active: boolean;
+  role: UserRole;
+  branch_id: string | null;
+  /** nama cabang; `null` = belum ditempatkan (owner/admin lintas cabang) */
+  cabang: string | null;
+  /** kode absensi 8 digit; `null` hanya untuk membership yang belum di-backfill */
+  employee_code: string | null;
+  /** terisi = karyawan sudah diarsipkan (keluar; riwayat tetap tersimpan) */
+  archived_at: string | null;
+}
+
+/**
+ * Balasan 201 `POST /api/karyawan` — bukan `KaryawanRow`, dan bedanya
+ * disengaja: yang baru dibuat belum punya cabang terpetakan namanya, dan
+ * `employee_code` justru SATU-SATUNYA alasan balasan ini dibaca (ponsel
+ * memulangkannya langsung ke layar sebagai kode absen).
+ */
+export interface KaryawanBaruResult {
+  user_id: string;
+  email: string;
+  nama: string;
+  role: UserRole;
+  employee_code: string;
+}
+
+/**
+ * SATU PENYEWA sebagaimana `GET /api/admin/tenants` mengirimnya (9 kunci).
+ *
+ * `plan_expires_at` sampai 2026-09-11 DIKIRIM tanpa disebut tipe mana pun:
+ * salinan lokal `TenantsPage.tsx` menyatakan delapan medan, kawat mengirim
+ * sembilan. Kelas yang sama dengan `dev_verify_url` (#105) dan `qty_teks`
+ * (#106) — medan yang ada di kawat dan tak ada di tipe mana pun.
+ *
+ * `created_at` & `plan_expires_at` `string`, bukan `Date`: kolomnya
+ * `timestamp`, dan yang sampai ke kawat ISO-8601. Kelas KELIMA berturut-turut.
+ */
+export interface TenantRow {
+  id: string;
+  nama: string;
+  slug: string;
+  plan: string;
+  /** `null` = tanpa kedaluwarsa */
+  plan_expires_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  jumlah_cabang: number;
+  jumlah_user: number;
+}
+
+/**
+ * AMPLOP `GET /api/admin/tenants/:id` — satu penyewa beserta cabang & anggotanya.
+ *
+ * Sampai 2026-09-11 amplop ini memulangkan DUA BARIS TABEL APA ADANYA:
+ * `company` 21 kunci camelCase dan `cabang` 16 — keduanya dari `db.select()`
+ * telanjang. Bentuknya mengikuti SKEMA, jadi kolom yang ditambahkan besok ikut
+ * terkirim tanpa ada yang memutuskannya.
+ *
+ * Itu persis yang ATURAN A `bentuk-balasan` larang dengan `MAKS_UTANG = 0` —
+ * dan penjaganya melaporkan NOL, sebab ia mengklasifikasi ARGUMEN LANGSUNG
+ * `c.json`. `c.json(baris)` tertangkap; `c.json({ x: baris })` tidak. Aturannya
+ * benar; jangkauannya yang kurang satu lapis.
+ */
+export interface TenantDetail {
+  company: CompanyRow;
+  cabang: CabangDto[];
+  anggota: TenantAnggota[];
+}
+
+/** Satu anggota (membership) penyewa, untuk panel super-admin. */
+export interface TenantAnggota {
+  user_id: string;
+  nama: string;
+  email: string;
+  role: UserRole;
+}
+
+/** Satu saldo pembuka bahan yang tersimpan — baris `GET /api/stok/awal`. */
+export interface StokAwalItem {
+  ingredient_id: string;
+  qty: number;
+  /** tanggal terkunci saldo pembuka bahan INI (bisa beda antar bahan) */
+  tanggal: string;
+}
+
+/**
+ * SALDO PEMBUKA yang tersimpan — `GET /api/stok/awal`, untuk mengisi ulang
+ * formulir Stok Awal (bukan saldo live).
+ *
+ * `tanggal` di tingkat amplop adalah tanggal saldo pembuka TERKINI (yang
+ * terbesar di antara `items`), atau HARI INI bila belum ada satu pun. Dan
+ * "hari ini" itu dihitung server di ZONA PERUSAHAAN (`tanggalDi(timezone)`),
+ * bukan di zona peramban — pembedaan yang hari ini tak terlihat karena
+ * `companies.timezone` belum bisa diubah, dan yang menahan pasangan itu tetap
+ * konsisten adalah `zona-waktu-satu-suara.test.ts`.
+ */
+export interface StokAwalTersimpan {
+  tanggal: string;
+  items: StokAwalItem[];
 }
 
 export type SmtpEncryption = "none" | "ssl" | "starttls";
@@ -1934,6 +2082,98 @@ export interface TemuanSetelanDto {
   rincian: string;
   /** langkah konkret yang menutup temuan ini */
   tindakan: string;
+}
+
+/** Satu entri migrasi basis data, sebagaimana panel sistem melihatnya. */
+/**
+ * BALASAN NETRAL `/api/auth/register` dan `/api/auth/resend-verification`.
+ *
+ * Kedua pintu memulangkan bentuk yang SAMA PERSIS — itu bukan kebetulan
+ * melainkan syaratnya: respons yang berbeda antar-pintu (atau antara email
+ * terdaftar dan tidak) membuka kembali enumerasi akun yang seluruh rute di
+ * sekitarnya susah payah tutup. Karena itu satu tipe, satu perakit.
+ *
+ * SATU PENGECUALIAN yang disengaja: `/register` untuk akun yang sudah
+ * terverifikasi DAN passwordnya cocok memulangkan SESI (`SesiLogin`) plus
+ * `sudah_aktif: true`, bukan bentuk ini. Pemanggil membedakannya dengan
+ * memeriksa `"token" in hasil`.
+ *
+ * `dev_verify_url` sampai 2026-09-11 DIKIRIM TAPI TAK DIDEKLARASIKAN di mana
+ * pun: tipe lokal web tak menyebutnya, dan ponsel mencatatnya sebagai hantu
+ * beralasan. Ia bukan tak terpakai — §106f dan §281 sudah membaca NILAInya,
+ * jadi mencabutnya memang memerahkan gerbang. Yang tak pernah ada: asersi
+ * bahwa NAMANYA milik sebuah bentuk yang dideklarasikan, dan itulah bedanya
+ * antara menangkap medan yang HILANG dan medan yang DITAMBAH. Ia lolos penghitung amplop pula — dua kunci dev menumpang sebaran
+ * bersyarat (`...(dev ? {…} : {})`), jadi pemindainya membaca empat kunci dan
+ * mengecualikannya sebagai pengakuan `{ok, …}`. Bukan ratchet-nya yang lunak;
+ * pembacanya yang rabun.
+ */
+export interface DaftarResult {
+  ok: boolean;
+  /**
+   * KODE keadaan — sejak 2026-09-05 kedua pintu menyebutkannya (keputusan
+   * pemilik; sebelumnya tiga belas keadaan dijawab satu kalimat netral).
+   * Yang bercabang WAJIB memakai ini, bukan mencocokkan `message`.
+   */
+  sebab: SebabDaftar;
+  message: string;
+  /**
+   * Jarak minimum sebelum kode berikutnya boleh diminta, dalam detik.
+   *
+   * Datang dari SERVER, bukan disalin ke klien: server yang menahannya, jadi
+   * angka kedua di sisi klien hanya akan menyimpang diam-diam. Nilainya TETAP
+   * untuk email mana pun — terdaftar atau tidak — jadi ia tak membocorkan apa
+   * pun.
+   */
+  retry_after_detik: number;
+  /** Hanya di dev (email belum diatur) — kode verifikasi 6 digit langsung. */
+  dev_verify_kode?: string;
+  /** Hanya di dev — tautan verifikasi siap klik, pasangan `dev_verify_kode`. */
+  dev_verify_url?: string;
+}
+
+export interface MigrasiEntriDto {
+  tag: string;
+  /** timestamp pembuatan berkas migrasi (dari journal drizzle) */
+  dibuat: string | null;
+  status: "terpasang" | "menunggu";
+}
+
+/** Ringkasan migrasi: berapa terpasang, berapa menunggu, dan daftarnya. */
+export interface MigrasiStatusDto {
+  total: number;
+  terpasang: number;
+  menunggu: number;
+  terakhir_diterapkan: string | null;
+  daftar: MigrasiEntriDto[];
+}
+
+/**
+ * AMPLOP `GET /api/admin/sistem` — panel sistem super-admin.
+ *
+ * Enam kunci, dan sampai 2026-09-10 bentuknya tak dideklarasikan di mana pun.
+ * Daun-daunnya sudah lama di kontrak (`TemuanSetelanDto`, `PercobaanEmailDto`)
+ * — amplop yang membungkusnya tidak. Kelas yang sama dengan #99/#101/#102,
+ * dan kali ini pada rute yang MEMANG diketuk verify-api: kunci ke-7 yang
+ * disuntikkan ke sini lolos typecheck, lolos 3.106 uji, dan lolos 3.647 lengan
+ * verify-api tanpa satu penjaga pun berubah warna.
+ *
+ * Akibatnya bukan hipotesis. DUA halaman web mendeklarasikan `SistemStatus`
+ * dengan nama yang SAMA untuk himpunan kunci yang SALING LEPAS — `SistemPage`
+ * lima kunci, `RiwayatEmailPage` satu (`email_percobaan`) — dan tak satu pun
+ * dari keduanya menggambarkan balasan yang sebenarnya. Nama yang sama untuk
+ * dua bentuk berbeda lebih buruk daripada dua nama: pembacanya mengira sudah
+ * melihat bentuknya.
+ */
+export interface SistemStatusDto {
+  database_ok: boolean;
+  storage_mode: "r2" | "local";
+  node_version: string;
+  migrations: MigrasiStatusDto;
+  /** temuan setelan yang sama dengan yang dicetak ke log boot */
+  pemeriksaan: TemuanSetelanDto[];
+  /** riwayat percobaan kirim email — menumpang rute ini, dibaca halaman lain */
+  email_percobaan: PercobaanEmailDto[];
 }
 
 /**
@@ -2242,14 +2482,38 @@ export interface KomponenDto {
   is_complement: boolean;
 }
 
-/** Kategori menu (master data). */
+/**
+ * BARIS DAFTAR INDUK sederhana — `{id, nama, sort_order}`.
+ *
+ * Dipakai DUA rute, dan penyebutan itu bukan kerapian: sampai 2026-09-10
+ * komentar di sini berbunyi "Kategori menu (master data)" sementara **lima**
+ * pemanggil web memakainya untuk `GET /kategori-bahan`, dan `GET /kategori` —
+ * rute yang tipe ini dinamai untuknya — dibaca lewat TIGA salinan lokal.
+ * Keduanya lolos hanya karena bentuknya identik hari ini.
+ *
+ *   · `/api/kategori`        — kategori MENU (GET, POST 201, PATCH)
+ *   · `/api/kategori-bahan`  — kategori BAHAN & perlengkapan (idem)
+ *
+ * Balasan tulis `/api/satuan` memakai `SatuanDto`, bukan ini — lihat di bawah.
+ * Perakit tunggalnya `barisMaster()` di `apps/server/src/lib/baris-master.ts`.
+ */
 export interface KategoriDto {
   id: string;
   nama: string;
   sort_order: number;
 }
 
-/** Satuan bahan (master data) — sumber pilihan dropdown satuan. */
+/**
+ * Satuan bahan (master data) — sumber pilihan dropdown satuan.
+ *
+ * `dipakai` kini dikirim oleh KETIGA metode (`GET`, `POST` 201, `PATCH`).
+ * Sampai 2026-09-10 hanya `GET` yang mengirimnya, sementara `SatuanSelect.tsx`
+ * sudah mengetik balasan `POST` sebagai `SatuanDto` — jadi tipenya menjanjikan
+ * medan yang tak pernah ada (terukur dari kawat: `has("dipakai")` = false).
+ * Yang menahannya dari jadi bug cuma kebetulan bahwa satu-satunya pembacanya
+ * `.nama`. Diperbaiki dari sisi server supaya klien yang menyisipkan hasil
+ * `POST` ke dalam daftar hasil `GET` tak menaruh baris cacat di sana.
+ */
 export interface SatuanDto {
   id: string;
   nama: string;
@@ -2932,6 +3196,119 @@ export interface TransferStokItemRow {
   alasan_tolak: string | null;
 }
 
+/**
+ * SATU BARIS KIRIMAN MASUK yang menunggu diterima — `GET /api/penerimaan`.
+ *
+ * 25 kunci, terukur lewat HTTP 2026-09-11. Bentuknya tak pernah dideklarasikan:
+ * handler-nya menyebar hasil `select` (`{ ...r, qty_teks, qty_setara,
+ * qty_dipesan_teks }`), dan `PenerimaanPage.tsx` mengetik ulang **21** medan —
+ * empat yang dikirim tak disebutnya sama sekali.
+ *
+ * Yang paling mahal di antara keempatnya `qty_teks`, dan mahalnya terukur:
+ * karena tipe lokal itu tak menyebutnya, layar Penerimaan **merakit ulang**
+ * `formatAngka(qty) + satuan` di TIGA tempat — persis yang medan ini ada untuk
+ * mencegah. Komentar `qtyTeks()` menuliskan sebabnya lebih dulu: menebak satuan
+ * sendiri sudah pernah melahirkan **"900 kg" untuk barang yang sebenarnya 900
+ * gr**, dan "batch" untuk barang bersatuan gram.
+ *
+ * `waktu` sengaja `string`: kolomnya `timestamp` (Drizzle → `Date`), dan yang
+ * sampai ke kawat ISO-8601. Pelajaran `archived_at` pada `KaryawanRow` (#101)
+ * dan `planExpiresAt` pada `CompanyRow` (#99) — perakitnya yang menerjemahkan,
+ * supaya tipe yang tertulis di sini adalah tipe yang benar-benar dikirim.
+ */
+export interface PenerimaanRow {
+  id: string;
+  ingredient_id: string;
+  bahan: string;
+  /** isi per kemasan beli; dasar `qty_setara` */
+  isi: number;
+  /** SATUAN TAMPILAN: `qty` SELALU dinyatakan dalam ini */
+  satuan: string;
+  /** satuan kemasan — bahan teks setara, JANGAN dipasang ke `qty` */
+  satuan_beli: string | null;
+  qty: number;
+  total_harga: number | null;
+  /** ASAL-USUL input, BUKAN satuan */
+  is_batch: boolean;
+  catatan: string | null;
+  waktu: string;
+  prod_date: string;
+  faktur_id: string | null;
+  no_faktur: string | null;
+  /** nomor faktur asal (PB-/PR-) */
+  nomor: string | null;
+  status: KonfirmasiStatus;
+  /** jalur kiriman: beli (pemasok) / produksi (Central Kitchen) */
+  jalur: JenisPengadaan;
+  /** cabang penerima — terisi untuk tampilan Kantor "semua cabang" */
+  cabang: string | null;
+  supplier: string | null;
+  tempat: string | null;
+  qty_dipesan: number | null;
+  alasan_tolak: string | null;
+  /**
+   * `qty` + `satuan` yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ada agar web & mobile mustahil berbeda satuan (lihat `qtyTeks()`).
+   */
+  qty_teks: string;
+  /**
+   * setara kemasan beli, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan.
+   * PELENGKAP — boleh ditampilkan di samping `qty_teks`, tak boleh
+   * menggantikannya.
+   */
+  qty_setara: string | null;
+  /** `qty_dipesan` dalam bentuk teks; null bila tak ada yang dipesan */
+  qty_dipesan_teks: string | null;
+}
+
+/**
+ * Jenis entri buku dana faktur — cermin `dana_tipe` di basis data.
+ *
+ * `cair` = pencairan RAB · `tambahan` = dana menyusul saat belanja melebihi
+ * rencana · `kembali` = sisa yang dikembalikan (dikurangkan dari total).
+ *
+ * Sampai 2026-09-11 kosakata ini dieja DUA kali tanpa rumah bersama: sekali
+ * sebagai `pgEnum` di skema, sekali diketik tangan di `FakturDetailPage.tsx`.
+ * Ia salah satu dari LIMA pgEnum (dari 27) yang tak punya padanan di kontrak —
+ * dua puluh dua sisanya sudah berpasangan, dan pasangan itu memang dijaga
+ * (dibuktikan: menambah nilai karangan ke sebuah union memerahkan
+ * `status-satu-kontrak`, bahkan pada union yang typecheck-nya diam).
+ */
+export type TipeDana = "cair" | "tambahan" | "kembali";
+
+/**
+ * SATU ENTRI BUKU DANA sebuah faktur — `GET /api/{produksi|pembelian}/dana/:id`.
+ *
+ * `waktu` sengaja `string`: kolomnya `timestamp` (Drizzle → `Date`), yang
+ * sampai ke kawat ISO-8601. Kelas KEEMPAT kali berturut-turut sesudah
+ * `planExpiresAt` (#99), `archived_at` (#101), dan `waktu` penerimaan (#106) —
+ * perakitnya yang menerjemahkan, supaya tipe yang tertulis di sini adalah tipe
+ * yang benar-benar dikirim.
+ */
+export interface DanaEntri {
+  id: string;
+  tipe: TipeDana;
+  nominal: number;
+  catatan: string | null;
+  /** nama orang yang mencatatnya; null bila akunnya sudah dihapus */
+  oleh: string | null;
+  waktu: string;
+}
+
+/**
+ * AMPLOP buku dana satu faktur.
+ *
+ * `total` dihitung SERVER dengan `kembali` DIKURANGKAN — bukan dijumlahkan.
+ * Itu sebabnya ia dikirim alih-alih dibiarkan klien menjumlahkan `rows`:
+ * penjumlahan yang lupa membalik tanda `kembali` memulangkan angka yang
+ * terlalu besar, dan angka itu dibaca sebagai "dana efektif" di layar faktur.
+ */
+export interface BukuDanaFaktur {
+  rows: DanaEntri[];
+  /** dana efektif: cair + tambahan − kembali */
+  total: number;
+}
+
 /** Satu FAKTUR transfer stok (nomor TF-) berisi banyak bahan. */
 export interface TransferStokFaktur {
   faktur_id: string;
@@ -2987,6 +3364,44 @@ export interface TransferStokSaldoRow {
   tersedia_teks: string;
   /** setara kemasan dari sisa siap kirim, mis. "≈ 0,9 kg"; null bila tak berkemasan */
   tersedia_setara: string | null;
+}
+
+/**
+ * DAFTAR FAKTUR TRANSFER — `GET /transfer-stok`. Berlangit-langit, BUKAN
+ * berhalaman: pintu ini menerima `per_page` (bawaan 50, maks 200) tapi tak
+ * pernah memulangkan `page`, jadi yang benar baginya penanda pemotongan.
+ *
+ * `rows_terpotong` ADA justru supaya klien bisa mengatakannya. Sampai
+ * 2026-09-11 amplop ini tak bernama, dan akibatnya terukur di kedua klien:
+ * halaman Transfer Stok web mendeklarasikan sendiri `{ rows: … }` di situs
+ * pengambilannya, jadi benderanya tak pernah ada bagi typecheck maupun bagi
+ * orang yang membaca layarnya; ponsel membuangnya di `transfer_repository`.
+ * Server sudah mengirimnya sejak putaran 23 dan §274 verify-api memakunya —
+ * yang hilang cuma rumah bagi bentuknya.
+ */
+export interface TransferStokDaftar {
+  /** maksimal `per_page` faktur, TERBARU dulu — selebihnya `rows_terpotong` */
+  rows: TransferStokFaktur[];
+  /**
+   * `rows` dipotong; masih ada faktur transfer yang lebih lama.
+   *
+   * Sekelas `SupplierKartu.rows_terpotong` dan `CustomerDetail.transaksi_terpotong`,
+   * dan alasannya sama: halaman transfer menyaring di peramban, jadi faktur
+   * yang tak terkirim tak pernah ada baginya.
+   */
+  rows_terpotong: boolean;
+}
+
+/**
+ * STOK READY DI SATU CABANG — `GET /transfer-stok/saldo`, dua situs balasan
+ * (daftar kosong lebih awal + daftar penuh). `branch_id` dikirim balik supaya klien
+ * tahu cabang MANA yang dijawab: kalau `branch_id` tak dikirim, server
+ * memutuskannya sendiri (`resolveBranchId`), dan daftar tanpa keterangan
+ * cabang adalah daftar yang tak bisa diperiksa.
+ */
+export interface TransferStokSaldo {
+  branch_id: string;
+  rows: TransferStokSaldoRow[];
 }
 
 /**
@@ -4871,7 +5286,16 @@ export interface PerlengkapanRowDto {
   id: string;
   nama: string;
   satuan: string;
-  harga_beli: number;
+  /**
+   * Harga beli acuan; `null` untuk peran non-manajemen (`bolehLihatBiaya`).
+   *
+   * Rute ini SATU-SATUNYA pintu perlengkapan tanpa `requireRole` — ia melayani
+   * tab Stok → Perlengkapan yang dipakai semua peran untuk pakai/opname. Yang
+   * ditutup ANGKANYA, seperti `harga_beli` bahan sejak 2026-08-26. Layar
+   * manajemen membacanya dari `/perlengkapan/master` & `/perlengkapan/beli`,
+   * keduanya sudah `requireRole("owner","admin")`.
+   */
+  harga_beli: number | null;
   stok_minimum: number;
   catatan: string | null;
   saldo: number;
@@ -5076,6 +5500,17 @@ export interface KirimanMenggantung {
   dikirim_dari: string | null;
   /** sudah berapa hari menggantung — makin tua makin gawat */
   umur_hari: number;
+  /**
+   * Jumlah + satuan yang SUDAH ditulis server, mis. "900 gr" — tampilkan apa
+   * adanya. Ditambahkan 2026-09-11: sampai hari itu rute ini tak mengirimnya
+   * sama sekali, jadi KEDUA klien merakit `formatAngka(qty) + satuan` sendiri
+   * (`PenerimaanPage.tsx:795`, `anomali_page.dart:216`) — satu-satunya pilihan
+   * yang ada. Menebak satuan sendiri sudah pernah melahirkan "900 kg" untuk
+   * barang yang sebenarnya 900 gr.
+   */
+  qty_teks: string;
+  /** setara kemasan, mis. "≈ 0,9 kg"; null bila bahan tak berkemasan */
+  qty_setara: string | null;
 }
 
 /** Satu barang di dalam satu kiriman yang sudah diterima/ditolak. */
