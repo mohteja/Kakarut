@@ -50,6 +50,116 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Idiom yang dipakai 66 kali dan tak pernah ditagih siapa pun — dan satu assertion yang ditandatangani kompilator padahal bohong — server — 2026-09-11
+
+**Vena.** Butir antrean "daftarkan OID 20 di `setTypeParser`", yang selama ini
+tercatat sebagai *usulan perbaikan* tanpa satu angka pun di belakangnya.
+Diperiksa, usulannya salah arah — dan yang benar jauh lebih kecil.
+
+**Premis, diukur dari basis data SUNGGUHAN** (bukan dari ingatan soal `pg`):
+
+```
+count(*)        -> "14"  string        count(*)::int -> 14  number
+sum(int)        -> "1"   string        numeric       -> 1.5 number
+count(*) + 1    =  "141"               count(*) === 0 = false
+```
+
+`db/client.ts` mendaftarkan SATU parser, OID 1700 (`numeric`). OID 20
+(`int8`/`bigint`) tidak — dan `count()` di Postgres SELALU bigint.
+
+**Populasi, disapu dengan melexer SELURUH literal string & template** di
+`apps/server/src` (bukan dengan menebak tag `sql`):
+
+| | jumlah |
+| --- | --- |
+| ekspresi `count(` di SQL mentah | **106** |
+| ekspresi `sum(` di SQL mentah | 56 |
+| `count()` memakai idiom `::int` | **66** |
+| `count()` tak di-cast tapi TAK PERNAH dibaca JS (`WHERE`/`HAVING`/`ORDER BY`) | 19 |
+| `count()` terbaca ke JS tanpa cast | **29** |
+| …di `audit-invarian.ts`, beranotasi `string \| number` + `Number()` | 26 |
+| …**sisanya** | **1 situs, 2 kolom** |
+
+**`sum()` tak ikut dijaga, dan itu TERUKUR bukan diasumsikan**: `sum(numeric)`
+adalah numeric (sudah diparse), dan sapuan atas seluruh kolom bertipe
+`integer`/`bigint` di skema HIDUP (27 kolom, ditanyakan ke
+`information_schema`) menemukan **NOL** situs `sum()` atas kolom integer.
+Kolom integer di basis data ini semuanya metadata kecil — `sort_order`,
+`port`, `radius_absen_m` — sementara uang dan jumlah semuanya `numeric`.
+Dua kolom `bigint` sejati (`backup_runs.jumlah_baris`, `ukuran_bytes`) lewat
+drizzle `bigint(..., { mode: "number" })`, yang memetakan sendiri.
+
+**Temuannya: `POST /sampah/kosongkan`.** Ia menghitung dua angka lalu
+MENGETIKNYA `number` lewat type assertion:
+
+```ts
+).rows as { penjualan: number; faktur: number }[];
+```
+
+Assertion adalah janji yang tak diperiksa siapa pun, dan runtime memberi
+string. Diukur pada kueri ITU SENDIRI, bukan pada bentuk umum: `"1"` dan
+`"182"` sebelum cast, `1` dan `182` sesudah — dan `"1" + 1` adalah `"11"`.
+Yang menyelamatkannya hari ini `Number()` di baris pulang, **bukan tipenya**;
+penulis berikutnya yang menjumlahkan `hitung.penjualan` mendapat sambungan
+teks tanpa satu peringatan pun.
+
+**Kenapa OID 20 TIDAK jadi didaftarkan.** Mendaftarkannya mengubah SETIAP
+bigint di seluruh aplikasi menjadi `number` — termasuk nilai yang kelak
+melampaui `Number.MAX_SAFE_INTEGER` — untuk menutup satu situs yang sudah
+dibayar 66 kali dengan cara lokal yang eksplisit. Yang kurang bukan parser
+global; yang kurang **penagih idiomnya**.
+
+**Yang dikerjakan.**
+
+- **`::int` pada dua hitungan di `sampah/routes.ts`**, dengan komentar yang
+  menyebut sebabnya di situsnya — sehingga assertion di bawahnya jadi benar.
+- **Gerbang baru `hitungan-int-di-sql.test.ts`**: tiap `count()` di SQL mentah
+  wajib di-cast, ATAU berada di posisi yang tak pernah dibaca JS, ATAU
+  terdaftar di `KECUALI` beserta sebabnya — dan uji terpisah menagih bahwa
+  pengecualian itu MASIH membayar dengan cara lain (anotasi jujur + `Number()`).
+  Premisnya juga menagih `setTypeParser(1700)` masih ada dan OID 20 masih
+  TIDAK terdaftar: bila kelak didaftarkan, gerbang ini kehilangan alasannya dan
+  harus dibuang, bukan dibiarkan.
+
+**Bukti merah** (dipulihkan byte-per-byte, dicek `cmp`):
+
+| yang disuntik | hasil |
+| --- | --- |
+| `::int` dicabut lagi dari `sampah/routes.ts` | **merah**, menyebut berkas & baris |
+| `::int` dicabut dari situs LAIN (`shift/routes.ts`) | **merah**, menyebut situs itu |
+| `Number()` di `audit-invarian.ts` diganti assertion `number` | **merah** — pengecualiannya berhenti membayar |
+
+**DUA INSTRUMEN SAYA SENDIRI KELIRU, dan keduanya ketahuan sebelum commit.**
+Sapuan pertama memungut tiap baris ber-`count(` (117 situs) dan tak bisa
+membedakan helper drizzle — yang `.mapWith(Number)` sendiri, diperiksa di
+`node_modules` — dari teks SQL. Sapuan kedua mencari template ber-tag
+`` sql`…` `` dan menemukan 5: ia BUTA terhadap `` sql<number>`…` ``. Yang
+ketiga berhenti menebak tag dan melexer seluruh literal: 99. Lalu pemindai
+posisi klausanya menuduh `backup.ts` yang benar — `orderBy(desc(sql`count(*)`))`
+— karena ekor konteksnya masih memuat tag dan petik pembuka.
+
+**Gerbang**: typecheck bersih · verify-api **3.759 / 0** · vitest **263 berkas / 3.198 uji** (+1 berkas, +7 uji) · invarian
+**27 / 0** · Playwright **49 lolos**.
+
+**Batas yang diakui.**
+
+- **SAPUAN INI BERSIH, dan kebersihannya sempit**: ia menjawab "`count()` mana
+  yang tiba sebagai teks", bukan "angka mana di kawat yang bertipe salah".
+  Arah kedua sudah dijaga §309/§311 yang mengadu TIPE NILAI dari kawat dengan
+  kontrak — tapi hanya untuk rute yang masuk sapuan itu.
+- **Posisi "tak pernah dibaca" ditentukan dari teks**, bukan dari parser SQL:
+  kata klausa terakhir sebelum ekspresinya, dan untuk potongan tanpa kata
+  klausa, panggilan JS yang membungkusnya. Bentuk yang lebih berliku (subkueri
+  di dalam `HAVING` yang hasilnya diproyeksikan) akan salah dinilai.
+- **`sum()` sengaja di luar gerbang.** Alasannya terukur hari ini (nol situs
+  atas kolom integer) — dan itu keadaan, bukan jaminan. Kolom `integer` baru
+  yang kelak dijumlahkan tak akan dilihat gerbang ini.
+- **Nol perubahan kawat, nol perubahan kontrak, nol baris ponsel, nol baris web.**
+- Perilaku `POST /sampah/kosongkan` TIDAK berubah hari ini: `Number()` sudah
+  menutupinya. Yang berubah, tipenya berhenti bohong.
+
+---
+
 ## Setelan yang dibaca kode tapi TAK PUNYA JALAN ke produksi — 15 dari 30, dan salah satunya menaruh seluruh database di asal publik — server + deploy — 2026-09-11
 
 **Vena.** Bukan dari antrean: pemilik bertanya lapis mana dari "Full-Stack
