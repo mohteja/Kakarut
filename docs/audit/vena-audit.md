@@ -50,6 +50,151 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Lencana yang menghitung halaman, dan enam kunci yang cuma satu terlihat — web + server — 2026-09-12
+
+**Pemicu.** Butir teratas antrean: *"0 salinan bentuk di web (HABIS #109) + 40
+`api<{…}>` inline berratchet"* — sisa paruh kedua sebuah vena yang sudah
+membayar delapan salinan bernama. Angkanya ratchet, jadi butirnya sudah
+berhenti jadi daftar nama; yang tersisa adalah memilih mana dari empat puluh
+yang benar-benar menyembunyikan sesuatu.
+
+**Populasi & pilahan.** 40 situs `api<T>(…)` yang T-nya struktural, dibaca ulang
+dari pemindai yang sudah ada (`amplop-web-berkontrak.test.ts`). Dipilah mekanis
+lebih dulu — argumen panggilannya diambil dengan kurung berimbang, bukan regex,
+sebab panggilan ini kerap membentang beberapa baris — jadi **21 BACA / 19
+TULIS**. Sembilan belas yang TULIS adalah pengakuan `{ok, …}`: kelas yang
+sengaja di luar hitungan di ujung server, dan alasannya sama di sini.
+
+Kedua puluh satu yang BACA lalu **diketuk lewat HTTP** terhadap DB gerbang, dan
+kunci teratas yang dideklarasikan dibandingkan dengan yang benar-benar dikirim:
+
+| yang ditemukan | jumlah |
+| --- | --- |
+| amplop SETIA (`{ rows }` memang satu-satunya kunci) | 9 |
+| elemen larik disempitkan | 5 |
+| **amplop DISEMPITKAN** | **4** |
+| ketukan saya sendiri yang salah (`/perlengkapan/:id` → `{error}`) | 1 |
+
+**TEMUAN — empat situs melihat satu dari enam kunci, dan kunci kelima itu angka
+lencananya.** `/produksi` dan `/pembelian` mengirim `rows, total, page,
+per_page, total_pengeluaran, ringkas`. `Layout.tsx` ×2 dan `TimBerandaPage.tsx`
+×2 mengetik `{ rows: … }`. Lima kunci karena itu bukan sekadar tak terpakai —
+menyentuhnya jadi galat tipe.
+
+Yang kelima, `ringkas`, lahir persis untuk menghentikan klien menghitung
+halaman. Komentar kontraknya menuliskannya sendiri: *"Ringkasan antrean
+pengadaan atas SELURUH populasi tersaring — bukan halaman yang sedang tampil."*
+
+**Ukurannya, dari kawat.** Lencana dijumlahkan di peramban sebagai
+`new Set(rows.filter(barisBelumSelesai).map(faktur_id)).size`, atas balasan yang
+diminta `per_page=500`:
+
+| `per_page` diminta | dilayani | lencana dari `rows` | `ringkas.harus_dikerjakan.faktur` |
+| --- | --- | --- | --- |
+| 500 | **200** | 36 | 36 |
+| 50 | 50 | 36 | 36 |
+| 10 | 10 | **10** | 36 |
+| 1 | 1 | **1** | 36 |
+
+Dua hal terbaca sekaligus. Servernya **membatasi `per_page` di 200** — diminta
+500, dilayani 200 — jadi upaya "jangan potong" itu ditolak tanpa suara, dan
+`per_page` yang mengabarkannya tak pernah ada bagi `Layout.tsx` karena amplopnya
+diketik tangan. Dan hitungan dari halaman memang bergantung pada halaman:
+perusahaan dengan lebih dari 200 faktur melihat lencana yang diam-diam berhenti
+bertambah.
+
+**Dan cacat itu sudah dibayar sebelumnya, di berkas yang sama, dua puluh baris
+di bawahnya.** Lencana Beli Perlengkapan memakai `bpNav?.ringkas.butuh_aksi`,
+dan komentarnya sudah menuliskan seluruh diagnosisnya — *"penyaringnya cuma
+melihat daftar yang dipotong 200 baris, jadi lencananya diam-diam berhenti
+bertambah pada perusahaan yang riwayatnya panjang"*. Pintu saudaranya dibiarkan
+terbuka karena tipe tulis-tangannya membuat `ringkas` mustahil dilihat.
+
+**TEMUAN KEDUA, dan ia PRASYARAT bagi yang pertama.** Memindahkan hitungannya ke
+server hanya aman bila aturan servernya terpaku. Disapu: `TAHAP_BELUM_SELESAI`
+tinggal di `@kakarut/shared`, **web dipaku uji statis** agar memakainya — dan
+server mengeja sendiri `IN ('rencana', 'dikerjakan', 'menunggu')` di **empat
+tempat**, tanpa satu penjaga pun. Salah satunya kueri ringkasan yang kini jadi
+sumber angka lencana.
+
+Yang membuat ini instans termurni dari kelas *"aturannya benar, populasinya
+digambar sekali"*: berkas KELIMA, `rekomendasi/routes.ts`, merakitnya dari
+shared — dan komentarnya sudah memperingatkan terhadap persis apa yang keempat
+lainnya lakukan: *"Menuliskan `IN ('rencana','dikerjakan',…)` di sini adalah
+cara paling pasti membuat ubin ringkasan dan lencana kartu berselisih soal
+permintaan yang sama."*
+
+**Perbaikan.**
+- Empat situs amplop → `StokMasukPage` (kontraknya sudah ada, dan
+  `TambahStokPage` sudah memakainya untuk rute yang sama), angkanya dari
+  `ringkas.harus_dikerjakan.faktur`, `per_page` turun ke 1.
+- Tiga situs larik yang rutenya sudah bernama DI TEMPAT LAIN untuk URL yang
+  sama → `StokRowDto[]` ×2, `PengajuanRow[]` ×1. Nol judgement: pintu saudara
+  yang ejaannya tinggal disalin.
+- `produksi/routes.ts` merakit predikatnya dari `TAHAP_BELUM_SELESAI`.
+- Ratchet **40 → 33**.
+
+**Muatan, sebagai efek samping yang layak disebut.** Lencana ini hidup di
+cangkang aplikasi dan ditembakkan tiap 60 detik di SETIAP halaman:
+
+| | `per_page=500` | `per_page=1` |
+| --- | --- | --- |
+| `/produksi` | 150.026 byte | 1.694 byte |
+| `/pembelian` | 177.903 byte | 1.566 byte |
+
+328 KB → 3,3 KB tiap satu menit, per pengguna, di tiap halaman.
+
+**Penjaga, dan tiap-tiapnya dibuktikan bisa menuduh.**
+- Ratchet diajari RUTE (`situsTulisTanganBerjalur`), lalu `/produksi` &
+  `/pembelian` dikunci setingkat rute. Pengunci setingkat BERKAS dicoba lebih
+  dulu dan SALAH: `Layout.tsx` memuat sembilan situs dan yang dibayar cuma dua,
+  jadi ia ikut menagih tujuh yang lain.
+- `pengadaan-tabel.test.ts` dibalik arahnya. Sampai hari ini ia menagih kedua
+  berkas web MEMANGGIL `barisBelumSelesai(r.status)`; kini ia menagih keduanya
+  TIDAK, dan menagih angkanya datang dari `ringkas`. Uji yang benar untuk dunia
+  yang salah.
+- Uji baru: predikat servernya tak boleh memuat `'rencana'` sebagai literal.
+- Lengan peramban baru (`lencana-pengadaan.spec.ts`), dua lengan: lencana ==
+  angka server, dan — yang membuatnya menyatakan sesuatu — `rows` DIKOSONGKAN
+  dari balasan sungguhan sambil `ringkas` dibiarkan utuh. Kode lama membaca 0 di
+  sana, dan 0 pada `badgeOranye` berarti lencananya HILANG: kegagalannya akan
+  terbaca sebagai "tak ada yang perlu dikerjakan".
+
+Ketiga penjaga statis dan lengan peramban semuanya dijalankan atas kode LAMA
+lebih dulu dan semuanya merah; sumbernya dipulihkan byte-per-byte (`cmp`).
+Lengan perambannya merah di lengan PERTAMA — dengan `per_page=1`, hitungan lama
+berbunyi 1 melawan 36.
+
+**Alat ukur saya sendiri salah sekali lagi, dan penjaganya sendiri yang
+menangkapnya.** Saringan rute versi pertama memakai `/^\/(produksi|pembelian)\b/`
+— dan `\b` juga cocok pada `/produksi-lain`, sebab `-` bukan aksara kata. Lengan
+PASANGAN yang mengujinya merah; saringannya disempitkan ke `(\?|$)` supaya
+hanya rute DAFTAR yang terkunci, sebab `/produksi/faktur/:id` memang mengirim
+`{ rows }` dan satu kunci itu boleh diketik tangan.
+
+**Batas yang diakui.**
+- **Tiga salinan literal masih hidup** di `modules/stok/service.ts` (proyeksi
+  stok berjalan). Ketiganya sepakat dengan shared hari ini, tak ada yang
+  menahannya tetap begitu; diberi ratchet (≤ 3) dan disebut, tidak diseret ke
+  putaran ini. Bentuknya berbeda — di sana tiap status juga dijumlah sendiri
+  lewat `FILTER (WHERE status = …)`, jadi merakitnya dari shared adalah
+  perombakan SQL mentah, bukan penggantian satu baris.
+- **Lima situs larik masih menyempit** (`/pesanan`, `/meja/status`, dan `/stok`
+  yang sudah dibayar dua di antaranya). Keduanya yang pertama belum punya tipe
+  kontrak, jadi menamainya adalah vena tersendiri, bukan penggantian ejaan.
+- **Sembilan amplop setia dibiarkan tak bernama.** Mereka tak menyembunyikan
+  apa pun hari ini; yang tak dijaga adalah kalau servernya kelak menambah kunci
+  di sebelah `rows`.
+- **Pemindai berjalur hanya memetik awalan STATIS.** Situs yang jalurnya dimulai
+  `${endpoint}` tak bisa dikenali rutenya sama sekali — dua di antaranya ada
+  (`FakturDetailPage`), dan keduanya kebetulan setia.
+- **Cacat pemotongannya tak pernah terlihat pada data hari ini**: DB gerbang
+  punya 62 dan 104 faktur, keduanya di bawah 200. Yang diukur adalah
+  MEKANISMENYA (lencana runtuh seiring halaman mengecil), bukan gejalanya pada
+  perusahaan sungguhan yang riwayatnya panjang.
+
+---
+
 ## Alat ukur yang berhenti di tengah tanpa mengaku — dan verdik yang ditentukan sisa `dist` — gerbang — 2026-09-12
 
 **Pemicu.** Butir antrean yang ditulis pada rilis 2026-09-11: *"`verify-api.sh`
@@ -15521,7 +15666,13 @@ berlaku di situ).
       diukur ulang dengan pengurai berkurung-berimbang (bukan regex) atas 145
       berkas, populasinya **225 situs `api<T>(…)` bertipe, 46 di antaranya
       struktural**. Enam dibayar #109 → **40**, dan kini ada ratchet-nya:
-      `apps/server/test/amplop-web-berkontrak.test.ts`. Butir ini karena itu
+      `apps/server/test/amplop-web-berkontrak.test.ts`. Tujuh lagi dibayar
+      #123 → **33**, dan di sana keempat puluhnya lebih dulu DIPILAH (21 BACA /
+      19 TULIS) lalu tiap yang BACA diketuk lewat HTTP: empat menyempitkan
+      amplop `/produksi` & `/pembelian` dari enam kunci jadi satu, dan kunci
+      yang hilang itu `ringkas` — angka lencana yang dihitung atas seluruh
+      populasi. Ratchetnya kini juga tahu RUTE (`situsTulisTanganBerjalur`),
+      jadi rute yang sudah dibayar bisa dikunci tanpa mengunci seluruh berkas. Butir ini karena itu
       berhenti jadi daftar nama dan jadi ANGKA yang hanya boleh menyusut.
       (Angka "3" yang sempat tertulis di sini SALAH: daftarnya memuat lima
       nama. Disapu ulang tiap putaran sejak.) Catatan lama, masih berlaku: diukur ulang 2026-09-06
