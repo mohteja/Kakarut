@@ -50,6 +50,113 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Jatah alat ukur yang dihabiskan uji penolakan — gerbang — 2026-09-12
+
+**Pemicu.** Dua butir antrean yang berdampingan: *"Jangkauan §311 = jangkauan
+verify-api"* dan *"§311 merekam paling banyak 2 balasan per pola rute"*. Yang
+pertama ternyata BERSIH; yang kedua menyembunyikan cacat yang jauh lebih tajam
+daripada bunyinya.
+
+**Populasi.** Dua rekaman dari satu jalan gerbang yang sama: `JEJAK_RUTE` (apa
+yang diketuk) dan `ADU_TIPE` (balasan yang direkam untuk diadu dengan kontrak).
+Dibandingkan mekanis.
+
+**Butir pertama: BERSIH, dan sempit.** 305 pola diketuk, 302 terekam. Ketiga
+yang tak terekam bukan kelalaian melainkan tak punya bentuk untuk diadu:
+`GET /` (shell HTML), `GET /uploads/*` (aset statis), dan
+`GET /admin/sistem/backup/:id/unduh` (aliran berkas). Kekhawatiran butirnya —
+*"dua penjaga bertumpu pada mekanisme yang sama"* — memang benar dan kini
+terukur: keduanya dibatasi oleh apa yang verify-api ketuk, dan populasinya
+praktis identik.
+
+**Butir kedua: TEMUAN, dan bukan yang tertulis di butirnya.** Butirnya
+menduga cacatnya *"cuma muncul pada balasan ketiga dan seterusnya"*. Yang
+sebenarnya terjadi lebih buruk: **ada pola yang bentuk SUKSESNYA tak pernah
+diadu sama sekali.**
+
+Sebabnya dua keputusan yang tak saling tahu. Perekamnya memberi tiap rute jatah
+dua rekaman, berkunci `metode+pola`. Pembandingnya lalu **membuang tiap balasan
+berstatus ≥ 400** — bentuknya `{error}`/`{kode}`, dipaku dari sisi lain. Maka
+rute yang dua ketukan pertamanya kebetulan uji penolakan menghabiskan seluruh
+jatahnya pada balasan yang akan dibuang.
+
+**Diukur dengan menaikkan batasnya** (2 → 8) pada jalan yang sama:
+
+| | batas 2 | batas 8 |
+| --- | --- | --- |
+| rekaman | 585 | 1.851 |
+| **pola yang diadu** | **261** | **269** |
+| interface tersidik | 157 | 161 |
+| objek diadu | 2.766 | 13.930 |
+| selisih tipe | 0 | 0 |
+| berkas | 903 KB | 4,42 MB |
+
+Delapan pola kembali muncul, dan inilah delapan itu beserta dua ketukan
+pertamanya:
+
+```
+DELETE /api/bahan/:id                    409, 404
+PATCH  /api/pengajuan/:id                403, 400
+POST   /api/kebersihan                   400, 400
+POST   /api/penjualan                    409, 409
+POST   /api/profil/password              401, 400
+POST   /api/shift/:id/selisih/putuskan   403, 400
+POST   /api/transfer-stok                400, 400
+PUT    /api/bahan/:id/resep              400, 400
+```
+
+**`POST /api/penjualan` ada di daftar itu.** Rute paling inti aplikasi kasir —
+bentuk balasannya tak pernah sekali pun dibandingkan dengan kontrak, sementara
+§311 berbunyi hijau dan menyebut angka 261.
+
+**Dan tak ada yang mengabarkannya.** Lengan premisnya LANTAI (`≥ 250`), dan
+lantai tak bisa melihat delapan yang hilang. Ini kelas yang berulang di berkas
+ini dengan kalimatnya sendiri: *sapuan yang menyusut LULUS tanpa memeriksa apa
+pun* — kali ini yang menyusut bukan sapuannya melainkan apa yang sampai ke
+sapuan itu.
+
+**Perbaikan, dan ia lebih murah daripada menaikkan batas.** Kelas balasan ikut
+jadi kunci jatah (`lib/rekam-balasan.ts`), jadi uji penolakan punya jatahnya
+sendiri dan tak bisa mengelaparkan bentuk sukses:
+
+| bentuk | rekaman | pola diadu | berkas |
+| --- | --- | --- | --- |
+| batas 2, satu jatah | 585 | 261 | 903 KB |
+| batas 8, satu jatah | 1.851 | 269 | 4,42 MB |
+| **batas 2, jatah terpisah** | **899** | **269** | **1,04 MB** |
+
+Jangkauan penuh dengan 15% berkas lebih besar, bukan 5×.
+
+**Penjaga.** `rekam-balasan-jatah.test.ts` — bukan asersi teks belaka: ia
+MENJALANKAN jatahnya atas urutan status yang NYATA (`POST /api/penjualan`:
+409, 409, 201, 201) dengan kunci lama dan kunci baru, lalu membuang yang ≥ 400
+persis seperti pembandingnya. Kunci lama menyisakan **nol** bentuk sukses;
+kunci baru menyisakan dua. Satu lengan lagi membuktikan pemisahannya bukan
+pintu terbuka: seratus balasan 400 tetap direkam dua. Lantai §311 dinaikkan
+250 → **265**.
+
+Kedua penjaga dijalankan atas kode LAMA dan keduanya merah; sumbernya
+dipulihkan byte-per-byte (`cmp`).
+
+**Batas yang diakui.**
+- **Nol selisih tipe ditemukan pada kedelapan pola itu**, bahkan pada batas 8
+  dengan 13.930 objek. Yang dibayar vena ini adalah JANGKAUAN alat ukurnya,
+  bukan sebuah bug perilaku — delapan rute berhenti berada di luar pandangan.
+- **Batas 2 tetap 2.** Cacat yang hanya muncul pada balasan sukses KETIGA
+  (mis. hanya saat lariknya kosong) masih tak terlihat; yang dibuktikan
+  putaran ini cuma bahwa menaikkannya ke 8 tak menemukan apa-apa hari ini.
+- **Lantai tetap lantai.** 265 memberi empat pola ruang berayun bersama data;
+  kehilangan tiga pola masih lolos. Yang benar-benar mengikat adalah jatah
+  terpisahnya, bukan angkanya.
+- **Tiga pola tetap di luar jangkauan** (HTML, aset statis, aliran berkas), dan
+  itu memang tak punya bentuk untuk diadu.
+- §279 memerah enam lengan pada SATU dari tiga jalan percobaan, dengan premis
+  stoknya sendiri yang gagal (`porsi: 11`). Jalan batas-8 yang merekam TIGA
+  KALI lebih banyak justru hijau 3.760/0, jadi volume rekaman bukan sebabnya;
+  dicatat sebagai ayunan antar-jalan, bukan akibat perubahan ini.
+
+---
+
 ## Lencana yang menghitung halaman, dan enam kunci yang cuma satu terlihat — web + server — 2026-09-12
 
 **Pemicu.** Butir teratas antrean: *"0 salinan bentuk di web (HABIS #109) + 40
@@ -15710,15 +15817,18 @@ berlaku di situ).
       2.762 objek. Bukti merahnya membuktikan jangkauannya, bukan cuma
       kepekaannya: cacat yang cuma hidup di `POST /satuan` memerahkan §311
       sementara §309 tetap hijau
-- [ ] **Jangkauan §311 = jangkauan verify-api** — rute yang tak pernah diketuk
-      skrip itu tetap tak terekam. Bukan kelemahan baru (itu batas yang sudah
-      diukur `cakupan-rute.test.ts` + `docs/audit/rute-diketuk.txt`), tapi kini
-      DUA penjaga bertumpu pada mekanisme yang sama, dan itu pantas disebut
-      alih-alih terbaca sebagai dua jaminan terpisah
-- [ ] **§311 merekam paling banyak 2 balasan per pola rute** — cacat yang cuma
-      muncul pada balasan ketiga dan seterusnya (mis. hanya saat lariknya
-      kosong) tak terlihat. Angkanya konstan bernama di `app.ts`; menaikkannya
-      menukar jangkauan dengan ukuran berkas (902 KB pada dua rekaman)
+- [x] ~~**Jangkauan §311 = jangkauan verify-api**~~ — BERSIH, diukur #124.
+      305 pola diketuk, 302 terekam; ketiga sisanya tak punya bentuk untuk
+      diadu (shell HTML, aset statis, aliran berkas). Kekhawatirannya benar dan
+      kini terukur: keduanya memang dibatasi apa yang verify-api ketuk, dan
+      populasinya praktis identik
+- [x] ~~**§311 merekam paling banyak 2 balasan per pola rute**~~ — TEMUAN #124,
+      dan bukan yang tertulis di butir ini. Bukan "cacat pada balasan ketiga":
+      DELAPAN pola tak pernah punya SATU PUN bentuk sukses untuk diadu, sebab
+      jatah rekamannya habis di uji penolakan yang pembandingnya buang.
+      `POST /api/penjualan` salah satunya. Dibayar dengan memisahkan jatah per
+      kelas balasan — 261 → 269 pola diadu, berkas 903 KB → 1,04 MB (menaikkan
+      batas ke 8 memberi jangkauan yang sama dengan 4,42 MB)
 - [ ] **`/kebersihan/:id` tak pernah teruji dari kawat** — DB gerbang tak punya
       satu pun laporan kebersihan, jadi idnya tak bisa dipetik. Diratchet ≤ 1
       di §309 supaya rute detail kedua yang senasib tak lahir diam-diam

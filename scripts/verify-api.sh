@@ -18524,7 +18524,16 @@ if [ -s "$REKAM311" ]; then
   RINGKAS311=$(echo "$R311" | grep '^REKAM ' | head -1 || true)
   # Rekaman yang menyusut = sapuan yang menyusut, dan sapuan yang menyusut
   # LULUS tanpa memeriksa apa pun. Lantainya dipatok dari pengukuran.
-  cek "§311 premis: pola rute terekam ≥ 250 (§309 cuma menjangkau 108)" "V >= 250" \
+  #
+  # LANTAINYA DINAIKKAN 250 → 265 pada 2026-09-12, dan sebabnya terukur: lantai
+  # 250 pernah membiarkan DELAPAN pola hilang tanpa suara. Jatah rekaman
+  # berkunci `metode+pola` saja, sementara pembandingnya membuang tiap balasan
+  # ≥ 400 — jadi rute yang dua ketukan pertamanya uji penolakan tak pernah
+  # punya satu pun bentuk sukses untuk diadu. `POST /api/penjualan` salah
+  # satunya (409, 409). Jatahnya kini dipisah per kelas (`lib/rekam-balasan.ts`)
+  # dan angkanya 261 → 269; lantai 265 memberi empat pola ruang berayun bersama
+  # data dan tetap memerah bila delapan hilang lagi.
+  cek "§311 premis: pola rute terekam ≥ 265 (§309 cuma menjangkau 108)" "V >= 265" \
     "$(echo "$RINGKAS311" | awk '{print $3}')"
   cek "§311 premis: interface tersidik ≥ 150" "V >= 150" "$(echo "$RINGKAS311" | awk '{print $4}')"
   cek "§311 premis: objek yang diadu ≥ 2500" "V >= 2500" "$(echo "$RINGKAS311" | awk '{print $5}')"
