@@ -50,6 +50,106 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Alat ukur yang berhenti di tengah tanpa mengaku — dan verdik yang ditentukan sisa `dist` — gerbang — 2026-09-12
+
+**Pemicu.** Butir antrean yang ditulis pada rilis 2026-09-11: *"`verify-api.sh`
+harus menyatakan 'dist tak ada' sebagai PREMIS, alih-alih tiga lengan yang
+membingungkan. Masuk antrean sebagai vena alat ukur."* Yang ditemukan saat
+menggarapnya jauh lebih buruk daripada tiga lengan yang membingungkan.
+
+**Populasi & sapuan.** 2.159 penugasan `VAR=$(…)` di `scripts/verify-api.sh`
+disapu mekanis untuk satu pertanyaan: *kalau pengukuran ini meleset, yang mati
+satu lengan atau seluruh jalannya?* Di bawah `set -euo pipefail`, penugasan
+sebagai PERNYATAAN yang memuat `grep` / `curl -sf` / `jq -e` tanpa jaring
+membunuh prosesnya. **4 dari 2.159** begitu. Sapuan kedua, atas bentuk
+`KELUAR…=$?`: **3 dari 3** didahului penugasan telanjang, jadi barisnya mati.
+
+**Detektor dibuktikan bisa menuduh.** Ketiga pemindai teks dijalankan atas
+skrip PRA-PERBAIKAN yang disimpan utuh: `situsRawanAbort` menuduh baris 4743,
+18299, 18418, 18456; `kodeKeluarTakTerbaca` menuduh 18298, 18417, 18455;
+`blokDist` memulangkan nol blok (prasyaratnya memang belum ada). Keempat uji
+INTI merah di sana, ketiga uji mekanisme tetap hijau — dan skripnya dipulihkan
+byte-per-byte (`cmp`). Pemindainya juga diadu dengan komentar yang berbunyi
+sama persis, dan tak menuduhnya.
+
+**Temuan 1 — satu `grep` yang meleset membunuh 200 seksi, dan gerbangnya
+melaporkan "gagal tanpa satu pun kegagalan".** `ASET111=$(curl -s "$BASE/" |
+grep -o '/assets/…' | head -1)` adalah pernyataan. Pada server tanpa
+`apps/web/dist`, `grep` tak menemukan apa pun → 1 → `pipefail` meneruskannya →
+`set -e` keluar. **Terukur dari kawat**: jalannya berhenti di §111, dan §112
+sampai §313 tak pernah menembak sama sekali. Yang membaca gerbang melihat
+`exit=1` lalu `grep '✘'` memulangkan **nol baris**. Diperbaiki dengan jaring
+`|| true` — dan, karena "jalan terpotong" harus bisa dibedakan dari "jalan yang
+selesai lalu gagal", dengan penanda `TUNTAS` yang dinyalakan tepat sebelum
+baris verdik dan sebuah jebakan `EXIT` yang meneriakkan `JALAN TERPOTONG` bila
+penandanya masih 0. Jebakannya diuji tak menelan kode keluar: 0 tetap 0, 1
+tetap 1.
+
+**Temuan 2 — lengan yang ditulis untuk menangkap pemindai mati, dimatikan lebih
+dulu oleh shell-nya.** §309, §311 dan §313 semuanya berbentuk `R=$(npx tsx …)`
+lalu `KELUAR=$?`. Di bawah `set -e`, tsx yang gagal membunuh skripnya **di
+baris pertama**, jadi `KELUAR=$?` tak pernah dieksekusi: ketiga lengan
+*"…keluarannya sepakat dengan kode keluar skripnya"* **hanya pernah bisa
+melihat 0**, dan ketiga lengan premis *"pemindainya benar-benar jalan"* tak
+pernah sempat menembak. Terukur dari bash sungguhan: bentuk lama tak mencetak
+apa pun sesudahnya; bentuk `if …; then …; else …` memulangkan 3 dan membiarkan
+lengan premisnya merah. Ini kelas *"detektor yang tak bisa menuduh"* yang
+paling halus — bukan regex yang terlalu sempit, melainkan penjaga yang sudah
+mati sebelum ditanya.
+
+**Temuan 3 — verdik yang ditentukan sisa jalan sebelumnya, termasuk satu HIJAU
+PALSU.** Empat tempat menjawab pertanyaan *"apakah dist dilayani?"* dengan tiga
+cara berbeda: §111 mengikis `/assets/*.js` dari HTML, §139 menyimpulkannya dari
+header yang hilang, §61 tak pernah menurunkannya sama sekali. Diukur dengan
+`dist` dipindahkan (`/api/health` → `build: null`):
+
+| lengan §61 | nilai |
+| --- | --- |
+| `health menyertakan build id` | 0 — merah |
+| `header X-Kakarut-Build == build health` | 0 — merah |
+| `respons API lain membawa build yang sama` | **1 — hijau, membandingkan `""` dengan `""`** |
+
+Lengan ketiga itu tak menyatakan apa pun sejak lahir. Sekarang ada **satu**
+prasyarat, `ADA_DIST`, dan sumbernya jawaban server sendiri (`/api/health`),
+bukan HTML yang dikikis; empat blok mengonsultasinya, dan yang bergantung
+padanya **dilewati dengan cacah yang sama**, bukan dimerahkan. Lengan ketiga
+juga mendapat pagar `-n "$HDRME"`.
+
+**Ukuran, dan inilah bukti venanya lunas.** Skrip yang sama, DB yang sama-sama
+baru di-seed, satu-satunya yang berbeda adalah `apps/web/dist` saat boot:
+
+| jalan | `/api/health` | verdik | terpotong |
+| --- | --- | --- | --- |
+| tanpa dist (sebelum) | `build: null` | mati di §111, **nol ✘** | ya |
+| tanpa dist (sesudah) | `build: null` | **3.753 lolos, 2 gagal** | tidak |
+| dengan dist (sesudah) | `build: 9172a861…` | **3.753 lolos, 2 gagal** | tidak |
+
+Dua angka yang identik itulah pernyataannya: verdiknya tak lagi bisa dibeli
+dengan sisa keadaan. (Kedua kegagalan itu milik alat ukur SAYA, bukan skripnya
+— harness pengukurannya mengoper `ADU_TIPE=` ke verify-api tapi tidak ke boot
+servernya, dan §311 memang seharusnya merah karena itu. Identik di kedua sisi,
+jadi pembandingannya tetap sah; gerbang penuh mem-boot dengan `ADU_TIPE=`.)
+
+**Penjaga**: `apps/server/test/verify-api-tuntas.test.ts` — tiga pemindai teks
+(`situsRawanAbort`, `kodeKeluarTakTerbaca`, `blokDist`) plus tiga uji yang
+MENJALANKAN bash sungguhan, supaya asersinya terikat ke mekanisme dan bukan ke
+ejaan. `blokDist` menghitung **lengan**, bukan baris: cabang "dilewati" yang
+lupa satu `ok` membuat cacah asersi menyusut diam-diam, dan cacah yang menyusut
+adalah cara paling halus sebuah gerbang berhenti menjaga.
+
+**Batas yang diakui.**
+- Pemindai abort hanya melihat penugasan SATU BARIS. Substitusi yang membentang
+  beberapa baris, dan pipeline telanjang (bukan penugasan), belum tersapu.
+- `blokDist` menyamakan CACAH lengan, bukan maknanya. Cabang lewat yang
+  menembak `ok` sebanyak yang benar tapi dengan kalimat yang salah tetap lolos.
+- Kelas yang sama hampir pasti hidup di `scripts/` lain dan di skrip CI;
+  yang disapu putaran ini hanya `verify-api.sh`.
+- Yang membuat vena ini ada — skrip gerbang di scratchpad yang mem-boot sebelum
+  membangun — tetap tinggal di scratchpad. Yang dibayar di repo adalah
+  KEKEBALANNYA: sekarang urutan itu tak lagi bisa mengubah verdik.
+
+---
+
 ## RILIS 2026-09-11 — dua puluh vena tayang, dan gerbang yang dijalankan DUA KALI karena saya menumpuknya sendiri — server + web + ponsel — 2026-09-11
 
 **Pemicu.** Pemilik meminta rilis. Aturan tetap *"jangan dulu rilis apa pun
@@ -2277,6 +2377,14 @@ baru; yang bertambah cuma cara membacanya.
   bentuknya sudah jelas: `verify-api.sh` harus menyatakan "dist tak ada"
   sebagai PREMIS yang gagal keras, alih-alih tiga lengan yang membingungkan.
   Masuk antrean sebagai vena alat ukur; tidak diselundupkan ke dalam rilis.
+
+  **DIBAYAR 2026-09-12** — lihat entri "Alat ukur yang berhenti di tengah tanpa
+  mengaku" di atas. Bentuk akhirnya bukan premis yang GAGAL KERAS melainkan
+  premis yang MELEWATI dengan cacah lengan yang sama, dan yang ditemukan saat
+  menggarapnya lebih buruk daripada tiga lengan yang membingungkan: salah satu
+  dari ketiganya ternyata **hijau palsu**, dan jalan tanpa dist sebenarnya
+  **mati di §111** — 200-an seksi sesudahnya tak pernah menembak, dengan nol
+  tanda gagal di lognya.
 
 - **e2e 48/48 gagal, dan bukan asersinya**: peramban tak pernah diluncurkan.
   `npm install` di kontainer baru menarik `@playwright/test` **1.61.1**, yang
