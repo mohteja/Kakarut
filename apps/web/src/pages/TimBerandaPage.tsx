@@ -1,15 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import type { StokRowDto } from "@kakarut/shared";
+import type { StokMasukPage, StokRowDto } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, StatusBadge, tdClass, thClass } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
 import { formatAngka, formatTanggal, hariIniWIB } from "../lib/format";
-import type { KonfirmasiStatus } from "@kakarut/shared";
-import { barisBelumSelesai } from "@kakarut/shared";
-
-type ProdRow = { faktur_id: string; status: KonfirmasiStatus };
 type PenRow = { status: string };
 
 /**
@@ -81,13 +77,13 @@ export function TimBerandaPage() {
   // Tim CK & kitchen toko: produksi yang belum selesai (kitchen: produksi lokal).
   const { data: prod, error: eProd } = useQuery({
     queryKey: ["produksi-beranda"],
-    queryFn: () => api<{ rows: ProdRow[] }>("/produksi?per_page=200"),
+    queryFn: () => api<StokMasukPage>("/produksi?per_page=1"),
     enabled: diCk || isKitchen,
     refetchInterval: 60_000,
   });
   const { data: beli, error: eBeli } = useQuery({
     queryKey: ["pembelian-beranda"],
-    queryFn: () => api<{ rows: ProdRow[] }>("/pembelian?per_page=200"),
+    queryFn: () => api<StokMasukPage>("/pembelian?per_page=1"),
     enabled: diCk,
     refetchInterval: 60_000,
   });
@@ -99,12 +95,14 @@ export function TimBerandaPage() {
     );
   const jumlahKritis = kritis.length;
   const jumlahDatang = (pen?.rows ?? []).filter((r) => r.status === "menunggu").length;
-  const fakturBelum = (rows: ProdRow[] | undefined) =>
-    // Aturannya di `@kakarut/shared`; berkas ini dulu menyimpan salinan
-    // byte-per-byte dari `Layout.tsx`.
-    new Set((rows ?? []).filter((r) => barisBelumSelesai(r.status)).map((r) => r.faktur_id)).size;
-  const produksiBelum = fakturBelum(prod?.rows);
-  const beliBelum = fakturBelum(beli?.rows);
+  /*
+   * ANGKANYA DARI SERVER — lihat komentar sepadan di `Layout.tsx`. Berkas ini
+   * dulu menyimpan salinan byte-per-byte dari sana; salinan itu tak cuma
+   * berulang, ia juga MENGHITUNG DARI HALAMAN: `per_page=200` dilayani apa
+   * adanya sampai 200 faktur, lalu diam-diam terpotong.
+   */
+  const produksiBelum = prod?.ringkas.harus_dikerjakan.faktur ?? 0;
+  const beliBelum = beli?.ringkas.harus_dikerjakan.faktur ?? 0;
 
   /*
    * MENUNGGU vs GAGAL — `loading` diturunkan dari ada-tidaknya data, jadi query

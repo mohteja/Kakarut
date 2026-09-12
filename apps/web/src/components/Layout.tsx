@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import type {
   BeliPerlengkapanDaftar,
-  KonfirmasiStatus,
+  PengajuanRow,
   RingkasSelisihDto,
+  StokMasukPage,
+  StokRowDto,
 } from "@kakarut/shared";
-import { barisBelumSelesai } from "@kakarut/shared";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -104,7 +105,7 @@ export function Layout() {
   // bila hanya menipis.
   const { data: stok, error: stokGagal } = useQuery({
     queryKey: ["stok", dataQuery],
-    queryFn: () => api<{ status: string }[]>(`/stok${dataQuery}`),
+    queryFn: () => api<StokRowDto[]>(`/stok${dataQuery}`),
     enabled: !!auth && !auth.user.is_super_admin,
     refetchInterval: 120_000,
   });
@@ -139,31 +140,46 @@ export function Layout() {
   // memakai slot data "store" (useCabangData tanpa fokus) — faktur di Central
   // Kitchen tak terhitung → notif "belum selesai" hilang walau sebenarnya ada.
   const scopePengadaan = dariKantor ? "?branch_id=all" : dataQuery;
-  const qsPengadaan = `${scopePengadaan}${scopePengadaan ? "&" : "?"}per_page=500`;
+  /*
+   * `per_page=1` karena yang dibutuhkan hanya `ringkas` — persis alasan yang
+   * sudah ditulis untuk lencana Beli Perlengkapan di bawah, dan yang berlaku
+   * di sini sejak rute ini pun berhalaman.
+   *
+   * Bentuk sebelumnya meminta `per_page=500` lalu MENGHITUNG SENDIRI dari
+   * `rows`, dan itu salah dua kali. Pertama, servernya MEMBATASI per_page di
+   * 200 — terukur 2026-09-12: diminta 500, dilayani 200 — jadi permintaan
+   * "jangan potong" itu ditolak diam-diam, dan `per_page` yang mengabarkannya
+   * tak pernah ada bagi berkas ini karena tipenya ditulis tangan. Kedua,
+   * hitungan dari halaman memang bergantung pada halaman: pada DB gerbang yang
+   * sama lencananya berbunyi 36 saat `per_page=500`, 10 saat `per_page=10`,
+   * dan 1 saat `per_page=1` — sementara `ringkas.harus_dikerjakan.faktur`
+   * tetap 36. Perusahaan dengan lebih dari 200 faktur karena itu melihat
+   * lencana yang diam-diam berhenti bertambah.
+   */
+  const qsPengadaan = `${scopePengadaan}${scopePengadaan ? "&" : "?"}per_page=1`;
   const { data: prodNav, error: prodGagal } = useQuery({
     queryKey: ["produksi-nav", scopePengadaan],
-    queryFn: () => api<{ rows: { faktur_id: string; status: KonfirmasiStatus }[] }>(`/produksi${qsPengadaan}`),
+    queryFn: () => api<StokMasukPage>(`/produksi${qsPengadaan}`),
     enabled: lihatPengadaan,
     refetchInterval: 60_000,
   });
   const { data: beliNav, error: beliGagal } = useQuery({
     queryKey: ["pembelian-nav", scopePengadaan],
-    queryFn: () => api<{ rows: { faktur_id: string; status: KonfirmasiStatus }[] }>(`/pembelian${qsPengadaan}`),
+    queryFn: () => api<StokMasukPage>(`/pembelian${qsPengadaan}`),
     enabled: lihatBeli,
     refetchInterval: 60_000,
   });
   /*
-    Aturannya di `@kakarut/shared` (`barisBelumSelesai`), bukan di sini. Sampai
-    2026-09-03 himpunan ini ditulis TIGA kali — di berkas ini, di
-    `TimBerandaPage.tsx` byte-per-byte sama, dan di `TambahStokPage`. Bentuk
-    `new Set(...).size` DIPERTAHANKAN: ia menghitung FAKTUR, bukan baris, dan
-    sapuan `kueri-web.ts` mengenali pembantu satu-lompatan yang berakhir
-    `.size` — mengubahnya jadi bentuk lain membutakan penjaga itu.
+    ANGKANYA DARI SERVER, dan aturannya tetap satu rumah.
+    `ringkas.harus_dikerjakan.faktur` dihitung `COUNT(*) FILTER (WHERE
+    bool_or(belum))` atas SELURUH populasi tersaring — definisi yang sama
+    persis dengan `new Set(rows.filter(barisBelumSelesai).map(faktur_id)).size`
+    yang dulu berdiri di sini, dan predikatnya kini dirakit dari
+    `TAHAP_BELUM_SELESAI` alih-alih diketik ulang sebagai literal SQL.
+    Bedanya cuma satu, dan itu yang penting: ia tak bergantung pada halaman.
   */
-  const hitungBelum = (rows?: { faktur_id: string; status: KonfirmasiStatus }[]) =>
-    new Set((rows ?? []).filter((r) => barisBelumSelesai(r.status)).map((r) => r.faktur_id)).size;
-  const produksiBelum = hitungBelum(prodNav?.rows);
-  const beliBelum = hitungBelum(beliNav?.rows);
+  const produksiBelum = prodNav?.ringkas.harus_dikerjakan.faktur ?? 0;
+  const beliBelum = beliNav?.ringkas.harus_dikerjakan.faktur ?? 0;
   // Faktur BELI PERLENGKAPAN yang masih aktif (menunggu dibeli / diproses) →
   // badge di nav "Beli Perlengkapan" — notifikasi yang sama dgn Beli Bahan Baku.
   /*
@@ -191,7 +207,7 @@ export function Layout() {
   // Hanya manajemen yang memutuskan, jadi hanya mereka yang perlu di-query.
   const { data: pengajuanNav, error: pengajuanGagal } = useQuery({
     queryKey: ["pengajuan", "menunggu"],
-    queryFn: () => api<{ id: string }[]>("/pengajuan?status=menunggu"),
+    queryFn: () => api<PengajuanRow[]>("/pengajuan?status=menunggu"),
     enabled: !!auth && !auth.user.is_super_admin && manajemenGuard,
     refetchInterval: 60_000,
   });

@@ -12,6 +12,7 @@ import { branches } from "./db/schema";
 import { getBuildId } from "./lib/build";
 import { galatDataKlien, nilaiTakSah } from "./lib/pg-galat";
 import { amatiProxy } from "./lib/pengamatan-proxy";
+import { kunciRekam } from "./lib/rekam-balasan";
 import {
   requireAuth,
   requireCompany,
@@ -374,7 +375,7 @@ export function createApp() {
    *
    * Yang direkam POLA rutenya (bukan jalur ber-UUID), metode, status, dan
    * badan JSON-nya. Dibatasi dua arah supaya tak pernah jadi beban:
-   *   · paling banyak `MAKS_REKAM_PER_RUTE` rekaman per `metode+pola` —
+   *   · paling banyak `MAKS_REKAM_PER_RUTE` rekaman per `metode+pola+kelas` —
    *     balasan ke-101 sebuah rute tak menyatakan apa pun yang baru;
    *   · badan di atas `MAKS_BADAN_BYTE` dilewati (dicatat sebagai dilewati,
    *     bukan dibuang diam-diam).
@@ -396,7 +397,10 @@ export function createApp() {
       try {
         const tipe = c.res.headers.get("content-type") ?? "";
         if (!tipe.includes("application/json")) return;
-        const kunci = `${c.req.method} ${c.req.routePath}`;
+        // Kuncinya memuat KELAS balasan — lihat `lib/rekam-balasan.ts` untuk
+        // cacat terukur yang membuatnya begitu (delapan pola, di antaranya
+        // `POST /api/penjualan`, bentuk suksesnya tak pernah diadu).
+        const kunci = kunciRekam(c.req.method, c.req.routePath, c.res.status);
         const n = cacah.get(kunci) ?? 0;
         if (n >= MAKS_REKAM_PER_RUTE) return;
         cacah.set(kunci, n + 1);

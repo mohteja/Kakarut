@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import type { BahanDto, BahanResepRow, JenisPengadaan } from "@kakarut/shared";
+import type { BahanDto, BahanResepRow, JenisPengadaan, StokRowDto } from "@kakarut/shared";
 import { angkaDari } from "@kakarut/shared";
 import {
   Card,
@@ -274,7 +274,7 @@ export function FakturFormPage({ tipe }: { tipe: JenisPengadaan }) {
   // form: otomatis ikut rak default bahan (Tempat Penyimpanan) saat selesai.
   const { data: stokRows } = useQuery({
     queryKey: ["stok", branchQuery],
-    queryFn: () => api<{ ingredient_id: string; saldo: number }[]>(`/stok${branchQuery}`),
+    queryFn: () => api<StokRowDto[]>(`/stok${branchQuery}`),
     enabled: tipe === "produksi",
   });
   const saldoByIng = stokRows

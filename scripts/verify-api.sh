@@ -105,7 +105,14 @@ daftar_verif() { # <email> <password> <nama>
 # ketahuan. Rute mati di cabang `if` yang tak pernah jalan tetap lolos.
 RUTE_MATI="${TMPDIR:-/tmp}/verify-api-rute-mati.$$"
 : > "$RUTE_MATI"
-trap 'rm -f "$RUTE_MATI" "$KUOTA_HABIS"' EXIT
+# Jalan yang BERHENTI DI TENGAH tak boleh menyamar jadi jalan yang selesai
+# lalu gagal. Ini bukan hipotesis: satu `grep -o` tanpa jaring di §111
+# membunuh jalannya persis di sana (pipefail meneruskan 1, `set -e` keluar).
+# Gerbang membaca exit=1, lalu `grep '✘'` atas lognya memulangkan NOL BARIS —
+# "gagal tanpa satu pun kegagalan" — dan 200-an seksi sesudahnya tak pernah
+# menembak sama sekali. Penanda ini yang membedakan keduanya.
+TUNTAS=0
+trap 'rm -f "$RUTE_MATI" "$KUOTA_HABIS"; [ "$TUNTAS" = 1 ] || { echo; echo "=== JALAN TERPOTONG: berhenti sebelum sampai ke baris Hasil ==="; echo "    Seksi terakhir di ekor log di atas adalah tempat matinya."; echo "    Nol tanda gagal pada jalan ber-exit bukan-nol BERARTI INI, bukan tiadanya temuan."; }' EXIT
 
 catat_rute_mati() { # catat_rute_mati <method> <path> <badan-respons>
   case "$3" in
@@ -204,6 +211,28 @@ pastikanHadir() { # pastikanHadir <token> [keterangan]
   # berikutnya ikut terlihat — tapi SEBABNYA sudah tercatat di ringkasan.
   gagal "pastikanHadir gagal${ket:+ ($ket)} — /shift/buka sesudah ini pasti ditolak"
 }
+
+# ── PRASYARAT: apakah `apps/web/dist` ikut dilayani server ini? ────────────
+#
+# DITURUNKAN SEKALI, DI SATU TEMPAT. Sebelumnya pertanyaan yang sama dijawab
+# TIGA kali dengan tiga cara berbeda — §111 mengikis tautan aset dari HTML,
+# §139 menyimpulkan dari header yang hilang, dan §61 tak menjawabnya sama
+# sekali — dan itu yang membuat gerbang memerah tiga lengan ketika `dist`
+# kebetulan tak ada. Terukur 2026-09-12: tanpa `dist`, §61 memberi dua merah
+# DAN SATU HIJAU PALSU (`respons API lain membawa header build yang sama`
+# membandingkan "" dengan "" → lolos tanpa menyatakan apa pun), plus satu
+# merah di §111.
+#
+# Sumbernya jawaban SERVER sendiri: `/api/health` hanya membawa `build` bila
+# `dist` ada saat boot (`index.ts` → `setBuildId`). Mengikis HTML menjawab
+# pertanyaan yang mirip tapi bukan yang sama.
+BUILD_ID=$(curl -s "$BASE/api/health" | jq -r '.build // empty')
+if [ -n "$BUILD_ID" ]; then ADA_DIST=1; else ADA_DIST=0; fi
+if [ "$ADA_DIST" = 1 ]; then
+  ok "PRASYARAT: web dist dilayani server ini (build $BUILD_ID)"
+else
+  ok "PRASYARAT: web dist TIDAK dilayani — lengan yang bergantung padanya dilewati, bukan dimerahkan"
+fi
 
 echo "== 1. Login =="
 OWNER=$(login "$OWNER_EMAIL" "$OWNER_PASS");  [ -n "$OWNER" ] && ok "login owner"
@@ -2310,16 +2339,27 @@ cek "kasir dgn branch_id=all masih melihat transaksi cabangnya" "V == 1" \
 echo "== 61. Deteksi pembaruan: build id di /api/health + header X-Kakarut-Build =="
 HEALTH61=$(curl -s "$BASE/api/health")
 cek "health ok:true" "V == 1" "$(echo "$HEALTH61" | jq '.ok == true | if . then 1 else 0 end')"
-BUILD61=$(echo "$HEALTH61" | jq -r '.build // empty')
-cek "health menyertakan build id (dist tersedia)" "V == 1" \
-  "$([ -n "$BUILD61" ] && echo 1 || echo 0)"
-HDR61=$(curl -s -D - -o /dev/null "$BASE/api/health" | tr -d '\r' | awk 'tolower($1)=="x-kakarut-build:"{print $2}')
-cek "header X-Kakarut-Build sama dengan build health" "V == 1" \
-  "$([ -n "$BUILD61" ] && [ "$HDR61" = "$BUILD61" ] && echo 1 || echo 0)"
-# respons API berautentikasi juga membawa header build
-HDRME=$(curl -s -D - -o /dev/null "$BASE/api/auth/me" -H "Authorization: Bearer $OWNER" | tr -d '\r' | awk 'tolower($1)=="x-kakarut-build:"{print $2}')
-cek "respons API lain membawa header build yang sama" "V == 1" \
-  "$([ "$HDRME" = "$BUILD61" ] && echo 1 || echo 0)"
+if [ "$ADA_DIST" = 1 ]; then
+  BUILD61=$(echo "$HEALTH61" | jq -r '.build // empty')
+  cek "health menyertakan build id" "V == 1" \
+    "$([ -n "$BUILD61" ] && echo 1 || echo 0)"
+  HDR61=$(curl -s -D - -o /dev/null "$BASE/api/health" | tr -d '\r' | awk 'tolower($1)=="x-kakarut-build:"{print $2}')
+  cek "header X-Kakarut-Build sama dengan build health" "V == 1" \
+    "$([ -n "$BUILD61" ] && [ "$HDR61" = "$BUILD61" ] && echo 1 || echo 0)"
+  # Respons API berautentikasi juga membawa header build.
+  #
+  # `-n` DI SINI BUKAN HIASAN: tanpa itu, dua nilai yang sama-sama kosong
+  # membuat lengan ini LOLOS — dan itulah persis yang terjadi pada server
+  # tanpa dist sebelum prasyarat di atas ada. Hijau yang tak menyatakan apa
+  # pun lebih berbahaya daripada merah yang membingungkan.
+  HDRME=$(curl -s -D - -o /dev/null "$BASE/api/auth/me" -H "Authorization: Bearer $OWNER" | tr -d '\r' | awk 'tolower($1)=="x-kakarut-build:"{print $2}')
+  cek "respons API lain membawa header build yang sama" "V == 1" \
+    "$([ -n "$HDRME" ] && [ "$HDRME" = "$BUILD61" ] && echo 1 || echo 0)"
+else
+  ok "health menyertakan build id (dilewati — web dist tak tersedia)"
+  ok "header X-Kakarut-Build sama dengan build health (dilewati — web dist tak tersedia)"
+  ok "respons API lain membawa header build yang sama (dilewati — web dist tak tersedia)"
+fi
 
 echo "== 62. Permintaan tambah stok = work-order Central Kitchen =="
 # owner minta tambah stok utk store CB46 (pemasok CK52_UTAMA), produksi di CK.
@@ -4738,10 +4778,20 @@ ENC111=$(header_of "content-encoding" -H 'Accept-Encoding: gzip' -H "Authorizati
 cek "API JSON besar terkompresi gzip" "V == 1" "$([ "$ENC111" = "gzip" ] && echo 1 || echo 0)"
 ENC111B=$(header_of "content-encoding" -H "Authorization: Bearer $OWNER" "$BASE/api/bahan")
 cek "tanpa Accept-Encoding → tidak dikompresi" "V == 1" "$([ -z "$ENC111B" ] && echo 1 || echo 0)"
-CCSHELL=$(header_of "cache-control" "$BASE/")
-cek "HTML shell tetap no-cache" "V == 1" "$(echo "$CCSHELL" | grep -q no-cache && echo 1 || echo 0)"
-ASET111=$(curl -s "$BASE/" | grep -o '/assets/[^"]*\.js' | head -1)
-if [ -n "$ASET111" ]; then
+if [ "$ADA_DIST" = 1 ]; then
+  CCSHELL=$(header_of "cache-control" "$BASE/")
+  cek "HTML shell tetap no-cache" "V == 1" "$(echo "$CCSHELL" | grep -q no-cache && echo 1 || echo 0)"
+else
+  ok "HTML shell tetap no-cache (dilewati — web dist tak tersedia)"
+fi
+# Jalur asetnya masih dikikis dari HTML — itu yang dibutuhkan, dan hanya bisa
+# didapat dari sana. Yang TIDAK lagi disimpulkan dari sini: ada-tidaknya dist.
+# `|| true` BUKAN hiasan: skripnya `set -euo pipefail`, dan `grep -o` yang tak
+# menemukan apa pun memulangkan 1 — pipefail meneruskannya, `set -e` membunuh
+# seluruh jalannya di sini. Tanpa dist, itu persis yang terjadi: jalannya
+# berhenti diam-diam di §111 dan 200-an seksi sesudahnya tak pernah menembak.
+ASET111=$(curl -s "$BASE/" | grep -o '/assets/[^"]*\.js' | head -1 || true)
+if [ "$ADA_DIST" = 1 ] && [ -n "$ASET111" ]; then
   CC111=$(header_of "cache-control" "$BASE$ASET111")
   cek "aset ber-hash ber-Cache-Control immutable" "V == 1" \
     "$(echo "$CC111" | grep -q immutable && echo 1 || echo 0)"
@@ -4805,7 +4855,7 @@ cek "file upload tersaji ber-Cache-Control immutable" "V == 1" \
 CC114B=$(header_of "cache-control" "$BASE/uploads/companies/x/menu/tidak-ada-114.png")
 cek "upload hilang → 404 tanpa immutable" "V == 1" \
   "$([ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/uploads/companies/x/menu/tidak-ada-114.png")" = "404" ] && ! echo "$CC114B" | grep -q immutable && echo 1 || echo 0)"
-if [ -n "$ASET111" ]; then
+if [ "$ADA_DIST" = 1 ]; then
   CC114C=$(header_of "cache-control" "$BASE/assets/tidak-ada-114.js")
   cek "aset hilang → no-cache (bukan immutable)" "V == 1" \
     "$(echo "$CC114C" | grep -q no-cache && ! echo "$CC114C" | grep -q immutable && echo 1 || echo 0)"
@@ -6053,7 +6103,7 @@ B139_200=$(hdr_of "$OWNER" /cabang 'X-Kakarut-Build')
 B139_304=$(curl -s -o /dev/null -D - -X GET "$BASE/api/cabang" \
   -H "Authorization: Bearer $OWNER" -H "If-None-Match: $(etag_of "$OWNER" /cabang)" \
   | tr -d '\r' | sed -n 's/^X-Kakarut-Build: *//Ip')
-if [ -z "$B139_200" ]; then
+if [ "$ADA_DIST" = 0 ]; then
   # server tanpa dist (CI job API-only) tak punya build id — tak ada yang diuji
   ok "304: build id — dilewati, server tanpa dist frontend"
 else
@@ -18294,9 +18344,15 @@ ADU309="apps/server/test/util/adu-tipe-kawat.ts"
 UJI309=$(npx tsx "$ADU309" --uji-diri 2>/dev/null)
 cek "§309 PASANGAN: contoh benar 0 selisih, contoh salah-tipe 1 selisih" "V == 1" \
   "$([ "$UJI309" = "0 1 0 1" ] && echo 1 || echo 0)"
-R309=$(npx tsx "$ADU309" --ringkas --basis "$BASE/api" --owner "$OWNER" --sa "$SA" --kasir "$REISS105" 2>/tmp/adu309.err)
-KELUAR309=$?
-RINGKAS309=$(echo "$R309" | grep '^RINGKAS ' | head -1)
+# `if …; then …; else …` BUKAN gaya. Di bawah `set -e`, `VAR=$(cmd)` yang
+# gagal membunuh skripnya DI BARIS ITU JUGA: `KELUAR309=$?` tak pernah
+# dieksekusi, jadi lengan "keluarannya sepakat dengan kode keluar skripnya"
+# hanya bisa melihat 0, dan lengan premis "pemindainya benar-benar jalan"
+# tak pernah sempat menembak. Lengan yang ditulis untuk menangkap pemindai
+# mati justru dimatikan lebih dulu oleh shell-nya. Terukur: bentuk lama
+# berhenti tanpa mencetak apa pun sesudahnya; bentuk ini memulangkan 3.
+if R309=$(npx tsx "$ADU309" --ringkas --basis "$BASE/api" --owner "$OWNER" --sa "$SA" --kasir "$REISS105" 2>/tmp/adu309.err); then KELUAR309=0; else KELUAR309=$?; fi
+RINGKAS309=$(echo "$R309" | grep '^RINGKAS ' | head -1 || true)
 cek "§309 premis: pemindainya benar-benar jalan (baris RINGKAS ada)" "V == 1" \
   "$([ -n "$RINGKAS309" ] && echo 1 || echo 0)"
 # Rute yang 4xx diam-diam adalah sapuan yang menyusut tanpa suara — dan sapuan
@@ -18413,9 +18469,15 @@ cek "§312 /auth/me kasir tetap membawa setelan operasionalnya" "V == 1" \
 #
 # Ratchetnya dua arah: pengecualian yang sudah TIDAK bocor dilaporkan BASI,
 # jadi utang yang lunas tak bisa menggantung sebagai izin permanen.
-B313=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --biaya --basis "$BASE/api" --kasir "$REISS105" 2>/tmp/biaya313.err)
-KELUAR313=$?
-RINGKAS313=$(echo "$B313" | grep '^BIAYA ' | head -1)
+# `if …; then …; else …` BUKAN gaya. Di bawah `set -e`, `VAR=$(cmd)` yang
+# gagal membunuh skripnya DI BARIS ITU JUGA: `KELUAR313=$?` tak pernah
+# dieksekusi, jadi lengan "keluarannya sepakat dengan kode keluar skripnya"
+# hanya bisa melihat 0, dan lengan premis "pemindainya benar-benar jalan"
+# tak pernah sempat menembak. Lengan yang ditulis untuk menangkap pemindai
+# mati justru dimatikan lebih dulu oleh shell-nya. Terukur: bentuk lama
+# berhenti tanpa mencetak apa pun sesudahnya; bentuk ini memulangkan 3.
+if B313=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --biaya --basis "$BASE/api" --kasir "$REISS105" 2>/tmp/biaya313.err); then KELUAR313=0; else KELUAR313=$?; fi
+RINGKAS313=$(echo "$B313" | grep '^BIAYA ' | head -1 || true)
 cek "§313 premis: pemindainya jalan (baris BIAYA ada)" "V == 1" \
   "$([ -n "$RINGKAS313" ] && echo 1 || echo 0)"
 cek "§313 premis: daftar kebijakan terbaca ≥ 10 medan" "V >= 10" "$(echo "$RINGKAS313" | awk '{print $2}')"
@@ -18451,12 +18513,27 @@ REKAM311="${ADU_TIPE:-/tmp/adu-tipe.jsonl}"
 cek "§311 premis: servernya benar-benar merekam (berkas ada & berisi)" "V == 1" \
   "$([ -s "$REKAM311" ] && echo 1 || echo 0)"
 if [ -s "$REKAM311" ]; then
-  R311=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --berkas "$REKAM311" 2>/tmp/adu311.err)
-  KELUAR311=$?
-  RINGKAS311=$(echo "$R311" | grep '^REKAM ' | head -1)
+  # `if …; then …; else …` BUKAN gaya. Di bawah `set -e`, `VAR=$(cmd)` yang
+  # gagal membunuh skripnya DI BARIS ITU JUGA: `KELUAR311=$?` tak pernah
+  # dieksekusi, jadi lengan "keluarannya sepakat dengan kode keluar skripnya"
+  # hanya bisa melihat 0, dan lengan premis "pemindainya benar-benar jalan"
+  # tak pernah sempat menembak. Lengan yang ditulis untuk menangkap pemindai
+  # mati justru dimatikan lebih dulu oleh shell-nya. Terukur: bentuk lama
+  # berhenti tanpa mencetak apa pun sesudahnya; bentuk ini memulangkan 3.
+  if R311=$(npx tsx apps/server/test/util/adu-tipe-kawat.ts --berkas "$REKAM311" 2>/tmp/adu311.err); then KELUAR311=0; else KELUAR311=$?; fi
+  RINGKAS311=$(echo "$R311" | grep '^REKAM ' | head -1 || true)
   # Rekaman yang menyusut = sapuan yang menyusut, dan sapuan yang menyusut
   # LULUS tanpa memeriksa apa pun. Lantainya dipatok dari pengukuran.
-  cek "§311 premis: pola rute terekam ≥ 250 (§309 cuma menjangkau 108)" "V >= 250" \
+  #
+  # LANTAINYA DINAIKKAN 250 → 265 pada 2026-09-12, dan sebabnya terukur: lantai
+  # 250 pernah membiarkan DELAPAN pola hilang tanpa suara. Jatah rekaman
+  # berkunci `metode+pola` saja, sementara pembandingnya membuang tiap balasan
+  # ≥ 400 — jadi rute yang dua ketukan pertamanya uji penolakan tak pernah
+  # punya satu pun bentuk sukses untuk diadu. `POST /api/penjualan` salah
+  # satunya (409, 409). Jatahnya kini dipisah per kelas (`lib/rekam-balasan.ts`)
+  # dan angkanya 261 → 269; lantai 265 memberi empat pola ruang berayun bersama
+  # data dan tetap memerah bila delapan hilang lagi.
+  cek "§311 premis: pola rute terekam ≥ 265 (§309 cuma menjangkau 108)" "V >= 265" \
     "$(echo "$RINGKAS311" | awk '{print $3}')"
   cek "§311 premis: interface tersidik ≥ 150" "V >= 150" "$(echo "$RINGKAS311" | awk '{print $4}')"
   cek "§311 premis: objek yang diadu ≥ 2500" "V >= 2500" "$(echo "$RINGKAS311" | awk '{print $5}')"
@@ -18476,5 +18553,6 @@ if [ "$FAIL" -gt 0 ]; then
   for g in "${GAGAL_RINGKAS[@]}"; do echo "  ✘ $g"; done
   echo
 fi
+TUNTAS=1
 echo "=== Hasil: $PASS lolos, $FAIL gagal ==="
 [ "$FAIL" -eq 0 ]
