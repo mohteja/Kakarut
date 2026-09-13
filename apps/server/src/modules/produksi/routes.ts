@@ -29,6 +29,7 @@ import {
   hargaPerUnit,
   jumlahFaktur,
   qtyTeks,
+  TAHAP_BELUM_SELESAI,
   type DampakBahan,
   type DampakLaporanHarga,
   type DampakMenu,
@@ -3039,7 +3040,19 @@ function buatRuteTambahStok(tipe: JenisPengadaan) {
        * `COUNT(DISTINCT key)`): nilainya sama, tapi kini mustahil ringkasannya
        * bicara soal populasi yang berbeda dari judulnya.
        */
-      const belumSelesaiSql = sql`${productions.status} IN ('rencana', 'dikerjakan', 'menunggu')`;
+      /*
+       * DIRAKIT dari `@kakarut/shared`, tidak diketik ulang sebagai literal SQL
+       * — idiom yang sudah dipakai `rekomendasi/routes.ts`, yang komentarnya
+       * menuliskan sebabnya lebih dulu daripada berkas ini mematuhinya:
+       * menuliskan `IN ('rencana','dikerjakan',…)` di sini "adalah cara paling
+       * pasti membuat ubin ringkasan dan lencana kartu berselisih soal
+       * permintaan yang sama."
+       *
+       * Sejak 2026-09-12 itu bukan lagi soal kerapian: lencana nav dan beranda
+       * tim BERHENTI menghitung sendiri dan memakai `ringkas` dari sini, jadi
+       * salinan yang menyimpang di baris ini akan menggerakkan angka di layar.
+       */
+      const belumSelesaiSql = sql`${inArray(productions.status, [...TAHAP_BELUM_SELESAI])}`;
       // "Selesai tapi belum sampai": berbunyi beres di papan sementara barangnya
       // tak bisa dipakai siapa pun. Predikatnya disalin dari `stok/service.ts`
       // (`qtyDiJalan`), bukan dikarang di sini.

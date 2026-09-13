@@ -50,6 +50,421 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## Jatah alat ukur yang dihabiskan uji penolakan — gerbang — 2026-09-12
+
+**Pemicu.** Dua butir antrean yang berdampingan: *"Jangkauan §311 = jangkauan
+verify-api"* dan *"§311 merekam paling banyak 2 balasan per pola rute"*. Yang
+pertama ternyata BERSIH; yang kedua menyembunyikan cacat yang jauh lebih tajam
+daripada bunyinya.
+
+**Populasi.** Dua rekaman dari satu jalan gerbang yang sama: `JEJAK_RUTE` (apa
+yang diketuk) dan `ADU_TIPE` (balasan yang direkam untuk diadu dengan kontrak).
+Dibandingkan mekanis.
+
+**Butir pertama: BERSIH, dan sempit.** 305 pola diketuk, 302 terekam. Ketiga
+yang tak terekam bukan kelalaian melainkan tak punya bentuk untuk diadu:
+`GET /` (shell HTML), `GET /uploads/*` (aset statis), dan
+`GET /admin/sistem/backup/:id/unduh` (aliran berkas). Kekhawatiran butirnya —
+*"dua penjaga bertumpu pada mekanisme yang sama"* — memang benar dan kini
+terukur: keduanya dibatasi oleh apa yang verify-api ketuk, dan populasinya
+praktis identik.
+
+**Butir kedua: TEMUAN, dan bukan yang tertulis di butirnya.** Butirnya
+menduga cacatnya *"cuma muncul pada balasan ketiga dan seterusnya"*. Yang
+sebenarnya terjadi lebih buruk: **ada pola yang bentuk SUKSESNYA tak pernah
+diadu sama sekali.**
+
+Sebabnya dua keputusan yang tak saling tahu. Perekamnya memberi tiap rute jatah
+dua rekaman, berkunci `metode+pola`. Pembandingnya lalu **membuang tiap balasan
+berstatus ≥ 400** — bentuknya `{error}`/`{kode}`, dipaku dari sisi lain. Maka
+rute yang dua ketukan pertamanya kebetulan uji penolakan menghabiskan seluruh
+jatahnya pada balasan yang akan dibuang.
+
+**Diukur dengan menaikkan batasnya** (2 → 8) pada jalan yang sama:
+
+| | batas 2 | batas 8 |
+| --- | --- | --- |
+| rekaman | 585 | 1.851 |
+| **pola yang diadu** | **261** | **269** |
+| interface tersidik | 157 | 161 |
+| objek diadu | 2.766 | 13.930 |
+| selisih tipe | 0 | 0 |
+| berkas | 903 KB | 4,42 MB |
+
+Delapan pola kembali muncul, dan inilah delapan itu beserta dua ketukan
+pertamanya:
+
+```
+DELETE /api/bahan/:id                    409, 404
+PATCH  /api/pengajuan/:id                403, 400
+POST   /api/kebersihan                   400, 400
+POST   /api/penjualan                    409, 409
+POST   /api/profil/password              401, 400
+POST   /api/shift/:id/selisih/putuskan   403, 400
+POST   /api/transfer-stok                400, 400
+PUT    /api/bahan/:id/resep              400, 400
+```
+
+**`POST /api/penjualan` ada di daftar itu.** Rute paling inti aplikasi kasir —
+bentuk balasannya tak pernah sekali pun dibandingkan dengan kontrak, sementara
+§311 berbunyi hijau dan menyebut angka 261.
+
+**Dan tak ada yang mengabarkannya.** Lengan premisnya LANTAI (`≥ 250`), dan
+lantai tak bisa melihat delapan yang hilang. Ini kelas yang berulang di berkas
+ini dengan kalimatnya sendiri: *sapuan yang menyusut LULUS tanpa memeriksa apa
+pun* — kali ini yang menyusut bukan sapuannya melainkan apa yang sampai ke
+sapuan itu.
+
+**Perbaikan, dan ia lebih murah daripada menaikkan batas.** Kelas balasan ikut
+jadi kunci jatah (`lib/rekam-balasan.ts`), jadi uji penolakan punya jatahnya
+sendiri dan tak bisa mengelaparkan bentuk sukses:
+
+| bentuk | rekaman | pola diadu | berkas |
+| --- | --- | --- | --- |
+| batas 2, satu jatah | 585 | 261 | 903 KB |
+| batas 8, satu jatah | 1.851 | 269 | 4,42 MB |
+| **batas 2, jatah terpisah** | **899** | **269** | **1,04 MB** |
+
+Jangkauan penuh dengan 15% berkas lebih besar, bukan 5×.
+
+**Penjaga.** `rekam-balasan-jatah.test.ts` — bukan asersi teks belaka: ia
+MENJALANKAN jatahnya atas urutan status yang NYATA (`POST /api/penjualan`:
+409, 409, 201, 201) dengan kunci lama dan kunci baru, lalu membuang yang ≥ 400
+persis seperti pembandingnya. Kunci lama menyisakan **nol** bentuk sukses;
+kunci baru menyisakan dua. Satu lengan lagi membuktikan pemisahannya bukan
+pintu terbuka: seratus balasan 400 tetap direkam dua. Lantai §311 dinaikkan
+250 → **265**.
+
+Kedua penjaga dijalankan atas kode LAMA dan keduanya merah; sumbernya
+dipulihkan byte-per-byte (`cmp`).
+
+**Batas yang diakui.**
+- **Nol selisih tipe ditemukan pada kedelapan pola itu**, bahkan pada batas 8
+  dengan 13.930 objek. Yang dibayar vena ini adalah JANGKAUAN alat ukurnya,
+  bukan sebuah bug perilaku — delapan rute berhenti berada di luar pandangan.
+- **Batas 2 tetap 2.** Cacat yang hanya muncul pada balasan sukses KETIGA
+  (mis. hanya saat lariknya kosong) masih tak terlihat; yang dibuktikan
+  putaran ini cuma bahwa menaikkannya ke 8 tak menemukan apa-apa hari ini.
+- **Lantai tetap lantai.** 265 memberi empat pola ruang berayun bersama data;
+  kehilangan tiga pola masih lolos. Yang benar-benar mengikat adalah jatah
+  terpisahnya, bukan angkanya.
+- **Tiga pola tetap di luar jangkauan** (HTML, aset statis, aliran berkas), dan
+  itu memang tak punya bentuk untuk diadu.
+- §279 memerah enam lengan pada SATU dari tiga jalan percobaan, dengan premis
+  stoknya sendiri yang gagal (`porsi: 11`). Jalan batas-8 yang merekam TIGA
+  KALI lebih banyak justru hijau 3.760/0, jadi volume rekaman bukan sebabnya;
+  dicatat sebagai ayunan antar-jalan, bukan akibat perubahan ini.
+
+---
+
+## Lencana yang menghitung halaman, dan enam kunci yang cuma satu terlihat — web + server — 2026-09-12
+
+**Pemicu.** Butir teratas antrean: *"0 salinan bentuk di web (HABIS #109) + 40
+`api<{…}>` inline berratchet"* — sisa paruh kedua sebuah vena yang sudah
+membayar delapan salinan bernama. Angkanya ratchet, jadi butirnya sudah
+berhenti jadi daftar nama; yang tersisa adalah memilih mana dari empat puluh
+yang benar-benar menyembunyikan sesuatu.
+
+**Populasi & pilahan.** 40 situs `api<T>(…)` yang T-nya struktural, dibaca ulang
+dari pemindai yang sudah ada (`amplop-web-berkontrak.test.ts`). Dipilah mekanis
+lebih dulu — argumen panggilannya diambil dengan kurung berimbang, bukan regex,
+sebab panggilan ini kerap membentang beberapa baris — jadi **21 BACA / 19
+TULIS**. Sembilan belas yang TULIS adalah pengakuan `{ok, …}`: kelas yang
+sengaja di luar hitungan di ujung server, dan alasannya sama di sini.
+
+Kedua puluh satu yang BACA lalu **diketuk lewat HTTP** terhadap DB gerbang, dan
+kunci teratas yang dideklarasikan dibandingkan dengan yang benar-benar dikirim:
+
+| yang ditemukan | jumlah |
+| --- | --- |
+| amplop SETIA (`{ rows }` memang satu-satunya kunci) | 9 |
+| elemen larik disempitkan | 5 |
+| **amplop DISEMPITKAN** | **4** |
+| ketukan saya sendiri yang salah (`/perlengkapan/:id` → `{error}`) | 1 |
+
+**TEMUAN — empat situs melihat satu dari enam kunci, dan kunci kelima itu angka
+lencananya.** `/produksi` dan `/pembelian` mengirim `rows, total, page,
+per_page, total_pengeluaran, ringkas`. `Layout.tsx` ×2 dan `TimBerandaPage.tsx`
+×2 mengetik `{ rows: … }`. Lima kunci karena itu bukan sekadar tak terpakai —
+menyentuhnya jadi galat tipe.
+
+Yang kelima, `ringkas`, lahir persis untuk menghentikan klien menghitung
+halaman. Komentar kontraknya menuliskannya sendiri: *"Ringkasan antrean
+pengadaan atas SELURUH populasi tersaring — bukan halaman yang sedang tampil."*
+
+**Ukurannya, dari kawat.** Lencana dijumlahkan di peramban sebagai
+`new Set(rows.filter(barisBelumSelesai).map(faktur_id)).size`, atas balasan yang
+diminta `per_page=500`:
+
+| `per_page` diminta | dilayani | lencana dari `rows` | `ringkas.harus_dikerjakan.faktur` |
+| --- | --- | --- | --- |
+| 500 | **200** | 36 | 36 |
+| 50 | 50 | 36 | 36 |
+| 10 | 10 | **10** | 36 |
+| 1 | 1 | **1** | 36 |
+
+Dua hal terbaca sekaligus. Servernya **membatasi `per_page` di 200** — diminta
+500, dilayani 200 — jadi upaya "jangan potong" itu ditolak tanpa suara, dan
+`per_page` yang mengabarkannya tak pernah ada bagi `Layout.tsx` karena amplopnya
+diketik tangan. Dan hitungan dari halaman memang bergantung pada halaman:
+perusahaan dengan lebih dari 200 faktur melihat lencana yang diam-diam berhenti
+bertambah.
+
+**Dan cacat itu sudah dibayar sebelumnya, di berkas yang sama, dua puluh baris
+di bawahnya.** Lencana Beli Perlengkapan memakai `bpNav?.ringkas.butuh_aksi`,
+dan komentarnya sudah menuliskan seluruh diagnosisnya — *"penyaringnya cuma
+melihat daftar yang dipotong 200 baris, jadi lencananya diam-diam berhenti
+bertambah pada perusahaan yang riwayatnya panjang"*. Pintu saudaranya dibiarkan
+terbuka karena tipe tulis-tangannya membuat `ringkas` mustahil dilihat.
+
+**TEMUAN KEDUA, dan ia PRASYARAT bagi yang pertama.** Memindahkan hitungannya ke
+server hanya aman bila aturan servernya terpaku. Disapu: `TAHAP_BELUM_SELESAI`
+tinggal di `@kakarut/shared`, **web dipaku uji statis** agar memakainya — dan
+server mengeja sendiri `IN ('rencana', 'dikerjakan', 'menunggu')` di **empat
+tempat**, tanpa satu penjaga pun. Salah satunya kueri ringkasan yang kini jadi
+sumber angka lencana.
+
+Yang membuat ini instans termurni dari kelas *"aturannya benar, populasinya
+digambar sekali"*: berkas KELIMA, `rekomendasi/routes.ts`, merakitnya dari
+shared — dan komentarnya sudah memperingatkan terhadap persis apa yang keempat
+lainnya lakukan: *"Menuliskan `IN ('rencana','dikerjakan',…)` di sini adalah
+cara paling pasti membuat ubin ringkasan dan lencana kartu berselisih soal
+permintaan yang sama."*
+
+**Perbaikan.**
+- Empat situs amplop → `StokMasukPage` (kontraknya sudah ada, dan
+  `TambahStokPage` sudah memakainya untuk rute yang sama), angkanya dari
+  `ringkas.harus_dikerjakan.faktur`, `per_page` turun ke 1.
+- Tiga situs larik yang rutenya sudah bernama DI TEMPAT LAIN untuk URL yang
+  sama → `StokRowDto[]` ×2, `PengajuanRow[]` ×1. Nol judgement: pintu saudara
+  yang ejaannya tinggal disalin.
+- `produksi/routes.ts` merakit predikatnya dari `TAHAP_BELUM_SELESAI`.
+- Ratchet **40 → 33**.
+
+**Muatan, sebagai efek samping yang layak disebut.** Lencana ini hidup di
+cangkang aplikasi dan ditembakkan tiap 60 detik di SETIAP halaman:
+
+| | `per_page=500` | `per_page=1` |
+| --- | --- | --- |
+| `/produksi` | 150.026 byte | 1.694 byte |
+| `/pembelian` | 177.903 byte | 1.566 byte |
+
+328 KB → 3,3 KB tiap satu menit, per pengguna, di tiap halaman.
+
+**Penjaga, dan tiap-tiapnya dibuktikan bisa menuduh.**
+- Ratchet diajari RUTE (`situsTulisTanganBerjalur`), lalu `/produksi` &
+  `/pembelian` dikunci setingkat rute. Pengunci setingkat BERKAS dicoba lebih
+  dulu dan SALAH: `Layout.tsx` memuat sembilan situs dan yang dibayar cuma dua,
+  jadi ia ikut menagih tujuh yang lain.
+- `pengadaan-tabel.test.ts` dibalik arahnya. Sampai hari ini ia menagih kedua
+  berkas web MEMANGGIL `barisBelumSelesai(r.status)`; kini ia menagih keduanya
+  TIDAK, dan menagih angkanya datang dari `ringkas`. Uji yang benar untuk dunia
+  yang salah.
+- Uji baru: predikat servernya tak boleh memuat `'rencana'` sebagai literal.
+- Lengan peramban baru (`lencana-pengadaan.spec.ts`), dua lengan: lencana ==
+  angka server, dan — yang membuatnya menyatakan sesuatu — `rows` DIKOSONGKAN
+  dari balasan sungguhan sambil `ringkas` dibiarkan utuh. Kode lama membaca 0 di
+  sana, dan 0 pada `badgeOranye` berarti lencananya HILANG: kegagalannya akan
+  terbaca sebagai "tak ada yang perlu dikerjakan".
+
+Ketiga penjaga statis dan lengan peramban semuanya dijalankan atas kode LAMA
+lebih dulu dan semuanya merah; sumbernya dipulihkan byte-per-byte (`cmp`).
+Lengan perambannya merah di lengan PERTAMA — dengan `per_page=1`, hitungan lama
+berbunyi 1 melawan 36.
+
+**Alat ukur saya sendiri salah sekali lagi, dan penjaganya sendiri yang
+menangkapnya.** Saringan rute versi pertama memakai `/^\/(produksi|pembelian)\b/`
+— dan `\b` juga cocok pada `/produksi-lain`, sebab `-` bukan aksara kata. Lengan
+PASANGAN yang mengujinya merah; saringannya disempitkan ke `(\?|$)` supaya
+hanya rute DAFTAR yang terkunci, sebab `/produksi/faktur/:id` memang mengirim
+`{ rows }` dan satu kunci itu boleh diketik tangan.
+
+**Batas yang diakui.**
+- **Tiga salinan literal masih hidup** di `modules/stok/service.ts` (proyeksi
+  stok berjalan). Ketiganya sepakat dengan shared hari ini, tak ada yang
+  menahannya tetap begitu; diberi ratchet (≤ 3) dan disebut, tidak diseret ke
+  putaran ini. Bentuknya berbeda — di sana tiap status juga dijumlah sendiri
+  lewat `FILTER (WHERE status = …)`, jadi merakitnya dari shared adalah
+  perombakan SQL mentah, bukan penggantian satu baris.
+- **Lima situs larik masih menyempit** (`/pesanan`, `/meja/status`, dan `/stok`
+  yang sudah dibayar dua di antaranya). Keduanya yang pertama belum punya tipe
+  kontrak, jadi menamainya adalah vena tersendiri, bukan penggantian ejaan.
+- **Sembilan amplop setia dibiarkan tak bernama.** Mereka tak menyembunyikan
+  apa pun hari ini; yang tak dijaga adalah kalau servernya kelak menambah kunci
+  di sebelah `rows`.
+- **Pemindai berjalur hanya memetik awalan STATIS.** Situs yang jalurnya dimulai
+  `${endpoint}` tak bisa dikenali rutenya sama sekali — dua di antaranya ada
+  (`FakturDetailPage`), dan keduanya kebetulan setia.
+- **Cacat pemotongannya tak pernah terlihat pada data hari ini**: DB gerbang
+  punya 62 dan 104 faktur, keduanya di bawah 200. Yang diukur adalah
+  MEKANISMENYA (lencana runtuh seiring halaman mengecil), bukan gejalanya pada
+  perusahaan sungguhan yang riwayatnya panjang.
+
+---
+
+## Alat ukur yang berhenti di tengah tanpa mengaku — dan verdik yang ditentukan sisa `dist` — gerbang — 2026-09-12
+
+**Pemicu.** Butir antrean yang ditulis pada rilis 2026-09-11: *"`verify-api.sh`
+harus menyatakan 'dist tak ada' sebagai PREMIS, alih-alih tiga lengan yang
+membingungkan. Masuk antrean sebagai vena alat ukur."* Yang ditemukan saat
+menggarapnya jauh lebih buruk daripada tiga lengan yang membingungkan.
+
+**Populasi & sapuan.** 2.159 penugasan `VAR=$(…)` di `scripts/verify-api.sh`
+disapu mekanis untuk satu pertanyaan: *kalau pengukuran ini meleset, yang mati
+satu lengan atau seluruh jalannya?* Di bawah `set -euo pipefail`, penugasan
+sebagai PERNYATAAN yang memuat `grep` / `curl -sf` / `jq -e` tanpa jaring
+membunuh prosesnya. **4 dari 2.159** begitu. Sapuan kedua, atas bentuk
+`KELUAR…=$?`: **3 dari 3** didahului penugasan telanjang, jadi barisnya mati.
+
+**Detektor dibuktikan bisa menuduh.** Ketiga pemindai teks dijalankan atas
+skrip PRA-PERBAIKAN yang disimpan utuh: `situsRawanAbort` menuduh baris 4743,
+18299, 18418, 18456; `kodeKeluarTakTerbaca` menuduh 18298, 18417, 18455;
+`blokDist` memulangkan nol blok (prasyaratnya memang belum ada). Keempat uji
+INTI merah di sana, ketiga uji mekanisme tetap hijau — dan skripnya dipulihkan
+byte-per-byte (`cmp`). Pemindainya juga diadu dengan komentar yang berbunyi
+sama persis, dan tak menuduhnya.
+
+**Temuan 1 — satu `grep` yang meleset membunuh 200 seksi, dan gerbangnya
+melaporkan "gagal tanpa satu pun kegagalan".** `ASET111=$(curl -s "$BASE/" |
+grep -o '/assets/…' | head -1)` adalah pernyataan. Pada server tanpa
+`apps/web/dist`, `grep` tak menemukan apa pun → 1 → `pipefail` meneruskannya →
+`set -e` keluar. **Terukur dari kawat**: jalannya berhenti di §111, dan §112
+sampai §313 tak pernah menembak sama sekali. Yang membaca gerbang melihat
+`exit=1` lalu `grep '✘'` memulangkan **nol baris**. Diperbaiki dengan jaring
+`|| true` — dan, karena "jalan terpotong" harus bisa dibedakan dari "jalan yang
+selesai lalu gagal", dengan penanda `TUNTAS` yang dinyalakan tepat sebelum
+baris verdik dan sebuah jebakan `EXIT` yang meneriakkan `JALAN TERPOTONG` bila
+penandanya masih 0. Jebakannya diuji tak menelan kode keluar: 0 tetap 0, 1
+tetap 1.
+
+**Temuan 2 — lengan yang ditulis untuk menangkap pemindai mati, dimatikan lebih
+dulu oleh shell-nya.** §309, §311 dan §313 semuanya berbentuk `R=$(npx tsx …)`
+lalu `KELUAR=$?`. Di bawah `set -e`, tsx yang gagal membunuh skripnya **di
+baris pertama**, jadi `KELUAR=$?` tak pernah dieksekusi: ketiga lengan
+*"…keluarannya sepakat dengan kode keluar skripnya"* **hanya pernah bisa
+melihat 0**, dan ketiga lengan premis *"pemindainya benar-benar jalan"* tak
+pernah sempat menembak. Terukur dari bash sungguhan: bentuk lama tak mencetak
+apa pun sesudahnya; bentuk `if …; then …; else …` memulangkan 3 dan membiarkan
+lengan premisnya merah. Ini kelas *"detektor yang tak bisa menuduh"* yang
+paling halus — bukan regex yang terlalu sempit, melainkan penjaga yang sudah
+mati sebelum ditanya.
+
+**Temuan 3 — verdik yang ditentukan sisa jalan sebelumnya, termasuk satu HIJAU
+PALSU.** Empat tempat menjawab pertanyaan *"apakah dist dilayani?"* dengan tiga
+cara berbeda: §111 mengikis `/assets/*.js` dari HTML, §139 menyimpulkannya dari
+header yang hilang, §61 tak pernah menurunkannya sama sekali. Diukur dengan
+`dist` dipindahkan (`/api/health` → `build: null`):
+
+| lengan §61 | nilai |
+| --- | --- |
+| `health menyertakan build id` | 0 — merah |
+| `header X-Kakarut-Build == build health` | 0 — merah |
+| `respons API lain membawa build yang sama` | **1 — hijau, membandingkan `""` dengan `""`** |
+
+Lengan ketiga itu tak menyatakan apa pun sejak lahir. Sekarang ada **satu**
+prasyarat, `ADA_DIST`, dan sumbernya jawaban server sendiri (`/api/health`),
+bukan HTML yang dikikis; empat blok mengonsultasinya, dan yang bergantung
+padanya **dilewati dengan cacah yang sama**, bukan dimerahkan. Lengan ketiga
+juga mendapat pagar `-n "$HDRME"`.
+
+**Ukuran, dan inilah bukti venanya lunas.** Skrip yang sama, DB yang sama-sama
+baru di-seed, satu-satunya yang berbeda adalah `apps/web/dist` saat boot:
+
+| jalan | `/api/health` | verdik | terpotong |
+| --- | --- | --- | --- |
+| tanpa dist (sebelum) | `build: null` | mati di §111, **nol ✘** | ya |
+| tanpa dist (sesudah) | `build: null` | **3.753 lolos, 2 gagal** | tidak |
+| dengan dist (sesudah) | `build: 9172a861…` | **3.753 lolos, 2 gagal** | tidak |
+
+Dua angka yang identik itulah pernyataannya: verdiknya tak lagi bisa dibeli
+dengan sisa keadaan. (Kedua kegagalan itu milik alat ukur SAYA, bukan skripnya
+— harness pengukurannya mengoper `ADU_TIPE=` ke verify-api tapi tidak ke boot
+servernya, dan §311 memang seharusnya merah karena itu. Identik di kedua sisi,
+jadi pembandingannya tetap sah; gerbang penuh mem-boot dengan `ADU_TIPE=`.)
+
+**Penjaga**: `apps/server/test/verify-api-tuntas.test.ts` — tiga pemindai teks
+(`situsRawanAbort`, `kodeKeluarTakTerbaca`, `blokDist`) plus tiga uji yang
+MENJALANKAN bash sungguhan, supaya asersinya terikat ke mekanisme dan bukan ke
+ejaan. `blokDist` menghitung **lengan**, bukan baris: cabang "dilewati" yang
+lupa satu `ok` membuat cacah asersi menyusut diam-diam, dan cacah yang menyusut
+adalah cara paling halus sebuah gerbang berhenti menjaga.
+
+**Batas yang diakui.**
+- Pemindai abort hanya melihat penugasan SATU BARIS. Substitusi yang membentang
+  beberapa baris, dan pipeline telanjang (bukan penugasan), belum tersapu.
+- `blokDist` menyamakan CACAH lengan, bukan maknanya. Cabang lewat yang
+  menembak `ok` sebanyak yang benar tapi dengan kalimat yang salah tetap lolos.
+- Kelas yang sama hampir pasti hidup di `scripts/` lain dan di skrip CI;
+  yang disapu putaran ini hanya `verify-api.sh`.
+- Yang membuat vena ini ada — skrip gerbang di scratchpad yang mem-boot sebelum
+  membangun — tetap tinggal di scratchpad. Yang dibayar di repo adalah
+  KEKEBALANNYA: sekarang urutan itu tak lagi bisa mengubah verdik.
+
+---
+
+## RILIS 2026-09-11 — dua puluh vena tayang, dan gerbang yang dijalankan DUA KALI karena saya menumpuknya sendiri — server + web + ponsel — 2026-09-11
+
+**Pemicu.** Pemilik meminta rilis. Aturan tetap *"jangan dulu rilis apa pun
+sampai saya minta"* berlaku sampai detik itu, dan dua puluh vena menunggu di
+`claude` sejak rilis sebelumnya (`42e048b`, CI #495).
+
+**Isi rilis**: 21 commit, `42e048b..6c4d72d`. Sebelas vena menamai bentuk
+balasan yang tak dideklarasikan di mana pun; lima menemukan kelas *aturannya
+benar, populasinya digambar sekali*; empat terakhir menemukan yang paling
+sunyi — **apa yang tak pernah dilihat siapa pun**: spanduk keranjang tanpa
+penjaga apa pun, 15 dari 30 setelan tanpa jalan ke produksi, idiom `::int`
+yang dipakai 66 kali tanpa penagih, dan enam bendera pemotongan dengan nol
+mata yang pernah melihatnya.
+
+**Urutan yang dijalankan**, dan tiap langkahnya menahan yang berikutnya:
+
+| langkah | hasil |
+| --- | --- |
+| merge `claude` → `production` (`21467eb`) | `git diff HEAD origin/claude` **KOSONG** — byte-identik, dibuktikan bukan diasumsikan |
+| gerbang penuh DI ATAS hasil merge | typecheck bersih · verify-api **3.759 / 0** · vitest **264 / 3.202** · invarian **27 / 0** · Playwright **50 lolos** |
+| dorong `production` | `42e048b..21467eb` |
+| CI GitHub #496 | quality **hijau** · verify-api + cakupan rute + invarian + Playwright **hijau** · build image + webhook Dokploy **hijau** |
+| ponsel `claude` → `Production` (`9b49b31`) | byte-identik dengan `claude`; CI ponsel **#66 hijau** |
+| stempel changelog di `claude` | 12 entri |
+
+**Gerbangnya dijalankan DUA KALI, dan yang pertama gagal karena saya.**
+Postgres mati di antara putaran vena terakhir dan rilis ini, jadi jalan
+pertama berhenti di "POSTGRES TIDAK HIDUP" sebelum satu uji pun berjalan.
+Itu bukan temuan tentang repo — itu catatan bahwa gerbang ini bergantung pada
+basis data yang hidup di kontainer yang sama, dan kontainer itu sudah
+didaur ulang sekali di tengah sesi.
+
+**Dua belas entri changelog distempel**, dan penghapusan judulnya dari
+`BELUM_TAYANG` dilakukan pada commit yang SAMA — memisahkan keduanya adalah
+cara berkas itu pernah salah selama empat hari, dan aturan itu tertulis di
+kepala daftarnya sendiri. Dua entri sengaja tetap tanpa stempel: keduanya
+BUKAN rilis (koreksi keterangan, dan petunjuk pemeliharaan berkas itu).
+
+**Batas yang diakui.**
+
+- **TAK ADA KETUKAN DARI KAWAT SESUDAH DEPLOY.** Kebijakan jaringan sesi ini
+  menolak domain produksi (403 dari proxy agen), jadi "tayang" di entri ini
+  bersandar pada CI GitHub — build image + webhook Dokploy — bukan pada
+  balasan HTTP dari server yang sungguhan. Rilis sebelumnya bisa mengetuk;
+  yang ini tidak. Disebut supaya bedanya tidak hilang.
+- **Batas laju API GitHub tercapai** di tengah rilis, sesudah `production`
+  terdorong. Ia tak mengubah apa pun yang sudah berjalan — CI tetap jalan —
+  tapi ia menunda pembacaan verdiknya dan merge ponsel.
+- **APK ponsel tidak ikut terkirim**: CI `Production` hanya analyze + test;
+  build store manual (`scripts/build-rilis.sh`). Perubahan ponsel di rilis ini
+  **nol baris `lib/`** — hanya fikstur kontrak — jadi tak ada perilaku aplikasi
+  yang berubah.
+- **Enumerasi akun terbuka di produksi** lewat `/register` &
+  `/resend-verification` (keputusan pemilik 2026-09-05). Disebut lagi supaya
+  tayangnya tidak senyap.
+- **Cadangan mungkin duduk di bucket publik** sampai pemilik memeriksa R2 —
+  temuan putaran #119 yang kini ikut tayang bersama pemeriksanya. Panel super
+  admin akan menandainya KRITIS begitu deploy hidup, dan itu justru gunanya.
+- **Tak ada staging**; `production` satu-satunya tujuan, dan branch-nya tak
+  diproteksi. Keduanya tercatat di audit tiga belas lapis, belum dikerjakan.
+
+---
+
 ## Kalimat yang hanya muncul saat datanya BESAR — enam bendera, tujuh layar, nol mata yang pernah melihatnya — web (uji) — 2026-09-11
 
 **Vena.** Butir antrean "spanduk pemotongan belum punya lengan peramban",
@@ -2214,6 +2629,14 @@ baru; yang bertambah cuma cara membacanya.
   bentuknya sudah jelas: `verify-api.sh` harus menyatakan "dist tak ada"
   sebagai PREMIS yang gagal keras, alih-alih tiga lengan yang membingungkan.
   Masuk antrean sebagai vena alat ukur; tidak diselundupkan ke dalam rilis.
+
+  **DIBAYAR 2026-09-12** — lihat entri "Alat ukur yang berhenti di tengah tanpa
+  mengaku" di atas. Bentuk akhirnya bukan premis yang GAGAL KERAS melainkan
+  premis yang MELEWATI dengan cacah lengan yang sama, dan yang ditemukan saat
+  menggarapnya lebih buruk daripada tiga lengan yang membingungkan: salah satu
+  dari ketiganya ternyata **hijau palsu**, dan jalan tanpa dist sebenarnya
+  **mati di §111** — 200-an seksi sesudahnya tak pernah menembak, dengan nol
+  tanda gagal di lognya.
 
 - **e2e 48/48 gagal, dan bukan asersinya**: peramban tak pernah diluncurkan.
   `npm install` di kontainer baru menarik `@playwright/test` **1.61.1**, yang
@@ -15350,7 +15773,13 @@ berlaku di situ).
       diukur ulang dengan pengurai berkurung-berimbang (bukan regex) atas 145
       berkas, populasinya **225 situs `api<T>(…)` bertipe, 46 di antaranya
       struktural**. Enam dibayar #109 → **40**, dan kini ada ratchet-nya:
-      `apps/server/test/amplop-web-berkontrak.test.ts`. Butir ini karena itu
+      `apps/server/test/amplop-web-berkontrak.test.ts`. Tujuh lagi dibayar
+      #123 → **33**, dan di sana keempat puluhnya lebih dulu DIPILAH (21 BACA /
+      19 TULIS) lalu tiap yang BACA diketuk lewat HTTP: empat menyempitkan
+      amplop `/produksi` & `/pembelian` dari enam kunci jadi satu, dan kunci
+      yang hilang itu `ringkas` — angka lencana yang dihitung atas seluruh
+      populasi. Ratchetnya kini juga tahu RUTE (`situsTulisTanganBerjalur`),
+      jadi rute yang sudah dibayar bisa dikunci tanpa mengunci seluruh berkas. Butir ini karena itu
       berhenti jadi daftar nama dan jadi ANGKA yang hanya boleh menyusut.
       (Angka "3" yang sempat tertulis di sini SALAH: daftarnya memuat lima
       nama. Disapu ulang tiap putaran sejak.) Catatan lama, masih berlaku: diukur ulang 2026-09-06
@@ -15388,15 +15817,18 @@ berlaku di situ).
       2.762 objek. Bukti merahnya membuktikan jangkauannya, bukan cuma
       kepekaannya: cacat yang cuma hidup di `POST /satuan` memerahkan §311
       sementara §309 tetap hijau
-- [ ] **Jangkauan §311 = jangkauan verify-api** — rute yang tak pernah diketuk
-      skrip itu tetap tak terekam. Bukan kelemahan baru (itu batas yang sudah
-      diukur `cakupan-rute.test.ts` + `docs/audit/rute-diketuk.txt`), tapi kini
-      DUA penjaga bertumpu pada mekanisme yang sama, dan itu pantas disebut
-      alih-alih terbaca sebagai dua jaminan terpisah
-- [ ] **§311 merekam paling banyak 2 balasan per pola rute** — cacat yang cuma
-      muncul pada balasan ketiga dan seterusnya (mis. hanya saat lariknya
-      kosong) tak terlihat. Angkanya konstan bernama di `app.ts`; menaikkannya
-      menukar jangkauan dengan ukuran berkas (902 KB pada dua rekaman)
+- [x] ~~**Jangkauan §311 = jangkauan verify-api**~~ — BERSIH, diukur #124.
+      305 pola diketuk, 302 terekam; ketiga sisanya tak punya bentuk untuk
+      diadu (shell HTML, aset statis, aliran berkas). Kekhawatirannya benar dan
+      kini terukur: keduanya memang dibatasi apa yang verify-api ketuk, dan
+      populasinya praktis identik
+- [x] ~~**§311 merekam paling banyak 2 balasan per pola rute**~~ — TEMUAN #124,
+      dan bukan yang tertulis di butir ini. Bukan "cacat pada balasan ketiga":
+      DELAPAN pola tak pernah punya SATU PUN bentuk sukses untuk diadu, sebab
+      jatah rekamannya habis di uji penolakan yang pembandingnya buang.
+      `POST /api/penjualan` salah satunya. Dibayar dengan memisahkan jatah per
+      kelas balasan — 261 → 269 pola diadu, berkas 903 KB → 1,04 MB (menaikkan
+      batas ke 8 memberi jangkauan yang sama dengan 4,42 MB)
 - [ ] **`/kebersihan/:id` tak pernah teruji dari kawat** — DB gerbang tak punya
       satu pun laporan kebersihan, jadi idnya tak bisa dipetik. Diratchet ≤ 1
       di §309 supaya rute detail kedua yang senasib tak lahir diam-diam

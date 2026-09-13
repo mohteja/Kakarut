@@ -48,6 +48,12 @@ const HAL = baca("../../web/src/pages/produksi/TambahStokPage.tsx");
 const HALDETAIL = baca("../../web/src/pages/produksi/FakturDetailPage.tsx");
 const LAYOUT = baca("../../web/src/components/Layout.tsx");
 const TIM = baca("../../web/src/pages/TimBerandaPage.tsx");
+/*
+ * Sumber SERVER ikut dibaca sejak 2026-09-12: sejak lencana web berhenti
+ * menghitung sendiri, satu-satunya tempat aturan "belum selesai" diterapkan
+ * untuk angka itu adalah kueri ringkasan di sini.
+ */
+const RUTE = baca("../src/modules/produksi/routes.ts");
 
 /** Badan `kolomPengadaan()` saja — supaya `judul:` di tempat lain tak ikut terhitung. */
 function badanKolom(): string {
@@ -85,7 +91,7 @@ describe("aturan tahap: satu rumah, bukan empat salinan", () => {
     expect(statusFaktur([{ status: "dikonfirmasi" }, { status: "ditolak" }])).toBe("sebagian");
   });
 
-  it("dua salinan lama sudah TIDAK ada lagi", () => {
+  it("salinan lamanya tak ada, dan web berhenti MENGHITUNG SENDIRI", () => {
     /*
      * `Layout.tsx` dan `TimBerandaPage.tsx` sama-sama menyimpan
      * `const BELUM_SELESAI = new Set([...])` byte-per-byte identik. Ringkasan
@@ -93,12 +99,59 @@ describe("aturan tahap: satu rumah, bukan empat salinan", () => {
      */
     expect(LAYOUT, "Layout.tsx masih punya salinannya").not.toMatch(/const BELUM_SELESAI\b/);
     expect(TIM, "TimBerandaPage.tsx masih punya salinannya").not.toMatch(/const BELUM_SELESAI\b/);
-    expect(LAYOUT).toContain("barisBelumSelesai(r.status)");
-    expect(TIM).toContain("barisBelumSelesai(r.status)");
-    // Bentuk `new Set(...).size` DIPERTAHANKAN: ia menghitung FAKTUR (bukan
-    // baris), dan sapuan `kueri-web.ts` mengenali pembantu satu-lompatan yang
-    // berakhir `.size`.
-    expect(LAYOUT).toContain(".map((r) => r.faktur_id)).size");
+    /*
+     * SAMPAI 2026-09-12 uji ini menagih KEBALIKANNYA: kedua berkas WAJIB
+     * memanggil `barisBelumSelesai(r.status)`. Itu benar selama lencananya
+     * memang menghitung sendiri — dan yang salah justru menghitung sendirinya.
+     *
+     * Terukur pada DB gerbang: lencana yang dijumlahkan dari `rows` berbunyi
+     * 36 pada `per_page=500`, 10 pada `per_page=10`, 1 pada `per_page=1`,
+     * sementara `ringkas.harus_dikerjakan.faktur` tetap 36. Servernya pun
+     * MEMBATASI `per_page` di 200 — diminta 500, dilayani 200 — jadi upaya
+     * "jangan potong" itu ditolak tanpa suara.
+     */
+    expect(LAYOUT, "Layout.tsx menghitung lencananya sendiri lagi").not.toContain(
+      "barisBelumSelesai(r.status)",
+    );
+    expect(TIM, "TimBerandaPage.tsx menghitung lencananya sendiri lagi").not.toContain(
+      "barisBelumSelesai(r.status)",
+    );
+    for (const [nama, src] of [
+      ["Layout.tsx", LAYOUT],
+      ["TimBerandaPage.tsx", TIM],
+    ] as const) {
+      expect(
+        (src.match(/\.ringkas\.harus_dikerjakan\.faktur/g) ?? []).length,
+        `${nama}: lencana produksi & beli harus keduanya dari angka server`,
+      ).toBe(2);
+    }
+  });
+
+  it("aturan 'belum selesai' DIRAKIT dari shared di kueri ringkasannya", () => {
+    /*
+     * Angka lencana kini datang dari sini, jadi predikatnya tak boleh lagi
+     * diketik ulang sebagai literal SQL. `rekomendasi/routes.ts` sudah menulis
+     * sebabnya lebih dulu daripada berkas ini mematuhinya: menuliskan
+     * `IN ('rencana','dikerjakan',…)` "adalah cara paling pasti membuat ubin
+     * ringkasan dan lencana kartu berselisih soal permintaan yang sama."
+     */
+    const i = RUTE.indexOf("const belumSelesaiSql");
+    expect(i, "belumSelesaiSql tak ditemukan").toBeGreaterThan(-1);
+    const baris = RUTE.slice(i, RUTE.indexOf("\n", i));
+    expect(baris, "predikatnya diketik ulang sebagai literal SQL").not.toMatch(/'rencana'/);
+    expect(baris).toContain("TAHAP_BELUM_SELESAI");
+    /*
+     * BATAS YANG DIAKUI, dan diukur: tiga salinan literal yang SAMA masih
+     * hidup di `modules/stok/service.ts` (proyeksi stok berjalan). Ketiganya
+     * sepakat dengan shared hari ini; tak ada yang menahannya tetap begitu.
+     * Mereka tak memberi makan lencana ini, jadi tidak diseret ke putaran ini —
+     * tapi juga tidak dibiarkan tak terhitung.
+     */
+    const SERVICE = baca("../src/modules/stok/service.ts");
+    const salinan = [...SERVICE.matchAll(/IN \('rencana', 'dikerjakan', 'menunggu'\)/g)].length;
+    expect(salinan, "salinan literal di stok/service.ts BERTAMBAH").toBeLessThanOrEqual(3);
+    // …dan bila masih ada, isinya wajib sama dengan shared.
+    if (salinan > 0) expect([...TAHAP_BELUM_SELESAI]).toEqual(["rencana", "dikerjakan", "menunggu"]);
   });
 });
 

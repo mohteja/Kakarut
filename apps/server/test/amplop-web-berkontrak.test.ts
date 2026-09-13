@@ -62,9 +62,33 @@ const WEB = "apps/web/src";
  * (2026-09-11) membayar enam: `KasirPage` ×3 (`/company` → `CompanyRow`,
  * `/cabang` → `CabangDto[]`, `/auth/me` → `SesiDto`), `MenuListPage` ×1
  * (`/company`), `TransferStokPage` ×2 (`TransferStokSaldo`,
- * `TransferStokDaftar`) → **40**.
+ * `TransferStokDaftar`) → 40.
+ *
+ * Vena "lencana yang menghitung halaman" (2026-09-12) membayar tujuh → **33**.
+ * Keempat puluh itu lebih dulu DIPILAH — 21 BACA, 19 TULIS — dan tiap yang
+ * BACA diketuk lewat HTTP terhadap DB gerbang untuk membandingkan kunci
+ * teratas yang dideklarasikan dengan yang benar-benar dikirim:
+ *
+ *   · 4 situs MENYEMPITKAN amplop: `/produksi` & `/pembelian` mengirim ENAM
+ *     kunci (`rows, total, page, per_page, total_pengeluaran, ringkas`),
+ *     keempatnya mengetik SATU. `StokMasukPage` sudah menamainya, dan
+ *     `TambahStokPage` sudah memakainya untuk rute yang sama.
+ *   · 3 situs menyempitkan ELEMEN larik pada rute yang bentuknya sudah bernama
+ *     DAN sudah dipakai di tempat lain untuk URL yang sama (`/stok` ×2 →
+ *     `StokRowDto[]`, `/pengajuan?status=menunggu` → `PengajuanRow[]`).
+ *   · 9 situs amplopnya SETIA (`{ rows }` memang satu-satunya kunci) — tak
+ *     bernama, tapi tak menyembunyikan apa pun. Dibiarkan.
+ *   · 19 TULIS adalah pengakuan `{ok, …}` — kelas yang sengaja di luar
+ *     hitungan di ujung server, dan alasannya sama di sini.
  */
-const MAKS_TULIS_TANGAN = 40;
+const MAKS_TULIS_TANGAN = 33;
+
+/**
+ * Rute DAFTAR pengadaan — `/produksi` dan `/pembelian` telanjang atau
+ * ber-query, BUKAN sub-jalurnya. Amplop keduanya berenam kunci; sub-jalurnya
+ * (`/produksi/faktur/:id`, `/produksi/log/:id`) mengirim `{ rows }` saja.
+ */
+const RUTE_DAFTAR = /^\/(produksi|pembelian)(\?|$)/;
 
 /** Berkas sumber web, rekursif. */
 function berkasWeb(dir: string): string[] {
@@ -127,6 +151,38 @@ export function situsTulisTangan(sumber: Record<string, string>): string[] {
   return keluar.sort();
 }
 
+/**
+ * Situs yang ditulis tangan BESERTA rutenya.
+ *
+ * Ratchet angka menjawab "berapa banyak"; ia tak bisa menjawab "rute MANA yang
+ * sudah dibayar". Pengunci setingkat BERKAS pernah dicoba di sini dan salah:
+ * `Layout.tsx` memuat sembilan situs, dan yang dibayar cuma dua di antaranya —
+ * penguncinya ikut menagih tujuh yang lain. Yang benar setingkat RUTE.
+ *
+ * Jalurnya dipetik dari literal pertama argumen panggilan (`"…"`, `'…'`, atau
+ * awalan statis sebuah template) — cukup untuk mengenali rutenya, dan tak
+ * berpura-pura menyelesaikan `${…}` yang cuma hidup saat program berjalan.
+ */
+export function situsTulisTanganBerjalur(
+  sumber: Record<string, string>,
+): { situs: string; jalur: string }[] {
+  const keluar: { situs: string; jalur: string }[] = [];
+  for (const [berkas, mentah] of Object.entries(sumber)) {
+    const buta = butaKomentar(mentah);
+    for (const m of buta.matchAll(/\bapi\s*</g)) {
+      const awal = buta.indexOf("<", m.index!);
+      const arg = argumenTipe(buta, awal);
+      if (!arg || buta[arg.akhir + 1] !== "(" || /=/.test(arg.teks)) continue;
+      if (!strukturalDiTempat(arg.teks)) continue;
+      const badan = argumenTipe(buta, arg.akhir + 1);
+      const lit = badan ? /^\s*[`"']([^`"'$]*)/.exec(badan.teks) : null;
+      const baris = buta.slice(0, m.index!).split("\n").length;
+      keluar.push({ situs: `${berkas}:${baris}`, jalur: lit ? lit[1] : "" });
+    }
+  }
+  return keluar.sort((a, b) => a.situs.localeCompare(b.situs));
+}
+
 /** Semua situs `api<T>(` bertipe — pembagi untuk PREMIS. */
 function situsBertipe(sumber: Record<string, string>): number {
   let n = 0;
@@ -146,6 +202,7 @@ describe("web mengetik ulang bentuk balasan di situs pengambilannya", () => {
   const sumber: Record<string, string> = {};
   for (const f of berkasWeb(AKAR + WEB)) sumber[f.slice(AKAR.length)] = readFileSync(f, "utf8");
   const tulisTangan = situsTulisTangan(sumber);
+  const berjalur = situsTulisTanganBerjalur(sumber);
   const bertipe = situsBertipe(sumber);
 
   it("PREMIS: sapuannya melihat populasi yang diukur, bukan sisa-sisanya", () => {
@@ -169,7 +226,7 @@ describe("web mengetik ulang bentuk balasan di situs pengambilannya", () => {
     ).toBeLessThanOrEqual(MAKS_TULIS_TANGAN);
   });
 
-  it("INTI: keenam situs yang dibayar putaran ini TIDAK kembali", () => {
+  it("INTI: rute yang sudah dibayar TIDAK diketik ulang", () => {
     /*
      * Dipaku pada BERKAS + BENTUKNYA, bukan pada angka saja: MAKS yang
      * diturunkan enam tetap benar bila enam situs lain yang dibayar dan
@@ -189,6 +246,17 @@ describe("web mengetik ulang bentuk balasan di situs pengambilannya", () => {
       expect.stringContaining("StokAwalPage.tsx"),
       expect.stringContaining("TransferStokPage.tsx"),
     ]);
+    /*
+     * `/produksi` & `/pembelian` DIKUNCI SETINGKAT RUTE, dan itu satu-satunya
+     * tingkat yang benar di sini: amplopnya berenam kunci, dan yang kelima —
+     * `ringkas` — adalah angka lencana yang dihitung atas SELURUH populasi.
+     * Situs yang mengetik amplopnya sendiri membuat `ringkas` MUSTAHIL dibaca,
+     * dan satu-satunya jalan yang tersisa adalah menghitung dari halaman.
+     */
+    expect(
+      berjalur.filter((s) => RUTE_DAFTAR.test(s.jalur)).map((s) => s.situs),
+      "amplop /produksi atau /pembelian diketik tangan lagi — `ringkas` hilang dari pandangan",
+    ).toEqual([]);
   });
 
   it("PASANGAN: pemindainya menuduh yang ditulis tangan, dan MELEWATI yang bernama", () => {
@@ -207,5 +275,31 @@ describe("web mengetik ulang bentuk balasan di situs pengambilannya", () => {
     expect(k("export async function api<T = unknown>(jalur: string) {}")).toEqual([]);
     // …dan komentar tidak dibaca
     expect(k('// api<{ di_komentar: string }>("/x")')).toEqual([]);
+  });
+
+  it("PASANGAN: pemindai berjalur memetik rutenya, dan BISA menuduh /produksi", () => {
+    const j = (t: string) => situsTulisTanganBerjalur({ "u.tsx": t });
+    expect(j('api<{ rows: X[] }>("/produksi?per_page=1")')).toEqual([
+      { situs: "u.tsx:1", jalur: "/produksi?per_page=1" },
+    ]);
+    // awalan statis sebuah template cukup — `${…}` tak dipura-purakan terselesaikan
+    expect(j("api<{ rows: X[] }>(`/pembelian${qs}`)")).toEqual([
+      { situs: "u.tsx:1", jalur: "/pembelian" },
+    ]);
+    // …dan yang BERNAMA tetap tak tertuduh, berapa pun rutenya
+    expect(j('api<StokMasukPage>("/produksi?per_page=1")')).toEqual([]);
+    // saringan rutenya sendiri: `/produksi-lain` bukan `/produksi`
+    /*
+     * SARINGAN RUTENYA IKUT DIUJI, dan versi pertamanya SALAH: `\b` sesudah
+     * `produksi` juga cocok pada `/produksi-lain`, sebab `-` bukan aksara kata.
+     * Lengan inilah yang menangkapnya. `(\?|$)` menyempitkannya ke rute DAFTAR
+     * saja — `/produksi/faktur/:id` mengirim `{ rows }` dan satu kunci itu
+     * memang boleh diketik tangan, sama seperti sembilan amplop setia lainnya.
+     */
+    const saring = (x: { jalur: string }[]) => x.filter((s) => RUTE_DAFTAR.test(s.jalur));
+    expect(saring(j('api<{ a: 1 }>("/produksi-lain")'))).toEqual([]);
+    expect(saring(j('api<{ a: 1 }>("/produksi/faktur/x")'))).toEqual([]);
+    expect(saring(j('api<{ a: 1 }>("/produksi")')).length).toBe(1);
+    expect(saring(j('api<{ a: 1 }>("/pembelian?per_page=200")')).length).toBe(1);
   });
 });
