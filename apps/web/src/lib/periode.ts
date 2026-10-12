@@ -85,27 +85,82 @@ export function rentangPeriode(kode: KodePeriode, hariIni: string): Rentang {
   }
 }
 
+/** Kode periode bernama yang mana pun yang rentangnya persis `r`, atau `null`. */
+export function periodeDari(r: Rentang, hariIni: string): KodePeriode | null {
+  return (
+    PERIODE.find(({ kode }) => {
+      const p = rentangPeriode(kode, hariIni);
+      return p.dari === r.dari && p.sampai === r.sampai;
+    })?.kode ?? null
+  );
+}
+
+/** "YYYY-MM-DD" yang benar-benar ada di kalender (bukan "2026-02-31"). */
+function tanggalSah(s: string | null): s is string {
+  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && keString(keTanggal(s)) === s;
+}
+
 /**
- * Periode mana yang sedang tampil — DITURUNKAN dari tanggalnya, bukan
- * disimpan terpisah. Dua sumber kebenaran untuk satu rentang berarti dropdown
- * bisa berkata "Bulan ini" sementara tanggalnya sudah diubah tangan.
- * `null` = rentang pilihan sendiri (tak cocok periode mana pun).
+ * PERIODE DI URL — supaya ia terbawa antar tab laporan, selamat dari muat
+ * ulang, dan bisa dikirim sebagai tautan.
  *
- * `utamakan` = periode yang terakhir DIPILIH orang. Beberapa periode bisa
- * jatuh ke rentang yang sama — di hari Senin "Minggu ini" = "Hari ini", di
- * tanggal 1 "Bulan ini" = "Hari ini" — dan tanpa ini dropdown melompat ke
- * entri pertama yang cocok, seolah pilihannya tak diterima. Ia hanya dipakai
- * selama rentangnya memang masih cocok.
+ *   ?periode=bulan-lalu        periode BERNAMA, dihitung ulang tiap dibuka
+ *   ?dari=…&sampai=…           rentang pilihan tangan, apa adanya
+ *   (tanpa keduanya)           hari ini
+ *
+ * Periode bernama disimpan sebagai NAMANYA, bukan tanggalnya: tautan "Bulan
+ * lalu" yang dibuka bulan depan berarti bulan lalu SAAT ITU — itulah yang
+ * dimaksud orang yang memilihnya. Sekaligus, URL-lah yang mengingat pilihan
+ * orang di hari yang ambigu (Senin: "Minggu ini" = "Hari ini"; tanggal 1:
+ * "Bulan ini" = "Hari ini"), jadi dropdown tak melompat ke entri lain.
+ *
+ * Isi URL yang rusak (tanggal mustahil, dari > sampai, kode tak dikenal) jatuh
+ * ke hari ini — bukan diteruskan ke server sebagai `?dari=` kosong.
  */
-export function periodeDari(
-  r: Rentang,
+export const KUNCI_URL_PERIODE = ["periode", "dari", "sampai"] as const;
+
+export function bacaPeriodeUrl(
+  params: URLSearchParams,
   hariIni: string,
-  utamakan?: KodePeriode | null,
-): KodePeriode | null {
-  const cocok = (kode: KodePeriode) => {
-    const p = rentangPeriode(kode, hariIni);
-    return p.dari === r.dari && p.sampai === r.sampai;
-  };
-  if (utamakan && cocok(utamakan)) return utamakan;
-  return PERIODE.find(({ kode }) => cocok(kode))?.kode ?? null;
+): Rentang & { kode: KodePeriode | null } {
+  const kode = params.get("periode");
+  const dikenal = PERIODE.find((p) => p.kode === kode)?.kode;
+  if (dikenal) return { ...rentangPeriode(dikenal, hariIni), kode: dikenal };
+  const dari = params.get("dari");
+  const sampai = params.get("sampai");
+  if (tanggalSah(dari) && tanggalSah(sampai) && dari <= sampai) {
+    return { dari, sampai, kode: periodeDari({ dari, sampai }, hariIni) };
+  }
+  return { ...rentangPeriode("hari-ini", hariIni), kode: "hari-ini" };
+}
+
+/**
+ * Parameter URL baru untuk sebuah pilihan; kunci lain di `params` dibiarkan.
+ * "Hari ini" = tanpa parameter, supaya URL bawaan tetap bersih.
+ */
+export function tulisPeriodeUrl(
+  params: URLSearchParams,
+  pilihan: { kode: KodePeriode } | { rentang: Rentang },
+): URLSearchParams {
+  const baru = new URLSearchParams(params);
+  for (const k of KUNCI_URL_PERIODE) baru.delete(k);
+  if ("kode" in pilihan) {
+    if (pilihan.kode !== "hari-ini") baru.set("periode", pilihan.kode);
+  } else {
+    baru.set("dari", pilihan.rentang.dari);
+    baru.set("sampai", pilihan.rentang.sampai);
+  }
+  return baru;
+}
+
+/** Hanya kunci periode dari `search` — yang dibawa tab laporan ke tab lain. */
+export function searchPeriode(search: string): string {
+  const asal = new URLSearchParams(search);
+  const bawa = new URLSearchParams();
+  for (const k of KUNCI_URL_PERIODE) {
+    const v = asal.get(k);
+    if (v !== null) bawa.set(k, v);
+  }
+  const s = bawa.toString();
+  return s ? `?${s}` : "";
 }

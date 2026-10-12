@@ -5,17 +5,18 @@ import { Card, ErrorText, PageTitle, Spinner, StatCard, inputClass, tdClass, thC
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggal } from "../../lib/format";
 import { LaporanTabs } from "./LaporanTabs";
-import { PilihPeriode } from "./PilihPeriode";
+import { PilihPeriode, usePeriodeLaporan } from "./PilihPeriode";
 
 /** Laporan pengeluaran pembelian bahan baku (faktur beli terkonfirmasi). */
 export function LaporanPembelianPage() {
   const { auth } = useAuth();
   const { cabang } = useBranch();
   const isManajemen = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const [dari, setDari] = useState(hariIniWIB());
-  const [sampai, setSampai] = useState(hariIniWIB());
+  // Periode tinggal di URL — terbawa antar tab laporan (lihat usePeriodeLaporan).
+  const periode = usePeriodeLaporan();
+  const { dari, sampai } = periode;
   const [cabangFilter, setCabangFilter] = useState("all");
 
   const branchParam = isManajemen ? `&branch_id=${cabangFilter}` : "";
@@ -36,14 +37,7 @@ export function LaporanPembelianPage() {
       </div>
 
       <Card className="mb-5 flex flex-wrap items-end gap-3 p-3">
-        <PilihPeriode
-          dari={dari}
-          sampai={sampai}
-          onUbah={(r) => {
-            setDari(r.dari);
-            setSampai(r.sampai);
-          }}
-        />
+        <PilihPeriode periode={periode} />
         {isManajemen && cabang.length > 0 && (
           <div>
             <label className="mb-1 block text-xs font-medium text-stone-500">Cabang</label>

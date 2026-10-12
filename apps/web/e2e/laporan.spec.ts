@@ -160,7 +160,7 @@ test.describe("laporan di browser = balasan API", () => {
     await expect(page.getByText(String(durasi.riwayat.length), { exact: true }).first()).toBeVisible();
   });
 
-  test("dropdown periode mengisi tanggalnya, dan angkanya = API untuk rentang itu", async ({ page, request }) => {
+  test("dropdown periode mengisi tanggalnya, angkanya = API, dan periodenya terbawa antar tab", async ({ page, request }) => {
     // Rumus kalendernya dipaku `periode-laporan.test.ts`; yang dijaga di sini
     // SAMBUNGANNYA: pilihan → kedua input → permintaan → kartu.
     const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
@@ -188,11 +188,35 @@ test.describe("laporan di browser = balasan API", () => {
     expect(await nilaiKartu(page, "Omzet")).toBe(Math.round(lap.omzet));
     expect(await nilaiKartu(page, "Transaksi")).toBe(lap.jumlah_transaksi);
 
+    // PINDAH TAB → periodenya ikut. Tanpa itu, Menu Terlaris membuka HARI INI
+    // dan dua angka dari dua periode berbeda berdiri di bawah judul yang sama.
+    const larisBulanLalu = page.waitForResponse(
+      (x) => x.url().includes(`/api/laporan/menu-laris?dari=${r.dari}&sampai=${r.sampai}`) && x.ok(),
+    );
+    await page.getByRole("link", { name: /Menu Terlaris/ }).click();
+    await expect(page).toHaveURL(/\/laporan\/menu-laris\?periode=bulan-lalu$/);
+    await larisBulanLalu;
+    await expect(periode).toHaveValue("bulan-lalu");
+    await expect(tgl.nth(0)).toHaveValue(r.dari);
+    await expect(tgl.nth(1)).toHaveValue(r.sampai);
+
+    // …dan selamat dari muat ulang.
+    await page.reload();
+    await expect(periode).toHaveValue("bulan-lalu");
+    await expect(tgl.nth(0)).toHaveValue(r.dari);
+
     // Tanggal digeser tangan → rentangnya bukan lagi "Bulan lalu", dan
     // dropdown yang tetap berkata begitu akan berbohong.
     const geser = r.dari.slice(0, 8) + "05";
     await tgl.nth(0).fill(geser);
     await expect(periode).toHaveValue("");
     await expect(periode.locator("option:checked")).toHaveText("Pilih tanggal");
+
+    // Rentang tangan juga terbawa — apa adanya, bukan dikembalikan ke nama.
+    await page.getByRole("link", { name: /Pembelian/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/laporan/pembelian\\?dari=${geser}&sampai=${r.sampai}$`));
+    await expect(tgl.nth(0)).toHaveValue(geser);
+    await expect(tgl.nth(1)).toHaveValue(r.sampai);
+    await expect(periode).toHaveValue("");
   });
 });

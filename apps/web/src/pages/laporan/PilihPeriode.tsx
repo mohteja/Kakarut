@@ -1,7 +1,30 @@
-import { useId, useState } from "react";
+import { useId } from "react";
+import { useSearchParams } from "react-router-dom";
 import { inputClass } from "../../components/ui";
 import { hariIniWIB } from "../../lib/format";
-import { PERIODE, periodeDari, rentangPeriode, type KodePeriode, type Rentang } from "../../lib/periode";
+import { PERIODE, bacaPeriodeUrl, tulisPeriodeUrl, type KodePeriode, type Rentang } from "../../lib/periode";
+
+/**
+ * Periode laporan yang tinggal di URL (lihat `bacaPeriodeUrl`), sehingga
+ * keempat tab membaca SATU periode yang sama: `LaporanTabs` membawa kuncinya
+ * ke tab lain, dan muat ulang tak mengembalikannya ke hari ini.
+ *
+ * `replace`, bukan entri riwayat baru: mengganti periode lima kali lalu
+ * menekan Kembali seharusnya keluar dari laporan, bukan memutar ulang kelima
+ * periode itu satu per satu.
+ */
+export function usePeriodeLaporan() {
+  const [params, setParams] = useSearchParams();
+  const { dari, sampai, kode } = bacaPeriodeUrl(params, hariIniWIB());
+  return {
+    dari,
+    sampai,
+    /** Periode bernama yang sedang tampil; `null` = rentang pilihan tangan. */
+    kode,
+    pilih: (k: KodePeriode) => setParams((p) => tulisPeriodeUrl(p, { kode: k }), { replace: true }),
+    ubah: (r: Rentang) => setParams((p) => tulisPeriodeUrl(p, { rentang: r }), { replace: true }),
+  };
+}
 
 /**
  * Pemilih periode laporan: dropdown periode cepat + dua input tanggal.
@@ -15,19 +38,9 @@ import { PERIODE, periodeDari, rentangPeriode, type KodePeriode, type Rentang } 
  * Dirender sebagai fragmen: ketiga medannya duduk berdampingan dengan pemilih
  * cabang di dalam kartu filter milik halaman pemakainya.
  */
-export function PilihPeriode({
-  dari,
-  sampai,
-  onUbah,
-}: {
-  dari: string;
-  sampai: string;
-  onUbah: (r: Rentang) => void;
-}) {
+export function PilihPeriode({ periode }: { periode: ReturnType<typeof usePeriodeLaporan> }) {
   const id = useId();
-  const [dipilih, setDipilih] = useState<KodePeriode | null>(null);
-  const hariIni = hariIniWIB();
-  const aktif = periodeDari({ dari, sampai }, hariIni, dipilih);
+  const { dari, sampai, kode, pilih, ubah } = periode;
 
   return (
     <>
@@ -37,16 +50,13 @@ export function PilihPeriode({
         </label>
         <select
           id={`${id}-periode`}
-          value={aktif ?? ""}
+          value={kode ?? ""}
           onChange={(e) => {
-            const kode = e.target.value as KodePeriode | "";
-            if (!kode) return;
-            setDipilih(kode);
-            onUbah(rentangPeriode(kode, hariIni));
+            if (e.target.value) pilih(e.target.value as KodePeriode);
           }}
           className={inputClass}
         >
-          {aktif === null && <option value="">Pilih tanggal</option>}
+          {kode === null && <option value="">Pilih tanggal</option>}
           {PERIODE.map((p) => (
             <option key={p.kode} value={p.kode}>
               {p.label}
@@ -63,7 +73,7 @@ export function PilihPeriode({
           type="date"
           value={dari}
           max={sampai}
-          onChange={(e) => onUbah({ dari: e.target.value, sampai })}
+          onChange={(e) => ubah({ dari: e.target.value, sampai })}
           className={inputClass}
         />
       </div>
@@ -76,7 +86,7 @@ export function PilihPeriode({
           type="date"
           value={sampai}
           min={dari}
-          onChange={(e) => onUbah({ dari, sampai: e.target.value })}
+          onChange={(e) => ubah({ dari, sampai: e.target.value })}
           className={inputClass}
         />
       </div>
