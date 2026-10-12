@@ -252,3 +252,72 @@ export async function pilihMeja(page: Page, nama: string) {
   // di langkah setelahnya — jauh dari sebabnya.
   await expect(modal).toHaveCount(0);
 }
+
+/** Tanggal kalender WIB "YYYY-MM-DD" — rumus yang sama dengan `hariIniWIB` web. */
+export function hariWIB(t = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(t);
+}
+
+/**
+ * HARI TERAKHIR YANG PUNYA DATA — bukan "hari ini".
+ *
+ * Spec laporan memakai data yang ditinggalkan verify-api, dan versi pertamanya
+ * menganggap data itu selalu bertanggal HARI INI (WIB). Anggapan itu runtuh
+ * begitu verify-api dan Playwright dipisah tengah malam WIB (17.00 UTC): run
+ * CI yang kebetulan melintasinya, atau suite yang dijalankan ulang besok
+ * paginya terhadap basis data yang sama. Terukur: verify-api 11 Okt, e2e
+ * 12 Okt 08.05 WIB → laporan "hari ini" kosong dan tiga test merah oleh
+ * PREMIS-nya sendiri, tanpa satu baris kode pun salah.
+ *
+ * Yang dijaga spec-spec itu kesetaraan layar ↔ API pada periode yang SAMA,
+ * bukan periode tertentu — jadi hari mana pun yang berdata sama sahnya. Mundur
+ * dari hari ini paling jauh `batasHari`; jalan normal berhenti di langkah
+ * pertama. Tak ketemu → galat yang menyebut sebabnya, bukan angka nol.
+ */
+export async function hariBerdata<T>(
+  request: APIRequestContext,
+  token: string,
+  rute: string,
+  berdata: (balasan: T) => boolean,
+  batasHari = 14,
+): Promise<{ hari: string; balasan: T }> {
+  const sekarang = Date.now();
+  for (let mundur = 0; mundur < batasHari; mundur++) {
+    const hari = hariWIB(new Date(sekarang - mundur * 86_400_000));
+    const r = await request.get(`${BASE}/api${rute}?dari=${hari}&sampai=${hari}&branch_id=all`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(r.ok(), `GET ${rute} ${hari} (status ${r.status()})`).toBeTruthy();
+    const balasan = (await r.json()) as T;
+    if (berdata(balasan)) return { hari, balasan };
+  }
+  throw new Error(
+    `PREMIS: ${rute} kosong di ${batasHari} hari terakhir — jalankan verify-api terhadap ` +
+      "basis data ini sebelum suite e2e (urutan gerbang CI).",
+  );
+}
+
+/**
+ * Pilih SATU hari di halaman laporan lewat input tanggalnya — jalur orang.
+ *
+ * Halaman laporan dibuka pada hari ini; bila `hari` lain, kedua input diisi
+ * dan yang DITUNGGU adalah balasan untuk rentang akhirnya. Tanpa penantian
+ * itu asersi sesudahnya bisa membaca kartu dari rentang sebelumnya — angka
+ * yang benar untuk periode yang salah, persis yang dijaga spec-nya.
+ *
+ * Dibandingkan dengan isi input, bukan dengan jam test: jam peramban dan jam
+ * test bisa berselisih hari tepat di tengah malam.
+ */
+export async function pilihHariLaporan(page: Page, rute: string, hari: string) {
+  const tgl = page.locator('input[type="date"]');
+  await expect(tgl).toHaveCount(2);
+  if ((await tgl.nth(0).inputValue()) === hari && (await tgl.nth(1).inputValue()) === hari) return;
+  const balasan = page.waitForResponse(
+    (r) => r.url().includes(`/api${rute}?dari=${hari}&sampai=${hari}`) && r.ok(),
+  );
+  // `dari` dulu: hari berdata tak pernah sesudah hari ini, jadi `dari` yang
+  // baru selalu sah terhadap `max={sampai}` lama.
+  await tgl.nth(0).fill(hari);
+  await tgl.nth(1).fill(hari);
+  await balasan;
+}
