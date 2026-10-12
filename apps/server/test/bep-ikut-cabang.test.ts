@@ -27,6 +27,7 @@ const baca = (rel: string) =>
   readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
 const LAPORAN = baca("../../web/src/pages/laporan/LaporanPage.tsx");
+const PILIH_PERIODE = baca("../../web/src/pages/laporan/PilihPeriode.tsx");
 const RUTE = baca("../src/modules/laporan/routes.ts");
 
 describe("premis: BEP memang berbeda per cabang", () => {
@@ -82,10 +83,20 @@ describe("yang SENGAJA tidak ikut membuang", () => {
     // Server memakai jendela 30 harinya sendiri, jadi mengganti tanggal tidak
     // membuat hasil BEP basi. Membuangnya di situ hanya akan memaksa owner
     // menghitung ulang tanpa alasan.
-    expect(LAPORAN).toContain("onChange={(e) => setDari(e.target.value)}");
-    expect(LAPORAN).toContain("onChange={(e) => setSampai(e.target.value)}");
-    const iDari = LAPORAN.indexOf("onChange={(e) => setDari(e.target.value)}");
-    expect(LAPORAN.slice(iDari - 200, iDari + 200)).not.toContain("setBep(");
+    //
+    // Sejak dropdown periode, periodenya tinggal di URL (`usePeriodeLaporan`)
+    // dan seluruh jalur ganti-tanggal — dropdown MAUPUN kedua input — lewat
+    // satu hook itu. Mengganti query string tak me-mount ulang halamannya,
+    // jadi `bep` (state biasa) bertahan, SELAMA tak ada yang membuangnya
+    // sebagai reaksi atas perubahan periode: tidak di pemanggilan
+    // `<PilihPeriode>`, tidak di hook-nya, dan tidak di efek yang bergantung
+    // pada `dari`/`sampai`.
+    expect(LAPORAN).toContain("const periode = usePeriodeLaporan();");
+    const i = LAPORAN.indexOf("<PilihPeriode");
+    expect(i, "LaporanPage tak lagi memakai PilihPeriode").toBeGreaterThan(-1);
+    expect(LAPORAN.slice(i, LAPORAN.indexOf("/>", i))).not.toContain("setBep(");
+    expect(PILIH_PERIODE).not.toMatch(/bep/i);
+    expect(LAPORAN).not.toMatch(/useEffect\([^]*?setBep\(/);
   });
 
   it("dan permintaan BEP memang tak membawa dari/sampai", () => {

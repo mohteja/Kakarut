@@ -11944,18 +11944,59 @@ ownerAktif214(){ # ownerAktif214 <token-a> <token-b> → jumlah owner aktif
 # dicabut), jadi cacatnya TAK PERNAH terlihat dari uji yang menunggu balasan
 # sebelum mengirim berikutnya. Terukur sebelum perbaikan: enam ronde,
 # enam-enamnya berakhir NOL owner, kedua permintaan dibalas 200.
-read -r TA214 TB214 UA214 UB214 <<< "$(buatDuaOwner214 arsip)"
-cek "dasar §214: perusahaan uji punya 2 owner" "V == 2" "$(ownerAktif214 "$TA214" "$TB214")"
+#
+# BALAPANNYA HARUS BENAR-BENAR TERJADI, dan itu tak bisa diandaikan.
+#
+# Versi pertama seksi ini menembak satu ronde dengan dua `curl … &` lalu
+# menuntut yang kalah dibalas 400. Di mesin yang sibuk keduanya tak pernah
+# bertemu: proses curl kedua baru menyala sesudah yang pertama selesai (8 ms),
+# sesi lawannya sudah dicabut, dan ia dibalas 401 — jalur BERURUTAN yang aman
+# itu. Terukur 2026-10-12 saat `flutter test` berjalan di host yang sama:
+# `3759 lolos, 1 gagal`, owner tersisa tetap tepat satu. Merahnya bukan bug.
+#
+# Tapi jawabannya juga BUKAN sekadar menerima 401. 400-lah satu-satunya bukti
+# bahwa kunci `kunciAntrean(tx, "owner", …)` di dalam transaksi yang menolak
+# yang kalah; ronde ber-401 tak pernah menyentuh kunci itu sama sekali. Uji
+# yang hijau oleh ronde berurutan menjaga NOL hal, dan hijaunya terbaca jauh
+# lebih luas dari yang benar. Maka:
+#
+#   - kedua permintaan ditembak dari SATU proses curl (`--parallel
+#     --parallel-immediate`), bukan dua proses yang menyala bergantian;
+#   - ronde diulang (paling banyak 5) sampai satu di antaranya benar-benar
+#     berbalapan — tiap ronde perusahaan baru, jadi tak ada sisa yang dibawa;
+#   - SETIAP ronde wajib berakhir tepat satu owner, dengan pasangan status
+#     200+400 (berbalapan) atau 200+401 (berurutan) — tak pernah 2×200, 5xx,
+#     atau apa pun lainnya;
+#   - dan minimal SATU ronde wajib berbalapan. Lima ronde tanpa satu pun
+#     pertemuan merah dengan namanya sendiri, bukan hijau tanpa memeriksa.
 D214=$(mktemp -d)
-curl -s -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UB214" \
-  -H "Authorization: Bearer $TA214" -H 'Content-Type: application/json' -d '{"arsip":true}' > "$D214/a" &
-curl -s -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UA214" \
-  -H "Authorization: Bearer $TB214" -H 'Content-Type: application/json' -d '{"arsip":true}' > "$D214/b" &
-wait
-cek "INTI: dua owner saling arsip BERSAMAAN → tepat SATU yang tersisa" "V == 1" \
-  "$(ownerAktif214 "$TA214" "$TB214")"
-cek "…dan yang kalah ditolak 400, bukan diloloskan atau 500" "V == 1" \
-  "$(cat "$D214"/a "$D214"/b | grep -c '^400' || true)"
+R214_SALAH=0; R214_STATUS_SALAH=0; R214_BALAP=0; R214_RONDE=0
+while [ "$R214_RONDE" -lt 5 ] && [ "$R214_BALAP" -eq 0 ]; do
+  R214_RONDE=$((R214_RONDE+1))
+  read -r TA214 TB214 UA214 UB214 <<< "$(buatDuaOwner214 "arsip$R214_RONDE")"
+  if [ "$R214_RONDE" -eq 1 ]; then
+    cek "dasar §214: perusahaan uji punya 2 owner" "V == 2" "$(ownerAktif214 "$TA214" "$TB214")"
+  fi
+  curl -s --parallel --parallel-immediate \
+    -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UB214" \
+      -H "Authorization: Bearer $TA214" -H 'Content-Type: application/json' -d '{"arsip":true}' \
+    --next -o /dev/null -w '%{http_code}\n' -X PATCH "$BASE/api/karyawan/$UA214" \
+      -H "Authorization: Bearer $TB214" -H 'Content-Type: application/json' -d '{"arsip":true}' \
+    > "$D214/r$R214_RONDE"
+  [ "$(ownerAktif214 "$TA214" "$TB214")" = 1 ] || R214_SALAH=$((R214_SALAH+1))
+  case "$(sort "$D214/r$R214_RONDE" | tr '\n' ' ')" in
+    "200 400 ") R214_BALAP=$((R214_BALAP+1)) ;;
+    "200 401 ") ;;
+    *) R214_STATUS_SALAH=$((R214_STATUS_SALAH+1))
+       echo "    ronde $R214_RONDE §214: status $(tr '\n' ' ' < "$D214/r$R214_RONDE")" ;;
+  esac
+done
+cek "INTI: dua owner saling arsip BERSAMAAN → tepat SATU yang tersisa (ronde menyimpang dari $R214_RONDE)" \
+  "V == 0" "$R214_SALAH"
+cek "…dan yang kalah ditolak 400 (berbalapan) atau 401 (berurutan) — tak pernah diloloskan atau 500" \
+  "V == 0" "$R214_STATUS_SALAH"
+cek "…dan balapannya SUNGGUH terjadi: minimal satu ronde yang kalah ditolak kunci (400), dari $R214_RONDE ronde" \
+  "V >= 1" "$R214_BALAP"
 
 # ── PINTU 2: MENURUNKAN PERAN owner terakhir (tanpa balapan sama sekali) ────
 # Penjaga lama cuma melihat `arsip`, jadi pintu ini terbuka lebar: owner

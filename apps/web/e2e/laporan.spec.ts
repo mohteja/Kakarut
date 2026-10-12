@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { BASE, masukLewatSesi, OWNER_EMAIL, OWNER_PASS, sesiApi } from "./util";
+import { BASE, hariBerdata, hariWIB, masukLewatSesi, OWNER_EMAIL, OWNER_PASS, pilihHariLaporan, sesiApi } from "./util";
+import { rentangPeriode } from "../src/lib/periode";
 
 /**
  * LAPORAN DI BROWSER MENAMPILKAN ANGKA YANG SAMA DENGAN SERVERNYA.
@@ -13,7 +14,9 @@ import { BASE, masukLewatSesi, OWNER_EMAIL, OWNER_PASS, sesiApi } from "./util";
  * omzetnya {omzet + total_refund}" (omzet kotor + nominal refund bersih).
  *
  * Datanya milik seed + verify-api yang berjalan sebelum suite ini di gerbang;
- * yang dijaga di sini kesetaraan layar ↔ API, bukan nilai mutlaknya.
+ * yang dijaga di sini kesetaraan layar ↔ API, bukan nilai mutlaknya. Karena
+ * itu harinya juga bukan "hari ini" melainkan hari terakhir yang BERDATA
+ * (`hariBerdata`) — lihat util.ts untuk run yang melintasi tengah malam WIB.
  */
 
 type Laporan = {
@@ -49,8 +52,6 @@ async function nilaiKartu(page: Page, label: string): Promise<number> {
   return angka(await labelKartu(page, label).locator("xpath=following-sibling::div[1]").innerText());
 }
 
-const HARI = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
-
 test.describe("laporan di browser = balasan API", () => {
   test("kartu penjualan, grafik per jam, dan keterangan refund memakai angka server", async ({
     page,
@@ -60,15 +61,16 @@ test.describe("laporan di browser = balasan API", () => {
     // `POST /auth/login` dibatasi 10 per 5 menit per (IP+email), dan pada jalan
     // pertama spec ini jatahnya habis lalu menyamar jadi "masih di /login".
     const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
-    const r = await request.get(`${BASE}/api/laporan?dari=${HARI}&sampai=${HARI}&branch_id=all`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(r.ok()).toBeTruthy();
-    const lap = (await r.json()) as Laporan;
-    expect(lap.jumlah_transaksi, "PREMIS: hari ini ada transaksi (verify-api berjalan sebelum suite ini)").toBeGreaterThan(0);
+    const { hari, balasan: lap } = await hariBerdata<Laporan>(
+      request,
+      token,
+      "/laporan",
+      (l) => l.jumlah_transaksi > 0,
+    );
 
     await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
     await page.goto("/laporan");
+    await pilihHariLaporan(page, "/laporan", hari);
     await expect(labelKartu(page, "Omzet")).toBeVisible();
 
     expect(await nilaiKartu(page, "Omzet")).toBe(Math.round(lap.omzet));
@@ -106,7 +108,17 @@ test.describe("laporan di browser = balasan API", () => {
   }) => {
     const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
     const h = { Authorization: `Bearer ${token}` };
-    const q = `dari=${HARI}&sampai=${HARI}&branch_id=all`;
+    // Hari menu-laris & pembelian = hari terakhir ber-TRANSAKSI. Lama Pesanan
+    // dicari sendiri: sajian bertanda selesai bisa absen di hari yang punya
+    // penjualan (mis. penjualan kasir e2e yang tak pernah lewat Papan Pesanan),
+    // dan halamannya hanya merender tabel "Per menu" bila `jumlah > 0`.
+    const { hari } = await hariBerdata<{ jumlah_transaksi: number }>(
+      request,
+      token,
+      "/laporan",
+      (l) => l.jumlah_transaksi > 0,
+    );
+    const q = `dari=${hari}&sampai=${hari}&branch_id=all`;
     const laris = (await (await request.get(`${BASE}/api/laporan/menu-laris?${q}`, { headers: h })).json()) as {
       total_qty: number;
       items: { nama: string; qty: number }[];
@@ -116,13 +128,16 @@ test.describe("laporan di browser = balasan API", () => {
       jumlah_faktur: number;
       jumlah_item: number;
     };
-    const durasi = (await (await request.get(`${BASE}/api/laporan/durasi-pesanan?${q}`, { headers: h })).json()) as {
-      jumlah: number;
-      riwayat: unknown[];
-    };
+    const { hari: hariDurasi, balasan: durasi } = await hariBerdata<{ jumlah: number; riwayat: unknown[] }>(
+      request,
+      token,
+      "/laporan/durasi-pesanan",
+      (d) => d.jumlah > 0,
+    );
 
     await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
     await page.goto("/laporan/menu-laris");
+    await pilihHariLaporan(page, "/laporan/menu-laris", hari);
     await expect(page.getByText("Total porsi")).toBeVisible();
     if (laris.items.length > 0) {
       // Baris teratas = item pertama balasan, dengan porsinya.
@@ -132,16 +147,76 @@ test.describe("laporan di browser = balasan API", () => {
     }
 
     await page.goto("/laporan/pembelian");
+    await pilihHariLaporan(page, "/laporan/pembelian", hari);
     await expect(labelKartu(page, "Total Pengeluaran")).toBeVisible();
     expect(await nilaiKartu(page, "Total Pengeluaran")).toBe(Math.round(beli.total_pengeluaran));
     expect(await nilaiKartu(page, "Jumlah Faktur")).toBe(beli.jumlah_faktur);
     expect(await nilaiKartu(page, "Jumlah Baris Bahan")).toBe(beli.jumlah_item);
 
     await page.goto("/laporan/durasi-pesanan");
+    await pilihHariLaporan(page, "/laporan/durasi-pesanan", hariDurasi);
     await expect(page.getByText("Per menu")).toBeVisible();
     // "menampilkan N dari M" — N = panjang riwayat yang dikirim, M = jumlah.
-    if (durasi.jumlah > 0) {
-      await expect(page.getByText(String(durasi.riwayat.length), { exact: true }).first()).toBeVisible();
-    }
+    await expect(page.getByText(String(durasi.riwayat.length), { exact: true }).first()).toBeVisible();
+  });
+
+  test("dropdown periode mengisi tanggalnya, angkanya = API, dan periodenya terbawa antar tab", async ({ page, request }) => {
+    // Rumus kalendernya dipaku `periode-laporan.test.ts`; yang dijaga di sini
+    // SAMBUNGANNYA: pilihan → kedua input → permintaan → kartu.
+    const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+    await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+    await page.goto("/laporan");
+
+    const periode = page.getByLabel("Periode");
+    const tgl = page.locator('input[type="date"]');
+    await expect(periode).toHaveValue("hari-ini");
+
+    const r = rentangPeriode("bulan-lalu", hariWIB());
+    const balasan = page.waitForResponse(
+      (x) => x.url().includes(`/api/laporan?dari=${r.dari}&sampai=${r.sampai}`) && x.ok(),
+    );
+    await periode.selectOption({ label: "Bulan lalu" });
+    await balasan;
+    await expect(tgl.nth(0)).toHaveValue(r.dari);
+    await expect(tgl.nth(1)).toHaveValue(r.sampai);
+
+    const api = await request.get(`${BASE}/api/laporan?dari=${r.dari}&sampai=${r.sampai}&branch_id=all`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const lap = (await api.json()) as Laporan;
+    await expect(labelKartu(page, "Omzet")).toBeVisible();
+    expect(await nilaiKartu(page, "Omzet")).toBe(Math.round(lap.omzet));
+    expect(await nilaiKartu(page, "Transaksi")).toBe(lap.jumlah_transaksi);
+
+    // PINDAH TAB → periodenya ikut. Tanpa itu, Menu Terlaris membuka HARI INI
+    // dan dua angka dari dua periode berbeda berdiri di bawah judul yang sama.
+    const larisBulanLalu = page.waitForResponse(
+      (x) => x.url().includes(`/api/laporan/menu-laris?dari=${r.dari}&sampai=${r.sampai}`) && x.ok(),
+    );
+    await page.getByRole("link", { name: /Menu Terlaris/ }).click();
+    await expect(page).toHaveURL(/\/laporan\/menu-laris\?periode=bulan-lalu$/);
+    await larisBulanLalu;
+    await expect(periode).toHaveValue("bulan-lalu");
+    await expect(tgl.nth(0)).toHaveValue(r.dari);
+    await expect(tgl.nth(1)).toHaveValue(r.sampai);
+
+    // …dan selamat dari muat ulang.
+    await page.reload();
+    await expect(periode).toHaveValue("bulan-lalu");
+    await expect(tgl.nth(0)).toHaveValue(r.dari);
+
+    // Tanggal digeser tangan → rentangnya bukan lagi "Bulan lalu", dan
+    // dropdown yang tetap berkata begitu akan berbohong.
+    const geser = r.dari.slice(0, 8) + "05";
+    await tgl.nth(0).fill(geser);
+    await expect(periode).toHaveValue("");
+    await expect(periode.locator("option:checked")).toHaveText("Pilih tanggal");
+
+    // Rentang tangan juga terbawa — apa adanya, bukan dikembalikan ke nama.
+    await page.getByRole("link", { name: /Pembelian/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/laporan/pembelian\\?dari=${geser}&sampai=${r.sampai}$`));
+    await expect(tgl.nth(0)).toHaveValue(geser);
+    await expect(tgl.nth(1)).toHaveValue(r.sampai);
+    await expect(periode).toHaveValue("");
   });
 });

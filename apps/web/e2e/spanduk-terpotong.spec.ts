@@ -20,7 +20,7 @@
  * dan kedua arah itu memang dua pertanyaan yang berbeda.
  */
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { BASE, OWNER_EMAIL, OWNER_PASS, masukLewatSesi, sesiApi } from "./util";
+import { BASE, OWNER_EMAIL, OWNER_PASS, hariBerdata, masukLewatSesi, pilihHariLaporan, sesiApi } from "./util";
 
 /**
  * "Spanduknya TIDAK ada" hanya sah SESUDAH halamannya benar-benar termuat.
@@ -65,7 +65,17 @@ test("spanduk pemotongan: layar mengatakan daftarnya terpotong — tiga bentuk, 
   expect(supplier.length, "tak ada supplier — premisnya runtuh").toBeGreaterThan(0);
   const sup = supplier[0];
 
-  const hariIni = new Date().toISOString().slice(0, 10);
+  // Laporan durasi dibaca pada hari terakhir yang punya sajian selesai, bukan
+  // "hari ini": kalimat "seluruh N sajian" hanya dirender bila `jumlah > 0`,
+  // dan hari ini bisa kosong (lihat `hariBerdata` di util.ts). Versi
+  // sebelumnya juga mengambil tanggal UTC (`toISOString`) sementara layarnya
+  // WIB — antara 00.00 dan 07.00 WIB premisnya membaca hari yang lain.
+  const { hari: hariDurasi, balasan: durasi } = await hariBerdata<{ jumlah: number; riwayat_terpotong: boolean }>(
+    request,
+    token,
+    "/laporan/durasi-pesanan",
+    (d) => d.jumlah > 0,
+  );
   const asli = {
     transfer: (await (await request.get(`${BASE}/api/transfer-stok`, { headers: h })).json()) as {
       rows_terpotong: boolean;
@@ -73,12 +83,7 @@ test("spanduk pemotongan: layar mengatakan daftarnya terpotong — tiga bentuk, 
     kartu: (await (
       await request.get(`${BASE}/api/supplier/${sup.id}/kartu`, { headers: h })
     ).json()) as { rows_terpotong: boolean },
-    durasi: (await (
-      await request.get(
-        `${BASE}/api/laporan/durasi-pesanan?dari=${hariIni}&sampai=${hariIni}`,
-        { headers: h },
-      )
-    ).json()) as { riwayat_terpotong: boolean },
+    durasi,
   };
   expect(asli.transfer.rows_terpotong, "/transfer-stok sudah terpotong").toBe(false);
   expect(asli.kartu.rows_terpotong, "kartu supplier sudah terpotong").toBe(false);
@@ -119,11 +124,13 @@ test("spanduk pemotongan: layar mengatakan daftarnya terpotong — tiga bentuk, 
   const utuh = page.getByText(/seluruh \d+ sajian yang terhitung ada di sini/);
   const terpotongLap = page.getByText(/menampilkan.*dari.*sajian yang terhitung/s);
   await page.goto("/laporan/durasi-pesanan");
+  await pilihHariLaporan(page, "/laporan/durasi-pesanan", hariDurasi);
   await expect(utuh).toBeVisible();
   await expect(terpotongLap).toHaveCount(0);
 
   await paksaTerpotong(page, "**/api/laporan/durasi-pesanan**", "riwayat_terpotong");
   await page.goto("/laporan/durasi-pesanan");
+  await pilihHariLaporan(page, "/laporan/durasi-pesanan", hariDurasi);
   await expect(terpotongLap).toBeVisible();
   await expect(utuh, "kalimat 'seluruhnya' TETAP ada padahal terpotong").toHaveCount(0);
 });
