@@ -8,6 +8,7 @@ import { api } from "../../lib/api";
 import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
 import { GrafikTransaksiPerJam } from "./GrafikTransaksiPerJam";
 import { LaporanTabs } from "./LaporanTabs";
+import { PilihPeriode } from "./PilihPeriode";
 
 const METODE_LABEL: Record<string, string> = {
   tunai: "💵 Tunai",
@@ -59,26 +60,14 @@ export function LaporanPage() {
       </div>
 
       <Card className="mb-5 flex flex-wrap items-end gap-3 p-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-stone-500">Dari tanggal</label>
-          <input
-            type="date"
-            value={dari}
-            max={sampai}
-            onChange={(e) => setDari(e.target.value)}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-stone-500">Sampai tanggal</label>
-          <input
-            type="date"
-            value={sampai}
-            min={dari}
-            onChange={(e) => setSampai(e.target.value)}
-            className={inputClass}
-          />
-        </div>
+        <PilihPeriode
+          dari={dari}
+          sampai={sampai}
+          onUbah={(r) => {
+            setDari(r.dari);
+            setSampai(r.sampai);
+          }}
+        />
         {isManajemen && cabang.length > 0 && (
           <div>
             <label className="mb-1 block text-xs font-medium text-stone-500">Cabang</label>

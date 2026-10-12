@@ -7,6 +7,7 @@ import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatDurasi, formatTanggal, formatWaktu, hariIniWIB } from "../../lib/format";
 import { LaporanTabs } from "./LaporanTabs";
+import { PilihPeriode } from "./PilihPeriode";
 
 /**
  * LAMA PENGERJAAN PESANAN — rata-rata per menu + riwayat penyelesaiannya.
@@ -46,26 +47,14 @@ export function LaporanDurasiPesananPage() {
       </div>
 
       <Card className="mb-5 flex flex-wrap items-end gap-3 p-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-stone-500">Dari tanggal</label>
-          <input
-            type="date"
-            value={dari}
-            max={sampai}
-            onChange={(e) => setDari(e.target.value)}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-stone-500">Sampai tanggal</label>
-          <input
-            type="date"
-            value={sampai}
-            min={dari}
-            onChange={(e) => setSampai(e.target.value)}
-            className={inputClass}
-          />
-        </div>
+        <PilihPeriode
+          dari={dari}
+          sampai={sampai}
+          onUbah={(r) => {
+            setDari(r.dari);
+            setSampai(r.sampai);
+          }}
+        />
         {isManajemen && cabang.length > 0 && (
           <div>
             <label className="mb-1 block text-xs font-medium text-stone-500">Cabang</label>

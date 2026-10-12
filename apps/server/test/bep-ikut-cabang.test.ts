@@ -82,10 +82,16 @@ describe("yang SENGAJA tidak ikut membuang", () => {
     // Server memakai jendela 30 harinya sendiri, jadi mengganti tanggal tidak
     // membuat hasil BEP basi. Membuangnya di situ hanya akan memaksa owner
     // menghitung ulang tanpa alasan.
-    expect(LAPORAN).toContain("onChange={(e) => setDari(e.target.value)}");
-    expect(LAPORAN).toContain("onChange={(e) => setSampai(e.target.value)}");
-    const iDari = LAPORAN.indexOf("onChange={(e) => setDari(e.target.value)}");
-    expect(LAPORAN.slice(iDari - 200, iDari + 200)).not.toContain("setBep(");
+    //
+    // Sejak dropdown periode, SATU penangan (`onUbah` milik `PilihPeriode`)
+    // menerima perubahan dari dropdown MAUPUN kedua input tanggal — jadi
+    // seluruh jalur ganti-tanggal lewat irisan ini.
+    const i = LAPORAN.indexOf("<PilihPeriode");
+    expect(i, "LaporanPage tak lagi memakai PilihPeriode").toBeGreaterThan(-1);
+    const penangan = LAPORAN.slice(i, LAPORAN.indexOf("/>", i));
+    expect(penangan).toContain("setDari(r.dari)");
+    expect(penangan).toContain("setSampai(r.sampai)");
+    expect(penangan).not.toContain("setBep(");
   });
 
   it("dan permintaan BEP memang tak membawa dari/sampai", () => {

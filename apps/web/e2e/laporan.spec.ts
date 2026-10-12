@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { BASE, hariBerdata, masukLewatSesi, OWNER_EMAIL, OWNER_PASS, pilihHariLaporan, sesiApi } from "./util";
+import { BASE, hariBerdata, hariWIB, masukLewatSesi, OWNER_EMAIL, OWNER_PASS, pilihHariLaporan, sesiApi } from "./util";
+import { rentangPeriode } from "../src/lib/periode";
 
 /**
  * LAPORAN DI BROWSER MENAMPILKAN ANGKA YANG SAMA DENGAN SERVERNYA.
@@ -157,5 +158,41 @@ test.describe("laporan di browser = balasan API", () => {
     await expect(page.getByText("Per menu")).toBeVisible();
     // "menampilkan N dari M" — N = panjang riwayat yang dikirim, M = jumlah.
     await expect(page.getByText(String(durasi.riwayat.length), { exact: true }).first()).toBeVisible();
+  });
+
+  test("dropdown periode mengisi tanggalnya, dan angkanya = API untuk rentang itu", async ({ page, request }) => {
+    // Rumus kalendernya dipaku `periode-laporan.test.ts`; yang dijaga di sini
+    // SAMBUNGANNYA: pilihan → kedua input → permintaan → kartu.
+    const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+    await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+    await page.goto("/laporan");
+
+    const periode = page.getByLabel("Periode");
+    const tgl = page.locator('input[type="date"]');
+    await expect(periode).toHaveValue("hari-ini");
+
+    const r = rentangPeriode("bulan-lalu", hariWIB());
+    const balasan = page.waitForResponse(
+      (x) => x.url().includes(`/api/laporan?dari=${r.dari}&sampai=${r.sampai}`) && x.ok(),
+    );
+    await periode.selectOption({ label: "Bulan lalu" });
+    await balasan;
+    await expect(tgl.nth(0)).toHaveValue(r.dari);
+    await expect(tgl.nth(1)).toHaveValue(r.sampai);
+
+    const api = await request.get(`${BASE}/api/laporan?dari=${r.dari}&sampai=${r.sampai}&branch_id=all`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const lap = (await api.json()) as Laporan;
+    await expect(labelKartu(page, "Omzet")).toBeVisible();
+    expect(await nilaiKartu(page, "Omzet")).toBe(Math.round(lap.omzet));
+    expect(await nilaiKartu(page, "Transaksi")).toBe(lap.jumlah_transaksi);
+
+    // Tanggal digeser tangan → rentangnya bukan lagi "Bulan lalu", dan
+    // dropdown yang tetap berkata begitu akan berbohong.
+    const geser = r.dari.slice(0, 8) + "05";
+    await tgl.nth(0).fill(geser);
+    await expect(periode).toHaveValue("");
+    await expect(periode.locator("option:checked")).toHaveText("Pilih tanggal");
   });
 });
