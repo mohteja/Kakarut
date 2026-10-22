@@ -20,6 +20,6 @@
     "test:e2e": "npm run build && npm run e2e -w @kakarut/web"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   }
 }
