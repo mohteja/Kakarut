@@ -1,8 +1,16 @@
 # syntax=docker/dockerfile:1
 
+# ---------- Versi Node ----------
+# Node 22 (LTS) — SAMA dengan `node-version: 22` di .github/workflows/ci.yml,
+# jadi image yang tayang menjalankan runtime yang persis sudah dilewati gerbang.
+# Sebelumnya `node:20`: Node 20 habis masa dukungannya 30 April 2026 dan tak lagi
+# menerima perbaikan keamanan, sementara CI sudah lama menguji di 22 — produksi
+# berjalan di runtime yang tak pernah diuji dan tak lagi ditambal.
+# Kedua stage harus sama: `node_modules` dari builder disalin utuh ke runtime.
+
 # ---------- Stage 1: builder ----------
 # Install SEMUA dependency (termasuk dev) lalu build SPA web (Vite -> apps/web/dist).
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
 # Manifest dulu agar layer install ter-cache selama dependency tidak berubah.
@@ -19,7 +27,7 @@ RUN npm run build
 # ---------- Stage 2: runtime ----------
 # Server dijalankan lewat tsx (lihat apps/server: "start": "tsx src/index.ts"),
 # jadi runtime butuh node_modules (berisi tsx) + source TS, bukan hasil kompilasi.
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 

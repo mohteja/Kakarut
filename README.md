@@ -36,7 +36,7 @@ apps/web          → React + Vite + Tailwind (UI Bahasa Indonesia)
 
 ## Menjalankan (development)
 
-Prasyarat: Node ≥ 20, PostgreSQL 16 (atau `DATABASE_URL` ke Postgres mana pun).
+Prasyarat: Node ≥ 22 (sama dengan CI & image produksi), PostgreSQL 16 (atau `DATABASE_URL` ke Postgres mana pun).
 
 ```bash
 npm install
