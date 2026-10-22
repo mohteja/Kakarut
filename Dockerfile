@@ -1,8 +1,22 @@
 # syntax=docker/dockerfile:1
 
+# ---------- Versi Node ----------
+# Node 24 (LTS "Krypton", habis dukungan 30 April 2028) — SAMA dengan
+# `node-version: 24` di .github/workflows/ci.yml, jadi image yang tayang
+# menjalankan runtime yang persis sudah dilewati gerbang. Naikkan KEDUANYA
+# bersamaan, atau produksi kembali berjalan di runtime yang tak pernah diuji.
+#
+# Riwayat: `node:20` — habis dukungan 30 April 2026, tak lagi ditambal, dan
+# CI saat itu sudah menguji di 22, jadi produksi berjalan di runtime yang tak
+# pernah diuji. Bukan 22: ia sudah maintenance dan habis 30 April 2027, jadi
+# memilihnya cuma menunda upgrade berikutnya enam bulan. Bukan 26: baru masuk
+# LTS 28 Oktober 2026 — tunggu ekosistemnya mengejar.
+#
+# Kedua stage harus sama: `node_modules` dari builder disalin utuh ke runtime.
+
 # ---------- Stage 1: builder ----------
 # Install SEMUA dependency (termasuk dev) lalu build SPA web (Vite -> apps/web/dist).
-FROM node:20-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 
 # Manifest dulu agar layer install ter-cache selama dependency tidak berubah.
@@ -19,7 +33,7 @@ RUN npm run build
 # ---------- Stage 2: runtime ----------
 # Server dijalankan lewat tsx (lihat apps/server: "start": "tsx src/index.ts"),
 # jadi runtime butuh node_modules (berisi tsx) + source TS, bukan hasil kompilasi.
-FROM node:20-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
