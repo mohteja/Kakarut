@@ -50,6 +50,82 @@ Tanpa keempatnya, berkas ini berubah jadi daftar hijau yang tak pernah dibayar:
 
 ---
 
+## RILIS 2026-09-12 — tiga alat ukur yang mengaku lebih luas daripada yang benar — server + web — 2026-09-13
+
+**Pemicu.** Pemilik meminta rilis. Aturan tetap *"jangan dulu rilis apa pun
+sampai saya minta"* berlaku sampai detik itu.
+
+**Isi rilis**: 4 commit, `fd5e02a..11b90aa`, merge `bd2085a`. Satu commit
+pembukuan stempel changelog rilis sebelumnya, lalu tiga vena yang menemukan
+bentuk yang sama dari tiga arah — **sebuah angka yang dipercaya, padahal
+dihitung atas populasi yang lebih kecil daripada yang diaku.**
+
+| vena | yang lolos selama ini |
+| --- | --- |
+| #122 `323e8bd` | jalan verify-api **mati di §111**; gerbang membaca gagal, lognya nol tanda gagal |
+| #123 `a286ee0` | lencana nav & beranda dijumlahkan dari **satu halaman** yang servernya potong di 200 |
+| #124 `11b90aa` | **delapan pola rute** tak pernah punya satu pun bentuk sukses untuk diadu |
+
+Hanya #123 yang terlihat pemakai; dua lainnya memperbaiki alat ukurnya sendiri.
+Muatan lencana turun dari 328 KB jadi 3,3 KB tiap 60 detik di SETIAP halaman —
+ia hidup di cangkang aplikasi.
+
+**PERUBAHAN KAWAT: NOL.** Tak ada rute, tak ada bentuk balasan, tak ada stempel
+changelog yang menunggu — `BELUM_TAYANG` hanya memuat dua entri "bukan rilis".
+Ponsel pun tak punya apa-apa: `origin/Production..origin/claude` KOSONG di
+`mohteja/kakarut-mobile`, jadi tak ada rilis serentak yang perlu dijaga.
+
+**Urutan yang dijalankan**, dan tiap langkahnya menahan yang berikutnya:
+
+1. Premis dibuktikan baca-saja: `origin/production` `21467eb`, empat commit
+   menunggu, pohon kerja bersih.
+2. Merge lokal `bd2085a`, lalu dibuktikan **byte-identik** dengan cabang kerja
+   (`git diff HEAD origin/claude` kosong) — sebelum DAN sesudah gerbang.
+3. Gerbang penuh di atas commit merge itu, bukan di atas cabang kerjanya.
+4. Dorong `production`. CI #497 yang memutuskan deploy, dibaca dari API GitHub.
+
+**Gerbang rilis** (di atas `bd2085a`): typecheck ok · verify-api **3.760/0** ·
+vitest **266 berkas / 3.218 uji** · invarian **27/0** · e2e **51 lolos**.
+
+**CI #497**, ketiga pekerjaannya hijau: *Typecheck + unit test + build web*;
+*Verify API + E2E web (DB segar)* — termasuk langkah cakupan rute dan audit
+invarian; dan *Build image & deploy produksi*, dengan langkah "Picu redeploy
+Dokploy" berhasil pada 13:46:53 UTC.
+
+**GERBANG MERAH SEKALI DI JALAN, DAN TAK ADA YANG DIDORONG KARENANYA.** Jalan
+gerbang pertama di atas `bd2085a` memerah **24 lengan dalam 108 asersi
+pertama** — §2b berbunyi "penjualan tanpa shift terbuka → 409" sementara
+kawatnya menjawab 201, dan belasan lengan sesudahnya berselisih seperti basis
+data yang sudah dipakai. Aturan "jangan dorong apa pun yang gerbangnya merah"
+yang membuat itu tak berakibat apa-apa.
+
+Didiagnosa, bukan diulang sampai hijau: DB direset, lalu **premisnya diukur
+sendiri** — seed segar memberi `shift terbuka: 0`, `shift total: 0`,
+`absensi: 0`. Jadi kodenya benar dan keadaannyalah yang tercemar. Yang paling
+mungkin mencemarinya: Postgres kontainer ini MATI lagi tepat saat gerbang
+pertama dijalankan (ia berhenti bersih di langkah "POSTGRES TIDAK HIDUP",
+sesudah `rm -rf dist` + `npm run build` + membunuh server), dan jalan berikutnya
+berangkat di atas sisa itu. Jalan bersih sesudahnya: 3.760/0.
+
+Ini kelas yang SAMA dengan vena #122 yang justru sedang dirilis — *hasil yang
+bergantung pada sisa jalan sebelumnya* — kali ini menimpa gerbangnya sendiri,
+bukan skripnya.
+
+**Batas yang diakui.**
+- **PRODUKSI TAK BISA DIKETUK dari sesi ini.** `https://terakasir.com/api/health`
+  memulangkan kode **000** — diblokir kebijakan jaringan, bukan gagal. Jadi
+  "tayang" di sini bersandar pada CI #497 dan webhook Dokploy yang menjawab
+  berhasil, BUKAN pada ketukan HTTP ke production. Sama seperti rilis 2026-09-11,
+  dan berbeda dari rilis-rilis sebelumnya yang sempat mengetuknya.
+- **APK ponsel tidak ikut terkirim** — tak ada yang perlu dikirim kali ini.
+- **Enumerasi akun tetap terbuka di production** lewat `/register` &
+  `/resend-verification` (keputusan pemilik 2026-09-05). Disebut lagi supaya
+  keadaan itu tidak jadi senyap hanya karena ia sudah lama.
+- **Tak ada staging di alur ini**; `production` satu-satunya tujuan, dan
+  `production` masih tak terproteksi di GitHub.
+
+---
+
 ## Jatah alat ukur yang dihabiskan uji penolakan — gerbang — 2026-09-12
 
 **Pemicu.** Dua butir antrean yang berdampingan: *"Jangkauan §311 = jangkauan
