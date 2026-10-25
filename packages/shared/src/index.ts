@@ -1,4 +1,5 @@
 export * from "./absensi";
+export * from "./addon";
 export * from "./cadangan";
 export * from "./constants";
 export * from "./contoh-cetak";

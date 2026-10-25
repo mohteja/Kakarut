@@ -19,6 +19,7 @@
  * Bill belum tentu. Yang menggantikannya sebagai identitas adalah MEJA dan
  * nama tamu — dan itu memang yang dipakai orang dapur untuk mengantar.
  */
+import { teksAddon } from "./addon";
 import { EscPosBuilder } from "./escpos";
 import type { ReceiptOptions } from "./receipt";
 
@@ -29,6 +30,12 @@ export interface OrderSlipItem {
   tag?: string | null;
   /** catatan personalisasi per baris (mis. "tanpa gula") */
   catatan?: string | null;
+  /**
+   * Add-on per porsi ("Extra mie x2", "Tanpa sayur") — perintah untuk dapur.
+   * SENGAJA hanya nama & jumlah: tipe ini tak membawa harga, sama seperti
+   * barisnya.
+   */
+  addons?: { nama: string; jumlah: number }[] | null;
 }
 
 export interface OrderSlipData {
@@ -127,6 +134,8 @@ export function buildOrderSlipBytes(data: OrderSlipData, opts: ReceiptOptions): 
   for (const it of data.items) {
     const tag = it.tag ? ` (${it.tag})` : "";
     b.bold(true).text(`${qtyTeksSlip(it.qty)}x ${it.nama}${tag}`).bold(false);
+    // Add-on SEBELUM catatan: ia bagian dari pesanannya, catatan keterangannya.
+    for (const a of it.addons ?? []) b.text(`   + ${teksAddon(a)}`);
     if (it.catatan?.trim()) b.text(`   * ${it.catatan.trim()}`);
   }
   b.divider();

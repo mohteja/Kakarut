@@ -84,7 +84,13 @@ const KOLOM: Record<string, string[]> = {
     "supplies.harga_beli",
     "companies.target_penjualan",
   ],
-  BATAS_HARGA: ["menus.harga_jual", "sale_items.harga_satuan"],
+  BATAS_HARGA: [
+    "menus.harga_jual",
+    "sale_items.harga_satuan",
+    "menu_addons.harga",
+    "sale_item_addons.harga",
+    "open_bill_item_addons.harga",
+  ],
   BATAS_QTY_BARIS: ["sale_items.qty", "sale_items.qty_refund", "open_bill_items.qty", "sale_refunds.qty"],
   BATAS_QTY_STOK: [
     "productions.qty",
@@ -107,7 +113,13 @@ const KOLOM: Record<string, string[]> = {
   ],
   BATAS_FAKTOR: ["menus.mult", "menus.base_mult", "menu_price_logs.mult_baru", "menu_price_logs.mult_lama"],
   BATAS_ISI: ["ingredients.isi"],
-  BATAS_QTY_RESEP: ["menu_components.qty", "ingredient_components.qty"],
+  BATAS_QTY_RESEP: [
+    "menu_components.qty",
+    "ingredient_components.qty",
+    "menu_addons.qty_bahan",
+    "sale_item_addons.qty_bahan",
+    "open_bill_item_addons.qty_bahan",
+  ],
   // Tak ada medan permintaan yang mengisinya — HPP lahir dari resep × qty ×
   // harga bahan. Ia tetap diklaim di sini karena `pastikanMuat` memakai
   // konstantanya di tempat angkanya dihitung (lihat `luapan-turunan.test.ts`).
@@ -161,6 +173,8 @@ const BUKAN_KOLOM: Record<string, string> = {
   lead_time_hari: "kolom integer",
   per_hari: "kolom integer",
   target_durasi_detik: "kolom integer",
+  min_pilih: "kolom integer",
+  maks_pilih: "kolom integer",
   lat: "tak disimpan — hanya diadu dengan radius cabang",
   lng: "tak disimpan — hanya diadu dengan radius cabang",
   harga_per_unit: "→ productions.total_harga / supply_mutations.total_harga (14,2)",

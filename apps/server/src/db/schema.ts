@@ -1044,6 +1044,96 @@ export const menuComponents = pgTable(
   (t) => [uniqueIndex("menu_components_menu_ingredient_uq").on(t.menuId, t.ingredientId)],
 );
 
+/**
+ * ADD-ON PER MENU — grup pilihan yang ditawarkan kasir saat menu masuk keranjang
+ * (mis. "Tambahan": Extra mie / Tanpa sayur; "Level pedas": Sedang / Pedas).
+ *
+ * Grup WAJIB = `min_pilih >= 1` (tanpa bendera terpisah: satu kebenaran, tak
+ * bisa berselisih). `maks_pilih` NULL = bebas. Yang dihitung min/maks adalah
+ * jumlah add-on BERBEDA yang dipilih, bukan jumlah porsinya (Extra mie ×2 tetap
+ * satu pilihan).
+ *
+ * TAK PERNAH DIHAPUS KERAS: menghapus di form menu mengisi `deleted_at`. Bill
+ * yang masih terbuka, antrean offline ponsel, dan laporan tetap bisa merujuk
+ * id-nya — dan baris transaksi menyimpan SNAPSHOT-nya sendiri
+ * (`sale_item_addons` / `open_bill_item_addons`), jadi mengubah add-on hari
+ * ini tak pernah mengubah transaksi kemarin.
+ */
+export const menuAddonGroups = pgTable(
+  "menu_addon_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    menuId: uuid("menu_id")
+      .notNull()
+      .references(() => menus.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    minPilih: integer("min_pilih").notNull().default(0),
+    maksPilih: integer("maks_pilih"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("menu_addon_groups_menu_idx").on(t.menuId),
+    uniqueIndex("menu_addon_groups_menu_nama_uq")
+      .on(t.menuId, t.nama)
+      .where(sql`${t.deletedAt} IS NULL`),
+    check("menu_addon_groups_min_ck", sql`${t.minPilih} >= 0`),
+    check(
+      "menu_addon_groups_maks_ck",
+      sql`${t.maksPilih} IS NULL OR ${t.maksPilih} >= GREATEST(${t.minPilih}, 1)`,
+    ),
+  ],
+);
+
+/**
+ * Satu add-on di dalam grup. `harga` per SATU kali pilih (gratis = 0, tak boleh
+ * negatif — "Tanpa mie" itu gratis, bukan potongan harga).
+ *
+ * `ingredient_id` + `qty_bahan` (opsional, berpasangan) menautkan add-on ke
+ * BAHAN supaya stok & HPP tetap jujur: positif = memakai lebih ("Extra mie"
+ * +100 g), negatif = memakai kurang ("Tanpa mie" −100 g, dilantai 0 per baris).
+ * Takarannya per satu kali pilih; "Extra mie ×2" memakai dua kalinya.
+ *
+ * `maks_jumlah` = batas berapa kali add-on ini boleh dipilih per porsi
+ * (NULL = s/d BATAS_JUMLAH_ADDON).
+ */
+export const menuAddons = pgTable(
+  "menu_addons",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => menuAddonGroups.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    harga: numeric("harga", { precision: 12, scale: 2, mode: "number" }).notNull().default(0),
+    maksJumlah: integer("maks_jumlah"),
+    ingredientId: uuid("ingredient_id").references(() => ingredients.id),
+    qtyBahan: numeric("qty_bahan", { precision: 12, scale: 4, mode: "number" }),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("menu_addons_group_idx").on(t.groupId),
+    check("menu_addons_harga_ck", sql`${t.harga} >= 0`),
+    check("menu_addons_maks_jumlah_ck", sql`${t.maksJumlah} IS NULL OR ${t.maksJumlah} >= 1`),
+    check(
+      "menu_addons_bahan_ck",
+      sql`(${t.ingredientId} IS NULL) = (${t.qtyBahan} IS NULL) AND (${t.qtyBahan} IS NULL OR ${t.qtyBahan} <> 0)`,
+    ),
+  ],
+);
+
 // ===== Transaksi (per cabang) =====
 
 /** Member/pelanggan — identitas via nomor WhatsApp, dipakai kasir & member area. */
@@ -1533,6 +1623,39 @@ export const saleItems = pgTable(
  * sini adalah "apa yang terjadi, kapan, oleh siapa, berapa" — supaya owner bisa
  * memeriksa belakangan tanpa harus merekonstruksi dari selisih.
  */
+/**
+ * SNAPSHOT add-on per baris — nama, harga, dan takaran bahan SAAT dipilih.
+ * Harga add-on sudah DILEBUR ke `harga_satuan` barisnya (refund, laporan omzet,
+ * bon, dan struk semuanya menghitung `harga_satuan × qty`); baris ini ada untuk
+ * MENAMPILKANNYA (tiket dapur, papan, struk) dan untuk menghitung ulang
+ * konsumsi bahan dari apa yang benar-benar dijual — bukan dari konfigurasi
+ * add-on hari ini.
+ */
+export const saleItemAddons = pgTable(
+  "sale_item_addons",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    saleItemId: uuid("sale_item_id")
+      .notNull()
+      .references(() => saleItems.id, { onDelete: "cascade" }),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    addonId: uuid("addon_id").references(() => menuAddons.id, { onDelete: "set null" }),
+    grupNama: text("grup_nama").notNull(),
+    nama: text("nama").notNull(),
+    harga: numeric("harga", { precision: 12, scale: 2, mode: "number" }).notNull(),
+    jumlah: integer("jumlah").notNull().default(1),
+    ingredientId: uuid("ingredient_id").references(() => ingredients.id),
+    qtyBahan: numeric("qty_bahan", { precision: 12, scale: 4, mode: "number" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [
+    index("sale_item_addons_item_idx").on(t.saleItemId),
+    check("sale_item_addons_jumlah_ck", sql`${t.jumlah} >= 1`),
+  ],
+);
+
 export const saleRefunds = pgTable(
   "sale_refunds",
   {
@@ -1833,6 +1956,39 @@ export const openBillItems = pgTable(
   (t) => [
     index("open_bill_items_bill_idx").on(t.billId),
     index("open_bill_items_status_idx").on(t.billId, t.pesananStatus),
+  ],
+);
+
+/**
+ * SNAPSHOT add-on per baris — nama, harga, dan takaran bahan SAAT dipilih.
+ * Harga add-on sudah DILEBUR ke `harga_satuan` barisnya (refund, laporan omzet,
+ * bon, dan struk semuanya menghitung `harga_satuan × qty`); baris ini ada untuk
+ * MENAMPILKANNYA (tiket dapur, papan, struk) dan untuk menghitung ulang
+ * konsumsi bahan dari apa yang benar-benar dijual — bukan dari konfigurasi
+ * add-on hari ini.
+ */
+export const openBillItemAddons = pgTable(
+  "open_bill_item_addons",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    openBillItemId: uuid("open_bill_item_id")
+      .notNull()
+      .references(() => openBillItems.id, { onDelete: "cascade" }),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    addonId: uuid("addon_id").references(() => menuAddons.id, { onDelete: "set null" }),
+    grupNama: text("grup_nama").notNull(),
+    nama: text("nama").notNull(),
+    harga: numeric("harga", { precision: 12, scale: 2, mode: "number" }).notNull(),
+    jumlah: integer("jumlah").notNull().default(1),
+    ingredientId: uuid("ingredient_id").references(() => ingredients.id),
+    qtyBahan: numeric("qty_bahan", { precision: 12, scale: 4, mode: "number" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [
+    index("open_bill_item_addons_item_idx").on(t.openBillItemId),
+    check("open_bill_item_addons_jumlah_ck", sql`${t.jumlah} >= 1`),
   ],
 );
 

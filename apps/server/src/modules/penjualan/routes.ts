@@ -28,6 +28,7 @@ import { refundSajian } from "./refund";
 import { strukPenjualan } from "./struk";
 import { gerbangBerlaku, kebutuhanKeranjang, pesanStokKurang } from "./stok-keranjang";
 import { loadKatalog } from "../menu/service";
+import { kelompokkanAddon, muatAddonPenjualan, PilihanAddonBody } from "../menu/addon";
 import { bahanKurang } from "../stok/service";
 import { createSale, PenjualanGagal } from "./service";
 
@@ -63,6 +64,8 @@ export const SaleBody = z.object({
         catatan: z.string().nullish(),
         /** baris asal di open bill — pembawa harga terkunci */
         open_bill_item_id: z.string().uuid().nullish(),
+        /** add-on per porsi; baris bill memakai snapshot bill */
+        addons: PilihanAddonBody.optional(),
       }),
     )
     .min(1)
@@ -88,6 +91,7 @@ const CekStokBody = z.object({
         menu_id: z.string().uuid(),
         qty: z.number().positive().max(BATAS_QTY_BARIS),
         is_dine_in: z.boolean().optional(),
+        addons: PilihanAddonBody.optional(),
       }),
     )
     .min(1)
@@ -229,6 +233,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
         return strukPenjualan(
           result.sale,
           result.items,
+          result.addons,
           result.branch_nama,
           auth.nama,
           bolehLihatBiaya(auth.role),
@@ -359,6 +364,11 @@ export const penjualanRoutes = new Hono<AppEnv>()
       throw new HTTPException(403, { message: "Kasir hanya boleh melihat transaksi cabangnya" });
     }
     const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
+    const addons = await muatAddonPenjualan(
+      db,
+      auth.company_id!,
+      items.map((i) => i.id),
+    );
     const [branch] = await db
       .select({ nama: branches.nama })
       .from(branches)
@@ -382,6 +392,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
       strukPenjualan(
         sale,
         items,
+        addons,
         branch?.nama ?? "",
         kasirUser?.nama ?? null,
         bolehLihatBiaya(auth.role),
@@ -416,6 +427,14 @@ export const penjualanRoutes = new Hono<AppEnv>()
       throw new HTTPException(403, { message: "Kasir hanya boleh melihat transaksi cabangnya" });
     }
     const items = await db.select().from(saleItems).where(eq(saleItems.saleId, sale.id));
+    const addonPerBaris = kelompokkanAddon(
+      await muatAddonPenjualan(
+        db,
+        auth.company_id!,
+        items.map((i) => i.id),
+      ),
+      (a) => a.saleItemId,
+    );
     const [branch] = await db
       .select({ nama: branches.nama })
       .from(branches)
@@ -446,6 +465,8 @@ export const penjualanRoutes = new Hono<AppEnv>()
             qty: qtyDitagih(it),
             tag: it.isDineIn !== sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
             catatan: it.catatan,
+            // nama & jumlah saja — slip dapur tak membawa harga
+            addons: (addonPerBaris.get(it.id) ?? []).map((a) => ({ nama: a.nama, jumlah: a.jumlah })),
           })),
           catatan: sale.catatan,
           kasir: kasirUser?.nama ?? null,

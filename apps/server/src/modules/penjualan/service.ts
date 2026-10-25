@@ -1,7 +1,8 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
   dibatalkanDapur,
+  hargaAddon,
   hitungPb1,
   penandaSajian,
   qtyEfektif,
@@ -14,14 +15,17 @@ import {
   branches,
   companies,
   meja,
+  openBillItemAddons,
   openBillItems,
   openBills,
   saleConsumptions,
+  saleItemAddons,
   saleItems,
   sales,
   shifts,
 } from "../../db/schema";
 import {
+  BATAS_HARGA,
   BATAS_HPP,
   BATAS_QTY_STOK,
   BATAS_UANG,
@@ -33,12 +37,14 @@ import {
 import { kodeCabang, tanggalDi } from "../../lib/time";
 import { upsertCustomer } from "../customer/service";
 import {
-  hitungHargaMenu,
+  hppBaris,
   komponenEfektif,
   loadKatalog,
-  tambahKebutuhanBahan,
+  tambahKebutuhanBaris,
   tampilDiCabang,
+  type AddonSnapBaris,
 } from "../menu/service";
+import { kelompokkanAddon, pastikanAddon, pastikanAddonSama } from "../menu/addon";
 import { bahanKurang } from "../stok/service";
 
 /**
@@ -254,6 +260,8 @@ export async function createSale(params: CreateSaleParams) {
     // sama) dan divalidasi milik bill, perusahaan, dan cabang yang benar —
     // tanpa itu kasir bisa menunjuk baris bill mana pun untuk menekan harga.
     const hargaBill = new Map<string, number>();
+    /** snapshot add-on baris bill — ikut terkunci bersama harganya */
+    const addonBill = new Map<string, AddonSnapBaris[]>();
     /**
      * Status pengerjaan & penanda penyajian DIWARISI dari baris open bill,
      * PER BARIS. Dapur mungkin sudah menyelesaikan sebagian pesanan ini sebelum
@@ -345,6 +353,22 @@ export async function createSale(params: CreateSaleParams) {
         .from(openBillItems)
         .where(eq(openBillItems.billId, bill.id));
       const byId = new Map(barisBill.map((b) => [b.id, b]));
+      const snapBill =
+        barisBill.length === 0
+          ? []
+          : await tx
+              .select()
+              .from(openBillItemAddons)
+              .where(
+                and(
+                  eq(openBillItemAddons.companyId, params.companyId),
+                  inArray(
+                    openBillItemAddons.openBillItemId,
+                    barisBill.map((b) => b.id),
+                  ),
+                ),
+              );
+      const snapPerBaris = kelompokkanAddon(snapBill, (r) => r.openBillItemId);
       for (const item of params.items) {
         if (!item.open_bill_item_id) continue;
         const baris = byId.get(item.open_bill_item_id);
@@ -398,6 +422,24 @@ export async function createSale(params: CreateSaleParams) {
           );
         }
         hargaBill.set(item.open_bill_item_id, baris.hargaSatuan);
+        const snap = (snapPerBaris.get(baris.id) ?? []).map((a) => ({
+          addonId: a.addonId,
+          grupNama: a.grupNama,
+          nama: a.nama,
+          harga: a.harga,
+          jumlah: a.jumlah,
+          ingredientId: a.ingredientId,
+          qtyBahan: a.qtyBahan,
+          sortOrder: a.sortOrder,
+        }));
+        // Add-on baris bill terkunci seperti harganya: kiriman yang berbeda
+        // berarti keranjang kasir tak sama dengan yang dimasak dapur.
+        pastikanAddonSama(
+          baris.menuNama,
+          (snapPerBaris.get(baris.id) ?? []).map((a) => ({ addonId: a.addonId, jumlah: a.jumlah })),
+          item.addons,
+        );
+        addonBill.set(item.open_bill_item_id, snap);
         warisBill.set(item.open_bill_item_id, {
           pesananStatus: baris.pesananStatus,
           pesananStatusAt: baris.pesananStatusAt,
@@ -418,6 +460,8 @@ export async function createSale(params: CreateSaleParams) {
     let subtotal = 0;
     let totalHpp = 0;
     const itemRows: Omit<typeof saleItems.$inferInsert, "saleId">[] = [];
+    /** snapshot add-on per baris — indeksnya sejajar `itemRows` */
+    const addonRows: AddonSnapBaris[][] = [];
     const konsumsi = new Map<string, number>(); // ingredientId -> qty
 
     for (const item of params.items) {
@@ -464,12 +508,24 @@ export async function createSale(params: CreateSaleParams) {
        * menjadi TA" — dan di situlah perbedaannya memang diinginkan.
        */
       const dasarDineIn = !sajianTakeaway;
+      /*
+       * ADD-ON: baris bill memakai snapshot bill (harganya sudah termasuk di
+       * harga terkunci); baris langsung memakai konfigurasi hari ini. Jalur
+       * susulan (offline) LENIEN — add-on yang sejak itu dinonaktifkan tak
+       * boleh menghapus penjualan yang sudah terjadi.
+       */
+      const addons = item.open_bill_item_id
+        ? addonBill.get(item.open_bill_item_id) ?? []
+        : pastikanAddon(katalog, menu, item.addons, { lenien: params.transaksiSusulan === true });
       // HPP tetap dihitung SAAT INI — biaya bahan memang biaya saat disajikan;
       // yang dikunci open bill hanyalah harga jual yang disepakati pembeli.
-      const hppSatuan = hitungHargaMenu(menu, katalog, dasarDineIn);
+      const hppSatuan = hppBaris(menu, katalog, dasarDineIn, addons);
+      // Harga add-on DILEBUR ke harga satuan: refund, omzet, bon, dan struk
+      // semuanya menghitung `harga_satuan × qty`.
       const hargaSatuan = item.open_bill_item_id
         ? hargaBill.get(item.open_bill_item_id) ?? menu.hargaJual
-        : menu.hargaJual;
+        : keSkalaKolom(menu.hargaJual + hargaAddon(addons), SKALA_UANG_KOLOM);
+      pastikanMuat(hargaSatuan, BATAS_HARGA, `Harga satuan "${menu.nama}"`);
       const lineTotal = keSkalaKolom(hargaSatuan * item.qty, SKALA_UANG_KOLOM);
       // Harga dan qty masing-masing SAH — `menus.harga_jual` sampai
       // 9.999.999.999 dan `sale_items.qty` sampai 99.999.999 — tapi hasil
@@ -522,11 +578,12 @@ export async function createSale(params: CreateSaleParams) {
         pesananMasukAt: waris?.pesananMasukAt ?? new Date(),
         sajianTakeaway,
       });
+      addonRows.push(addons);
 
       // Aturan "resep → bahan yang dipotong" hidup di SATU tempat, dipakai
       // bersama gerbang kecukupan stok di Open Bill — supaya yang memeriksa
       // dan yang mencatat tak pernah berbeda pendapat.
-      tambahKebutuhanBahan(konsumsi, katalog, menu, item.qty, dasarDineIn);
+      tambahKebutuhanBaris(konsumsi, katalog, menu, item.qty, dasarDineIn, addons);
     }
 
     /*
@@ -543,6 +600,7 @@ export async function createSale(params: CreateSaleParams) {
       for (const komponen of katalog.komponenByMenu.values()) {
         for (const k of komponen) namaBahan.set(k.ingredient_id, k.nama);
       }
+      for (const [id, b] of katalog.bahanAddon) if (!namaBahan.has(id)) namaBahan.set(id, b.nama);
       for (const [ingredientId, qty] of konsumsi) {
         pastikanMuat(qty, BATAS_QTY_STOK, `Pemakaian bahan "${namaBahan.get(ingredientId) ?? ingredientId}"`);
       }
@@ -740,6 +798,29 @@ export async function createSale(params: CreateSaleParams) {
       .values(itemRows.map((r) => ({ ...r, saleId: sale.id })))
       .returning();
 
+    // `.returning()` memulangkan baris dalam urutan VALUES — sejajar itemRows.
+    const addonPerItem = insertedItems.flatMap((it, i) => addonRows[i].map((a) => ({ saleItemId: it.id, a })));
+    const addonTersimpan =
+      addonPerItem.length === 0
+        ? []
+        : await tx
+            .insert(saleItemAddons)
+            .values(
+              addonPerItem.map(({ saleItemId, a }) => ({
+                saleItemId,
+                companyId: params.companyId,
+                addonId: a.addonId,
+                grupNama: a.grupNama,
+                nama: a.nama,
+                harga: a.harga,
+                jumlah: a.jumlah,
+                ingredientId: a.ingredientId,
+                qtyBahan: a.qtyBahan,
+                sortOrder: a.sortOrder,
+              })),
+            )
+            .returning();
+
     if (konsumsi.size > 0) {
       await tx.insert(saleConsumptions).values(
         [...konsumsi].map(([ingredientId, qty]) => ({
@@ -753,6 +834,12 @@ export async function createSale(params: CreateSaleParams) {
       );
     }
 
-    return { sale, items: insertedItems, branch_nama: branch.nama, shift_susulan: shiftSusulan };
+    return {
+      sale,
+      items: insertedItems,
+      addons: addonTersimpan,
+      branch_nama: branch.nama,
+      shift_susulan: shiftSusulan,
+    };
   });
 }

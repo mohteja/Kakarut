@@ -110,7 +110,7 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
 
   it("daftar FK `SET NULL` tak bertambah tanpa ditinjau", () => {
     /*
-     * 19 FK `ON DELETE SET NULL` di seluruh schema, dan tiap satu adalah medan
+     * 21 FK `ON DELETE SET NULL` di seluruh schema, dan tiap satu adalah medan
      * yang bisa berubah jadi null tanpa kode mana pun memintanya. Yang baru
      * wajib ditimbang: apakah ada yang membaca medan itu sebagai BUKTI, bukan
      * sekadar sebagai tautan?
@@ -126,6 +126,14 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
      * pemisahan yang `pernah_jadi_penjualan` ada untuk menegakkan. Bentuknya
      * juga sama persis dengan `menu_price_logs.oleh_user_id` yang sudah
      * berdiri di daftar ini.
+     *
+     * KE-20 & KE-21 (2026-10-25): `sale_item_addons.addon_id` dan
+     * `open_bill_item_addons.addon_id`. DITIMBANG DAN AMAN: snapshot add-on
+     * membawa faktanya sendiri — `grup_nama`, `nama`, `harga`, `jumlah`,
+     * `ingredient_id`, `qty_bahan` — dan itulah yang dibaca struk, papan,
+     * bon, serta rekalkulasi. `addon_id` cuma tautan balik ke katalog (dan
+     * kunci penanda baris, `tandaAddon`, yang memperlakukan null sebagai
+     * "add-on yang sudah tak ada"). Add-on pun tak pernah dihapus keras.
      */
     const jumlah = (SCHEMA.match(/onDelete:\s*"set null"/g) ?? []).length;
     expect(
@@ -133,7 +141,7 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
       "jumlah FK ON DELETE SET NULL berubah. Untuk yang baru: adakah kode yang " +
         "membacanya sebagai BUKTI sebuah peristiwa? Kalau ya, faktanya harus " +
         "disimpan terpisah — lihat `pernah_jadi_penjualan`",
-    ).toBe(19);
+    ).toBe(21);
   });
 
   it("PASANGAN: pemindainya membaca berkas yang benar & tak hijau karena kosong", () => {

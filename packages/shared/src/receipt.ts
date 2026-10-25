@@ -2,6 +2,7 @@
  * Layout struk thermal (ESC/POS) — dipakai tombol "Cetak Thermal",
  * auto-print setelah pembayaran, dan Cetak Tes di pengaturan printer.
  */
+import { teksAddon } from "./addon";
 import { EscPosBuilder } from "./escpos";
 import type { MetodeBayar } from "./types";
 
@@ -20,6 +21,25 @@ export interface ReceiptItem {
   tag?: string | null;
   /** catatan personalisasi per baris (mis. "tanpa gula") */
   catatan?: string | null;
+  /** add-on per porsi — harganya SUDAH termasuk di `hargaSatuan` */
+  addons?: AddonKertas[] | null;
+}
+
+/** Add-on sejauh yang dicetak di struk & bon: nama, jumlah, harga per pilih. */
+export interface AddonKertas {
+  nama: string;
+  jumlah: number;
+  harga: number;
+}
+
+/**
+ * "  + Extra mie x2 (+Rp6.000)" — gratis cukup namanya. Tambahan harganya di
+ * dalam kurung, BUKAN di kolom kanan: kolom kanan adalah total baris, dan
+ * angka add-on di sana terbaca sebagai baris tagihan kedua.
+ */
+export function teksAddonKertas(a: AddonKertas): string {
+  const tambah = a.harga * a.jumlah;
+  return `  + ${teksAddon(a)}${tambah > 0 ? ` (+${formatRupiahAscii(tambah)})` : ""}`;
 }
 
 export interface ReceiptData {
@@ -122,6 +142,7 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
     const qtyStr = Number.isInteger(it.qty) ? String(it.qty) : it.qty.toFixed(2);
     const tag = it.tag ? ` (${it.tag})` : "";
     b.line(`  ${qtyStr} x ${formatRupiahAscii(it.hargaSatuan)}${tag}`, formatRupiahAscii(it.lineTotal));
+    for (const a of it.addons ?? []) b.text(teksAddonKertas(a));
     if (it.catatan?.trim()) b.text(`  * ${it.catatan.trim()}`);
   }
   b.divider();

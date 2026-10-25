@@ -74,6 +74,7 @@ function menuDariBarisBill(it: OpenBillDetail["items"][number]): MenuDto {
     sort_order: 0,
     branch_ids: [],
     komponen: [],
+    addon_groups: [],
     hpp: 0,
     hpp_dine_in: 0,
     harga_saran: 0,

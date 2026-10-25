@@ -91,11 +91,11 @@ describe("SaleRow / SaleItemRow / SaleResult == bentuk yang dibangun strukPenjua
   const dibangunItem = kunciSaleItemRow(struk);
   const kontrakItem = medanInterface(tipe, "SaleItemRow");
 
-  it("PREMIS: sebesar yang diukur lewat HTTP — sale 30, item 16, atas 4", () => {
+  it("PREMIS: sebesar yang diukur lewat HTTP — sale 30, item 17 (+addons), atas 4", () => {
     expect(dibangunSale.length).toBe(30);
     expect(kontrakSale.length).toBe(30);
-    expect(dibangunItem.length).toBe(16);
-    expect(kontrakItem.length).toBe(16);
+    expect(dibangunItem.length).toBe(17);
+    expect(kontrakItem.length).toBe(17);
     expect(kunciSaleResult(struk)).toEqual(["branch_nama", "items", "kasir", "sale"]);
     expect(medanInterface(tipe, "SaleResult")).toEqual(["branch_nama", "items", "kasir", "sale"]);
   });

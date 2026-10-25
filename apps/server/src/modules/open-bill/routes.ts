@@ -1,14 +1,22 @@
 import { zValidator } from "../../lib/validator";
-import { BATAS_QTY_BARIS } from "../../lib/batas-angka";
+import { BATAS_HARGA, BATAS_QTY_BARIS, keSkalaKolom, pastikanMuat, SKALA_UANG_KOLOM } from "../../lib/batas-angka";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { OpenBillDetail, OpenBillRow } from "@kakarut/shared";
-import { db } from "../../db/client";
-import { barisDitagih, hitungPb1, waktuKertas } from "@kakarut/shared";
+import type { OpenBillDetail, OpenBillRow, PilihanAddon } from "@kakarut/shared";
+import { db, type Tx } from "../../db/client";
+import { barisDitagih, hargaAddon, hitungPb1, tandaAddon, waktuKertas } from "@kakarut/shared";
 import { opsiKertasDariQuery, responsBon, responsSlip } from "../print/kertas";
-import { loadKatalog } from "../menu/service";
+import { loadKatalog, type AddonSnapBaris, type KatalogMenu } from "../menu/service";
+import {
+  addonBarisDto,
+  kelompokkanAddon,
+  muatAddonBill,
+  pastikanAddon,
+  pastikanAddonSama,
+  PilihanAddonBody,
+} from "../menu/addon";
 import { kebutuhanKeranjang, pesanStokKurang } from "../penjualan/stok-keranjang";
 import { bahanKurang } from "../stok/service";
 import {
@@ -17,6 +25,7 @@ import {
   meja,
   menuBranches,
   menus,
+  openBillItemAddons,
   openBillItems,
   openBills,
   pesananLogs,
@@ -65,6 +74,13 @@ const BillBody = z.object({
         qty: z.number().positive().max(BATAS_QTY_BARIS),
         dine_in_override: z.boolean().nullish(),
         catatan: z.string().nullish(),
+        /**
+         * Add-on per porsi — hanya menentukan baris BARU. Baris yang sudah
+         * tersimpan (ber-`id`, pasangan per menu, atau `pisah_dari`) memakai
+         * snapshot-nya; kiriman yang berbeda ditolak 400. Tak dikirim = klien
+         * lama → snapshot dipertahankan.
+         */
+        addons: PilihanAddonBody.optional(),
       }),
     )
     .min(1)
@@ -148,6 +164,14 @@ async function loadDetail(
   if (!bill || bill.companyId !== companyId || bill.closedAt) return null;
   if (kurung && bill.branchId !== kurung) return null;
   const items = await db.select().from(openBillItems).where(eq(openBillItems.billId, id));
+  const addonPerBaris = kelompokkanAddon(
+    await muatAddonBill(
+      db,
+      companyId,
+      items.map((it) => it.id),
+    ),
+    (a) => a.openBillItemId,
+  );
   return {
     id: bill.id,
     meja_id: bill.mejaId,
@@ -167,6 +191,7 @@ async function loadDetail(
       // saat PUT, dan kasir perlu melihatnya — tapi statusnya ikut supaya
       // klien tahu baris itu tidak boleh ditagih.
       pesanan_status: it.pesananStatus,
+      addons: (addonPerBaris.get(it.id) ?? []).map(addonBarisDto),
     })),
   };
 }
@@ -204,7 +229,7 @@ function sajianDariKasir(dineInOverride: boolean | null | undefined): boolean {
 async function pastikanStokCukup(
   companyId: string,
   branchId: string,
-  items: { menu_id: string; qty: number; dine_in_override?: boolean | null }[],
+  items: { menu_id: string; qty: number; dine_in_override?: boolean | null; addons?: PilihanAddon[] }[],
   billDineIn: boolean,
 ): Promise<void> {
   if (items.length === 0) return;
@@ -226,7 +251,12 @@ async function pastikanStokCukup(
   // begitu saja.
   const butuh = kebutuhanKeranjang(
     katalog,
-    items.map((it) => ({ menu_id: it.menu_id, qty: it.qty, is_dine_in: it.dine_in_override })),
+    items.map((it) => ({
+      menu_id: it.menu_id,
+      qty: it.qty,
+      is_dine_in: it.dine_in_override,
+      addons: it.addons,
+    })),
     billDineIn,
   );
   const kurang = await bahanKurang(db, companyId, branchId, butuh);
@@ -235,19 +265,72 @@ async function pastikanStokCukup(
   }
 }
 
-/** Baris BARU: nama + harga di-snapshot dari katalog saat ini. */
-function barisBaru(billId: string, it: BillItemInput, katalog: KatalogHarga) {
+/**
+ * Baris BARU: nama + harga di-snapshot dari katalog saat ini — harga TERMASUK
+ * add-on terpilih, karena yang terkunci adalah harga yang disepakati pembeli.
+ */
+function barisBaru(billId: string, it: BillItemInput, katalog: KatalogHarga, addons: AddonSnapBaris[]) {
   const m = katalog.get(it.menu_id)!;
+  const hargaSatuan = keSkalaKolom(m.hargaJual + hargaAddon(addons), SKALA_UANG_KOLOM);
+  pastikanMuat(hargaSatuan, BATAS_HARGA, `Harga satuan "${m.nama}"`);
   return {
     billId,
     menuId: it.menu_id,
     menuNama: m.nama,
-    hargaSatuan: m.hargaJual,
+    hargaSatuan,
     qty: it.qty,
     dineInOverride: it.dine_in_override ?? null,
     sajianTakeaway: sajianDariKasir(it.dine_in_override),
     catatan: it.catatan?.trim() || null,
   };
+}
+
+/** Add-on baris baru, diadili ketat terhadap konfigurasi hari ini. */
+function addonBaru(katalogMenu: KatalogMenu, katalog: KatalogHarga, it: BillItemInput): AddonSnapBaris[] {
+  return pastikanAddon(katalogMenu, { id: it.menu_id, nama: katalog.get(it.menu_id)!.nama }, it.addons);
+}
+
+/** Sisipkan snapshot add-on untuk baris-baris yang baru disisipkan (indeks sejajar). */
+async function simpanAddonBaris(
+  tx: Tx,
+  companyId: string,
+  barisIds: string[],
+  addons: AddonSnapBaris[][],
+) {
+  const pasangan = barisIds.flatMap((openBillItemId, i) => addons[i].map((a) => ({ openBillItemId, a })));
+  if (pasangan.length === 0) return;
+  await tx.insert(openBillItemAddons).values(
+    pasangan.map(({ openBillItemId, a }) => ({
+      openBillItemId,
+      companyId,
+      addonId: a.addonId,
+      grupNama: a.grupNama,
+      nama: a.nama,
+      harga: a.harga,
+      jumlah: a.jumlah,
+      ingredientId: a.ingredientId,
+      qtyBahan: a.qtyBahan,
+      sortOrder: a.sortOrder,
+    })),
+  );
+}
+
+/**
+ * PASANGAN CADANGAN (klien yang tak mengirim `id`): baris lama pertama yang
+ * belum terpakai dengan menu yang sama — dan, bila kiriman menyebut `addons`,
+ * dengan TANDA add-on yang sama. "Mie ayam + Extra mie" dan "Mie ayam" polos
+ * adalah dua baris berbeda; menukar pasangannya berarti menukar harga
+ * terkuncinya. Kiriman tanpa `addons` (klien lama) cocok per menu seperti dulu.
+ */
+function cocokPerMenu(
+  lama: readonly { id: string; menuId: string; tanda: string }[],
+  terpakai: ReadonlySet<string>,
+  it: { menu_id: string; addons?: PilihanAddon[] },
+): string | undefined {
+  const tanda = it.addons === undefined ? null : tandaAddon(it.addons);
+  return lama.find(
+    (r) => !terpakai.has(r.id) && r.menuId === it.menu_id && (tanda === null || r.tanda === tanda),
+  )?.id;
 }
 
 export const openBillRoutes = new Hono<AppEnv>()
@@ -354,6 +437,7 @@ export const openBillRoutes = new Hono<AppEnv>()
                     : "TA"
                   : null,
               catatan: it.catatan,
+              addons: it.addons.map((a) => ({ nama: a.nama, jumlah: a.jumlah })),
             })),
           catatan: detail.catatan,
           kasir: null,
@@ -422,6 +506,7 @@ export const openBillRoutes = new Hono<AppEnv>()
               : "TA"
             : null,
         catatan: it.catatan,
+        addons: it.addons.map((a) => ({ nama: a.nama, jumlah: a.jumlah, harga: a.harga })),
       }));
 
     /*
@@ -473,6 +558,8 @@ export const openBillRoutes = new Hono<AppEnv>()
       throw new HTTPException(400, { message: "pisah_dari hanya berlaku saat memperbarui bill" });
     }
     const katalog = await validateMenus(auth.company_id!, branchId, body.items);
+    const katalogMenu = await loadKatalog(db, auth.company_id!);
+    const addonPerItem = body.items.map((it) => addonBaru(katalogMenu, katalog, it));
     const { mejaId, mejaLabel, tipe } = await resolveMeja(auth.company_id!, branchId, body.meja_id);
     // Sesudah `resolveMeja`: tipe meja yang menentukan dine-in bill, dan
     // dine-in menentukan apakah bahan kemasan ikut terpakai.
@@ -538,9 +625,16 @@ export const openBillRoutes = new Hono<AppEnv>()
           createdBy: auth.sub,
         })
         .returning({ id: openBills.id });
-      await tx
+      const disisip = await tx
         .insert(openBillItems)
-        .values(body.items.map((it) => barisBaru(bill.id, it, katalog)));
+        .values(body.items.map((it, i) => barisBaru(bill.id, it, katalog, addonPerItem[i])))
+        .returning({ id: openBillItems.id });
+      await simpanAddonBaris(
+        tx,
+        auth.company_id!,
+        disisip.map((r) => r.id),
+        addonPerItem,
+      );
       return { id: bill.id };
     });
     if (hasil.bentrok) {
@@ -609,6 +703,7 @@ export const openBillRoutes = new Hono<AppEnv>()
       );
     }
     const katalog = await validateMenus(auth.company_id!, existing.branchId, body.items);
+    const katalogMenu = await loadKatalog(db, auth.company_id!);
     const { mejaId, mejaLabel, tipe } = await resolveMeja(
       auth.company_id!,
       existing.branchId,
@@ -638,25 +733,35 @@ export const openBillRoutes = new Hono<AppEnv>()
      * barisnya tetap ada, lengkap dengan pelaku & waktunya. Membatalkan SELURUH
      * bill tetap lewat `DELETE /open-bill/:id`.
      */
-    const lamaCek = await db
+    const lamaBaris = await db
       .select({ id: openBillItems.id, menuId: openBillItems.menuId })
       .from(openBillItems)
       .where(eq(openBillItems.billId, id));
+    const tandaLama = new Map(
+      [
+        ...kelompokkanAddon(
+          await muatAddonBill(
+            db,
+            auth.company_id!,
+            lamaBaris.map((r) => r.id),
+          ),
+          (a) => a.openBillItemId,
+        ),
+      ].map(([barisId, list]) => [barisId, tandaAddon(list.map((a) => ({ id: a.addonId, jumlah: a.jumlah })))]),
+    );
+    const lamaCek = lamaBaris.map((r) => ({ ...r, tanda: tandaLama.get(r.id) ?? "" }));
     const terpakaiCek = new Set<string>();
     for (const it of body.items) {
       if (it.id && lamaCek.some((r) => r.id === it.id)) terpakaiCek.add(it.id);
     }
-    const sisaCek = new Map<string, string[]>();
-    for (const r of lamaCek) {
-      if (terpakaiCek.has(r.id)) continue;
-      const antre = sisaCek.get(r.menuId) ?? [];
-      antre.push(r.id);
-      sisaCek.set(r.menuId, antre);
-    }
+    // Baris kiriman yang akan jadi baris BARU — gerbang stok & add-on hanya
+    // menimbang ini.
+    const akanBaru: BillItemInput[] = [];
     for (const it of body.items) {
       if (it.id || it.pisah_dari) continue;
-      const cocok = sisaCek.get(it.menu_id)?.shift();
+      const cocok = cocokPerMenu(lamaCek, terpakaiCek, it);
       if (cocok) terpakaiCek.add(cocok);
+      else akanBaru.push(it);
     }
     /*
      * Gerbang stok pada PUT hanya menimbang baris yang BENAR-BENAR BARU.
@@ -667,6 +772,9 @@ export const openBillRoutes = new Hono<AppEnv>()
      * penyimpanan ulang bill yang tak menambah pesanan apa pun, hanya karena
      * stoknya sudah menipis sejak tadi.
      */
+    // Add-on baris baru diadili SEBELUM transaksi dibuka — galatnya
+    // menyebut add-on/grupnya, bukan "stok tak cukup".
+    for (const it of akanBaru) addonBaru(katalogMenu, katalog, it);
     await pastikanStokCukup(
       auth.company_id!,
       existing.branchId,
@@ -835,6 +943,32 @@ export const openBillRoutes = new Hono<AppEnv>()
         .from(openBillItems)
         .where(eq(openBillItems.billId, id));
       const lamaById = new Map(lama.map((r) => [r.id, r]));
+      // Snapshot add-on baris lama — dibaca ulang DI DALAM transaksi, di bawah
+      // kunci bill, sama seperti barisnya.
+      const snapLama = kelompokkanAddon(
+        await muatAddonBill(
+          tx,
+          auth.company_id!,
+          lama.map((r) => r.id),
+        ),
+        (a) => a.openBillItemId,
+      );
+      const snapDari = (barisId: string): AddonSnapBaris[] =>
+        (snapLama.get(barisId) ?? []).map((a) => ({
+          addonId: a.addonId,
+          grupNama: a.grupNama,
+          nama: a.nama,
+          harga: a.harga,
+          jumlah: a.jumlah,
+          ingredientId: a.ingredientId,
+          qtyBahan: a.qtyBahan,
+          sortOrder: a.sortOrder,
+        }));
+      const lamaBertanda = lama.map((r) => ({
+        id: r.id,
+        menuId: r.menuId,
+        tanda: tandaAddon(snapDari(r.id).map((a) => ({ id: a.addonId, jumlah: a.jumlah }))),
+      }));
       const pasangan = new Map<number, string>(); // indeks item kiriman → id baris lama
       const terpakai = new Set<string>();
 
@@ -850,6 +984,9 @@ export const openBillRoutes = new Hono<AppEnv>()
         if (asal.menuId !== it.menu_id) {
           throw new HTTPException(400, { message: "Baris asal pisah porsi beda menu" });
         }
+        // Porsi pecahan membawa add-on baris asalnya — mi ayam "Extra mie"
+        // yang dibungkus satu tetap "Extra mie".
+        pastikanAddonSama(asal.menuNama, snapDari(asal.id), it.addons);
         void i;
       }
       for (const [i, it] of body.items.entries()) {
@@ -863,22 +1000,17 @@ export const openBillRoutes = new Hono<AppEnv>()
         if (terpakai.has(it.id)) {
           throw new HTTPException(400, { message: "Baris bill dikirim lebih dari sekali" });
         }
+        // Add-on baris tersimpan TERKUNCI bersama harganya.
+        pastikanAddonSama(row.menuNama, snapDari(row.id), it.addons);
         terpakai.add(it.id);
         pasangan.set(i, it.id);
-      }
-      const sisaPerMenu = new Map<string, string[]>();
-      for (const r of lama) {
-        if (terpakai.has(r.id)) continue;
-        const antre = sisaPerMenu.get(r.menuId) ?? [];
-        antre.push(r.id);
-        sisaPerMenu.set(r.menuId, antre);
       }
       for (const [i, it] of body.items.entries()) {
         // Baris pisah porsi SELALU baris baru — kalau ia ikut pencocokan
         // per-menu, ia akan merebut baris lama yang seharusnya jadi pasangan
         // baris lain, dan hasilnya bill kehilangan satu baris tanpa sebab.
         if (it.id || it.pisah_dari) continue;
-        const cocok = sisaPerMenu.get(it.menu_id)?.shift();
+        const cocok = cocokPerMenu(lamaBertanda, terpakai, it);
         if (cocok) {
           terpakai.add(cocok);
           pasangan.set(i, cocok);
@@ -920,9 +1052,14 @@ export const openBillRoutes = new Hono<AppEnv>()
       }
       const baru = body.items.filter((_, i) => !pasangan.has(i));
       if (baru.length > 0) {
-        await tx.insert(openBillItems).values(
-          baru.map((it) => {
-            const dasar = barisBaru(id, it, katalog);
+        // Pisah porsi mewarisi snapshot add-on asalnya; baris baru biasa
+        // memakai konfigurasi hari ini.
+        const addonBaruPerItem = baru.map((it) =>
+          it.pisah_dari ? snapDari(it.pisah_dari) : addonBaru(katalogMenu, katalog, it),
+        );
+        const disisip = await tx.insert(openBillItems).values(
+          baru.map((it, bi) => {
+            const dasar = barisBaru(id, it, katalog, addonBaruPerItem[bi]);
             const asal = it.pisah_dari ? lamaById.get(it.pisah_dari) : undefined;
             if (!asal) return dasar;
             // `sajianTakeaway` SENGAJA tidak diwarisi: memecah porsi justru
@@ -937,6 +1074,12 @@ export const openBillRoutes = new Hono<AppEnv>()
               pesananStatusOleh: asal.pesananStatusOleh,
             };
           }),
+        ).returning({ id: openBillItems.id });
+        await simpanAddonBaris(
+          tx,
+          auth.company_id!,
+          disisip.map((r) => r.id),
+          addonBaruPerItem,
         );
       }
       return null;

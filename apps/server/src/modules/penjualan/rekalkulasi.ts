@@ -21,10 +21,11 @@
  */
 import { BATAS_HPP, pastikanMuat, keSkalaKolom, SKALA_HPP_KOLOM } from "../../lib/batas-angka";
 import { and, eq, isNull } from "drizzle-orm";
-import { qtyDitagih, qtyEfektif } from "@kakarut/shared";
+import { qtyDitagih } from "@kakarut/shared";
 import type { Tx } from "../../db/client";
 import { saleConsumptions, saleItems, sales } from "../../db/schema";
-import { hitungHargaMenu, komponenEfektif, loadKatalog } from "../menu/service";
+import { hppBaris, lengkapiBahanAddon, loadKatalog, tambahKebutuhanBaris } from "../menu/service";
+import { kelompokkanAddon, muatAddonPenjualan } from "../menu/addon";
 
 export interface HasilRekalkulasi {
   hppLama: number;
@@ -166,17 +167,36 @@ export async function hitungUlangBiayaPenjualan(
     };
   }
 
+  /*
+   * ADD-ON DARI SNAPSHOT, bukan dari konfigurasi add-on hari ini. Admin boleh
+   * mengganti takaran "Extra mie" atau menghapusnya sesudah transaksi ini;
+   * yang terpakai di dapur tetap yang tercatat saat dijual.
+   */
+  const snapshot = await muatAddonPenjualan(
+    tx,
+    companyId,
+    baris.map((b) => b.id),
+  );
+  await lengkapiBahanAddon(
+    tx,
+    companyId,
+    katalog,
+    snapshot.flatMap((a) => (a.ingredientId ? [a.ingredientId] : [])),
+  );
+  const addonPerBaris = kelompokkanAddon(snapshot, (a) => a.saleItemId);
+
   let totalHpp = 0;
   const konsumsi = new Map<string, number>(); // ingredientId -> qty
   for (const b of baris) {
     const menu = menuById.get(b.menuId)!;
+    const addons = addonPerBaris.get(b.id) ?? [];
     // BASIS BIAYA = penyajiannya. Aturan yang sama dengan `createSale`.
     const dasarDineIn = !b.sajianTakeaway;
     const hppSatuan = hppSatuanBaru({
       hppLama: b.hppSatuan,
       basisBerubah: basisBerubah.has(b.id),
-      hppBasisBaru: hitungHargaMenu(menu, katalog, dasarDineIn),
-      hppBasisLama: hitungHargaMenu(menu, katalog, !dasarDineIn),
+      hppBasisBaru: hppBaris(menu, katalog, dasarDineIn, addons),
+      hppBasisLama: hppBaris(menu, katalog, !dasarDineIn, addons),
     });
     /*
      * PORSI YANG DITAGIH, bukan porsi yang dipesan.
@@ -217,18 +237,12 @@ export async function hitungUlangBiayaPenjualan(
      * pra-agregat per (sale_id, ingredient_id) tanpa `sale_item_id` sehingga
      * kontribusi satu baris tak bisa dicabut sendiri. Yang bisa dijaga adalah
      * UANG-nya (lihat `hppSatuanBaru`); resep jarang diubah, harga bahan
-     * bergerak tiap kali belanja dilaporkan.
+     * bergerak tiap kali belanja dilaporkan. Add-on-nya dari snapshot.
+     *
+     * Rumusnya `tambahKebutuhanBaris` — yang sama dengan `createSale`, jadi
+     * delta "Tanpa mie" dilantai per baris di kedua jalur.
      */
-    for (const k of komponenEfektif(katalog, menu)) {
-      if (!k.track_stok) continue;
-      const qty =
-        qtyEfektif(
-          { qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement },
-          dasarDineIn,
-        ) * qtyBayar;
-      if (qty <= 0) continue;
-      konsumsi.set(k.ingredient_id, (konsumsi.get(k.ingredient_id) ?? 0) + qty);
-    }
+    tambahKebutuhanBaris(konsumsi, katalog, menu, qtyBayar, dasarDineIn, addons);
   }
 
   if (totalHpp !== sale.totalHpp) {

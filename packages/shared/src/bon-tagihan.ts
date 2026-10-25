@@ -30,7 +30,7 @@
  * membiarkan tamu menemukan selisihnya di struk.
  */
 import { EscPosBuilder } from "./escpos";
-import { formatRupiahAscii, type ReceiptOptions } from "./receipt";
+import { formatRupiahAscii, teksAddonKertas, type AddonKertas, type ReceiptOptions } from "./receipt";
 
 export interface BonItem {
   nama: string;
@@ -41,6 +41,8 @@ export interface BonItem {
   tag?: string | null;
   /** catatan personalisasi per baris (mis. "tanpa gula") */
   catatan?: string | null;
+  /** add-on per porsi — harganya SUDAH termasuk di `hargaSatuan` */
+  addons?: AddonKertas[] | null;
 }
 
 export interface BonData {
@@ -134,6 +136,7 @@ export function buildBonBytes(data: BonData, opts: ReceiptOptions): Uint8Array {
     const qtyStr = Number.isInteger(it.qty) ? String(it.qty) : it.qty.toFixed(2);
     const tag = it.tag ? ` (${it.tag})` : "";
     b.line(`  ${qtyStr} x ${formatRupiahAscii(it.hargaSatuan)}${tag}`, formatRupiahAscii(it.lineTotal));
+    for (const a of it.addons ?? []) b.text(teksAddonKertas(a));
     if (it.catatan?.trim()) b.text(`  * ${it.catatan.trim()}`);
   }
   b.divider();

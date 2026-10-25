@@ -101,6 +101,7 @@ export function contohStruk(opts: OpsiContohStruk): SaleResult {
       // Baris kedua diberi catatan supaya baris bercatatan ikut terlihat —
       // itulah baris yang paling sering meluber di kertas 58 mm.
       catatan: n === 1 ? "tanpa gula" : null,
+      addons: [],
       qtyRefund: 0,
       saleId: "contoh",
       menuId: `contoh-menu-${n}`,

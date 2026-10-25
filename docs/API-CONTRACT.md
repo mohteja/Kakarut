@@ -2547,6 +2547,67 @@ export interface BahanBulkRow {
   catatan?: string | null;
 }
 
+/**
+ * ADD-ON PER MENU — satu pilihan di dalam grup (mis. "Extra mie", "Tanpa sayur").
+ *
+ * `harga` per SATU kali pilih (0 = gratis). `ingredient_id` + `qty_bahan`
+ * (opsional, berpasangan) menautkannya ke bahan: positif = memakai lebih,
+ * negatif = memakai kurang (dilantai 0 per baris). Takarannya per satu kali
+ * pilih; dipilih ×2 = dua kalinya.
+ */
+export interface MenuAddonDto {
+  id: string;
+  nama: string;
+  harga: number;
+  /** batas berapa kali boleh dipilih per porsi; null = s/d BATAS_JUMLAH_ADDON */
+  maks_jumlah: number | null;
+  ingredient_id: string | null;
+  ingredient_nama: string | null;
+  satuan: string | null;
+  qty_bahan: number | null;
+  /** false = sementara tak tersedia (mis. telur habis) — tak ditawarkan kasir */
+  is_active: boolean;
+  /**
+   * Perubahan HPP per SATU kali pilih (bisa negatif). null untuk peran tanpa
+   * hak melihat biaya — ditahan `tanpaBiayaMenu`, sama seperti `hpp`.
+   */
+  hpp_delta: number | null;
+}
+
+/**
+ * Grup add-on. WAJIB = `min_pilih >= 1`; `maks_pilih` null = bebas. Yang
+ * dihitung min/maks adalah add-on BERBEDA yang dipilih — "Extra mie ×2" tetap
+ * satu pilihan.
+ */
+export interface MenuAddonGroupDto {
+  id: string;
+  nama: string;
+  min_pilih: number;
+  maks_pilih: number | null;
+  addons: MenuAddonDto[];
+}
+
+/** Pilihan add-on pada satu baris — bentuk PERMINTAAN (keranjang → server). */
+export interface PilihanAddon {
+  id: string;
+  /** berapa kali dipilih untuk SETIAP porsi baris ini (≥ 1) */
+  jumlah: number;
+}
+
+/**
+ * SNAPSHOT add-on pada baris bill / pesanan — nama & harga SAAT dipilih.
+ * Harga add-on sudah termasuk di `harga_satuan` barisnya; ini untuk
+ * ditampilkan (tiket dapur, papan, bon, struk). `addon_id` null bila add-on
+ * aslinya sudah tak ada di katalog.
+ */
+export interface AddonBarisDto {
+  addon_id: string | null;
+  grup_nama: string;
+  nama: string;
+  harga: number;
+  jumlah: number;
+}
+
 export interface MenuDto {
   id: string;
   nama: string;
@@ -2590,6 +2651,11 @@ export interface MenuDto {
   harga_saran: number | null;
   harga_jual_bulat: number | null;
   food_cost_persen: number | null;
+  /**
+   * Grup add-on yang ditawarkan kasir saat menu ini masuk keranjang.
+   * [] = tanpa add-on (menu langsung masuk keranjang seperti biasa).
+   */
+  addon_groups: MenuAddonGroupDto[];
 }
 
 /**
@@ -3930,6 +3996,13 @@ export interface SaleItemInput {
    * menu terbaru. Qty tetap boleh berubah saat pembayaran.
    */
   open_bill_item_id?: string | null;
+  /**
+   * Add-on terpilih untuk SETIAP porsi baris ini. Harga add-on dilebur ke
+   * `harga_satuan` oleh server. Tak dikirim/[] = tanpa add-on. Untuk baris
+   * open bill, add-on diambil dari snapshot bill — kiriman yang berbeda
+   * ditolak.
+   */
+  addons?: PilihanAddon[];
 }
 
 /**
@@ -3962,6 +4035,14 @@ export type SebabPenjualanGagal =
   | "baris_dibatalkan"
   | "kasir_belum_dibuka"
   | "shift_tidak_cocok";
+
+/**
+ * Sebab 400 bila pilihan add-on sebuah baris tak sah (nonaktif, grup wajib
+ * belum dipilih, melebihi batas, …) — pesan manusianya di `message`. Klien
+ * memuat ulang menu lalu meminta kasir memilih ulang; transaksinya TIDAK
+ * tercatat.
+ */
+export type SebabAddonTidakValid = "addon_tidak_valid";
 
 /**
  * BENTUK STRUK: satu baris `sales` sebagaimana dilihat klien.
@@ -4056,6 +4137,23 @@ export interface SaleItemRow {
   sajianTakeaway: boolean;
   /** porsi yang sudah dikembalikan uangnya (kumulatif) */
   qtyRefund: number;
+  /**
+   * Add-on baris ini (snapshot saat dijual) — harganya SUDAH termasuk di
+   * `hargaSatuan`. [] = tanpa add-on.
+   */
+  addons: SaleItemAddonRow[];
+}
+
+/** Snapshot satu add-on pada baris struk (camelCase, mengikuti `SaleItemRow`). */
+export interface SaleItemAddonRow {
+  /** null bila add-on aslinya sudah tak ada */
+  addonId: string | null;
+  grupNama: string;
+  nama: string;
+  /** per SATU kali pilih */
+  harga: number;
+  /** berapa kali dipilih per porsi */
+  jumlah: number;
 }
 
 /**
@@ -4414,6 +4512,12 @@ export interface OpenBillItemDto {
    * baris biasa, dan pembeli membayar makanan yang tak pernah dibuat.
    */
   pesanan_status: PesananStatus;
+  /**
+   * Add-on baris ini (snapshot saat dipesan) — harganya SUDAH termasuk di
+   * `harga_satuan`. TIDAK BISA diubah sesudah baris tersimpan: pilihan lain =
+   * baris baru. [] = tanpa add-on.
+   */
+  addons: AddonBarisDto[];
 }
 
 /** Ringkasan open bill untuk daftar/pemilih bill di kasir. */
@@ -4480,6 +4584,8 @@ export interface PesananItemRow {
   qty_refund: number;
   /** personalisasi pelanggan, mis. "tanpa sambal" */
   catatan: string | null;
+  /** add-on yang dipilih (mis. "Extra mie x2") — dapur membuatnya */
+  addons: AddonBarisDto[];
   is_dine_in: boolean;
   status: PesananStatus;
   /**
