@@ -1,5 +1,5 @@
 import type { CompanyRow, ModeCompany, UserRole } from "@kakarut/shared";
-import { bolehLihatBiaya, tanpaAngkaManajemenCompany } from "@kakarut/shared";
+import { KODE_JENIS_USAHA, bolehLihatBiaya, tanpaAngkaManajemenCompany } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
 import { BATAS_UANG } from "../../lib/batas-angka";
 import { iso } from "../../lib/time";
@@ -47,6 +47,7 @@ export function companyRow(row: BarisCompany): CompanyRow {
     telepon: row.telepon,
     logoUrl: row.logoUrl,
     timezone: row.timezone,
+    jenisUsaha: row.jenisUsaha,
     pb1Enabled: row.pb1Enabled,
     pb1Rate: row.pb1Rate,
     receiptFooter: row.receiptFooter,
@@ -73,6 +74,8 @@ const PatchBody = z.object({
   nama: z.string().trim().min(1).optional(),
   alamat: z.string().nullish(),
   telepon: z.string().nullish(),
+  /** kode `JENIS_USAHA`; null = kosongkan */
+  jenis_usaha: z.enum(KODE_JENIS_USAHA).nullish(),
   logo_url: z.string().nullish(),
   pb1_enabled: z.boolean().optional(),
   pb1_rate: z.number().min(0).max(100).optional(),
@@ -207,6 +210,7 @@ export const companyRoutes = new Hono<AppEnv>()
         ...(body.alamat !== undefined && { alamat: body.alamat }),
         ...(body.telepon !== undefined && { telepon: body.telepon }),
         ...(body.logo_url !== undefined && { logoUrl: body.logo_url }),
+        ...(body.jenis_usaha !== undefined && { jenisUsaha: body.jenis_usaha }),
         ...(body.pb1_enabled !== undefined && { pb1Enabled: body.pb1_enabled }),
         ...(body.pb1_rate !== undefined && { pb1Rate: body.pb1_rate }),
         ...(body.receipt_footer !== undefined && { receiptFooter: body.receipt_footer || null }),

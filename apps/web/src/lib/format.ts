@@ -37,40 +37,69 @@ export function formatAngka(n: number | null | undefined, maxDecimals = 2): stri
   return new Intl.NumberFormat("id-ID", { maximumFractionDigits: maxDecimals }).format(n);
 }
 
-export function hariIniWIB(timeZone = "Asia/Jakarta"): string {
+/**
+ * ZONA WAKTU PERUSAHAAN yang sedang aktif — satu nilai modul, dipasang
+ * `AuthContext` setiap kali sesi berganti (`aturZonaPerusahaan`).
+ *
+ * Server menghitung tanggal bisnis di `companies.timezone` (`tanggalDi(tz)`);
+ * web harus bersuara sama, sebab perusahaan baru kini bisa memilih WITA/WIT
+ * saat dibuat. Sebelum 2026-10-26 web mematok WIB di sini dan kolomnya
+ * dikunci agar tak pernah berbeda (`zona-waktu-satu-suara.test.ts`); kini
+ * kebalikannya — semua pemformat di berkas ini membaca zona perusahaan, dan
+ * nilai bawaan `Asia/Jakarta` hanya berlaku sebelum ada sesi (halaman login).
+ *
+ * Nilai modul, bukan konteks React: pemformat ini fungsi biasa yang dipanggil
+ * dari ratusan tempat, termasuk di luar komponen (cetak struk). Sesi berganti
+ * = `setSession` = muat ulang data, jadi tak ada layar yang tertinggal memakai
+ * zona lama.
+ */
+const ZONA_BAWAAN = "Asia/Jakarta";
+let zonaAktif = ZONA_BAWAAN;
+
+export function aturZonaPerusahaan(tz: string | null | undefined): void {
+  zonaAktif = tz && tz.trim() ? tz : ZONA_BAWAAN;
+}
+
+export function zonaPerusahaan(): string {
+  return zonaAktif;
+}
+
+/** "YYYY-MM-DD" hari ini di zona perusahaan (nama lama dipertahankan: 40+ pemanggil). */
+export function hariIniWIB(timeZone = zonaPerusahaan()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date());
 }
 
+/** "YYYY-MM-DD" sebuah titik waktu di zona perusahaan. */
+export function tanggalDiZona(d: Date | string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: zonaPerusahaan() }).format(new Date(d));
+}
+
 /**
- * Waktu untuk KERTAS: "21/08 14.30" — tanggal & jam, zona WIB.
+ * Waktu untuk KERTAS: "21/08 14.30" — tanggal & jam, zona perusahaan.
  *
  * Dipakai struk pembayaran DAN slip pesanan. Satu rumah, sebab keduanya kertas
  * yang beredar berdampingan di meja yang sama: dua rumusan yang menyimpang
  * sedikit saja membuat dua kertas untuk satu pesanan berbunyi jam berbeda, dan
  * yang membacanya tak punya cara tahu mana yang benar.
- *
- * WIB dipatok di sini, bukan di tiap pemanggil — lihat
- * `zona-waktu-satu-suara.test.ts`: selama web mematok WIB, `companies.timezone`
- * harus tetap tak bisa diubah, dan daftar tempat yang mematoknya adalah daftar
- * kerja yang harus dibereskan lebih dulu. Menambah pemanggil baru tak
- * memperpanjang daftar itu; menambah rumusan baru memperpanjangnya.
  */
 export function waktuKertasWIB(d: Date): string {
-  return waktuKertas(d, "Asia/Jakarta");
+  return waktuKertas(d, zonaPerusahaan());
 }
 
 export function formatTanggal(tanggal: string): string {
+  // Tengah hari UTC: jatuh di tanggal yang sama di zona mana pun dari UTC−11
+  // sampai UTC+11, jadi tanggal kalender tak bergeser oleh zona tampilan.
   return new Intl.DateTimeFormat("id-ID", {
     dateStyle: "full",
-    timeZone: "Asia/Jakarta",
-  }).format(new Date(`${tanggal}T00:00:00+07:00`));
+    timeZone: zonaPerusahaan(),
+  }).format(new Date(`${tanggal}T12:00:00Z`));
 }
 
 export function formatWaktu(iso: string): string {
   return new Intl.DateTimeFormat("id-ID", {
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "Asia/Jakarta",
+    timeZone: zonaPerusahaan(),
   }).format(new Date(iso));
 }
 
@@ -102,13 +131,13 @@ export function labelTahapPembelian(p: {
   return aktif.length === 1 ? `tahap ${aktif[0]}` : "beberapa tahap";
 }
 
-/** Tanggal ringkas dari timestamp ISO, mis. "11 Jul 2026" (zona WIB). */
+/** Tanggal ringkas dari timestamp ISO, mis. "11 Jul 2026" (zona perusahaan). */
 export function formatTanggalRingkas(iso: string): string {
   return new Intl.DateTimeFormat("id-ID", {
     day: "numeric",
     month: "short",
     year: "numeric",
-    timeZone: "Asia/Jakarta",
+    timeZone: zonaPerusahaan(),
   }).format(new Date(iso));
 }
 

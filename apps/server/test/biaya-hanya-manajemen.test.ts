@@ -171,7 +171,7 @@ describe("angka biaya hanya untuk manajemen", () => {
   it("penyaring perusahaan menihilkan SELURUH medan manajemen", () => {
     const kosong = tanpaAngkaManajemenCompany({
       id: "x", nama: "x", metodeHpp: "average", slug: "x", alamat: null, telepon: null,
-      logoUrl: null, timezone: "Asia/Jakarta", pb1Enabled: true, pb1Rate: 10,
+      logoUrl: null, timezone: "Asia/Jakarta", jenisUsaha: null, pb1Enabled: true, pb1Rate: 10,
       receiptFooter: "kaki", receiptShowAlamat: true, diskonMaksPersen: 100,
       blokirJualMinus: false, targetPenjualan: 15_000_000, foodCostMaks: 40,
       plan: "pro", planExpiresAt: "2027-01-01T00:00:00.000Z", isActive: true,

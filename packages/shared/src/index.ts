@@ -26,3 +26,4 @@ export * from "./types";
 export * from "./geo";
 export * from "./angka";
 export * from "./skala";
+export * from "./profil-usaha";

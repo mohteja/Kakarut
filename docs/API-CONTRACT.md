@@ -227,7 +227,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > MENGGANTI sesi tersimpan (seperti login), bukan menggabung.
 
 - `GET /api/onboarding/status` — res: `{ has_company: bool, email: string, undangan: [{ id, company_nama, role, cabang_nama|null, diundang_pada }] }`
-- `POST /api/onboarding/perusahaan` — req: `{ nama }` — res: **201** sesi baru (jadi owner perusahaan baru) — error: **403** super-admin
+- `POST /api/onboarding/perusahaan` — req: **`BuatPerusahaanBody`** = `{ nama (1..80), jenis_usaha (kode `JENIS_USAHA`), alamat (5..300), telepon (8–15 angka, boleh `+`/spasi/-), timezone? (`Asia/Jakarta` | `Asia/Makassar` | `Asia/Jayapura`, bawaan `Asia/Jakarta`) }` — `.strict()` — res: **201** sesi baru (jadi owner perusahaan baru; `company.timezone` = zona yang dipilih) — error: **400** isian kurang/tak sah (kalimat menyebut isiannya, mis. `alamat: wajib diisi`), **403** super-admin. **BERUBAH 2026-10-26:** dulu cukup `{ nama }`; klien lama kini menerima 400. Alamat & telepon ikut ditulis ke cabang "Pusat". **Zona waktu hanya bisa dipilih di sini** — `PATCH /company` tak menerimanya; klien wajib menampilkan tanggal/jam di zona `company.timezone` dari sesi, bukan zona perangkat. Pilihan & aturan: `packages/shared/src/profil-usaha.ts`.
 - `POST /api/onboarding/undangan/:id/terima` — res: sesi baru (bergabung ke perusahaan) — error: **404** bukan untuk email ini, **400** undangan tak berlaku
 - `POST /api/onboarding/undangan/:id/tolak` — res: `{ ok }` — error: **404**
 - `DELETE /api/onboarding/akun` — req: `{ password }` — SOFT delete akun sendiri — res: `{ ok }` — error: **401** password salah, **400** owner terakhir sebuah perusahaan (harus serahkan/hapus perusahaan dulu)
@@ -1550,7 +1550,7 @@ Laporan:
 ## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin]**
 
 - `GET /api/karyawan` — query: `arsip=true` (daftar arsip) — res: row karyawan
-- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen"|"bar", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen/bar butuh cabang; mismatch peran/tipe cabang — kitchen/bar hanya cabang store), **403** hanya owner boleh buat owner, **409** email ada — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)*
+- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen"|"bar", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen/bar butuh cabang; mismatch peran/tipe cabang — kitchen/bar hanya cabang store), **403** hanya owner boleh buat owner, **409** email sudah karyawan aktif / sudah punya undangan pending — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)* **SEJAK 2026-10-26: email yang SUDAH punya akun tak lagi 409** — balasannya **200** `KaryawanDiundangResult` = `{ diundang: true, id, email, role }`: dibuat undangan pending (peran & cabang sama), `password` diabaikan, tanpa surel; orangnya menekan Terima di halaman welcome. Klien wajib membedakan 200 `diundang` dari 201 akun baru.
 - `POST /api/karyawan/undang` — req: `{ email, role: enum, branch_id?: uuid|null }` — buat UNDANGAN pending (tanpa password; email dikirim best-effort). Saat email itu daftar/menerima → membership dibuat otomatis — res: **201** `{ id, email, role }` — error: **400** (cashier/tim butuh cabang), **403** hanya owner boleh undang owner, **409** sudah jadi karyawan aktif / sudah diundang
 - `GET /api/karyawan/undangan` — res: `UndanganKaryawanRow[]` (`{id,email,role,cabang_nama|null,status,diundang_pada}`, hanya pending)
 - `DELETE /api/karyawan/undangan/:id` — batalkan undangan pending — res: `{ ok }` — error: **404**
@@ -1716,6 +1716,11 @@ export interface CompanyRow {
   telepon: string | null;
   logoUrl: string | null;
   timezone: string;
+  /**
+   * Kode `JENIS_USAHA` (`profil-usaha.ts`); `null` untuk perusahaan yang lahir
+   * sebelum kolomnya ada, atau dibuat super admin / seed.
+   */
+  jenisUsaha: string | null;
   pb1Enabled: boolean;
   pb1Rate: number;
   receiptFooter: string | null;
@@ -1914,6 +1919,19 @@ export interface KaryawanBaruResult {
 }
 
 /**
+ * Balasan 200 `POST /api/karyawan` bila emailnya SUDAH punya akun (mis.
+ * mendaftar sendiri lalu memilih "tunggu diundang"): bukan akun baru, melainkan
+ * undangan pending — orangnya menekan Terima di halaman welcome.
+ */
+export interface KaryawanDiundangResult {
+  diundang: true;
+  /** id undangan */
+  id: string;
+  email: string;
+  role: UserRole;
+}
+
+/**
  * SATU PENYEWA sebagaimana `GET /api/admin/tenants` mengirimnya (9 kunci).
  *
  * `plan_expires_at` sampai 2026-09-11 DIKIRIM tanpa disebut tipe mana pun:
@@ -1979,9 +1997,10 @@ export interface StokAwalItem {
  * `tanggal` di tingkat amplop adalah tanggal saldo pembuka TERKINI (yang
  * terbesar di antara `items`), atau HARI INI bila belum ada satu pun. Dan
  * "hari ini" itu dihitung server di ZONA PERUSAHAAN (`tanggalDi(timezone)`),
- * bukan di zona peramban — pembedaan yang hari ini tak terlihat karena
- * `companies.timezone` belum bisa diubah, dan yang menahan pasangan itu tetap
- * konsisten adalah `zona-waktu-satu-suara.test.ts`.
+ * bukan di zona peramban. Sejak 2026-10-26 zona itu bisa dipilih (WIB/WITA/
+ * WIT) saat perusahaan dibuat, dan web mengikutinya lewat
+ * `aturZonaPerusahaan` — yang menahan pasangan itu tetap konsisten adalah
+ * `zona-waktu-satu-suara.test.ts`.
  */
 export interface StokAwalTersimpan {
   tanggal: string;

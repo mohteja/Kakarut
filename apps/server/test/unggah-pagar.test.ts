@@ -93,8 +93,10 @@ describe("pagar unggahan klien = pagar server", () => {
   it("penolakan terjadi SEBELUM unggah, bukan sesudah", () => {
     // `alasanTolak` harus dipanggil lebih dulu dan menghentikan alurnya —
     // kalau ia dipanggil setelah `api(...)`, berkasnya sudah telanjur naik.
+    // Pipa unggahnya kini fungsi sendiri (`unggahGambar`, 2026-10-26 — dipakai
+    // juga halaman welcome); yang diukur tetap urutannya DI DALAM komponen.
     const posTolak = komponen.indexOf("alasanTolak(file)");
-    const posApi = komponen.indexOf("api<{ url: string }>");
+    const posApi = komponen.indexOf("await unggahGambar(file, tujuan)");
     expect(posTolak).toBeGreaterThan(-1);
     expect(posApi).toBeGreaterThan(-1);
     expect(posTolak).toBeLessThan(posApi);

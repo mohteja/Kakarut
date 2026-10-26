@@ -3,7 +3,14 @@ import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { OnboardingStatus, UndanganDto } from "@kakarut/shared";
+import {
+  KODE_JENIS_USAHA,
+  KODE_ZONA_WAKTU,
+  PROFIL_USAHA,
+  ZONA_BAWAAN,
+  type OnboardingStatus,
+  type UndanganDto,
+} from "@kakarut/shared";
 import { db } from "../../db/client";
 import { kunciAntrean } from "../../lib/kunci";
 import { bentrokUnikPada } from "../../lib/pg-galat";
@@ -11,6 +18,28 @@ import { branches, companies, invitations, memberships, users } from "../../db/s
 import { requireAuth, verifikasiPassword, type AppEnv } from "../../middleware/auth";
 import { buatSesi } from "../auth/session";
 import { buatPerusahaanUntuk, terimaUndangan } from "./service";
+
+/**
+ * PROFIL USAHA yang wajib diisi saat membuat perusahaan dari halaman welcome.
+ *
+ * Dulu cukup `{nama}`; kini alamat, telepon, dan jenis usaha ikut wajib —
+ * alamat & telepon langsung tercetak di kepala struk, jadi perusahaan baru tak
+ * lagi mencetak struk tanpa identitas. Klien lama yang masih mengirim `{nama}`
+ * saja mendapat 400 yang MENYEBUT isian yang kurang (`pesanZod`).
+ *
+ * `timezone` hanya bisa dipilih DI SINI, sekali: sesudahnya data sudah
+ * bertanggal di zona itu, dan `PATCH /company` sengaja tak menerimanya
+ * (`zona-waktu-satu-suara.test.ts`).
+ */
+const BuatPerusahaanSchema = z
+  .object({
+    nama: z.string().trim().min(1, "Nama usaha wajib diisi").max(PROFIL_USAHA.namaMaks),
+    jenis_usaha: z.enum(KODE_JENIS_USAHA),
+    alamat: z.string().trim().min(PROFIL_USAHA.alamatMin).max(PROFIL_USAHA.alamatMaks),
+    telepon: z.string().trim().regex(PROFIL_USAHA.polaTelepon),
+    timezone: z.enum(KODE_ZONA_WAKTU).default(ZONA_BAWAAN),
+  })
+  .strict();
 
 /** Apakah user punya minimal satu keanggotaan AKTIF (perusahaan aktif + belum diarsip). */
 async function punyaPerusahaan(userId: string): Promise<boolean> {
@@ -78,7 +107,7 @@ export const onboardingRoutes = new Hono<AppEnv>()
   // Buat perusahaan sendiri → jadi OWNER → sesi baru diarahkan ke perusahaan itu.
   .post(
     "/perusahaan",
-    zValidator("json", z.object({ nama: z.string().trim().min(1, "Nama usaha wajib diisi") }).strict()),
+    zValidator("json", BuatPerusahaanSchema),
     async (c) => {
       const auth = c.get("auth");
       if (auth.is_super_admin) {
@@ -113,7 +142,7 @@ export const onboardingRoutes = new Hono<AppEnv>()
       for (let percobaan = 0; percobaan < 3; percobaan += 1) {
         try {
           companyId = await db.transaction((tx) =>
-            buatPerusahaanUntuk(tx, { nama: c.req.valid("json").nama, userId: auth.sub }),
+            buatPerusahaanUntuk(tx, { ...c.req.valid("json"), userId: auth.sub }),
           );
           break;
         } catch (e) {

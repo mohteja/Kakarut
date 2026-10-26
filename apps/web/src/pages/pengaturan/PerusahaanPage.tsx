@@ -1,4 +1,4 @@
-import { angkaDari, teksAngka, type CompanyRow } from "@kakarut/shared";
+import { JENIS_USAHA, ZONA_WAKTU, angkaDari, teksAngka, type CompanyRow } from "@kakarut/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ImageUpload } from "../../components/ImageUpload";
@@ -27,6 +27,8 @@ type Company = Pick<
   | "nama"
   | "alamat"
   | "telepon"
+  | "jenisUsaha"
+  | "timezone"
   | "logoUrl"
   | "pb1Enabled"
   | "pb1Rate"
@@ -161,6 +163,7 @@ export function PerusahaanPage() {
   const [nama, setNama] = useState("");
   const [alamat, setAlamat] = useState("");
   const [telepon, setTelepon] = useState("");
+  const [jenisUsaha, setJenisUsaha] = useState("");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [pb1Enabled, setPb1Enabled] = useState(false);
   const [pb1Rate, setPb1Rate] = useState("10");
@@ -183,6 +186,7 @@ export function PerusahaanPage() {
     setNama(company.nama);
     setAlamat(company.alamat ?? "");
     setTelepon(company.telepon ?? "");
+    setJenisUsaha(company.jenisUsaha ?? "");
     setLogoUrl(company.logoUrl);
     setPb1Enabled(company.pb1Enabled);
     setPb1Rate(teksAngka(company.pb1Rate));
@@ -235,6 +239,7 @@ export function PerusahaanPage() {
           nama,
           alamat: alamat || null,
           telepon: telepon || null,
+          jenis_usaha: jenisUsaha || null,
           logo_url: logoUrl,
           pb1_enabled: pb1Enabled,
           pb1_rate: Math.min(100, Math.max(0, angkaDari(pb1Rate) || 0)),
@@ -271,6 +276,26 @@ export function PerusahaanPage() {
         <div>
           <label className="mb-1 block text-sm font-medium">Telepon</label>
           <input value={telepon} onChange={(e) => setTelepon(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Jenis usaha</label>
+          <select value={jenisUsaha} onChange={(e) => setJenisUsaha(e.target.value)} className={inputClass}>
+            <option value="">— Belum diisi —</option>
+            {JENIS_USAHA.map((j) => (
+              <option key={j.kode} value={j.kode}>
+                {j.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Zona waktu</label>
+          <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-700">
+            {ZONA_WAKTU.find((z) => z.kode === company.timezone)?.label ?? company.timezone}
+            <span className="block text-xs text-stone-500">
+              Dipilih saat perusahaan dibuat dan tidak bisa diubah — data yang sudah tercatat bertanggal di zona ini.
+            </span>
+          </div>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Logo</label>

@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { api, AUTH_STORAGE_KEY, loadAuth, saveAuth, type AuthState } from "../lib/api";
+import { aturZonaPerusahaan } from "../lib/format";
 import { hapusLokal } from "../lib/simpanan";
 
 /*
@@ -62,6 +63,11 @@ const JEDA_SEGAR_MS = 30_000;
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [auth, setAuth] = useState<AuthState | null>(() => loadAuth());
+  // Zona perusahaan untuk semua pemformat tanggal/jam (`lib/format.ts`).
+  // Dipasang SAAT RENDER, bukan di efek: anak-anak provider ini dirender
+  // sesudahnya dalam lintasan yang sama, jadi tak ada satu bingkai pun yang
+  // mencetak jam di zona sesi sebelumnya. Idempoten — memasang nilai yang sama.
+  aturZonaPerusahaan(auth?.company?.timezone);
   const terakhirSegar = useRef(0);
 
   // SINKRON SESI ANTAR-TAB (satu browser): event `storage` menyala di tab LAIN

@@ -15,6 +15,8 @@ import {
 import { TabelResponsif } from "../../components/TabelResponsif";
 import type {
   AktivitasRow,
+  KaryawanBaruResult,
+  KaryawanDiundangResult,
   KaryawanRow,
   KaryawanTempatDto,
   UndanganKaryawanRow,
@@ -246,6 +248,8 @@ export function KaryawanPage() {
   } | null>(null);
   // Modal QR karyawan (untuk absensi) + data URL QR yang digenerate
   const [qrFor, setQrFor] = useState<KaryawanRow | null>(null);
+  /** Email yang ternyata sudah punya akun → jadi undangan, bukan akun baru. */
+  const [diundang, setDiundang] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   // Modal riwayat kegiatan seorang karyawan (log faktur yang ia lakukan)
   const [aktivitasFor, setAktivitasFor] = useState<KaryawanRow | null>(null);
@@ -279,7 +283,7 @@ export function KaryawanPage() {
 
   const tambah = useMutation({
     mutationFn: (f: FormState) =>
-      api("/karyawan", {
+      api<KaryawanBaruResult | KaryawanDiundangResult>("/karyawan", {
         method: "POST",
         body: {
           nama: f.nama,
@@ -289,9 +293,17 @@ export function KaryawanPage() {
           branch_id: WAJIB_CABANG.has(f.role) ? f.branch_id : f.branch_id || null,
         },
       }),
-    onSuccess: () => {
+    onSuccess: (hasil) => {
       setForm(null);
-      queryClient.invalidateQueries({ queryKey: ["karyawan"] });
+      if ("diundang" in hasil) {
+        // Email itu sudah punya akun (mis. daftar sendiri lalu "tunggu
+        // diundang"): server membuat undangan, bukan akun baru.
+        setDiundang(hasil.email);
+        queryClient.invalidateQueries({ queryKey: ["undangan"] });
+      } else {
+        setDiundang(null);
+        queryClient.invalidateQueries({ queryKey: ["karyawan"] });
+      }
     },
   });
 
@@ -378,6 +390,21 @@ export function KaryawanPage() {
       >
         Karyawan
       </PageTitle>
+
+      {diundang && (
+        <div
+          className="mb-3 flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+          data-testid="info-diundang"
+        >
+          <span>
+            <b>{diundang}</b> sudah punya akun Terakasir — undangan dikirim. Karyawan tinggal menekan{" "}
+            <b>Terima</b> di aplikasinya; sampai itu, ia tampil di daftar undangan.
+          </span>
+          <button type="button" onClick={() => setDiundang(null)} className="shrink-0 font-semibold" aria-label="Tutup">
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Karyawan berjalan vs arsip (sudah keluar — riwayat tetap tersimpan) */}
       <div className="mb-3 flex gap-2">

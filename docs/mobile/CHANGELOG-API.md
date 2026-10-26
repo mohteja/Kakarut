@@ -25,6 +25,51 @@ tanpa akses repo server.
 
 ---
 
+## 🔴 Halaman welcome — profil usaha wajib saat membuat perusahaan, zona waktu WIB/WITA/WIT, "Tambah karyawan" ke akun terdaftar jadi undangan
+
+🔴 **WAJIB** — `POST /api/onboarding/perusahaan` **menolak** badan lama `{nama}`.
+
+**Belum tayang.**
+
+**Apa.** Daftar tetap tak membuatkan perusahaan. Layar welcome (akun tanpa
+perusahaan) kini meminta orangnya memilih: **"Saya karyawan"** (tunggu
+diundang — layar menanyakan `GET /onboarding/status` sendiri tiap 10 detik)
+atau **"Saya pemilik usaha"** (isi profil usaha lalu jadi owner).
+
+**Yang berubah di permintaan:**
+
+| rute | dulu | kini |
+| --- | --- | --- |
+| `POST /api/onboarding/perusahaan` | `{ nama }` | `BuatPerusahaanBody` = `{ nama, jenis_usaha, alamat, telepon, timezone? }` — `.strict()`; `{nama}` saja → **400** `"jenis_usaha: wajib diisi; alamat: wajib diisi; telepon: wajib diisi"` |
+| `PATCH /api/company` | — | menerima `jenis_usaha` (kode atau `null`); **tetap** menolak `timezone` (400) |
+
+Pilihan & aturannya satu rumah: `packages/shared/src/profil-usaha.ts`
+(`JENIS_USAHA`, `ZONA_WAKTU` + `offsetJam`, `PROFIL_USAHA`,
+`validasiProfilUsaha`). Alamat & telepon ikut ditulis ke cabang "Pusat".
+
+**Yang berubah di balasan:**
+
+| tempat | medan | isi |
+| --- | --- | --- |
+| `CompanyRow` (`GET /company`) | `jenisUsaha` | kode `JENIS_USAHA`; `null` untuk perusahaan lama |
+| `POST /api/karyawan` | **200** `KaryawanDiundangResult` | `{ diundang: true, id, email, role }` bila email itu **sudah punya akun** — dibuat undangan pending (bukan 409 lagi), `password` diabaikan, tanpa surel. Akun baru tetap **201** `KaryawanBaruResult`. Klien wajib membedakan keduanya. |
+
+**Zona waktu — yang harus dicerminkan klien.** Pemilik memilih WIB
+(`Asia/Jakarta`), WITA (`Asia/Makassar`), atau WIT (`Asia/Jayapura`) **sekali**,
+saat perusahaan dibuat; sesudahnya tak bisa diubah. Server sudah lama
+menghitung "hari ini" di `company.timezone`; kini nilainya bisa selain WIB, jadi
+klien **wajib** menghitung tanggal query (`tanggal=`) dan menampilkan jam di
+zona `company.timezone` dari sesi, bukan WIB yang dipaku dan bukan zona
+perangkat. Web: `aturZonaPerusahaan` (`lib/format.ts`). Ponsel: `aturZonaPerusahaan`
++ `kOffsetZona` (`core/format.dart`) — Indonesia tanpa jam musim panas, jadi
+offset tetap aman.
+
+**Urutan rilis.** Server dulu. APK lama tetap bisa login dan bekerja di
+perusahaan yang sudah ada, tapi tombol "Buat & Jadi Owner"-nya akan menerima
+400 (kalimatnya terbaca di layar) sampai APK baru terpasang.
+
+---
+
 ## 🟢 Add-on per menu — "Extra mie" berbayar, "Tanpa sayur" gratis, grup wajib "Level pedas"
 
 🟢 **BARU** — additif untuk klien lama, dengan **satu syarat rilis** (lihat

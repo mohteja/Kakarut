@@ -62,6 +62,11 @@ export interface CompanyRow {
   telepon: string | null;
   logoUrl: string | null;
   timezone: string;
+  /**
+   * Kode `JENIS_USAHA` (`profil-usaha.ts`); `null` untuk perusahaan yang lahir
+   * sebelum kolomnya ada, atau dibuat super admin / seed.
+   */
+  jenisUsaha: string | null;
   pb1Enabled: boolean;
   pb1Rate: number;
   receiptFooter: string | null;
@@ -260,6 +265,19 @@ export interface KaryawanBaruResult {
 }
 
 /**
+ * Balasan 200 `POST /api/karyawan` bila emailnya SUDAH punya akun (mis.
+ * mendaftar sendiri lalu memilih "tunggu diundang"): bukan akun baru, melainkan
+ * undangan pending — orangnya menekan Terima di halaman welcome.
+ */
+export interface KaryawanDiundangResult {
+  diundang: true;
+  /** id undangan */
+  id: string;
+  email: string;
+  role: UserRole;
+}
+
+/**
  * SATU PENYEWA sebagaimana `GET /api/admin/tenants` mengirimnya (9 kunci).
  *
  * `plan_expires_at` sampai 2026-09-11 DIKIRIM tanpa disebut tipe mana pun:
@@ -325,9 +343,10 @@ export interface StokAwalItem {
  * `tanggal` di tingkat amplop adalah tanggal saldo pembuka TERKINI (yang
  * terbesar di antara `items`), atau HARI INI bila belum ada satu pun. Dan
  * "hari ini" itu dihitung server di ZONA PERUSAHAAN (`tanggalDi(timezone)`),
- * bukan di zona peramban — pembedaan yang hari ini tak terlihat karena
- * `companies.timezone` belum bisa diubah, dan yang menahan pasangan itu tetap
- * konsisten adalah `zona-waktu-satu-suara.test.ts`.
+ * bukan di zona peramban. Sejak 2026-10-26 zona itu bisa dipilih (WIB/WITA/
+ * WIT) saat perusahaan dibuat, dan web mengikutinya lewat
+ * `aturZonaPerusahaan` — yang menahan pasangan itu tetap konsisten adalah
+ * `zona-waktu-satu-suara.test.ts`.
  */
 export interface StokAwalTersimpan {
   tanggal: string;

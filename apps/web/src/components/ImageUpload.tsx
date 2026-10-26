@@ -4,6 +4,23 @@ import { btnSecondary } from "./ui";
 import { alasanTolak } from "../lib/unggah";
 
 /**
+ * Kirim satu gambar ke `POST /upload?tujuan=…` dan pulangkan URL-nya. Satu
+ * rumah untuk pipa unggah — dipakai komponen di bawah dan halaman welcome
+ * (logo yang dipilih SEBELUM perusahaannya ada, diunggah sesudahnya).
+ */
+export async function unggahGambar(file: File, tujuan: TujuanUnggah): Promise<string> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const { url } = await api<{ url: string }>(`/upload?tujuan=${tujuan}`, {
+    method: "POST",
+    formData: fd,
+  });
+  return url;
+}
+
+export type TujuanUnggah = "menu" | "logo" | "bukti" | "resep";
+
+/**
  * Upload gambar dengan preview yang jelas — pengganti <input type="file">
  * bawaan browser yang membingungkan. Dipakai untuk foto menu & logo.
  *
@@ -20,7 +37,7 @@ export function ImageUpload({
 }: {
   value: string | null;
   onChange: (url: string | null) => void;
-  tujuan: "menu" | "logo" | "bukti" | "resep";
+  tujuan: TujuanUnggah;
   placeholder?: string;
   compact?: boolean;
 }) {
@@ -47,13 +64,7 @@ export function ImageUpload({
     setError(null);
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const { url } = await api<{ url: string }>(`/upload?tujuan=${tujuan}`, {
-        method: "POST",
-        formData: fd,
-      });
-      onChange(url);
+      onChange(await unggahGambar(file, tujuan));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

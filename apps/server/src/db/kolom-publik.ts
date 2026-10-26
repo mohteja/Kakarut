@@ -28,6 +28,7 @@ export const KOLOM_COMPANY = {
   telepon: companies.telepon,
   logoUrl: companies.logoUrl,
   timezone: companies.timezone,
+  jenisUsaha: companies.jenisUsaha,
   pb1Enabled: companies.pb1Enabled,
   pb1Rate: companies.pb1Rate,
   receiptFooter: companies.receiptFooter,

@@ -157,6 +157,12 @@ export const companies = pgTable("companies", {
   telepon: text("telepon"),
   logoUrl: text("logo_url"),
   timezone: text("timezone").notNull().default("Asia/Jakarta"),
+  /**
+   * Jenis usaha (`JENIS_USAHA` di shared) — diisi pemilik saat membuat
+   * perusahaan dari halaman welcome. Null untuk perusahaan yang lahir sebelum
+   * kolom ini ada, atau dibuat super admin / seed.
+   */
+  jenisUsaha: text("jenis_usaha"),
   pb1Enabled: boolean("pb1_enabled").notNull().default(false),
   pb1Rate: numeric("pb1_rate", { precision: 5, scale: 2, mode: "number" })
     .notNull()

@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Tx } from "../../db/client";
+import type { JenisUsaha, ZonaWaktu } from "@kakarut/shared";
 import { branches, companies, invitations, memberships } from "../../db/schema";
 import { seedKategoriBahanPerusahaan } from "../kategori-bahan/service";
 import { seedMejaDefault } from "../meja/defaults";
@@ -33,16 +34,34 @@ async function slugUnik(tx: Tx, nama: string): Promise<string> {
  */
 export async function buatPerusahaanUntuk(
   tx: Tx,
-  opts: { nama: string; userId: string },
+  opts: {
+    nama: string;
+    userId: string;
+    jenis_usaha: JenisUsaha;
+    alamat: string;
+    telepon: string;
+    timezone: ZonaWaktu;
+  },
 ): Promise<string> {
   const slug = await slugUnik(tx, opts.nama);
+  // Zona waktu ditulis HANYA di sini — satu-satunya saat ia boleh dipilih.
   const [company] = await tx
     .insert(companies)
-    .values({ nama: opts.nama, slug, plan: "lite" })
+    .values({
+      nama: opts.nama,
+      slug,
+      plan: "lite",
+      jenisUsaha: opts.jenis_usaha,
+      alamat: opts.alamat,
+      telepon: opts.telepon,
+      timezone: opts.timezone,
+    })
     .returning();
+  // Cabang Pusat ikut membawa alamat & telepon usaha: di mode Lite cabang itu
+  // ADALAH usahanya, dan layar cabang tak semestinya kosong di hari pertama.
   const [branch] = await tx
     .insert(branches)
-    .values({ companyId: company.id, nama: "Pusat" })
+    .values({ companyId: company.id, nama: "Pusat", alamat: opts.alamat, telepon: opts.telepon })
     .returning();
   await seedMejaDefault(tx, company.id, branch.id);
   await seedUnitsPerusahaan(tx, company.id);

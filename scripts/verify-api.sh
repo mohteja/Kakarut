@@ -3996,7 +3996,7 @@ ST1=$(api "$TOK1" GET /onboarding/status)
 cek "onboarding: has_company false" "V == 1" "$(echo "$ST1" | jq '(.has_company==false)|if . then 1 else 0 end')"
 cek "onboarding: undangan kosong" "V == 0" "$(echo "$ST1" | jq '.undangan|length')"
 # 2. Buat perusahaan sendiri → jadi owner
-BP1=$(api "$TOK1" POST /onboarding/perusahaan '{"nama":"Warung Uji 96"}')
+BP1=$(api "$TOK1" POST /onboarding/perusahaan '{"nama":"Warung Uji 96","jenis_usaha":"warung_makan","alamat":"Jl. Uji No. 1","telepon":"081234567890"}')
 cek "buat perusahaan: jadi owner" "V == 1" "$(echo "$BP1" | jq '(.user.role=="owner")|if . then 1 else 0 end')"
 cek "buat perusahaan: company terisi" "V == 1" "$(echo "$BP1" | jq '((.company.id|length)>0)|if . then 1 else 0 end')"
 # Owner perusahaan BARU langsung punya kode karyawan (barcode/QR absen) —
@@ -4336,7 +4336,7 @@ echo "== 103. Isolasi lintas-perusahaan: edit kredensial akun multi-perusahaan =
 # U daftar (tanpa perusahaan) → buat perusahaan sendiri (B) → diundang & terima di
 # Basooopa (A) sebagai kasir → jadi anggota DUA perusahaan (identitas users global).
 TOKU103=$(daftar_verif "dua103@example.com" "Dobel10345" "Dobel 103")
-api "$TOKU103" POST /onboarding/perusahaan '{"nama":"Warung Dua 103"}' > /dev/null
+api "$TOKU103" POST /onboarding/perusahaan '{"nama":"Warung Dua 103","jenis_usaha":"warung_makan","alamat":"Jl. Uji No. 1","telepon":"081234567890"}' > /dev/null
 INV103=$(api "$OWNER" POST /karyawan/undang "{\"email\":\"dua103@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}" | jq -r .id)
 api "$TOKU103" POST "/onboarding/undangan/$INV103/terima" > /dev/null
 UID103=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="dua103@example.com")][0].user_id')
@@ -11785,7 +11785,7 @@ cek "dasar §213: tiga akun baru siap membuat usaha" "V == 3" \
 for i in 1 2 3; do
   curl -s -o "$D4_213/b$i" -w '%{http_code}\n' -X POST "$BASE/api/onboarding/perusahaan" \
     -H "Authorization: Bearer $(cat "$D4_213/t$i")" -H 'Content-Type: application/json' \
-    -d "{\"nama\":\"$NAMA213\"}" > "$D4_213/c$i" &
+    -d "{\"nama\":\"$NAMA213\",\"jenis_usaha\":\"warung_makan\",\"alamat\":\"Jl. Uji No. 1\",\"telepon\":\"081234567890\"}" > "$D4_213/c$i" &
 done
 wait
 cek "INTI: tiga usaha BERNAMA SAMA dibuat serentak → TAK ADA 5xx" "V == 0" \
@@ -15534,7 +15534,7 @@ done
 # dipaku DUA ARAH terhadap kontraknya, bukan terhadap daftar yang diketik di
 # skrip ini.
 K273C=$(medan296 CompanyRow)
-cek "§273 premis: kontrak CompanyRow terbaca dari types.ts (22 medan)" "V == 22" \
+cek "§273 premis: kontrak CompanyRow terbaca dari types.ts (23 medan)" "V == 23" \
   "$(echo "$K273C" | grep -c .)"
 cek "§273 kunci GET /company == CompanyRow (DUA ARAH — arah yang dulu luput)" "V == 0" \
   "$(selisih296 "$(jq -r 'keys[]' <<<"$CO273")" "$K273C")"
@@ -18779,6 +18779,88 @@ cek "§320 tamu kasir: Mie Ayam + Pedas + Extra mie ×2 → harga 15.000 + 8.000
   "$(jq '.items[0].harga_satuan // 0' <<<"$B320")"
 B320_ID=$(jq -r '.id // ""' <<<"$B320")
 [ -n "$B320_ID" ] && api "$TKAS320" DELETE "/open-bill/$B320_ID" > /dev/null
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §321 — HALAMAN WELCOME: profil usaha wajib, zona waktu sekali pilih, dan
+#        "Tambah karyawan" untuk email yang sudah punya akun → undangan
+# ═══════════════════════════════════════════════════════════════════════════
+# Daftar tak membuatkan perusahaan; di halaman welcome orangnya memilih
+# "saya karyawan" (tunggu diundang) atau "saya pemilik usaha" (isi profil).
+# Sejak 2026-10-26 `POST /onboarding/perusahaan` mewajibkan jenis usaha,
+# alamat, dan telepon, dan menerima zona WIB/WITA/WIT — dipilih SEKALI, tak
+# bisa diubah lewat PATCH /company. Owner yang mengetik email terdaftar di
+# "Tambah karyawan" kini membuat undangan, bukan 409.
+#
+# IP SENDIRI untuk pendaftaran — `batasRegister` 20/IP/jam dibagi seluruh
+# skrip (lihat catatan KUOTA di `daftar_verif`).
+XFF321="X-Forwarded-For: 203.0.113.121"
+dv321() { # <email> <nama> → token sesi
+  local r k
+  r=$(curl -s -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' -H "$XFF321" \
+    -d "{\"nama\":\"$2\",\"email\":\"$1\",\"password\":\"Rahasia321!\"}")
+  k=$(jq -r '.dev_verify_kode // ""' <<<"$r")
+  [ -z "$k" ] && return 0
+  curl -s -X POST "$BASE/api/auth/verify-email" -H 'Content-Type: application/json' -H "$XFF321" \
+    -d "{\"email\":\"$1\",\"kode\":\"$k\"}" | jq -r '.token // ""'
+}
+SUF321="$(date +%s)$RANDOM"
+EA321="pemilik321-$SUF321@example.com"
+EB321="karyawan321-$SUF321@example.com"
+TA321=$(dv321 "$EA321" "Pemilik 321")
+TB321=$(dv321 "$EB321" "Karyawan 321")
+cek "premis §321: dua akun baru terverifikasi, tanpa perusahaan" "V == 2" \
+  "$(for t in "$TA321" "$TB321"; do [ -n "$t" ] && api "$t" GET /auth/me | jq 'select(.company==null)|1'; done | grep -c 1)"
+# Klien lama (hanya nama) → 400 yang MENYEBUT isian yang kurang.
+R321=$(api "$TA321" POST /onboarding/perusahaan '{"nama":"Kopi Timur 321"}')
+cek "§321 hanya {nama} → 400 menyebut alamat/telepon/jenis usaha" "V == 1" \
+  "$(jq '((.error//"")|(contains("alamat") and contains("telepon") and contains("jenis_usaha")))|if . then 1 else 0 end' <<<"$R321")"
+PROF321='"nama":"Kopi Timur 321","jenis_usaha":"kafe_kopi","alamat":"Jl. Somba Opu No. 21, Makassar","telepon":"0411 321 321"'
+cek "§321 zona di luar WIB/WITA/WIT → 400" "V == 400" \
+  "$(status_code_body "$TA321" POST /onboarding/perusahaan "{$PROF321,\"timezone\":\"Asia/Tokyo\"}")"
+cek "§321 telepon bukan nomor → 400" "V == 400" \
+  "$(status_code_body "$TA321" POST /onboarding/perusahaan '{"nama":"X 321","jenis_usaha":"kafe_kopi","alamat":"Jl. Uji No. 1","telepon":"telepon saya"}')"
+cek "§321 jenis usaha asing → 400" "V == 400" \
+  "$(status_code_body "$TA321" POST /onboarding/perusahaan '{"nama":"X 321","jenis_usaha":"pabrik","alamat":"Jl. Uji No. 1","telepon":"081234567890"}')"
+S321=$(api "$TA321" POST /onboarding/perusahaan "{$PROF321,\"timezone\":\"Asia/Makassar\"}")
+TO321=$(jq -r '.token // ""' <<<"$S321")
+cek "§321 profil lengkap WITA → owner, sesi membawa zona WITA" "V == 1" \
+  "$(jq '((.user.role=="owner") and (.company.timezone=="Asia/Makassar"))|if . then 1 else 0 end' <<<"$S321")"
+CO321=$(api "$TO321" GET /company)
+cek "§321 GET /company memantulkan profilnya" "V == 1" \
+  "$(jq '((.jenisUsaha=="kafe_kopi") and (.alamat=="Jl. Somba Opu No. 21, Makassar") and (.telepon=="0411 321 321") and (.timezone=="Asia/Makassar"))|if . then 1 else 0 end' <<<"$CO321")"
+cek "§321 cabang Pusat ikut membawa alamat & telepon usaha" "V == 1" \
+  "$(api "$TO321" GET /cabang | jq '[.[]|select(.nama=="Pusat" and .alamat=="Jl. Somba Opu No. 21, Makassar" and .telepon=="0411 321 321")]|length')"
+cek "§321 hari ini dihitung di zona WITA (Stok Awal tanpa saldo = hari ini)" "V == 1" \
+  "$(api "$TO321" GET /stok/awal | jq --arg d "$(TZ=Asia/Makassar date +%F)" '(.tanggal==$d)|if . then 1 else 0 end')"
+cek "§321 PATCH /company tak menerima timezone → 400" "V == 400" \
+  "$(status_code_body "$TO321" PATCH /company '{"timezone":"Asia/Jakarta"}')"
+cek "§321 PATCH /company jenis_usaha → tersimpan" "V == 1" \
+  "$(api "$TO321" PATCH /company '{"jenis_usaha":"minuman"}' | jq '(.jenisUsaha=="minuman")|if . then 1 else 0 end')"
+cek "§321 …zona tetap WITA sesudah PATCH" "V == 1" \
+  "$(api "$TO321" GET /company | jq '(.timezone=="Asia/Makassar")|if . then 1 else 0 end')"
+# Karyawan memilih "tunggu diundang"; owner memakai Tambah karyawan biasa.
+cek "§321 premis: akun karyawan belum punya undangan" "V == 0" \
+  "$(api "$TB321" GET /onboarding/status | jq '.undangan|length')"
+CAB321=$(api "$TO321" GET /cabang | jq -r '[.[]|select(.tipe=="store")][0].id')
+K321=$(api "$TO321" POST /karyawan "{\"nama\":\"Diketik Owner\",\"email\":\"$EB321\",\"password\":\"PasswordOwner1\",\"role\":\"cashier\",\"branch_id\":\"$CAB321\"}")
+cek "§321 Tambah karyawan dgn email terdaftar → undangan (diundang:true), bukan 409" "V == 1" \
+  "$(jq --arg e "$EB321" '((.diundang==true) and (.email==$e) and (.role=="cashier") and ((.id|length)>0))|if . then 1 else 0 end' <<<"$K321")"
+cek "§321 …diulang → 409 (sudah diundang)" "V == 409" \
+  "$(status_code_body "$TO321" POST /karyawan "{\"nama\":\"X\",\"email\":\"$EB321\",\"password\":\"PasswordOwner1\",\"role\":\"cashier\",\"branch_id\":\"$CAB321\"}")"
+cek "§321 …tampil di daftar undangan owner" "V == 1" \
+  "$(api "$TO321" GET /karyawan/undangan | jq --arg e "$EB321" '[.[]|select(.email==$e)]|length')"
+U321=$(api "$TB321" GET /onboarding/status)
+cek "§321 halaman tunggu karyawan melihat undangannya" "V == 1" \
+  "$(jq '[.undangan[]|select(.company_nama=="Kopi Timur 321" and .role=="cashier")]|length' <<<"$U321")"
+J321=$(api "$TB321" POST "/onboarding/undangan/$(jq -r '.undangan[0].id' <<<"$U321")/terima")
+cek "§321 Terima → sesi kasir di perusahaan WITA" "V == 1" \
+  "$(jq '((.user.role=="cashier") and (.company.nama=="Kopi Timur 321") and (.company.timezone=="Asia/Makassar"))|if . then 1 else 0 end' <<<"$J321")"
+cek "§321 password ketikan owner DIABAIKAN — akun tetap milik orangnya" "V == 401" \
+  "$(status_code_body "" POST /auth/login "{\"email\":\"$EB321\",\"password\":\"PasswordOwner1\"}")"
+cek "§321 …password sendiri tetap berlaku" "V == 200" \
+  "$(status_code_body "" POST /auth/login "{\"email\":\"$EB321\",\"password\":\"Rahasia321!\"}")"
+cek "§321 Tambah karyawan dgn email yang sudah anggota aktif → 409" "V == 409" \
+  "$(status_code_body "$TO321" POST /karyawan "{\"nama\":\"X\",\"email\":\"$EB321\",\"password\":\"PasswordOwner1\",\"role\":\"cashier\",\"branch_id\":\"$CAB321\"}")"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

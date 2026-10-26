@@ -10,6 +10,7 @@ import {
   hariIniWIB,
   labelTahapPembelian,
   labelTahapProduksi,
+  zonaPerusahaan,
 } from "../../lib/format";
 
 const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
@@ -24,7 +25,7 @@ const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
 };
 
 function tanggal30HariLalu(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(
+  return new Intl.DateTimeFormat("en-CA", { timeZone: zonaPerusahaan() }).format(
     new Date(Date.now() - 29 * 24 * 3600 * 1000),
   );
 }
@@ -254,7 +255,7 @@ function IsiKartu({ kartu }: { kartu: KartuStokDto }) {
                       month: "2-digit",
                       hour: "2-digit",
                       minute: "2-digit",
-                      timeZone: "Asia/Jakarta",
+                      timeZone: zonaPerusahaan(),
                     }).format(new Date(m.waktu))}
                   </td>
                   <td className={tdClass}>
