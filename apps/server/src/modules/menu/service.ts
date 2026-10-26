@@ -1,6 +1,7 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import {
   bahanPembatas,
+  validasiPilihanAddon,
   foodCostPersen,
   hargaJualBulat,
   hargaPerUnit,
@@ -9,12 +10,23 @@ import {
   hitungHpp,
   qtyBahanPerPorsi,
   qtyEfektif,
+  type GrupAturan,
   type KomponenDtoPenuh,
+  type MenuAddonGroupDto,
   type MenuDtoPenuh,
   type MenuStokDto,
+  type PilihanAddon,
 } from "@kakarut/shared";
 import { db, type Db, type Tx } from "../../db/client";
-import { ingredients, menuBranches, menuCategories, menuComponents, menus } from "../../db/schema";
+import {
+  ingredients,
+  menuAddonGroups,
+  menuAddons,
+  menuBranches,
+  menuCategories,
+  menuComponents,
+  menus,
+} from "../../db/schema";
 import { kunciBackfillKode } from "../../lib/kunci";
 import { hitungSaldoCabang } from "../stok/service";
 
@@ -27,6 +39,60 @@ export interface KatalogMenu {
   komponenByMenu: Map<string, KomponenDtoPenuh[]>;
   /** pembatasan lokasi per menu — TANPA entri/kosong = tampil di semua cabang */
   branchIdsByMenu: Map<string, string[]>;
+  /**
+   * Grup add-on per menu, TERMASUK yang sudah dihapus (bertanda `terhapus`):
+   * penjualan offline yang disusulkan & bill lama masih bisa merujuknya.
+   * DTO menyaring yang terhapus.
+   */
+  addonGroupsByMenu: Map<string, GrupKatalog[]>;
+  /** info bahan yang ditautkan add-on — banyak yang TIDAK ada di resep menu */
+  bahanAddon: Map<string, BahanKatalog>;
+}
+
+export interface BahanKatalog {
+  nama: string;
+  satuan: string;
+  harga_per_unit: number;
+  track_stok: boolean;
+  is_packaging: boolean;
+  is_complement: boolean;
+}
+
+export interface AddonKatalog {
+  id: string;
+  nama: string;
+  harga: number;
+  maks_jumlah: number | null;
+  ingredient_id: string | null;
+  qty_bahan: number | null;
+  is_active: boolean;
+  terhapus: boolean;
+}
+
+export interface GrupKatalog extends GrupAturan {
+  terhapus: boolean;
+  addons: AddonKatalog[];
+}
+
+/**
+ * Add-on yang MENEMPEL pada satu baris — bentuk yang cukup untuk menghitung
+ * harga, HPP, dan bahan. Sumbernya bisa konfigurasi hari ini (baris baru) atau
+ * SNAPSHOT (`sale_item_addons`/`open_bill_item_addons`) saat menghitung ulang.
+ */
+export interface AddonSnap {
+  ingredientId: string | null;
+  qtyBahan: number | null;
+  harga: number;
+  jumlah: number;
+}
+
+/** Snapshot lengkap yang ditulis ke tabel `*_item_addons`. */
+export interface AddonSnapBaris extends AddonSnap {
+  /** null = add-on aslinya sudah tak ada (snapshot lama) */
+  addonId: string | null;
+  grupNama: string;
+  nama: string;
+  sortOrder: number;
 }
 
 /**
@@ -49,10 +115,67 @@ export function komponenEfektif(katalog: KatalogMenu, menu: MenuRow): KomponenDt
 }
 
 /**
- * Kebutuhan bahan TERLACAK untuk sejumlah porsi satu menu, ditambahkan ke
- * `keranjang`. Satu-satunya tempat aturan "resep → bahan yang dipotong stok"
- * ditulis, dipakai baik saat MENCATAT konsumsi (createSale) maupun saat
- * MEMERIKSA kecukupan stok sebelum pesanan diterima (open bill & penjualan).
+ * Takaran bahan untuk SATU porsi sebuah baris: resep efektif, lalu delta
+ * add-on (`qty_bahan × jumlah`), DILANTAI 0 per bahan. "Tanpa mie" −100 g pada
+ * resep 80 g memakai 0 g — bukan −20 g yang diam-diam menambah stok.
+ *
+ * Satu rumus untuk konsumsi stok, gerbang cek stok, dan HPP baris. Delta
+ * add-on tak bisa digabung lintas keranjang lebih dulu (lantainya per baris),
+ * jadi pemanggil menggabungkan HASIL fungsi ini, bukan masukannya.
+ *
+ * Termasuk bahan tak terlacak (HPP tetap membutuhkannya); bahan add-on yang
+ * info katalognya tak ditemukan dilewati.
+ */
+export function kebutuhanPorsi(
+  katalog: KatalogMenu,
+  menu: MenuRow,
+  dineIn: boolean,
+  addons: readonly AddonSnap[] = [],
+): Map<string, { qty: number; resep: number; info: BahanKatalog }> {
+  const out = new Map<string, { qty: number; resep: number; info: BahanKatalog }>();
+  for (const k of komponenEfektif(katalog, menu)) {
+    const qty = qtyEfektif({ qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement }, dineIn);
+    const ada = out.get(k.ingredient_id);
+    if (ada) {
+      ada.qty += qty;
+      ada.resep += qty;
+    } else {
+      out.set(k.ingredient_id, {
+        qty,
+        resep: qty,
+        info: {
+          nama: k.nama,
+          satuan: k.satuan,
+          harga_per_unit: k.harga_per_unit,
+          track_stok: k.track_stok,
+          is_packaging: k.is_packaging,
+          is_complement: k.is_complement,
+        },
+      });
+    }
+  }
+  for (const a of addons) {
+    if (!a.ingredientId || a.qtyBahan === null) continue;
+    const ada = out.get(a.ingredientId);
+    const info = ada?.info ?? katalog.bahanAddon.get(a.ingredientId);
+    if (!info) continue;
+    const delta = qtyEfektif(
+      { qty: a.qtyBahan * a.jumlah, isPackaging: info.is_packaging, isComplement: info.is_complement },
+      dineIn,
+    );
+    if (ada) ada.qty += delta;
+    else out.set(a.ingredientId, { qty: delta, resep: 0, info });
+  }
+  for (const v of out.values()) if (v.qty < 0) v.qty = 0;
+  return out;
+}
+
+/**
+ * Kebutuhan bahan TERLACAK untuk sejumlah porsi satu BARIS (menu + add-on-nya),
+ * ditambahkan ke `keranjang`. Satu-satunya tempat aturan "resep → bahan yang
+ * dipotong stok" ditulis, dipakai baik saat MENCATAT konsumsi (createSale)
+ * maupun saat MEMERIKSA kecukupan stok sebelum pesanan diterima (open bill &
+ * penjualan).
  *
  * Kalau pemeriksaan memakai aturan yang berbeda dari pencatatan, gerbangnya
  * akan menolak pesanan yang sebenarnya cukup — atau meloloskan yang tidak —
@@ -61,24 +184,98 @@ export function komponenEfektif(katalog: KatalogMenu, menu: MenuRow): KomponenDt
  * `dineIn` di sini adalah BASIS BIAYA baris itu (bukan tempat makannya):
  * kemasan take-away tak terpakai saat dine-in, complement dipakai setengah.
  */
-export function tambahKebutuhanBahan(
+export function tambahKebutuhanBaris(
   keranjang: Map<string, number>,
   katalog: KatalogMenu,
   menu: MenuRow,
   porsi: number,
   dineIn: boolean,
+  addons: readonly AddonSnap[] = [],
 ): Map<string, number> {
-  for (const k of komponenEfektif(katalog, menu)) {
+  for (const [ingredientId, b] of kebutuhanPorsi(katalog, menu, dineIn, addons)) {
     // bahan yang tidak dilacak stoknya: tetap masuk HPP, tapi tidak
     // menghasilkan catatan konsumsi
-    if (!k.track_stok) continue;
-    const qty =
-      qtyEfektif({ qty: k.qty, isPackaging: k.is_packaging, isComplement: k.is_complement }, dineIn) *
-      porsi;
+    if (!b.info.track_stok) continue;
+    const qty = b.qty * porsi;
     if (qty <= 0) continue;
-    keranjang.set(k.ingredient_id, (keranjang.get(k.ingredient_id) ?? 0) + qty);
+    keranjang.set(ingredientId, (keranjang.get(ingredientId) ?? 0) + qty);
   }
   return keranjang;
+}
+
+/**
+ * HPP per porsi sebuah BARIS: HPP resep + selisih bahan karena add-on ×
+ * harga per unit. Tanpa add-on hasilnya PERSIS `hitungHargaMenu` (jalur yang
+ * sama, urutan penjumlahan yang sama) — baris lama tak bergeser satu sen pun.
+ */
+export function hppBaris(
+  menu: MenuRow,
+  katalog: KatalogMenu,
+  dineIn: boolean,
+  addons: readonly AddonSnap[] = [],
+): number {
+  const dasar = hitungHargaMenu(menu, katalog, dineIn);
+  if (!addons.some((a) => a.ingredientId && a.qtyBahan !== null)) return dasar;
+  let selisih = 0;
+  for (const b of kebutuhanPorsi(katalog, menu, dineIn, addons).values()) {
+    selisih += (b.qty - b.resep) * b.info.harga_per_unit;
+  }
+  return dasar + selisih;
+}
+
+/**
+ * Pilihan → bentuk hitung, TANPA mengadili (untuk RAMALAN stok: cek-stok).
+ * Id yang tak dikenal dilewati — yang menolaknya validasi di pintu tulis.
+ */
+export function snapDariPilihan(
+  katalog: KatalogMenu,
+  menuId: string,
+  pilihan: readonly PilihanAddon[] | undefined,
+): AddonSnap[] {
+  if (!pilihan || pilihan.length === 0) return [];
+  const byId = new Map<string, AddonKatalog>();
+  for (const g of katalog.addonGroupsByMenu.get(menuId) ?? []) for (const a of g.addons) byId.set(a.id, a);
+  return pilihan.flatMap((p) => {
+    const a = byId.get(p.id);
+    return a ? [{ ingredientId: a.ingredient_id, qtyBahan: a.qty_bahan, harga: a.harga, jumlah: p.jumlah }] : [];
+  });
+}
+
+/**
+ * Pilihan kasir → snapshot add-on baris, setelah divalidasi terhadap grup
+ * menu ini. `lenien` untuk penjualan offline yang disusulkan (lihat
+ * `validasiPilihanAddon`). Urutan snapshot mengikuti urutan grup & add-on di
+ * form menu, bukan urutan klik — tiket dapur jadi konsisten.
+ */
+export function resolusiAddon(
+  katalog: KatalogMenu,
+  menuId: string,
+  pilihan: readonly PilihanAddon[],
+  opsi: { lenien?: boolean } = {},
+): { ok: true; addons: AddonSnapBaris[] } | { ok: false; pesan: string } {
+  const grup = katalog.addonGroupsByMenu.get(menuId) ?? [];
+  if (pilihan.length === 0 && grup.length === 0) return { ok: true, addons: [] };
+  const v = validasiPilihanAddon(grup, [...pilihan], opsi);
+  if (!v.ok) return v;
+  const jumlahById = new Map(pilihan.map((p) => [p.id, p.jumlah]));
+  const addons: AddonSnapBaris[] = [];
+  for (const g of grup) {
+    for (const a of g.addons) {
+      const jumlah = jumlahById.get(a.id);
+      if (jumlah === undefined) continue;
+      addons.push({
+        addonId: a.id,
+        grupNama: g.nama,
+        nama: a.nama,
+        harga: a.harga,
+        jumlah,
+        ingredientId: a.ingredient_id,
+        qtyBahan: a.qty_bahan,
+        sortOrder: addons.length,
+      });
+    }
+  }
+  return { ok: true, addons };
 }
 
 /** Apakah menu tampil di cabang ini? (tanpa pembatasan = semua cabang) */
@@ -176,7 +373,103 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
     }
   }
 
-  return { rows, categoryNameById, komponenByMenu, branchIdsByMenu };
+  const addonGroupsByMenu = new Map<string, GrupKatalog[]>();
+  const bahanAddon = new Map<string, BahanKatalog>();
+  if (rows.length > 0) {
+    // Urutan stabil (sort_order, nama, id) — isinya ikut ETag /menu.
+    const grupRows = await dbx
+      .select()
+      .from(menuAddonGroups)
+      .where(eq(menuAddonGroups.companyId, companyId))
+      .orderBy(asc(menuAddonGroups.sortOrder), asc(menuAddonGroups.nama), asc(menuAddonGroups.id));
+    const grupById = new Map<string, GrupKatalog>();
+    for (const g of grupRows) {
+      const grup: GrupKatalog = {
+        id: g.id,
+        nama: g.nama,
+        min_pilih: g.minPilih,
+        maks_pilih: g.maksPilih,
+        terhapus: g.deletedAt !== null,
+        addons: [],
+      };
+      grupById.set(g.id, grup);
+      const list = addonGroupsByMenu.get(g.menuId) ?? [];
+      list.push(grup);
+      addonGroupsByMenu.set(g.menuId, list);
+    }
+    if (grupRows.length > 0) {
+      const addonRows = await dbx
+        .select({
+          addon: menuAddons,
+          bahanNama: ingredients.nama,
+          bahanSatuan: ingredients.satuan,
+          hargaBeli: ingredients.hargaBeli,
+          isi: ingredients.isi,
+          trackStok: ingredients.trackStok,
+          isPackaging: ingredients.isPackaging,
+          isComplement: ingredients.isComplement,
+        })
+        .from(menuAddons)
+        .leftJoin(ingredients, eq(menuAddons.ingredientId, ingredients.id))
+        .where(eq(menuAddons.companyId, companyId))
+        .orderBy(asc(menuAddons.sortOrder), asc(menuAddons.nama), asc(menuAddons.id));
+      for (const r of addonRows) {
+        const a = r.addon;
+        grupById.get(a.groupId)?.addons.push({
+          id: a.id,
+          nama: a.nama,
+          harga: a.harga,
+          maks_jumlah: a.maksJumlah,
+          ingredient_id: a.ingredientId,
+          qty_bahan: a.qtyBahan,
+          is_active: a.isActive,
+          terhapus: a.deletedAt !== null,
+        });
+        if (a.ingredientId && r.bahanNama !== null && !bahanAddon.has(a.ingredientId)) {
+          bahanAddon.set(a.ingredientId, {
+            nama: r.bahanNama,
+            satuan: r.bahanSatuan!,
+            harga_per_unit: hargaPerUnit(r.hargaBeli!, r.isi!),
+            track_stok: r.trackStok!,
+            is_packaging: r.isPackaging!,
+            is_complement: r.isComplement!,
+          });
+        }
+      }
+    }
+  }
+
+  return { rows, categoryNameById, komponenByMenu, branchIdsByMenu, addonGroupsByMenu, bahanAddon };
+}
+
+/**
+ * Lengkapi `bahanAddon` dengan bahan yang dirujuk SNAPSHOT tapi tak lagi
+ * ditautkan add-on mana pun (admin mengganti bahannya sesudah penjualan).
+ * Dipakai saat menghitung ulang dari snapshot — tanpa ini delta bahannya
+ * diam-diam hilang dari HPP & konsumsi.
+ */
+export async function lengkapiBahanAddon(
+  dbx: Db | Tx,
+  companyId: string,
+  katalog: KatalogMenu,
+  ingredientIds: Iterable<string>,
+): Promise<void> {
+  const kurang = [...new Set(ingredientIds)].filter((id) => !katalog.bahanAddon.has(id));
+  if (kurang.length === 0) return;
+  const rows = await dbx
+    .select()
+    .from(ingredients)
+    .where(and(eq(ingredients.companyId, companyId), inArray(ingredients.id, kurang)));
+  for (const r of rows) {
+    katalog.bahanAddon.set(r.id, {
+      nama: r.nama,
+      satuan: r.satuan,
+      harga_per_unit: hargaPerUnit(r.hargaBeli, r.isi),
+      track_stok: r.trackStok,
+      is_packaging: r.isPackaging,
+      is_complement: r.isComplement,
+    });
+  }
 }
 
 /**
@@ -200,7 +493,12 @@ export function katalogDenganHarga(
       ),
     );
   }
-  return { ...katalog, komponenByMenu };
+  const bahanAddon = new Map(
+    [...katalog.bahanAddon].map(([id, b]) =>
+      hargaPerUnitBaru.has(id) ? [id, { ...b, harga_per_unit: hargaPerUnitBaru.get(id)! }] : [id, b],
+    ),
+  );
+  return { ...katalog, komponenByMenu, bahanAddon };
 }
 
 /**
@@ -441,5 +739,42 @@ export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDtoPenuh {
     harga_saran: saran,
     harga_jual_bulat: hargaJualBulat(saran),
     food_cost_persen: foodCostPersen(hpp, menu.hargaJual),
+    addon_groups: addonGroupsDto(menu, katalog, hpp),
   };
+}
+
+/**
+ * Grup add-on untuk DTO — yang terhapus disaring. `hpp_delta` = perubahan HPP
+ * (basis bawa pulang, sama dengan `hpp`) untuk SATU kali pilih.
+ */
+function addonGroupsDto(menu: MenuRow, katalog: KatalogMenu, hpp: number): MenuAddonGroupDto[] {
+  return (katalog.addonGroupsByMenu.get(menu.id) ?? [])
+    .filter((g) => !g.terhapus)
+    .map((g) => ({
+      id: g.id,
+      nama: g.nama,
+      min_pilih: g.min_pilih,
+      maks_pilih: g.maks_pilih,
+      addons: g.addons
+        .filter((a) => !a.terhapus)
+        .map((a) => {
+          const bahan = a.ingredient_id ? katalog.bahanAddon.get(a.ingredient_id) : undefined;
+          return {
+            id: a.id,
+            nama: a.nama,
+            harga: a.harga,
+            maks_jumlah: a.maks_jumlah,
+            ingredient_id: a.ingredient_id,
+            ingredient_nama: bahan?.nama ?? null,
+            satuan: bahan?.satuan ?? null,
+            qty_bahan: a.qty_bahan,
+            is_active: a.is_active,
+            hpp_delta: a.ingredient_id
+              ? hppBaris(menu, katalog, false, [
+                  { ingredientId: a.ingredient_id, qtyBahan: a.qty_bahan, harga: a.harga, jumlah: 1 },
+                ]) - hpp
+              : 0,
+          };
+        }),
+    }));
 }

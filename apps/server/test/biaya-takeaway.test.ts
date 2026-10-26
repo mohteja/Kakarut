@@ -70,6 +70,8 @@ function katalog(
       categoryNameById: new Map(),
       komponenByMenu: new Map(Object.entries(komponen)),
       branchIdsByMenu: new Map(),
+      addonGroupsByMenu: new Map(),
+      bahanAddon: new Map(),
     },
     menuById: new Map(menus.map((m) => [m.id, m])),
   };

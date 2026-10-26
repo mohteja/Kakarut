@@ -299,6 +299,9 @@ const DIKECUALIKAN_HOP = new Map<string, string>([
   ["modules/produksi/routes.ts:wajibKelipatanKemasan", "ber-EPS_QTY yang kini beralasan tertulis"],
   ["modules/produksi/routes.ts:hargaPerUnit", "harga turunan, bukan putusan"],
   ["modules/transfer/routes.ts:wajibKelipatanKemasan", "ber-EPS_QTY yang kini beralasan tertulis"],
+  // `harga × jumlah` add-on (berskala-2 × bilangan bulat ≤ 20) hanya DICETAK
+  // di samping nama add-on; `formatRupiahAscii` membulatkan, tak memutuskan.
+  ["receipt.ts:formatRupiahAscii", "tambahan add-on yang dicetak, bukan putusan"],
 ]);
 
 describe("satu hop: nilai lewat variabel perantara", () => {

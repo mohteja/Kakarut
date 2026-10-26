@@ -63,9 +63,11 @@ export const PETA: Record<string, string> = {
   "modules/company/routes.ts|pb1_rate": "companies.pb1_rate",
   "modules/company/routes.ts|target_penjualan": "companies.target_penjualan",
   "modules/menu/routes.ts|base_mult": "menus.base_mult",
+  "modules/menu/routes.ts|harga": "menu_addons.harga",
   "modules/menu/routes.ts|harga_jual": "menus.harga_jual",
   "modules/menu/routes.ts|mult": "menus.mult",
   "modules/menu/routes.ts|qty": "menu_components.qty",
+  "modules/menu/routes.ts|qty_bahan": "menu_addons.qty_bahan",
   "modules/open-bill/routes.ts|qty": "open_bill_items.qty",
   "modules/penjualan/routes.ts|qty": "sale_items.qty",
   "modules/penjualan/routes.ts|uang_diterima": "sales.uang_diterima",
@@ -74,6 +76,10 @@ export const PETA: Record<string, string> = {
   "modules/perlengkapan/routes.ts|qty_fisik": "supply_mutations.qty_fisik",
   "modules/perlengkapan/routes.ts|stok_minimum": "supplies.stok_minimum",
   "modules/perlengkapan/routes.ts|total_harga": "supply_mutations.total_harga",
+  // `harga` di sini harga per KEMASAN beli — dikalikan jumlah lalu ditulis ke
+  // total_harga. Masuk PETA (bukan BUKAN_KOLOM) sejak `menu_addons.harga`
+  // membuat nama medan ini juga nama kolom numeric.
+  "modules/produksi/routes.ts|harga": "productions.total_harga",
   "modules/produksi/routes.ts|qty": "productions.qty",
   "modules/produksi/routes.ts|total_harga": "productions.total_harga",
   "modules/shift/routes.ts|modal_awal": "shifts.modal_awal",

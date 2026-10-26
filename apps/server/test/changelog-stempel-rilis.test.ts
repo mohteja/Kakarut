@@ -89,6 +89,10 @@ const BELUM_TAYANG = new Set([
   // successfully" — dan ponselnya lewat `c751fc3` / CI #56. Stempelnya dipasang
   // pada commit yang SAMA dengan penghapusan baris-baris ini; memisahkan
   // keduanya adalah cara berkas ini pernah salah selama empat hari.
+  //
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-10-26 — entri add-on per
+  // menu tayang lewat merge PR #238; stempelnya dipasang pada commit yang SAMA
+  // dengan penghapusan baris ini.
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

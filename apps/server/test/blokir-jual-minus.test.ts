@@ -97,10 +97,10 @@ describe("aturan resep → bahan cuma punya satu implementasi", () => {
      * pesanan yang sebenarnya cukup — atau meloloskan yang tidak — dan tak ada
      * yang bisa menjelaskan sebabnya kepada kasir.
      */
-    expect(baca("modules/menu/service.ts")).toContain("export function tambahKebutuhanBahan(");
+    expect(baca("modules/menu/service.ts")).toContain("export function tambahKebutuhanBaris(");
     // `createSale` memanggilnya LANGSUNG: kebutuhannya ditumpuk di dalam gelung
     // yang juga menghitung harga & HPP.
-    expect(baca("modules/penjualan/service.ts")).toContain("tambahKebutuhanBahan(");
+    expect(baca("modules/penjualan/service.ts")).toContain("tambahKebutuhanBaris(");
     /*
      * `open-bill` kini menjangkaunya LEWAT `kebutuhanKeranjang` (2026-09-06):
      * perakitan "keranjang → bahan" yang dulu diketik ulang di sana dipakai
@@ -109,7 +109,10 @@ describe("aturan resep → bahan cuma punya satu implementasi", () => {
      * berhenti memakai aturan resep bersamanya.
      */
     expect(baca("modules/open-bill/routes.ts")).toContain("kebutuhanKeranjang(");
-    expect(baca("modules/penjualan/stok-keranjang.ts")).toContain("tambahKebutuhanBahan(");
+    expect(baca("modules/penjualan/stok-keranjang.ts")).toContain("tambahKebutuhanBaris(");
+    // Hitung ulang (refund, toggle bawa pulang) menyusun ulang konsumsi dengan
+    // rumus yang SAMA — termasuk delta add-on dari snapshot, dilantai per baris.
+    expect(baca("modules/penjualan/rekalkulasi.ts")).toContain("tambahKebutuhanBaris(");
   });
 
   it("tak ada yang menguraikan resep dengan tangan lagi", () => {

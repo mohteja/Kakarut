@@ -103,11 +103,13 @@ const daftar: Record<string, Record<string, Alasan>> = {
   "modules/bahan/routes.ts": {
     "5": {
       kelas: "sah",
-      jumlah: 3,
+      jumlah: 4,
       teks:
         "Saran/‘lima terakhir’ di formulir — bukan daftar yang mengaku " +
         "lengkap. Lima yang muncul memang dimaksudkan lima, dan tak ada " +
-        "keputusan yang diambil dari panjangnya.",
+        "keputusan yang diambil dari panjangnya. Situs keempat: penjaga " +
+        "arsip bahan menyebut paling banyak lima add-on yang memakainya — " +
+        "contoh dalam pesan 409, keputusannya dari ADA/TIDAKNYA baris.",
     },
   },
   "modules/customer/routes.ts": {

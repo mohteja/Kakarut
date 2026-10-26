@@ -74,7 +74,7 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
     "`id` diverifikasi `eq(ingredients.companyId, auth.company_id!)` lebih dulu di handler yang sama (mis. :638, :1062, :1663) yang membalas 404, lalu anak-anaknya (`ingredientSteps`, `ingredientComponents`, `ingredientSuppliers`, `menuComponents`) dibaca/dihapus lewat id yang sudah lolos itu. Empat situs baru: pembuktinya kueri lain, bukan panggilan bernama — dan kueri tetangga bukan verifikasi" }],
   ["modules/pesanan/routes.ts", { situs: 8, alasan:
     "`pastikanKartu(jenis, id, auth.company_id!, branchId)` dipanggil sebelum baris anak disentuh; `billIds`/`saleIds` daftar papan lahir dari query ber-companyId tepat di atasnya. TIGA situs baru ada di `selaraskanTutupBill(tx, billId, sekarang, ctx)` — `billId` PARAMETER, dan ketiga pemanggilnya mengoper bill yang sudah lolos `pastikanKartu`" }],
-  ["modules/open-bill/routes.ts", { situs: 4, alasan:
+  ["modules/open-bill/routes.ts", { situs: 2, alasan:
     "`loadDetail` membaca bill lalu MENOLAK di JS (`bill.companyId !== companyId`) sebelum apa pun dipakai; anaknya dibaca lewat `billId` yang sudah lolos itu. Satu situs baru (`.update(openBillItems)` pembatalan) berada di dalam transaksi yang dibuka SESUDAH penolakan itu" }],
   ["modules/penjualan/refund.ts", { situs: 1, alasan:
     "`refundSajian(tx, params)` — barisnya disaring `saleItems.id` milik nota yang sudah diverifikasi pemanggilnya (`penjualan/routes.ts` membaca sale ber-companyId lalu 404) sebelum refund dijalankan" }],
@@ -84,9 +84,9 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
     "`sale` datang dari select ber-companyId; `saleItems.saleId = sale.id` dan `users.id = sale.cashierUserId` mengikutinya (tabel `users` memang global — venanya sendiri)" }],
   ["modules/kebersihan/routes.ts", { situs: 3, alasan:
     "`ids` laporan lahir dari query ber-`syarat` yang memuat companyId; itemnya dibaca/dihapus per `reportId` dari daftar itu" }],
-    ["modules/menu/routes.ts", { situs: 2, alasan:
-    "`menuId` diverifikasi milik perusahaan sebelum `menuComponents`/`menuBranches` diganti isi" }],
-  ["modules/penjualan/rekalkulasi.ts", { situs: 4, alasan:
+    ["modules/menu/routes.ts", { situs: 7, alasan:
+    "`menuId` diverifikasi milik perusahaan sebelum `menuComponents`/`menuBranches` diganti isi. Lima situs `replaceAddons` (hapus-lunak, singkir nama, perbarui grup/add-on) menyaring id yang BARU SAJA dibaca dari `menu_addon_groups`/`menu_addons` ber-`companyId` + `menuId` di fungsi yang sama — id kiriman di luar himpunan itu sudah ditolak 400 lebih dulu" }],
+  ["modules/penjualan/rekalkulasi.ts", { situs: 3, alasan:
     "`hitungUlangBiayaPenjualan(tx, saleId, companyId, …)` menerima companyId sebagai PARAMETER dan memakainya di kueri pertamanya; dua situs baru menyaring `saleId` yang sudah lolos kueri itu di fungsi yang sama" }],
   ["modules/penjualan/service.ts", { situs: 1, alasan:
     "bill dimuat `eq(openBills.companyId, params.companyId)` + `.for(\"update\")`, baru barisnya dibaca & bill-nya ditutup lewat id itu" }],

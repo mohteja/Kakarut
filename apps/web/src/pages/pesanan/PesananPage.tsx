@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   durasiPesananDetik,
   dibatalkanDapur,
+  ringkasAddon,
   ringkasPesanan,
   sajianBedaDariNota,
   urutkanPesanan,
@@ -168,6 +169,9 @@ function BarisPesanan({
             <div className="text-xs font-semibold text-rose-600">
               ↩ {it.qty_refund} porsi dikembalikan — jangan dibuat
             </div>
+          )}
+          {(it.addons ?? []).length > 0 && (
+            <div className="text-xs font-semibold text-orange-700">+ {ringkasAddon(it.addons)}</div>
           )}
           {it.catatan && <div className="text-xs italic text-orange-600">📝 {it.catatan}</div>}
         </div>

@@ -104,8 +104,15 @@ const PUTUSAN: Record<string, string> = {
   "ingredient_logs.harga_baru": "salinan ingredients.harga_beli — kolomnya numeric(14,2) yang sama persis",
   "menu_price_logs.mult_baru": "salinan menus.mult — numeric(7,3) ke numeric(7,3)",
   "menu_price_logs.mult_lama": "salinan menus.mult — presisi sama",
-  "open_bill_items.harga_satuan": "dari menus.harga_jual numeric(12,2) ke kolom numeric(14,2) yang LEBIH LEBAR",
-  "sale_items.harga_satuan": "dari menus.harga_jual — presisi sama numeric(12,2)",
+  "open_bill_items.harga_satuan":
+    "DIJAGA pastikanMuat(hargaSatuan, BATAS_HARGA) di barisBaru — harga_jual + add-on, ke kolom numeric(14,2) yang lebih lebar",
+  "sale_items.harga_satuan":
+    "DIJAGA pastikanMuat(hargaSatuan, BATAS_HARGA) — harga_jual + add-on bisa melewati numeric(12,2) walau keduanya sah",
+  // Snapshot add-on: salinan menu_addons berpresisi SAMA persis.
+  "sale_item_addons.harga": "salinan menu_addons.harga — numeric(12,2) ke numeric(12,2)",
+  "sale_item_addons.qty_bahan": "salinan menu_addons.qty_bahan — numeric(12,4) ke numeric(12,4)",
+  "open_bill_item_addons.harga": "salinan menu_addons.harga — numeric(12,2) ke numeric(12,2)",
+  "open_bill_item_addons.qty_bahan": "salinan menu_addons.qty_bahan — numeric(12,4) ke numeric(12,4)",
   "faktur_dana.nominal": "dari medan dana_cair/realisasi ber-BATAS_UANG — presisi sama",
   "supply_purchases.qty": "dari medan qty ber-BATAS_QTY_STOK ke numeric(16,3) yang lebih lebar",
   "supply_purchases.total_harga": "dari medan total_harga ber-BATAS_UANG — presisi sama",

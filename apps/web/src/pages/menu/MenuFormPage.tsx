@@ -16,6 +16,7 @@ import {
   type MenuDto,
 } from "@kakarut/shared";
 import { BahanPicker } from "../../components/BahanPicker";
+import { AddonEditor, grupDariDto, grupKeBody, masalahGrup, type GrupForm } from "./AddonEditor";
 import { ImageUpload } from "../../components/ImageUpload";
 import { IKON_MENU_KOSONG } from "../../components/KartuMenuKasir";
 import {
@@ -93,6 +94,8 @@ export function MenuFormPage() {
   const [komponen, setKomponen] = useState<KomponenForm[]>([]);
   /** pembatasan lokasi (mode Pro) — [] = tampil di semua lokasi */
   const [branchIds, setBranchIds] = useState<string[]>([]);
+  /** grup add-on per menu (mis. "Level pedas", "Tambahan") */
+  const [addonGroups, setAddonGroups] = useState<GrupForm[]>([]);
   /** dialog "menu ini belum punya kemasan take away" sedang terbuka */
   const [tanyaKemasan, setTanyaKemasan] = useState(false);
   const dimuat = useRef(false);
@@ -120,6 +123,7 @@ export function MenuFormPage() {
       m.komponen.map((k) => ({ ingredient_id: k.ingredient_id, qty: teksAngka(k.qty) })),
     );
     setBranchIds(m.branch_ids ?? []);
+    setAddonGroups(grupDariDto(m.addon_groups ?? []));
   }, [id, menuEdit]);
 
   const bahanById = useMemo(() => new Map((bahan ?? []).map((b) => [b.id, b])), [bahan]);
@@ -279,6 +283,7 @@ export function MenuFormPage() {
         branch_ids: branchIds.filter((bid) =>
           cabang.some((b) => b.id === bid && bolehJadiLokasiMenu(b)),
         ),
+        addon_groups: grupKeBody(addonGroups),
       };
       return id
         ? api(`/menu/${id}`, { method: "PUT", body })
@@ -298,6 +303,7 @@ export function MenuFormPage() {
    * bacaannya tak membaca galatnya, jadi mode sunting berputar selamanya
    * begitu salah satunya gagal.
    */
+  const masalahAddon = masalahGrup(addonGroups);
   const gagalMuat = bahanGagal ?? kategoriGagal ?? menuEditGagal;
   if (gagalMuat) return <SpinnerAtauGalat error={gagalMuat} apa="Data menu" />;
   if (!bahan || !kategori || (id && !menuEdit)) return <Spinner />;
@@ -313,6 +319,7 @@ export function MenuFormPage() {
           // diam-diam kehilangan bahan lebih merusak daripada menyimpannya
           // tanpa kemasan, dan tombolnya pun sudah mati — ini pagar keduanya.
           if (qtyTerbuang.length > 0) return;
+          if (masalahAddon) return;
           // Konfirmasi dulu bila menu berresep ini belum punya kemasan take
           // away — bukan larangan (ada menu yang memang tak pernah dibawa
           // pulang), tapi keputusannya harus disadari, bukan kelewatan.
@@ -677,6 +684,15 @@ export function MenuFormPage() {
           )}
         </Card>
 
+        <AddonEditor
+          value={addonGroups}
+          onChange={setAddonGroups}
+          bahan={bahan}
+          menus={menus}
+          selfId={id}
+          lihatBiaya
+        />
+
         <Card className="p-4">
           <h2 className="mb-3 font-semibold text-stone-700">Preview harga (live)</h2>
           <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-5">
@@ -748,11 +764,16 @@ export function MenuFormPage() {
             terjual.
           </div>
         )}
+        {masalahAddon && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+            Add-on: {masalahAddon}
+          </div>
+        )}
         <ErrorText error={simpan.error} />
         <div className="flex gap-2">
           <button
             type="submit"
-            disabled={simpan.isPending || qtyTerbuang.length > 0}
+            disabled={simpan.isPending || qtyTerbuang.length > 0 || masalahAddon !== null}
             className={btnPrimary}
           >
             {simpan.isPending ? "Menyimpan…" : "Simpan Menu"}

@@ -474,6 +474,7 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
   const struk = strukPenjualan(
     result.sale,
     result.items,
+    result.addons,
     result.branch_nama,
     auth.nama,
     bolehLihatBiaya(auth.role),

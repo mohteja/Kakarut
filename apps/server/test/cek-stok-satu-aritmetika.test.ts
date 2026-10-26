@@ -97,11 +97,11 @@ describe("cek-stok: satu aritmetika untuk yang meramal dan yang menghakimi", () 
     // ikut dan itu disengaja — ia menumpuk `konsumsi` di dalam gelung yang juga
     // menghitung harga & HPP, dan memaksanya lewat sini akan menyalin gelung
     // itu, bukan menyatukannya. Yang menyatukan keduanya satu lapis di bawah:
-    // `tambahKebutuhanBahan`, yang ketiganya sama-sama pakai.
+    // `tambahKebutuhanBaris`, yang ketiganya sama-sama pakai.
     expect(butaKomentar(OPENBILL)).toContain("kebutuhanKeranjang(");
     expect(butaKomentar(RUTE)).toContain("kebutuhanKeranjang(");
-    expect(butaKomentar(SERVICE)).toContain("tambahKebutuhanBahan(");
-    expect(butaKomentar(baca(RUMAH))).toContain("tambahKebutuhanBahan(");
+    expect(butaKomentar(SERVICE)).toContain("tambahKebutuhanBaris(");
+    expect(butaKomentar(baca(RUMAH))).toContain("tambahKebutuhanBaris(");
   });
 
   it("INTI: predikat gerbang dipanggil dua situs, tak ada yang menulis kondisinya sendiri", () => {

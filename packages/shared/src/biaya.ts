@@ -57,6 +57,11 @@ export function tanpaBiayaMenu(dto: MenuDtoPenuh): MenuDto {
     harga_jual_bulat: null,
     food_cost_persen: null,
     komponen: dto.komponen.map((k) => ({ ...k, harga_per_unit: null })),
+    // selisih HPP add-on sama bocornya dengan harga per unit bahan
+    addon_groups: dto.addon_groups.map((g) => ({
+      ...g,
+      addons: g.addons.map((a) => ({ ...a, hpp_delta: null })),
+    })),
   };
 }
 

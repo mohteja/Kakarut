@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import {
+  BATAS_JUMLAH_ADDON,
   PANDUAN_MARKUP,
   bagiAtauNull,
   bolehLihatBiaya,
@@ -25,6 +26,8 @@ import {
   branches,
   companies,
   ingredients,
+  menuAddonGroups,
+  menuAddons,
   menuBranches,
   menuComponents,
   menuPriceLogs,
@@ -57,6 +60,38 @@ const KomponenBody = z.object({
   qty: z.number().positive().max(BATAS_QTY_RESEP),
 });
 
+/**
+ * Satu add-on di form menu. `id` dikirim = perbarui add-on itu; tanpa `id` =
+ * add-on baru (termasuk hasil "Salin add-on dari menu…", yang sengaja
+ * membuang id supaya salinannya mandiri).
+ */
+const AddonBody = z.object({
+  id: z.string().uuid().optional(),
+  nama: z.string().trim().min(1).max(60),
+  /** per SATU kali pilih; 0 = gratis */
+  harga: z.number().nonnegative().max(BATAS_HARGA),
+  maks_jumlah: z.number().int().min(1).max(BATAS_JUMLAH_ADDON).nullish(),
+  ingredient_id: z.string().uuid().nullish(),
+  // Bertanda: + memakai lebih, − memakai kurang. Kolomnya numeric(12,4) —
+  // batas resep, sama seperti `komponen[].qty`.
+  qty_bahan: z.number().min(-BATAS_QTY_RESEP).max(BATAS_QTY_RESEP)
+    .refine((v) => v !== 0, "Takaran bahan add-on tidak boleh 0")
+    .nullish(),
+  is_active: z.boolean().default(true),
+}).strict();
+
+const AddonGroupBody = z.object({
+  id: z.string().uuid().optional(),
+  nama: z.string().trim().min(1).max(60),
+  /** ≥ 1 = WAJIB dipilih */
+  min_pilih: z.number().int().min(0).max(50).default(0),
+  /** null = bebas */
+  maks_pilih: z.number().int().min(1).max(50).nullish(),
+  addons: z.array(AddonBody).min(1).max(50),
+}).strict();
+
+type AddonGroupInput = z.infer<typeof AddonGroupBody>;
+
 const MenuCreateBody = z.object({
   nama: z.string().trim().min(1),
   kode: z.string().trim().max(20).nullish(),
@@ -77,6 +112,7 @@ const MenuCreateBody = z.object({
    */
   target_durasi_detik: z.number().int().min(1).max(86_400).nullish(),
   komponen: z.array(KomponenBody).max(200).default([]),
+  addon_groups: z.array(AddonGroupBody).max(20).default([]),
   is_active: z.boolean().default(true),
   /** pembatasan lokasi (mode Pro) — null/[] = tampil di semua cabang */
   branch_ids: z.array(z.string().uuid()).max(100).nullish(),
@@ -114,6 +150,8 @@ const MenuUpdateBody = z.object({
   target_durasi_detik: z.number().int().min(1).max(86_400).nullish(),
   /** undefined = resep lama tetap; [] = kosongkan resep */
   komponen: z.array(KomponenBody).max(200).optional(),
+  /** undefined = add-on lama tetap; [] = hapus semua grup add-on */
+  addon_groups: z.array(AddonGroupBody).max(20).optional(),
   is_active: z.boolean().optional(),
   /** undefined = pembatasan lama tetap; null/[] = tampil di semua cabang */
   branch_ids: z.array(z.string().uuid()).max(100).nullish(),
@@ -147,13 +185,57 @@ function validatePaket(body: MenuEfektif) {
   }
 }
 
+/** Aturan bentuk grup add-on yang tak bisa dinyatakan zod per-objek. */
+function validateAddonGroups(groups: AddonGroupInput[]) {
+  const namaGrup = new Set<string>();
+  for (const g of groups) {
+    const kunci = g.nama.toLowerCase();
+    if (namaGrup.has(kunci)) {
+      throw new HTTPException(400, { message: `Nama grup add-on "${g.nama}" dipakai dua kali` });
+    }
+    namaGrup.add(kunci);
+    if (g.maks_pilih != null && g.min_pilih > g.maks_pilih) {
+      throw new HTTPException(400, {
+        message: `Grup "${g.nama}": minimal pilih tidak boleh melebihi maksimal pilih`,
+      });
+    }
+    if (g.min_pilih > g.addons.length) {
+      throw new HTTPException(400, {
+        message: `Grup "${g.nama}": minimal pilih ${g.min_pilih}, tapi pilihannya cuma ${g.addons.length}`,
+      });
+    }
+    const namaAddon = new Set<string>();
+    for (const a of g.addons) {
+      if (namaAddon.has(a.nama.toLowerCase())) {
+        throw new HTTPException(400, { message: `Grup "${g.nama}": add-on "${a.nama}" dipakai dua kali` });
+      }
+      namaAddon.add(a.nama.toLowerCase());
+      if ((a.ingredient_id == null) !== (a.qty_bahan == null)) {
+        throw new HTTPException(400, {
+          message: `Add-on "${a.nama}": bahan dan takarannya harus diisi berdua (atau dikosongkan berdua)`,
+        });
+      }
+    }
+  }
+  const ids = groups.flatMap((g) => [g.id, ...g.addons.map((a) => a.id)]).filter(Boolean);
+  if (new Set(ids).size !== ids.length) {
+    throw new HTTPException(400, { message: "Ada id add-on yang dikirim dua kali" });
+  }
+}
+
 /** Semua referensi (bahan komponen, menu dasar) harus milik perusahaan pemanggil. */
 async function validateRefs(
   companyId: string,
   body: MenuEfektif,
   selfId?: string,
 ) {
-  const ids = [...new Set(body.komponen.map((k) => k.ingredient_id))];
+  validateAddonGroups(body.addon_groups);
+  const ids = [
+    ...new Set([
+      ...body.komponen.map((k) => k.ingredient_id),
+      ...body.addon_groups.flatMap((g) => g.addons.flatMap((a) => (a.ingredient_id ? [a.ingredient_id] : []))),
+    ]),
+  ];
   if (ids.length > 0) {
     const rows = await db
       .select({ id: ingredients.id })
@@ -254,6 +336,119 @@ async function replaceKomponen(
     await tx.insert(menuComponents).values(
       [...byIngredient].map(([ingredientId, qty]) => ({ menuId, ingredientId, qty })),
     );
+  }
+}
+
+/**
+ * Simpan grup add-on sebuah menu: perbarui yang ber-id, sisipkan yang baru,
+ * dan HAPUS LUNAK (`deleted_at`) yang tak lagi dikirim — bill terbuka, antrean
+ * offline, dan laporan lama masih merujuk id-nya. Id yang bukan milik menu ini
+ * ditolak, jadi form menu A tak bisa "mencuri" add-on menu B.
+ */
+async function replaceAddons(tx: Tx, companyId: string, menuId: string, groups: AddonGroupInput[]) {
+  const now = new Date();
+  // Dua penyimpanan form menu yang sama bersamaan akan sama-sama membaca
+  // "grup lama", lalu sama-sama menyisipkan grup baru — berurutkan per menu.
+  await tx
+    .select({ id: menus.id })
+    .from(menus)
+    .where(and(eq(menus.id, menuId), eq(menus.companyId, companyId)))
+    .for("update");
+  const grupLama = await tx
+    .select({ id: menuAddonGroups.id })
+    .from(menuAddonGroups)
+    .where(
+      and(
+        eq(menuAddonGroups.companyId, companyId),
+        eq(menuAddonGroups.menuId, menuId),
+        isNull(menuAddonGroups.deletedAt),
+      ),
+    );
+  const idGrupLama = new Set(grupLama.map((g) => g.id));
+  const addonLama =
+    idGrupLama.size === 0
+      ? []
+      : await tx
+          .select({ id: menuAddons.id })
+          .from(menuAddons)
+          .where(
+            and(
+              eq(menuAddons.companyId, companyId),
+              inArray(menuAddons.groupId, [...idGrupLama]),
+              isNull(menuAddons.deletedAt),
+            ),
+          );
+  const idAddonLama = new Set(addonLama.map((a) => a.id));
+  for (const g of groups) {
+    if (g.id && !idGrupLama.has(g.id)) {
+      throw new HTTPException(400, { message: `Grup add-on "${g.nama}" tidak ditemukan di menu ini` });
+    }
+    for (const a of g.addons) {
+      if (a.id && !idAddonLama.has(a.id)) {
+        throw new HTTPException(400, { message: `Add-on "${a.nama}" tidak ditemukan di menu ini` });
+      }
+    }
+  }
+
+  const grupDisimpan = new Set(groups.flatMap((g) => (g.id ? [g.id] : [])));
+  const addonDisimpan = new Set(groups.flatMap((g) => g.addons.flatMap((a) => (a.id ? [a.id] : []))));
+  const grupDibuang = [...idGrupLama].filter((id) => !grupDisimpan.has(id));
+  const addonDibuang = [...idAddonLama].filter((id) => !addonDisimpan.has(id));
+  if (addonDibuang.length > 0) {
+    await tx
+      .update(menuAddons)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(inArray(menuAddons.id, addonDibuang), isNull(menuAddons.deletedAt)));
+  }
+  if (grupDibuang.length > 0) {
+    await tx
+      .update(menuAddonGroups)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(inArray(menuAddonGroups.id, grupDibuang), isNull(menuAddonGroups.deletedAt)));
+  }
+  // Nama grup unik per menu (indeks parsial). Menukar nama dua grup dalam satu
+  // simpan akan bentrok di tengah jalan, jadi nama lama disingkirkan dulu.
+  if (grupDisimpan.size > 0) {
+    await tx
+      .update(menuAddonGroups)
+      .set({ nama: sql`'~' || ${menuAddonGroups.id}::text` })
+      .where(inArray(menuAddonGroups.id, [...grupDisimpan]));
+  }
+
+  for (const [gi, g] of groups.entries()) {
+    const nilaiGrup = {
+      nama: g.nama,
+      minPilih: g.min_pilih,
+      maksPilih: g.maks_pilih ?? null,
+      sortOrder: gi,
+      updatedAt: now,
+    };
+    let groupId: string;
+    if (g.id) {
+      await tx.update(menuAddonGroups).set(nilaiGrup).where(eq(menuAddonGroups.id, g.id));
+      groupId = g.id;
+    } else {
+      const [baru] = await tx
+        .insert(menuAddonGroups)
+        .values({ ...nilaiGrup, companyId, menuId })
+        .returning({ id: menuAddonGroups.id });
+      groupId = baru.id;
+    }
+    for (const [ai, a] of g.addons.entries()) {
+      const nilai = {
+        groupId,
+        nama: a.nama,
+        harga: a.harga,
+        maksJumlah: a.maks_jumlah ?? null,
+        ingredientId: a.ingredient_id ?? null,
+        qtyBahan: a.ingredient_id ? (a.qty_bahan ?? null) : null,
+        isActive: a.is_active,
+        sortOrder: ai,
+        updatedAt: now,
+      };
+      if (a.id) await tx.update(menuAddons).set(nilai).where(eq(menuAddons.id, a.id));
+      else await tx.insert(menuAddons).values({ ...nilai, companyId });
+    }
   }
 }
 
@@ -649,6 +844,7 @@ export const menuRoutes = new Hono<AppEnv>()
       if (!menu) throw new HTTPException(409, { message: `Menu "${body.nama}" sudah ada` });
       await replaceKomponen(tx, menu.id, body.komponen);
       await replaceBranches(tx, menu.id, body.branch_ids);
+      await replaceAddons(tx, auth.company_id!, menu.id, body.addon_groups);
       // Baris pembuka riwayat harga (harga_lama null) — supaya nanti terlihat
       // apakah harga jual pernah bergerak sama sekali sejak menu dibuat.
       await catatHargaMenu(tx, {
@@ -720,6 +916,7 @@ export const menuRoutes = new Hono<AppEnv>()
           // hanya resep yang dikirim yang perlu divalidasi; resep lama sudah
           // tervalidasi saat disimpan dan tidak ikut ditulis ulang di bawah
           komponen: body.komponen ?? [],
+          addon_groups: body.addon_groups ?? [],
           is_active: body.is_active ?? lama.isActive,
           branch_ids: body.branch_ids,
         };
@@ -774,6 +971,10 @@ export const menuRoutes = new Hono<AppEnv>()
         // undefined = tidak dikirim → pertahankan pembatasan lama; null/[] = buka semua
         if (body.branch_ids !== undefined) {
           await replaceBranches(tx, menu.id, body.branch_ids);
+        }
+        // undefined = tidak dikirim (mis. ponsel lama) → add-on lama tetap
+        if (body.addon_groups !== undefined) {
+          await replaceAddons(tx, auth.company_id!, menu.id, body.addon_groups);
         }
         return menu;
       });

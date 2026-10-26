@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { addonBarisDto, kelompokkanAddon, muatAddonBill, muatAddonPenjualan } from "../menu/addon";
 import { zTanggal } from "../../lib/tanggal-query";
 import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -435,6 +436,15 @@ export const pesananRoutes = new Hono<AppEnv>()
           .from(openBillItems)
           .leftJoin(users, eq(openBillItems.pesananStatusOleh, users.id))
           .where(inArray(openBillItems.billId, billIds));
+        // Add-on: satu kueri untuk seluruh papan, terkurung perusahaan.
+        const addonBill = kelompokkanAddon(
+          await muatAddonBill(
+            db,
+            auth.company_id!,
+            rows.map((r) => r.id),
+          ),
+          (a) => a.openBillItemId,
+        );
         for (const r of rows) {
           const arr = itemBill.get(r.billId) ?? [];
           arr.push({
@@ -445,6 +455,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             // Pembatalan barisnya diungkapkan lewat `status: "batal"`.
             qty_refund: 0,
             catatan: r.catatan,
+            addons: (addonBill.get(r.id) ?? []).map(addonBarisDto),
             // null = ikut mode transaksi; bill belum dibayar jadi belum ada
             // keputusan final — tampilkan dine-in sebagai bawaan.
             is_dine_in: r.dineInOverride ?? true,
@@ -479,6 +490,14 @@ export const pesananRoutes = new Hono<AppEnv>()
           .from(saleItems)
           .leftJoin(users, eq(saleItems.pesananStatusOleh, users.id))
           .where(inArray(saleItems.saleId, saleIds));
+        const addonSale = kelompokkanAddon(
+          await muatAddonPenjualan(
+            db,
+            auth.company_id!,
+            rows.map((r) => r.id),
+          ),
+          (a) => a.saleItemId,
+        );
         for (const r of rows) {
           const arr = itemSale.get(r.saleId) ?? [];
           arr.push({
@@ -491,6 +510,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             qty: qtyDitagih(r),
             qty_refund: r.qtyRefund,
             catatan: r.catatan,
+            addons: (addonSale.get(r.id) ?? []).map(addonBarisDto),
             is_dine_in: r.isDineIn,
             status: r.status,
             sajian_takeaway: r.sajianTakeaway,

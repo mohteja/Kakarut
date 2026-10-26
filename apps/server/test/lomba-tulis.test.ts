@@ -102,6 +102,18 @@ const daftar: Record<string, Record<string, Alasan>> = {
         "sampai ke fungsi ini. Batas pemindai yang berlingkup satu fungsi.",
     },
   },
+  "modules/menu/routes.ts": {
+    replaceAddons: {
+      kelas: "sah",
+      teks:
+        "PENAHANNYA ADA, di tabel lain: baris pertama fungsinya mengunci baris " +
+        "`menus` miliknya `FOR UPDATE`, jadi dua penyimpanan form menu yang " +
+        "sama berurutan — yang kedua membaca grup & add-on SESUDAH yang pertama " +
+        "commit. Pemindai membaca kunci per tabel, dan yang dibaca-lalu-ditulis " +
+        "di sini `menu_addon_groups`/`menu_addons`, anak dari baris yang " +
+        "dikunci. Hapus-lunaknya pun bersyarat `deleted_at IS NULL`.",
+    },
+  },
   "modules/penyimpanan/autoFile.ts": {
     autoFileRakCabang: {
       kelas: "sah",

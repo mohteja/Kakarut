@@ -59,6 +59,7 @@ function baris(p: {
     qty: 1,
     qty_refund: 0,
     catatan: null,
+    addons: [],
     is_dine_in: p.isDineIn,
     status: "dikerjakan",
     sajian_takeaway: p.sajianTakeaway,

@@ -1,9 +1,11 @@
 import type { SaleItemRow, SaleResult, SaleRow } from "@kakarut/shared";
 import { iso } from "../../lib/time";
-import type { saleItems, sales } from "../../db/schema";
+import type { saleItemAddons, saleItems, sales } from "../../db/schema";
+import { kelompokkanAddon, saleItemAddonRow } from "../menu/addon";
 
 type BarisSale = typeof sales.$inferSelect;
 type BarisSaleItem = typeof saleItems.$inferSelect;
+type BarisSaleItemAddon = typeof saleItemAddons.$inferSelect;
 
 /**
  * SATU-SATUNYA PENULIS BENTUK STRUK, dan satu-satunya gerbang biayanya.
@@ -39,6 +41,8 @@ type BarisSaleItem = typeof saleItems.$inferSelect;
 export function strukPenjualan(
   sale: BarisSale,
   items: BarisSaleItem[],
+  /** snapshot `sale_item_addons` transaksi ini (urutan bebas) */
+  addons: BarisSaleItemAddon[],
   branchNama: string,
   kasir: string | null,
   lihatBiaya: boolean,
@@ -75,6 +79,7 @@ export function strukPenjualan(
     deletedAt: sale.deletedAt === null ? null : iso(sale.deletedAt),
     deletedBy: sale.deletedBy,
   };
+  const addonPerBaris = kelompokkanAddon(addons, (a) => a.saleItemId);
   return {
     sale: baris,
     items: items.map((it): SaleItemRow => ({
@@ -94,6 +99,7 @@ export function strukPenjualan(
       pesananMasukAt: iso(it.pesananMasukAt),
       sajianTakeaway: it.sajianTakeaway,
       qtyRefund: it.qtyRefund,
+      addons: (addonPerBaris.get(it.id) ?? []).map(saleItemAddonRow),
     })),
     branch_nama: branchNama,
     kasir,

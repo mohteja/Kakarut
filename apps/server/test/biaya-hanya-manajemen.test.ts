@@ -142,6 +142,8 @@ describe("angka biaya hanya untuk manajemen", () => {
     // harga di dalam komponen resep ikut, kalau tidak struktur biayanya bisa
     // disusun ulang dari balasan yang katanya sudah disaring
     expect(biaya).toContain("harga_per_unit: null");
+    // selisih HPP per add-on — dari situ harga bahan bisa dihitung balik
+    expect(biaya).toContain("hpp_delta: null");
   });
 
   it("keluaran `GET /company` melewati `saringCompany`", () => {
