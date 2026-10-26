@@ -126,3 +126,27 @@ test("karyawan: welcome → tunggu diundang → undangan muncul sendiri → Teri
   expect(sesi.user.role).toBe("cashier");
   expect(sesi.company?.nama).toBe("Warung Undangan E2E");
 });
+
+test("hapus akun: tombol merah baru menyala setelah email akun DIKETIK", async ({ page, request }) => {
+  const { email } = await akunBaru(request, "welcome-hapus", "Hapus Welcome");
+  await login(page, email, PASS);
+  await page.getByRole("button", { name: "Hapus Akun" }).click();
+
+  const tombol = page.getByRole("button", { name: "Hapus Akun Saya" });
+  const kotakEmail = page.getByLabel(/Ketik email akun Anda/);
+  await page.getByPlaceholder("Password Anda").fill(PASS);
+  // Password saja tak cukup.
+  await expect(tombol).toBeDisabled();
+  // Email yang salah: tombol tetap mati, dan dikatakan kenapa.
+  await kotakEmail.fill("orang.lain@contoh.id");
+  await expect(page.getByText("Email belum sama dengan email akun ini.")).toBeVisible();
+  await expect(tombol).toBeDisabled();
+  // Email akun (huruf besar tak masalah) → menyala → terhapus → kembali ke login.
+  await kotakEmail.fill(email.toUpperCase());
+  await expect(tombol).toBeEnabled();
+  await tombol.click();
+  await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
+
+  const masuk = await request.post(`${BASE}/api/auth/login`, { data: { email, password: PASS } });
+  expect(masuk.status(), "akun yang dihapus tak bisa masuk lagi").toBe(401);
+});

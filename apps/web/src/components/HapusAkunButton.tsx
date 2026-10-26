@@ -2,20 +2,27 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { ErrorText, InputPassword } from "./ui";
+import { ErrorText, InputPassword, inputClass } from "./ui";
 
 /**
- * Tombol + modal "Hapus Akun" (SOFT delete). Butuh konfirmasi password. Server
+ * Tombol + modal "Hapus Akun" (SOFT delete). Butuh EMAIL AKUN diketik ulang
+ * plus password — tombol merahnya baru menyala bila emailnya sama persis
+ * (server menegakkan aturan yang sama: `DELETE /onboarding/akun`). Server
  * memblokir bila pemanggil owner terakhir sebuah perusahaan. Sukses → logout.
  * Dipakai di Profil Saya & halaman Onboarding (user tanpa perusahaan).
  */
 export function HapusAkunButton() {
-  const { logout } = useAuth();
+  const { auth, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
+  const emailAkun = auth?.user.email ?? "";
+  const emailCocok = email.trim().toLowerCase() === emailAkun.trim().toLowerCase() && emailAkun !== "";
+  const siap = emailCocok && password !== "";
 
   const hapus = useMutation({
-    mutationFn: () => api("/onboarding/akun", { method: "DELETE", body: { password } }),
+    mutationFn: () =>
+      api("/onboarding/akun", { method: "DELETE", body: { password, email: email.trim() } }),
     onSuccess: () => {
       logout();
       window.location.href = "/login";
@@ -27,6 +34,7 @@ export function HapusAkunButton() {
       <button
         onClick={() => {
           setPassword("");
+          setEmail("");
           hapus.reset();
           setOpen(true);
         }}
@@ -47,16 +55,35 @@ export function HapusAkunButton() {
             <h2 className="text-lg font-bold text-stone-800">Hapus Akun</h2>
             <p className="mt-1 mb-3 text-sm text-stone-500">
               Akun Anda akan dihapus dan tidak bisa dipakai login lagi. Riwayat transaksi
-              tetap tersimpan. Masukkan password untuk konfirmasi.
+              tetap tersimpan.
             </p>
-            <InputPassword
+            <label className="mb-1 block text-sm text-stone-700" htmlFor="hapus-email">
+              Ketik email akun Anda untuk konfirmasi:{" "}
+              <b className="break-all font-mono text-stone-900">{emailAkun}</b>
+            </label>
+            <input
+              id="hapus-email"
               autoFocus
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={emailAkun}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              onPaste={(e) => e.preventDefault()}
+              className={`${inputClass} mb-1`}
+            />
+            {email !== "" && !emailCocok && (
+              <p className="mb-2 text-xs text-red-600">Email belum sama dengan email akun ini.</p>
+            )}
+            <label className="mt-2 mb-1 block text-sm text-stone-700">Password</label>
+            <InputPassword
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password Anda"
               autoComplete="current-password"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && password) hapus.mutate();
+                if (e.key === "Enter" && siap) hapus.mutate();
               }}
             />
             <ErrorText error={hapus.error} />
@@ -70,7 +97,7 @@ export function HapusAkunButton() {
               </button>
               <button
                 onClick={() => hapus.mutate()}
-                disabled={!password || hapus.isPending}
+                disabled={!siap || hapus.isPending}
                 className="rounded-lg bg-red-600 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {hapus.isPending ? "Menghapus…" : "Hapus Akun Saya"}

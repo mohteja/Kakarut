@@ -4037,8 +4037,15 @@ cek "undang email yang sudah anggota → 409" "V == 409" \
   "$(status_code_body "$OWNER" POST /karyawan/undang "{\"email\":\"undangan96@example.com\",\"role\":\"cashier\",\"branch_id\":\"$PUSAT96\"}")"
 # 5. Hapus akun (soft) → login gagal → email bebas dipakai ulang
 TOK3=$(daftar_verif "hapus96@example.com" "Rahasia123" "Hapus 96")
-cek "hapus akun (tanpa perusahaan) → ok" "V == 1" \
-  "$(api "$TOK3" DELETE /onboarding/akun '{"password":"Rahasia123"}' | jq '(.ok==true)|if . then 1 else 0 end')"
+# Konfirmasi KETIK EMAIL: email yang salah/kosong menolak walau password benar.
+cek "hapus akun: email konfirmasi salah → 400 (akun tetap)" "V == 400" \
+  "$(status_code_body "$TOK3" DELETE /onboarding/akun '{"password":"Rahasia123","email":"orang.lain@example.com"}')"
+cek "hapus akun: tanpa email konfirmasi → 400" "V == 400" \
+  "$(status_code_body "$TOK3" DELETE /onboarding/akun '{"password":"Rahasia123"}')"
+cek "…akun masih bisa login sesudah dua penolakan itu" "V == 200" \
+  "$(status_code_body "" POST /auth/login '{"email":"hapus96@example.com","password":"Rahasia123"}')"
+cek "hapus akun (tanpa perusahaan, email diketik — huruf besar & spasi tak masalah) → ok" "V == 1" \
+  "$(api "$TOK3" DELETE /onboarding/akun '{"password":"Rahasia123","email":"  Hapus96@Example.com "}' | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "login setelah hapus akun → 401" "V == 401" \
   "$(status_code_body "" POST /auth/login '{"email":"hapus96@example.com","password":"Rahasia123"}')"
 # daftar ulang email yg tadi dihapus → boleh (email tombstone dibebaskan) → kode verifikasi baru
@@ -4048,10 +4055,10 @@ cek "daftar ulang email yang dihapus → berhasil (kode verifikasi baru)" "V == 
 VT3B=$(echo "$REG3B" | jq -r '.dev_verify_kode')
 TOK3B=$(api "" POST /auth/verify-email "{\"email\":\"hapus96@example.com\",\"kode\":\"$VT3B\"}" | jq -r .token)
 cek "hapus akun password salah → 401" "V == 401" \
-  "$(status_code_body "$TOK3B" DELETE /onboarding/akun '{"password":"salahbanget"}')"
+  "$(status_code_body "$TOK3B" DELETE /onboarding/akun '{"password":"salahbanget","email":"hapus96@example.com"}')"
 # 6. Owner terakhir tak boleh hapus akun
 cek "hapus akun owner terakhir → 400" "V == 400" \
-  "$(status_code_body "$OWNER" DELETE /onboarding/akun "{\"password\":\"$OWNER_PASS\"}")"
+  "$(status_code_body "$OWNER" DELETE /onboarding/akun "{\"password\":\"$OWNER_PASS\",\"email\":\"$OWNER_EMAIL\"}")"
 
 echo "== 97. Lupa/reset password + pengaturan SMTP =="
 # Reset password diuji SAAT email belum dikonfigurasi → forgot mengembalikan
@@ -12022,9 +12029,10 @@ cek "PASANGAN: owner terakhir tetap ada sesudahnya" "V == 1" "$(ownerAktif214 "$
 read -r TE214 TF214 UE214 UF214 <<< "$(buatDuaOwner214 hapus)"
 DH214=$(mktemp -d)
 for tok in "$TE214" "$TF214"; do
+  em214=$(api "$tok" GET /auth/me | jq -r '.user.email')
   curl -s -o /dev/null -w '%{http_code}\n' -X DELETE "$BASE/api/onboarding/akun" \
     -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
-    -d "{\"password\":\"$P214\"}" > "$DH214/$(echo "$tok" | tail -c 10)" &
+    -d "{\"password\":\"$P214\",\"email\":\"$em214\"}" > "$DH214/$(echo "$tok" | tail -c 10)" &
 done
 wait
 cek "INTI: dua owner hapus akun BERSAMAAN → tepat SATU yang tersisa" "V == 1" \

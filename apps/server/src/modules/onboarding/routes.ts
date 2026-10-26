@@ -216,14 +216,33 @@ export const onboardingRoutes = new Hono<AppEnv>()
     }
     return c.json({ ok: true });
   })
-  // Hapus akun sendiri (SOFT delete): butuh konfirmasi password. Diblokir bila
-  // pemanggil adalah OWNER terakhir sebuah perusahaan (harus serahkan/hapus dulu).
-  .delete("/akun", zValidator("json", z.object({ password: z.string() }).strict()), async (c) => {
+  // Hapus akun sendiri (SOFT delete): butuh password DAN email akun diketik
+  // ulang. Diblokir bila pemanggil adalah OWNER terakhir sebuah perusahaan
+  // (harus serahkan/hapus dulu).
+  //
+  // KETIK EMAIL (2026-10-26, permintaan pemilik): tindakan ini tak bisa
+  // dibatalkan dari dalam aplikasi, jadi orangnya harus menuliskan email
+  // akunnya sendiri — bukan sekadar menekan tombol merah di dialog yang
+  // kebetulan terbuka. Ditegakkan di SERVER, bukan cuma di tombol: klien
+  // mana pun yang melewatkannya ditolak dengan kalimat yang sama.
+  .delete(
+    "/akun",
+    zValidator(
+      "json",
+      z.object({ password: z.string(), email: z.string().trim().toLowerCase() }).strict(),
+    ),
+    async (c) => {
     const auth = c.get("auth");
     if (auth.is_super_admin) {
       throw new HTTPException(400, { message: "Akun super admin tidak bisa dihapus dari sini" });
     }
-    await verifikasiPassword(auth.sub, c.req.valid("json").password);
+    const body = c.req.valid("json");
+    if (body.email !== auth.email.trim().toLowerCase()) {
+      throw new HTTPException(400, {
+        message: "Email yang diketik tidak sama dengan email akun ini — akun tidak dihapus",
+      });
+    }
+    await verifikasiPassword(auth.sub, body.password);
 
     await db.transaction(async (tx) => {
       /*
@@ -297,4 +316,5 @@ export const onboardingRoutes = new Hono<AppEnv>()
         .where(eq(users.id, auth.sub));
     });
     return c.json({ ok: true });
-  });
+    },
+  );
