@@ -89,6 +89,11 @@ const BELUM_TAYANG = new Set([
   // successfully" — dan ponselnya lewat `c751fc3` / CI #56. Stempelnya dipasang
   // pada commit yang SAMA dengan penghapusan baris-baris ini; memisahkan
   // keduanya adalah cara berkas ini pernah salah selama empat hari.
+  //
+  // BELUM DI-MERGE (2026-10-25): add-on per menu. Server dulu, baru ponsel
+  // (badan `.strict()`); stempelnya dipasang DAN baris ini dihapus pada commit
+  // yang sama dengan merge-nya.
+  '## 🟢 Add-on per menu — "Extra mie" berbayar, "Tanpa sayur" gratis, grup wajib "Level pedas"',
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

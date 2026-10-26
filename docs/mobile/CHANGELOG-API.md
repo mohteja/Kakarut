@@ -25,6 +25,68 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Add-on per menu — "Extra mie" berbayar, "Tanpa sayur" gratis, grup wajib "Level pedas"
+
+🟢 **BARU** — additif untuk klien lama, dengan **satu syarat rilis** (lihat
+"Urutan rilis" di bawah).
+
+**Belum tayang.**
+
+**Apa.** Admin mengatur grup add-on per menu di form menu. Kasir memilihnya
+saat menu masuk keranjang; pilihannya tercetak di tiket dapur, papan pesanan,
+bon, dan struk. Add-on bisa gratis atau berharga, bisa ditautkan ke bahan
+(+/− takaran per pilih, jadi stok & HPP ikut), dan boleh dipilih berjumlah
+("Extra mie ×2"). Grup bisa WAJIB (`min_pilih ≥ 1`) dengan batas `maks_pilih`.
+
+**Yang bertambah di balasan:**
+
+| tempat | medan | isi |
+| --- | --- | --- |
+| `MenuDto` | `addon_groups[]` | `{id, nama, min_pilih, maks_pilih, addons[]}`; `[]` = menu tanpa add-on |
+| `MenuAddonDto` | `id, nama, harga, maks_jumlah, ingredient_id, ingredient_nama, satuan, qty_bahan, is_active, hpp_delta` | `hpp_delta` **null** untuk kasir (sama seperti `hpp`) |
+| `OpenBillItemDto` | `addons[]` | `AddonBarisDto {addon_id, grup_nama, nama, harga, jumlah}` — snapshot saat dipesan |
+| `PesananItemRow` | `addons[]` | `AddonBarisDto` — untuk papan dapur |
+| `SaleItemRow` | `addons[]` | `SaleItemAddonRow {addonId, grupNama, nama, harga, jumlah}` (camelCase, mengikuti barisnya) |
+
+**Yang bertambah di permintaan** (semuanya OPSIONAL):
+
+- `POST /api/penjualan`, `POST /api/penjualan/cek-stok`, perintah `penjualan`
+  di `POST /api/sync`, `POST`/`PUT /api/open-bill`: `items[].addons:
+  [{id, jumlah}]` — pilihan untuk SETIAP porsi baris itu.
+- `POST`/`PUT /api/menu`: `addon_groups[]` (form menu; `PUT` tanpa kunci ini
+  = add-on lama tetap).
+
+**Aturan yang harus dicerminkan klien** (`packages/shared/src/addon.ts`):
+
+- **Harga add-on DILEBUR ke `harga_satuan`** oleh server — `line_total` tetap
+  `harga_satuan × qty`. Jangan menjumlah `addons[].harga` lagi saat menghitung
+  total; tampilkan saja.
+- Dua baris menu yang sama hanya boleh digabung bila add-on-nya sama persis
+  (`tandaAddon`: `id x jumlah`, terurut).
+- Validasi pilihan (`validasiPilihanAddon`): id ganda/asing, jumlah 1–20 dan
+  ≤ `maks_jumlah`, add-on nonaktif (`is_active: false` — jangan ditawarkan),
+  jumlah add-on BERBEDA per grup di dalam `[min_pilih, maks_pilih]`.
+- Pilihan tak sah → **400 `sebab: "addon_tidak_valid"`**; `error` menyebut
+  add-on/grupnya. Transaksinya TIDAK tercatat.
+- **Sinkron offline lenien**: add-on yang sejak itu dinonaktifkan/dihapus atau
+  grup wajib yang belum terpenuhi DITERIMA (penjualannya sudah terjadi). Id
+  asing dan jumlah tak sah tetap 400.
+- **Baris open bill yang sudah tersimpan: add-on-nya TERKUNCI.** Kirim
+  `addons` yang sama (atau jangan kirim kuncinya sama sekali); pilihan lain =
+  baris baru. `pisah_dari` mewarisi add-on baris asalnya. Pasangan cadangan
+  tanpa `id` kini memakai menu + tanda add-on bila `addons` dikirim.
+- Membayar bill: baris ber-`open_bill_item_id` memakai snapshot bill; `addons`
+  yang dikirim dan berbeda → 400.
+
+**Urutan rilis.** Badan permintaan `.strict()`, jadi aplikasi yang mengirim
+`addons` ke server LAMA akan ditolak — **server dulu, baru ponsel**. Ponsel
+lama tetap jalan di server baru (tak mengirim `addons`, membayar bill lewat
+snapshot, `PUT` tak mengubah add-on). Tapi ponsel lama bisa menjual menu
+ber-grup WAJIB tanpa pilihan — server akan menolaknya (400). **Jangan membuat
+grup wajib sebelum ponsel baru terpasang di semua perangkat.**
+
+---
+
 ## 🟢 `GET /api/penerimaan/anomali` akhirnya mengirim `qty_teks` + `qty_setara` — layar kiriman menggantung berhenti menebak satuan
 
 🟢 **BARU** — additif, tak ada yang berubah bentuk. Dan ini pekerjaan yang

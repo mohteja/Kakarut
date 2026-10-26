@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { qtyDitagih, tarifPb1Struk } from "@kakarut/shared";
+import { qtyDitagih, tarifPb1Struk, teksAddonKertas } from "@kakarut/shared";
 import type {
   CabangDto,
   CompanyRow,
@@ -145,6 +145,7 @@ export function ReceiptModal({
         lineTotal: it.hargaSatuan * qtyDitagih(it),
         tag: it.isDineIn !== data.sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
         catatan: catatanBaris(it),
+        addons: (it.addons ?? []).map((a) => ({ nama: a.nama, jumlah: a.jumlah, harga: a.harga })),
       })),
       subtotal: data.sale.subtotal,
       diskon: data.sale.diskon,
@@ -203,6 +204,8 @@ export function ReceiptModal({
         qty: qtyDitagih(it),
         tag: it.isDineIn !== data.sale.isDineIn ? (it.isDineIn ? "DI" : "TA") : null,
         catatan: catatanBaris(it),
+        // nama & jumlah saja — slip dapur tak membawa harga
+        addons: (it.addons ?? []).map((a) => ({ nama: a.nama, jumlah: a.jumlah })),
       })),
       catatan: data.sale.catatan,
       kasir: data.kasir ?? null,
@@ -273,6 +276,11 @@ export function ReceiptModal({
                     </span>
                     <span>{formatRupiah(it.hargaSatuan * ditagih)}</span>
                   </div>
+                  {(it.addons ?? []).map((a, i) => (
+                    <div key={i} className="text-stone-600">
+                      {teksAddonKertas(a).trim()}
+                    </div>
+                  ))}
                   {it.qtyRefund > 0 && (
                     <div className="text-amber-700">↩ {it.qtyRefund} porsi dikembalikan</div>
                   )}

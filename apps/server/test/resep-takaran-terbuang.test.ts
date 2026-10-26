@@ -63,7 +63,9 @@ describe("form Menu menahan takaran yang tak akan masuk resep", () => {
     // Tombol saja tidak cukup: form ini disubmit lewat `onSubmit`, dan
     // menekan Enter di kotak isian melewati tombolnya.
     expect(MENU).toMatch(/if \(qtyTerbuang\.length > 0\) return;/);
-    expect(MENU).toMatch(/disabled=\{simpan\.isPending \|\| qtyTerbuang\.length > 0\}/);
+    // Syarat lain boleh menyusul (mis. masalah add-on) — yang dipaku: takaran
+    // tak terbaca ikut mematikan tombolnya.
+    expect(MENU).toMatch(/disabled=\{simpan\.isPending \|\| qtyTerbuang\.length > 0( \|\| [^}]+)?\}/);
   });
 
   it("penjaganya berjalan SEBELUM dialog kemasan", () => {

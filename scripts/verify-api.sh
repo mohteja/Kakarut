@@ -17674,7 +17674,7 @@ R298=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu
 ID298=$(jq -r '.sale.id // ""' <<<"$R298")
 G298K=$(api "$REISS105" GET "/penjualan/$ID298")
 G298O=$(api "$OWNER" GET "/penjualan/$ID298")
-cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 30 + SaleItemRow 16 + SaleResult 4)" "V == 50" \
+cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 30 + SaleItemRow 17 + SaleResult 4)" "V == 51" \
   "$(printf '%s\n%s\n%s\n' "$K298_SALE" "$K298_ITEM" "$K298_ATAS" | grep -c .)"
 cek "§298 premis: kasir berhasil membuat transaksi (ada sale.id & satu baris)" "V == 1" \
   "$([ -n "$ID298" ] && [ "$(jq '.items|length' <<<"$R298")" -ge 1 ] && echo 1 || echo 0)"
@@ -17684,7 +17684,7 @@ cek "§298 POST .sale == SaleRow (dua arah)" "V == 0" \
   "$(selisih296 "$(jq -r '.sale|keys[]' <<<"$R298")" "$K298_SALE")"
 cek "§298 POST tiap baris .items == SaleItemRow (dua arah, gabungan)" "V == 0" \
   "$(selisih296 "$(jq -r '[.items[]|keys[]]|unique|.[]' <<<"$R298")" "$K298_ITEM")"
-cek "§298 POST tiap baris membawa SEMUA 16 kunci (bukan cuma gabungannya)" "V == 1" \
+cek "§298 POST tiap baris membawa SEMUA 17 kunci (bukan cuma gabungannya)" "V == 1" \
   "$(jq -r --argjson n "$(echo "$K298_ITEM" | grep -c .)" '[.items[]|(keys|length)==$n]|all|if . then 1 else 0 end' <<<"$R298")"
 # INTI TEMUAN: biaya ditahan di pintu yang kasir pakai tiap checkout.
 cek "§298 POST kasir: sale.totalHpp DITAHAN (null, bukan angka)" "V == 1" \
@@ -18535,6 +18535,201 @@ cek "§313 PASANGAN: owner tetap menerima harga_beli perlengkapan" "V == 1" \
   "$(api "$OWNER" GET /perlengkapan | jq '([.[]|select(.harga_beli != null)]|length) > 0 | if . then 1 else 0 end')"
 cek "§313 PASANGAN: kasir menerima barisnya, dengan harga_beli null" "V == 1" \
   "$(api "$REISS105" GET /perlengkapan | jq '(((.|length) > 0) and ([.[]|select(.harga_beli != null)]|length) == 0)|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §314 — ADD-ON PER MENU: CRUD, gerbang biaya, aturan bentuk
+# ═══════════════════════════════════════════════════════════════════════════
+# Grup add-on per menu ("Level pedas" wajib pilih 1, "Tambahan" bebas) dengan
+# add-on gratis/berharga yang bisa ditautkan ke bahan (± takaran). Seksi
+# §314–§319 diletakkan SEBELUM §311 dengan sengaja: rekaman balasan yang diadu
+# §311 ikut memuat bentuk ber-add-on (MenuDto, OpenBillDetail, SaleResult,
+# PesananRow) — tanpa itu kunci barunya tak pernah diadu lewat kawat.
+api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null 2>&1 || true
+N312=$(date +%s%N | tail -c 7)
+bahan312() { # <nama> <harga_beli> <isi> <satuan>
+  api "$OWNER" POST /bahan "$(jq -nc --arg n "$1 $N312" --argjson h "$2" --argjson i "$3" --arg s "$4" \
+    '{nama:$n, harga_beli:$h, isi:$i, satuan:$s, pengadaan:"beli", kategori:"lain", track_stok:true}')" | jq -r '.id // ""'
+}
+MIE312=$(bahan312 "Mie Uji 312" 1000 100 g)      # Rp10/g
+SAYUR312=$(bahan312 "Sayur Uji 312" 200 100 g)   # Rp2/g
+TELUR312=$(bahan312 "Telur Uji 312" 2500 1 pcs)  # Rp2.500/pcs
+CAT312=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+cek "premis §314: tiga bahan uji terbentuk" "V == 3" \
+  "$(printf '%s\n%s\n%s\n' "$MIE312" "$SAYUR312" "$TELUR312" | grep -c '^[0-9a-f-]\{36\}$')"
+R312=$(api "$OWNER" POST /menu "$(jq -nc --arg c "$CAT312" --arg mie "$MIE312" --arg sy "$SAYUR312" --arg tl "$TELUR312" --arg n "Mie Ayam 312 $N312" '{
+  nama:$n, category_id:$c, tipe:"regular", mult:2, harga_jual:15000,
+  komponen:[{ingredient_id:$mie,qty:80},{ingredient_id:$sy,qty:30}],
+  addon_groups:[
+    {nama:"Level pedas", min_pilih:1, maks_pilih:1, addons:[{nama:"Sedang",harga:0},{nama:"Pedas",harga:0}]},
+    {nama:"Tambahan", addons:[
+      {nama:"Extra mie", harga:3000, maks_jumlah:3, ingredient_id:$mie, qty_bahan:100},
+      {nama:"Tanpa sayur", harga:0, maks_jumlah:1, ingredient_id:$sy, qty_bahan:-50},
+      {nama:"Extra telur", harga:4000, ingredient_id:$tl, qty_bahan:1}]}]}')")
+M312=$(jq -r '.id // ""' <<<"$R312")
+addon312() { jq -r --arg n "$1" '[.addon_groups[].addons[]|select(.nama==$n)][0].id // ""' <<<"$R312"; }
+A_SEDANG=$(addon312 Sedang); A_PEDAS=$(addon312 Pedas); A_MIE=$(addon312 "Extra mie")
+A_SAYUR=$(addon312 "Tanpa sayur"); A_TELUR=$(addon312 "Extra telur")
+cek "§314 POST /menu ber-add-on: 2 grup, 5 add-on, urut seperti form" "V == 1" \
+  "$(jq '([.addon_groups[].nama] == ["Level pedas","Tambahan"]) and ([.addon_groups[].addons[]]|length == 5) and (.addon_groups[0].min_pilih == 1) | if . then 1 else 0 end' <<<"$R312")"
+# hpp_delta per SATU kali pilih (basis bawa pulang): mie 100 g × Rp10; sayur
+# −50 g pada resep 30 g → dilantai 0, jadi −30 g × Rp2; telur di luar resep.
+cek "§314 owner: hpp_delta Extra mie = 1000, Tanpa sayur = −60 (dilantai resep), Extra telur = 2500" "V == 1" \
+  "$(jq '[.addon_groups[].addons[]|{(.nama): .hpp_delta}]|add|(.["Extra mie"]==1000 and .["Tanpa sayur"]==-60 and .["Extra telur"]==2500 and .Sedang==0)|if . then 1 else 0 end' <<<"$R312")"
+cek "§314 kasir: hpp_delta DITAHAN (null) — selisih HPP sama bocornya dengan harga bahan" "V == 1" \
+  "$(api "$REISS105" GET "/menu/$M312" | jq '[.addon_groups[].addons[].hpp_delta]|(length == 5 and all(. == null))|if . then 1 else 0 end')"
+cek "§314 kasir: harga add-on (harga jual) TETAP terlihat" "V == 3000" \
+  "$(api "$REISS105" GET "/menu/$M312" | jq '[.addon_groups[].addons[]|select(.nama=="Extra mie")][0].harga')"
+cek "§314 min_pilih > maks_pilih → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M312" '{"addon_groups":[{"nama":"G","min_pilih":2,"maks_pilih":1,"addons":[{"nama":"a","harga":0},{"nama":"b","harga":0}]}]}')"
+cek "§314 bahan tanpa takaran (tak berpasangan) → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M312" "{\"addon_groups\":[{\"nama\":\"G\",\"addons\":[{\"nama\":\"a\",\"harga\":0,\"ingredient_id\":\"$MIE312\"}]}]}")"
+cek "§314 kunci asing di add-on → 400 (.strict bersarang)" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M312" '{"addon_groups":[{"nama":"G","addons":[{"nama":"a","harga":0,"diskon":5}]}]}')"
+cek "§314 harga add-on negatif → 400 (gratis = 0, bukan potongan)" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M312" '{"addon_groups":[{"nama":"G","addons":[{"nama":"a","harga":-1000}]}]}')"
+cek "§314 id add-on yang bukan milik menu ini → 400" "V == 400" \
+  "$(status_code_body "$OWNER" PUT "/menu/$M312" "{\"addon_groups\":[{\"nama\":\"G\",\"addons\":[{\"id\":\"$(cat /proc/sys/kernel/random/uuid)\",\"nama\":\"a\",\"harga\":0}]}]}")"
+# Menu BARU yang mengirim id grup menu lain tak bisa "mencuri" add-on itu —
+# "Salin add-on dari menu…" membuang id-nya justru supaya salinannya mandiri.
+cek "§314 POST menu baru dengan id grup menu lain → 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /menu "$(jq -nc --arg c "$CAT312" --arg g "$(jq -r '.addon_groups[0].id' <<<"$R312")" --arg n "Curi 312 $N312" '{nama:$n,category_id:$c,tipe:"regular",mult:2,harga_jual:1000,addon_groups:[{id:$g,nama:"X",addons:[{nama:"a",harga:0}]}]}')")"
+cek "§314 PUT tanpa addon_groups (klien lama) → add-on TETAP, id sama" "V == 1" \
+  "$(api "$OWNER" PUT "/menu/$M312" '{"harga_jual":15000}' | jq --arg m "$A_MIE" '([.addon_groups[].addons[]]|length == 5) and ([.addon_groups[].addons[].id]|index($m) != null)|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §315 — JUAL DENGAN ADD-ON: harga dilebur, HPP & stok dari bahan add-on
+# ═══════════════════════════════════════════════════════════════════════════
+saldo312() { api "$REISS105" GET /stok | jq --arg i "$1" '([.[]|select(.ingredient_id==$i)][0].saldo) // 0'; }
+SM0=$(saldo312 "$MIE312"); SS0=$(saldo312 "$SAYUR312")
+R313=$(api "$REISS105" POST /penjualan "$(jq -nc --arg m "$M312" --arg pd "$A_PEDAS" --arg mi "$A_MIE" --arg sy "$A_SAYUR" \
+  '{is_dine_in:false, metode_bayar:"qris", items:[{menu_id:$m, qty:2, addons:[{id:$mi,jumlah:2},{id:$pd,jumlah:1},{id:$sy,jumlah:1}]}]}')")
+S313=$(jq -r '.sale.id // ""' <<<"$R313"); IT313=$(jq -r '.items[0].id // ""' <<<"$R313")
+cek "§315 premis: penjualan ber-add-on tercatat" "V == 1" "$([ -n "$S313" ] && echo 1 || echo 0)"
+cek "§315 hargaSatuan = 15.000 + 3.000×2 (harga add-on DILEBUR)" "V == 21000" "$(jq '.items[0].hargaSatuan' <<<"$R313")"
+cek "§315 lineTotal = hargaSatuan × qty — rumus refund/omzet/bon tak berubah" "V == 42000" "$(jq '.items[0].lineTotal' <<<"$R313")"
+cek "§315 items[].addons: snapshot urut form menu (Pedas, Extra mie×2, Tanpa sayur)" "V == 1" \
+  "$(jq '[.items[0].addons[]|"\(.grupNama)/\(.nama)x\(.jumlah)"] == ["Level pedas/Pedasx1","Tambahan/Extra miex2","Tambahan/Tanpa sayurx1"]|if . then 1 else 0 end' <<<"$R313")"
+SM1=$(saldo312 "$MIE312"); SS1=$(saldo312 "$SAYUR312")
+cek "§315 stok mie berkurang 2 × (80 + 100×2) = 560" "abs(V - 560) < 1e-6" \
+  "$(python3 -c "print($SM0 - $SM1)")"
+cek "§315 stok sayur TAK berkurang: 'Tanpa sayur' −50 pada resep 30 → 0 (dilantai, bukan −20)" "abs(V) < 1e-6" \
+  "$(python3 -c "print($SS0 - $SS1)")"
+cek "§315 owner: hppSatuan = 800 + 2000 (mie) + 0 (sayur dilantai) = 2800" "abs(V - 2800) < 1e-6" \
+  "$(api "$OWNER" GET "/penjualan/$S313" | jq '.items[0].hppSatuan')"
+cek "§315 GET /:id (cetak ulang) memuat add-on yang sama" "V == 3" \
+  "$(api "$REISS105" GET "/penjualan/$S313" | jq '.items[0].addons|length')"
+cek "§315 grup WAJIB tak dipilih → 400 sebab addon_tidak_valid" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "$(jq -nc --arg m "$M312" --arg mi "$A_MIE" '{metode_bayar:"qris",items:[{menu_id:$m,qty:1,addons:[{id:$mi,jumlah:1}]}]}')" \
+     | jq '(.sebab == "addon_tidak_valid") and (.error|test("Level pedas"))|if . then 1 else 0 end')"
+cek "§315 jumlah melebihi maks_jumlah (Extra mie ×4, maks 3) → addon_tidak_valid" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "$(jq -nc --arg m "$M312" --arg pd "$A_PEDAS" --arg mi "$A_MIE" '{metode_bayar:"qris",items:[{menu_id:$m,qty:1,addons:[{id:$pd,jumlah:1},{id:$mi,jumlah:4}]}]}')" \
+     | jq '(.sebab == "addon_tidak_valid")|if . then 1 else 0 end')"
+cek "§315 jumlah 0 → 400" "V == 400" \
+  "$(status_code_body "$REISS105" POST /penjualan "$(jq -nc --arg m "$M312" --arg pd "$A_PEDAS" '{metode_bayar:"qris",items:[{menu_id:$m,qty:1,addons:[{id:$pd,jumlah:0}]}]}')")"
+cek "§315 menu tanpa add-on tetap terjual tanpa kunci addons (bentuk lama)" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"metode_bayar\":\"qris\",\"items\":[{\"menu_id\":\"$MENU298\",\"qty\":1}]}" | jq '(.items[0].addons == [])|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §316 — CEK STOK memakai rumus yang SAMA (delta add-on, lantai per baris)
+# ═══════════════════════════════════════════════════════════════════════════
+# Saldo mie & sayur uji sudah minus sesudah §315, jadi `kurang` memuat tiap
+# bahan yang dibutuhkan — angkanya `butuh` yang diadu.
+CS314=$(api "$REISS105" POST /penjualan/cek-stok "$(jq -nc --arg m "$M312" --arg mi "$A_MIE" --arg sy "$A_SAYUR" \
+  '{items:[{menu_id:$m,qty:1,addons:[{id:$mi,jumlah:2},{id:$sy,jumlah:1}]}]}')")
+cek "§316 cek-stok: butuh mie = 80 + 200 = 280" "abs(V - 280) < 1e-6" \
+  "$(jq --arg i "$MIE312" '[.kurang[]|select(.ingredient_id==$i)][0].butuh // -1' <<<"$CS314")"
+cek "§316 cek-stok: sayur tak dibutuhkan sama sekali (Tanpa sayur, dilantai 0)" "V == 0" \
+  "$(jq --arg i "$SAYUR312" '[.kurang[]|select(.ingredient_id==$i)]|length' <<<"$CS314")"
+cek "§316 PASANGAN tanpa add-on: butuh mie = resep 80" "abs(V - 80) < 1e-6" \
+  "$(api "$REISS105" POST /penjualan/cek-stok "{\"items\":[{\"menu_id\":\"$M312\",\"qty\":1}]}" | jq --arg i "$MIE312" '[.kurang[]|select(.ingredient_id==$i)][0].butuh // -1')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §317 — OPEN BILL: add-on terkunci bersama harganya, pasangan, pisah, cetak
+# ═══════════════════════════════════════════════════════════════════════════
+B315=$(api "$REISS105" POST /open-bill "$(jq -nc --arg m "$M312" --arg pd "$A_PEDAS" --arg mi "$A_MIE" --arg se "$A_SEDANG" \
+  '{customer_nama:"Uji 315", items:[{menu_id:$m,qty:2,addons:[{id:$pd,jumlah:1},{id:$mi,jumlah:1}]},{menu_id:$m,qty:1,addons:[{id:$se,jumlah:1}]}]}')")
+B315_ID=$(jq -r '.id // ""' <<<"$B315")
+BA315=$(jq -r '.items[]|select(.addons|length==2)|.id' <<<"$B315")
+BB315=$(jq -r '.items[]|select(.addons|length==1)|.id' <<<"$B315")
+cek "§317 baris bill mengunci harga TERMASUK add-on (18.000 & 15.000)" "V == 1" \
+  "$(jq '[.items[].harga_satuan]|sort == [15000,18000]|if . then 1 else 0 end' <<<"$B315")"
+cek "§317 OpenBillItemDto.addons berbentuk snake_case (addon_id, grup_nama, nama, harga, jumlah)" "V == 1" \
+  "$(jq '[.items[].addons[]|keys]|unique == [["addon_id","grup_nama","harga","jumlah","nama"]]|if . then 1 else 0 end' <<<"$B315")"
+cek "§317 PUT mengubah add-on baris tersimpan (ber-id) → 400 addon_tidak_valid" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$B315_ID" "$(jq -nc --arg m "$M312" --arg a "$BA315" --arg b "$BB315" --arg se "$A_SEDANG" \
+     '{items:[{id:$a,menu_id:$m,qty:2,addons:[{id:$se,jumlah:1}]},{id:$b,menu_id:$m,qty:1}]}')" | jq '(.sebab=="addon_tidak_valid")|if . then 1 else 0 end')"
+cek "§317 PUT klien lama (tanpa kunci addons) → 200, add-on & harga dipertahankan" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$B315_ID" "$(jq -nc --arg m "$M312" --arg a "$BA315" --arg b "$BB315" '{items:[{id:$a,menu_id:$m,qty:2},{id:$b,menu_id:$m,qty:1}]}')" \
+     | jq --arg a "$BA315" '[.items[]|select(.id==$a)][0]|(.harga_satuan==18000 and (.addons|length)==2)|if . then 1 else 0 end')"
+# Pasangan cadangan memakai TANDA add-on: kiriman tanpa id yang urutannya
+# terbalik tetap mendarat di baris yang benar — tak ada baris baru, harga utuh.
+P315=$(api "$REISS105" PUT "/open-bill/$B315_ID" "$(jq -nc --arg m "$M312" --arg pd "$A_PEDAS" --arg mi "$A_MIE" --arg se "$A_SEDANG" \
+  '{items:[{menu_id:$m,qty:3,addons:[{id:$se,jumlah:1}]},{menu_id:$m,qty:2,addons:[{id:$mi,jumlah:1},{id:$pd,jumlah:1}]}]}')")
+cek "§317 pasangan per menu + tanda add-on: baris Sedang jadi qty 3, baris Pedas+mie tetap 2, tetap 2 baris" "V == 1" \
+  "$(jq --arg a "$BA315" --arg b "$BB315" '(.items|length==2) and ([.items[]|select(.id==$b)][0].qty==3) and ([.items[]|select(.id==$a)][0].qty==2)|if . then 1 else 0 end' <<<"$P315")"
+PS315=$(api "$REISS105" PUT "/open-bill/$B315_ID" "$(jq -nc --arg m "$M312" --arg a "$BA315" --arg b "$BB315" \
+  '{items:[{id:$a,menu_id:$m,qty:1},{pisah_dari:$a,menu_id:$m,qty:1,dine_in_override:false},{id:$b,menu_id:$m,qty:3}]}')")
+cek "§317 pisah porsi mewarisi harga 18.000 DAN add-on baris asal" "V == 1" \
+  "$(jq --arg a "$BA315" --arg b "$BB315" '[.items[]|select(.id!=$a and .id!=$b)][0]|(.harga_satuan==18000 and ([.addons[].nama]|sort)==["Extra mie","Pedas"])|if . then 1 else 0 end' <<<"$PS315")"
+SL315=$(api "$REISS105" GET "/open-bill/$B315_ID/slip")
+cek "§317 slip dapur memuat '+ Extra mie' dan TANPA rupiah" "V == 1" \
+  "$(jq -r '.teks' <<<"$SL315" | grep -q '+ Extra mie' && ! jq -r '.teks' <<<"$SL315" | grep -q 'Rp' && echo 1 || echo 0)"
+cek "§317 bon tagihan menyebut tambahannya di kurung (+Rp3.000)" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$B315_ID/bon" | jq -r '.teks' | grep -q '+ Extra mie (+Rp3.000)' && echo 1 || echo 0)"
+cek "§317 papan pesanan: kartu bill membawa add-on per baris" "V == 5" \
+  "$(api "$REISS105" GET /pesanan | jq --arg b "$B315_ID" '[.[]|select(.id==$b)][0]|[.items[].addons|length]|add')"
+ITEMS315=$(api "$REISS105" GET "/open-bill/$B315_ID" | jq -c '[.items[]|{menu_id, qty, open_bill_item_id: .id}]')
+cek "§317 bayar bill dengan add-on BERBEDA dari snapshot → addon_tidak_valid" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "$(jq -nc --arg o "$B315_ID" --argjson it "$ITEMS315" --arg se "$A_SEDANG" \
+     '{open_bill_id:$o, metode_bayar:"qris", items:($it|map(. + {addons:[{id:$se,jumlah:1}]}))}')" | jq '(.sebab=="addon_tidak_valid")|if . then 1 else 0 end')"
+BY315=$(api "$REISS105" POST /penjualan "$(jq -nc --arg o "$B315_ID" --argjson it "$ITEMS315" '{open_bill_id:$o, metode_bayar:"qris", items:$it}')")
+cek "§317 bayar bill: baris penjualan membawa snapshot add-on bill & harga terkuncinya" "V == 1" \
+  "$(jq '([.items[]|select((.addons|length)==2)]|length == 2) and ([.items[]|select((.addons|length)==2)|.hargaSatuan]|all(. == 18000))|if . then 1 else 0 end' <<<"$BY315")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §318 — SINKRON OFFLINE LENIEN, online ketat; hapus lunak menjaga snapshot
+# ═══════════════════════════════════════════════════════════════════════════
+# Body PUT dirakit dari DTO menu sendiri — bentuk yang dikirim form web.
+grup316() { # <jq filter atas addon> → addon_groups untuk PUT
+  api "$OWNER" GET "/menu/$M312" | jq -c "[.addon_groups[]|{id,nama,min_pilih,maks_pilih,addons:[.addons[]|{id,nama,harga,maks_jumlah,ingredient_id,qty_bahan,is_active}|$1]}]"
+}
+api "$OWNER" PUT "/menu/$M312" "$(jq -nc --argjson g "$(grup316 'if .nama=="Extra telur" then .is_active=false else . end')" '{addon_groups:$g}')" > /dev/null
+cek "§318 add-on nonaktif tetap di DTO (is_active false) — kasir yang menyembunyikannya" "V == 1" \
+  "$(api "$REISS105" GET "/menu/$M312" | jq '[.addon_groups[].addons[]|select(.nama=="Extra telur")][0].is_active == false|if . then 1 else 0 end')"
+JUAL316=$(jq -nc --arg m "$M312" --arg pd "$A_PEDAS" --arg tl "$A_TELUR" '{is_dine_in:false,metode_bayar:"tunai",items:[{menu_id:$m,qty:1,addons:[{id:$pd,jumlah:1},{id:$tl,jumlah:1}]}]}')
+cek "§318 online: add-on nonaktif → addon_tidak_valid ('sedang tidak tersedia')" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "$JUAL316" | jq '(.sebab=="addon_tidak_valid") and (.error|test("tidak tersedia"))|if . then 1 else 0 end')"
+sync316() { jq -nc --arg r "$(cat /proc/sys/kernel/random/uuid)" --arg w "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --argjson p "$1" \
+  '{device_id:"e316",commands:[{client_ref:$r,tipe:"penjualan",waktu:$w,payload:$p}]}'; }
+SY316=$(api "$REISS105" POST /sync "$(sync316 "$JUAL316")")
+SY316_ID=$(jq -r '.hasil[0].data.sale.id // ""' <<<"$SY316")
+cek "§318 sync susulan: add-on yang SEJAK ITU nonaktif DITERIMA (penjualannya sudah terjadi)" "V == 1" \
+  "$(jq '(.hasil[0].kode == 201) and ([.hasil[0].data.items[0].addons[].nama]|index("Extra telur") != null) and (.hasil[0].data.items[0].hargaSatuan == 19000)|if . then 1 else 0 end' <<<"$SY316")"
+cek "§318 sync: id add-on ASING tetap ditolak (bukan keluaran kasir jujur)" "V == 400" \
+  "$(api "$REISS105" POST /sync "$(sync316 "$(jq -nc --arg m "$M312" --arg x "$(cat /proc/sys/kernel/random/uuid)" '{is_dine_in:false,metode_bayar:"tunai",items:[{menu_id:$m,qty:1,addons:[{id:$x,jumlah:1}]}]}')")" | jq '.hasil[0].kode')"
+api "$OWNER" PUT "/menu/$M312" "$(jq -nc --argjson g "$(grup316 'select(.nama!="Extra telur")')" '{addon_groups:$g}')" > /dev/null
+cek "§318 add-on dihapus dari form → hilang dari DTO menu" "V == 0" \
+  "$(api "$OWNER" GET "/menu/$M312" | jq '[.addon_groups[].addons[]|select(.nama=="Extra telur")]|length')"
+cek "§318 …tapi struk lama tetap menyebutnya (snapshot, hapus lunak)" "V == 1" \
+  "$(api "$REISS105" GET "/penjualan/$SY316_ID" | jq '[.items[0].addons[].nama]|index("Extra telur") != null|if . then 1 else 0 end')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §319 — HITUNG ULANG (refund) memakai SNAPSHOT, bukan konfigurasi hari ini
+# ═══════════════════════════════════════════════════════════════════════════
+# Admin mengubah takaran "Extra mie" jadi 500 g SESUDAH §315 terjual. Refund
+# satu porsi menyusun ulang konsumsi transaksi itu; yang benar memakai 100 g
+# yang tercatat saat dijual: sisa 1 porsi × (80 + 200) = 280 g, jadi saldo mie
+# naik 280. Dengan konfigurasi hari ini angkanya 1.080 — dan stoknya bohong.
+api "$OWNER" PUT "/menu/$M312" "$(jq -nc --argjson g "$(grup316 'if .nama=="Extra mie" then .qty_bahan=500 else . end')" '{addon_groups:$g}')" > /dev/null
+cek "premis §319: takaran Extra mie di katalog kini 500" "V == 500" \
+  "$(api "$OWNER" GET "/menu/$M312" | jq '[.addon_groups[].addons[]|select(.nama=="Extra mie")][0].qty_bahan')"
+SM2=$(saldo312 "$MIE312")
+api "$REISS105" POST "/penjualan/$S313/refund" "{\"alasan\":\"uji 317\",\"items\":[{\"sale_item_id\":\"$IT313\",\"qty\":1}]}" > /dev/null
+SM3=$(saldo312 "$MIE312")
+cek "§319 refund 1 porsi: saldo mie naik 280 (snapshot 100 g), bukan dari takaran baru" "abs(V - 280) < 1e-6" \
+  "$(python3 -c "print($SM3 - $SM2)")"
+cek "§319 hppSatuan baris tak bergeser (fakta historis, basis tak berubah)" "abs(V - 2800) < 1e-6" \
+  "$(api "$OWNER" GET "/penjualan/$S313" | jq '.items[0].hppSatuan')"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

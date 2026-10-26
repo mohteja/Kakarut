@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
+  AddonBarisDto,
   CabangDto,
   CekStokResult,
   CompanyRow,
@@ -18,7 +19,7 @@ import type {
   Shift,
   StatusHadirDto,
 } from "@kakarut/shared";
-import { angkaDari, dibatalkanDapur, hitungPb1 } from "@kakarut/shared";
+import { angkaDari, dibatalkanDapur, hargaAddon, hitungPb1, ringkasAddon, tandaAddon } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -39,6 +40,7 @@ import { uuidV4 } from "../../lib/idempoten";
 import { bacaLokal, tulisLokal } from "../../lib/simpanan";
 import { petunjukMember } from "../../lib/member-wa";
 import { ReceiptModal, type SaleResult } from "./ReceiptModal";
+import { AddonPickerModal, butuhPemilihAddon } from "./AddonPicker";
 import {
   KosongkanMejaModal,
   kelasStatus,
@@ -84,8 +86,17 @@ function menuDariBarisBill(it: OpenBillDetail["items"][number]): MenuDto {
 }
 
 interface CartLine {
+  /**
+   * Identitas LOKAL baris. Dulu baris dikunci `menu.id` — dan itu cukup selama
+   * satu menu = satu baris. Dengan add-on, "Mie ayam + Extra mie" dan "Mie
+   * ayam" polos adalah dua baris menu yang sama; tiap tombol baris (qty,
+   * catatan, dine-in) harus tahu baris yang mana.
+   */
+  key: string;
   menu: MenuDto;
   qty: number;
+  /** add-on per porsi (snapshot); harganya ikut `hargaBaris` */
+  addons: AddonBarisDto[];
   /** null = ikut pengaturan transaksi */
   dineInOverride: boolean | null;
   /** catatan personalisasi baris (mis. "tanpa gula") */
@@ -101,9 +112,17 @@ interface CartLine {
   pesananStatus?: PesananStatus;
 }
 
-/** Harga yang benar-benar ditagih untuk satu baris keranjang. */
+/**
+ * Harga yang benar-benar ditagih untuk satu baris keranjang — rumus server:
+ * harga terkunci bill, atau harga menu + Σ harga add-on × jumlah.
+ */
 function hargaBaris(l: CartLine) {
-  return l.hargaKunci ?? l.menu.harga_jual;
+  return l.hargaKunci ?? Math.round((l.menu.harga_jual + hargaAddon(l.addons)) * 100) / 100;
+}
+
+/** Pilihan add-on baris BARU untuk dikirim ke server (`[{id, jumlah}]`). */
+function pilihanAddon(l: CartLine) {
+  return l.addons.flatMap((a) => (a.addon_id ? [{ id: a.addon_id, jumlah: a.jumlah }] : []));
 }
 
 /**
@@ -491,27 +510,40 @@ export function KasirPage() {
       .filter((g) => g.items.length > 0);
   }, [menus, cariMenu, kategoriTampil]);
 
-  function tambah(menu: MenuDto) {
+  /** menu ber-add-on yang sedang menunggu pilihan kasir */
+  const [pilihAddonUntuk, setPilihAddonUntuk] = useState<MenuDto | null>(null);
+
+  /** Ketukan menu: menu ber-add-on membuka pemilih, selebihnya langsung masuk. */
+  function ketukMenu(menu: MenuDto) {
+    if (butuhPemilihAddon(menu)) setPilihAddonUntuk(menu);
+    else tambah(menu);
+  }
+
+  function tambah(menu: MenuDto, addons: AddonBarisDto[] = []) {
+    const tanda = tandaAddon(addons.map((a) => ({ id: a.addon_id, jumlah: a.jumlah })));
     setCart((prev) => {
-      const idx = prev.findIndex((l) => l.menu.id === menu.id);
+      // Digabung HANYA dengan baris menu yang sama DAN add-on yang sama persis.
+      const idx = prev.findIndex(
+        (l) => l.menu.id === menu.id && tandaAddon(l.addons.map((a) => ({ id: a.addon_id, jumlah: a.jumlah }))) === tanda,
+      );
       if (idx >= 0) {
         const copy = [...prev];
         copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
         return copy;
       }
-      return [...prev, { menu, qty: 1, dineInOverride: null, catatan: "" }];
+      return [...prev, { key: uuidV4(), menu, qty: 1, addons, dineInOverride: null, catatan: "" }];
     });
   }
 
-  function ubahCatatanLine(menuId: string, val: string) {
-    setCart((prev) => prev.map((l) => (l.menu.id === menuId ? { ...l, catatan: val } : l)));
+  function ubahCatatanLine(key: string, val: string) {
+    setCart((prev) => prev.map((l) => (l.key === key ? { ...l, catatan: val } : l)));
   }
 
-  function ubahQty(menuId: string, delta: number) {
+  function ubahQty(key: string, delta: number) {
     setCart((prev) =>
       prev
         .map((l) => {
-          if (l.menu.id !== menuId) return l;
+          if (l.key !== key) return l;
           /**
            * Baris yang SUDAH masuk bill sudah tayang di papan dapur sejak bill
            * disimpan — bisa jadi sudah dimasak. Menghapusnya dari keranjang
@@ -541,10 +573,10 @@ export function KasirPage() {
     );
   }
 
-  function toggleLineDineIn(menuId: string) {
+  function toggleLineDineIn(key: string) {
     setCart((prev) =>
       prev.map((l) => {
-        if (l.menu.id !== menuId) return l;
+        if (l.key !== key) return l;
         const efektif = l.dineInOverride ?? dineIn;
         return { ...l, dineInOverride: !efektif };
       }),
@@ -590,6 +622,7 @@ export function KasirPage() {
               menu_id: l.menu.id,
               qty: l.qty,
               ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
+              ...(l.addons.length > 0 ? { addons: pilihanAddon(l) } : {}),
             })),
           },
     [cartTagih, dineIn, editingBillId],
@@ -715,6 +748,9 @@ export function KasirPage() {
             ...(l.dineInOverride !== null ? { is_dine_in: l.dineInOverride } : {}),
             ...(l.catatan.trim() ? { catatan: l.catatan.trim() } : {}),
             ...(editingBillId && l.billItemId ? { open_bill_item_id: l.billItemId } : {}),
+            // Baris bill memakai snapshot add-on bill di server; baris baru
+            // membawa pilihannya sendiri.
+            ...(!(editingBillId && l.billItemId) && l.addons.length > 0 ? { addons: pilihanAddon(l) } : {}),
           })),
         },
       });
@@ -827,6 +863,7 @@ export function KasirPage() {
                 : "TA"
               : null,
           catatan: l.catatan.trim() || null,
+          addons: l.addons.map((a) => ({ nama: a.nama, jumlah: a.jumlah })),
         })),
         kasir: auth?.user.nama ?? null,
       });
@@ -877,6 +914,7 @@ export function KasirPage() {
                 : "TA"
               : null,
           catatan: l.catatan.trim() || null,
+          addons: l.addons.map((a) => ({ nama: a.nama, jumlah: a.jumlah, harga: a.harga })),
         })),
         subtotal,
         diskon,
@@ -917,6 +955,9 @@ export function KasirPage() {
           qty: l.qty,
           ...(l.dineInOverride !== null ? { dine_in_override: l.dineInOverride } : {}),
           ...(l.catatan.trim() ? { catatan: l.catatan.trim() } : {}),
+          // Add-on baris tersimpan terkunci di server — hanya baris baru yang
+          // membawa pilihannya.
+          ...(!l.billItemId && l.addons.length > 0 ? { addons: pilihanAddon(l) } : {}),
         })),
       };
       return editingBillId
@@ -968,8 +1009,10 @@ export function KasirPage() {
       // harga & id baris ikut dibawa: yang ditagih adalah harga saat dipesan,
       // dan id-nya dipakai agar PUT/bayar tidak kehilangan kunci harga itu
       lines.push({
+        key: it.id,
         menu,
         qty: it.qty,
+        addons: it.addons ?? [],
         dineInOverride: it.dine_in_override,
         catatan: it.catatan ?? "",
         billItemId: it.id,
@@ -1095,7 +1138,7 @@ export function KasirPage() {
                 key={m.id}
                 menu={m}
                 stok={sisaByMenu.get(m.id)}
-                onKlik={() => tambah(m)}
+                onKlik={() => ketukMenu(m)}
               />
             ))}
             {menuTampil.length === 0 && (
@@ -1115,7 +1158,7 @@ export function KasirPage() {
                   {g.items.map((m) => (
                     <button
                       key={m.id}
-                      onClick={() => tambah(m)}
+                      onClick={() => ketukMenu(m)}
                       title={m.deskripsi ? `${m.nama} — ${m.deskripsi}` : m.nama}
                       className="flex flex-col items-center justify-center rounded-md border border-stone-200 bg-white px-1 py-1.5 text-center transition hover:border-orange-400 hover:shadow-sm"
                     >
@@ -1330,7 +1373,7 @@ export function KasirPage() {
             const batal = dibatalkan(l);
             return (
               <div
-                key={l.menu.id}
+                key={l.key}
                 className={`rounded-lg border p-2 ${
                   batal
                     ? "border-stone-200 bg-stone-100 opacity-70"
@@ -1346,6 +1389,9 @@ export function KasirPage() {
                     <div className="truncate text-sm font-semibold text-stone-800">
                       {l.menu.nama}
                     </div>
+                    {l.addons.length > 0 && (
+                      <div className="text-xs font-medium text-orange-700">+ {ringkasAddon(l.addons)}</div>
+                    )}
                     <div className="text-xs text-stone-500">
                       {formatRupiah(hargaBaris(l))} ×{" "}
                       <span className="font-semibold">{l.qty}</span>
@@ -1398,7 +1444,7 @@ export function KasirPage() {
                 </div>
                 <div className="mt-2 flex items-center justify-between">
                   <button
-                    onClick={() => { if (!batal) toggleLineDineIn(l.menu.id); }}
+                    onClick={() => { if (!batal) toggleLineDineIn(l.key); }}
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                       efektifDineIn
                         ? "bg-blue-100 text-blue-700"
@@ -1410,7 +1456,7 @@ export function KasirPage() {
                   </button>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => ubahQty(l.menu.id, -1)}
+                      onClick={() => ubahQty(l.key, -1)}
                       disabled={sudahKeDapur || batal}
                       title={
                         sudahKeDapur
@@ -1423,7 +1469,7 @@ export function KasirPage() {
                     </button>
                     <span className="w-6 text-center text-sm font-semibold">{l.qty}</span>
                     <button
-                      onClick={() => ubahQty(l.menu.id, 1)}
+                      onClick={() => ubahQty(l.key, 1)}
                       disabled={batal}
                       className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
@@ -1433,7 +1479,7 @@ export function KasirPage() {
                 </div>
                 <input
                   value={l.catatan}
-                  onChange={(e) => ubahCatatanLine(l.menu.id, e.target.value)}
+                  onChange={(e) => ubahCatatanLine(l.key, e.target.value)}
                   readOnly={batal}
                   placeholder="Catatan (mis. tanpa gula, tanpa mie)"
                   className="mt-2 w-full rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-xs focus:border-orange-400 focus:bg-white focus:outline-none"
@@ -1645,11 +1691,14 @@ export function KasirPage() {
                   membacakan daftar yang harus cocok dengan totalnya. */}
               {cartTagih.map((l) => (
                 <div
-                  key={l.menu.id}
+                  key={l.key}
                   className="flex items-start justify-between gap-2 px-3 py-2 text-sm"
                 >
                   <span className="min-w-0">
                     <span className="font-semibold text-stone-800">{l.qty}×</span> {l.menu.nama}
+                    {l.addons.length > 0 && (
+                      <span className="block text-xs text-orange-700">+ {ringkasAddon(l.addons)}</span>
+                    )}
                     {l.catatan.trim() && (
                       <span className="block text-xs text-stone-400">* {l.catatan.trim()}</span>
                     )}
@@ -2084,6 +2133,15 @@ export function KasirPage() {
           </div>
         </div>
       )}
+
+      <AddonPickerModal
+        menu={pilihAddonUntuk}
+        onClose={() => setPilihAddonUntuk(null)}
+        onPilih={(m, addons) => {
+          tambah(m, addons);
+          setPilihAddonUntuk(null);
+        }}
+      />
 
       {struk && (
         <ReceiptModal
