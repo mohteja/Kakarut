@@ -19,6 +19,7 @@ import { seedMejaDefault } from "../modules/meja/defaults";
 import { createSale } from "../modules/penjualan/service";
 import { seedUnitsPerusahaan } from "../modules/satuan/service";
 import { resolveKodeKaryawan } from "../modules/users/service";
+import { lengkapiDataDemoSekali } from "./guest-data";
 
 /**
  * Akun & perusahaan TAMU (guest mode) — dipakai bersama siapa pun untuk
@@ -69,6 +70,9 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
   const [ada] = await dbc.select({ id: companies.id }).from(companies).where(eq(companies.slug, GUEST.slug));
   if (ada) {
     await pastikanKeanggotaan(dbc, ada.id, owner.id, kasir.id, null);
+    // Perusahaan demo yang SUDAH hidup (production) ikut menerima data demo
+    // lengkap — sekali saja, ditambahkan tanpa menimpa isi buatan pengunjung.
+    await lengkapiDataDemoSekali(ada.id, owner.id, kasir.id);
     return false;
   }
 
@@ -196,6 +200,7 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
     }
   }
   console.log(`Guest mode: perusahaan demo dibuat (${dibuat} transaksi dummy).`);
+  await lengkapiDataDemoSekali(hasil.companyId, owner.id, kasir.id);
   return true;
 }
 
