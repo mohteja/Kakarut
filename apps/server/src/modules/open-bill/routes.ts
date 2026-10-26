@@ -16,6 +16,7 @@ import {
   pastikanAddon,
   pastikanAddonSama,
   PilihanAddonBody,
+  snapDariBaris,
 } from "../menu/addon";
 import { kebutuhanKeranjang, pesanStokKurang } from "../penjualan/stok-keranjang";
 import { bahanKurang } from "../stok/service";
@@ -231,6 +232,8 @@ async function pastikanStokCukup(
   branchId: string,
   items: { menu_id: string; qty: number; dine_in_override?: boolean | null; addons?: PilihanAddon[] }[],
   billDineIn: boolean,
+  /** katalog yang sudah dimuat pemanggil — dipakai ulang, tak dimuat dua kali */
+  katalog: KatalogMenu,
 ): Promise<void> {
   if (items.length === 0) return;
   const [company] = await db
@@ -238,7 +241,6 @@ async function pastikanStokCukup(
     .from(companies)
     .where(eq(companies.id, companyId));
   if (!company?.blokir) return;
-  const katalog = await loadKatalog(db, companyId);
   // Perakitan keranjang → bahan dan kalimat penolakannya PINDAH RUMAH
   // 2026-09-06 (`penjualan/stok-keranjang.ts`). Keduanya dulu diketik ulang di
   // sini, sama persis dengan versi di `createSale` — dan sejak `POST
@@ -269,10 +271,25 @@ async function pastikanStokCukup(
  * Baris BARU: nama + harga di-snapshot dari katalog saat ini — harga TERMASUK
  * add-on terpilih, karena yang terkunci adalah harga yang disepakati pembeli.
  */
-function barisBaru(billId: string, it: BillItemInput, katalog: KatalogHarga, addons: AddonSnapBaris[]) {
+function barisBaru(
+  billId: string,
+  it: BillItemInput,
+  katalog: KatalogHarga,
+  addons: AddonSnapBaris[],
+  /** harga terkunci yang DIWARISI (pisah porsi) — bukan harga hari ini */
+  hargaWarisan?: number,
+) {
   const m = katalog.get(it.menu_id)!;
-  const hargaSatuan = keSkalaKolom(m.hargaJual + hargaAddon(addons), SKALA_UANG_KOLOM);
-  pastikanMuat(hargaSatuan, BATAS_HARGA, `Harga satuan "${m.nama}"`);
+  let hargaSatuan: number;
+  if (hargaWarisan !== undefined) {
+    // Harga warisan sudah tersimpan di kolom yang sama, jadi pasti muat —
+    // menjaga harga hari ini di sini menolak pecahan karena angka yang tak
+    // pernah ditulis.
+    hargaSatuan = hargaWarisan;
+  } else {
+    hargaSatuan = keSkalaKolom(m.hargaJual + hargaAddon(addons), SKALA_UANG_KOLOM);
+    pastikanMuat(hargaSatuan, BATAS_HARGA, `Harga satuan "${m.nama}"`);
+  }
   return {
     billId,
     menuId: it.menu_id,
@@ -563,7 +580,7 @@ export const openBillRoutes = new Hono<AppEnv>()
     const { mejaId, mejaLabel, tipe } = await resolveMeja(auth.company_id!, branchId, body.meja_id);
     // Sesudah `resolveMeja`: tipe meja yang menentukan dine-in bill, dan
     // dine-in menentukan apakah bahan kemasan ikut terpakai.
-    await pastikanStokCukup(auth.company_id!, branchId, body.items, tipe === "dine_in");
+    await pastikanStokCukup(auth.company_id!, branchId, body.items, tipe === "dine_in", katalogMenu);
     /**
      * SATU MEJA DINE-IN = SATU BILL BERJALAN.
      *
@@ -775,12 +792,11 @@ export const openBillRoutes = new Hono<AppEnv>()
     // Add-on baris baru diadili SEBELUM transaksi dibuka — galatnya
     // menyebut add-on/grupnya, bukan "stok tak cukup".
     for (const it of akanBaru) addonBaru(katalogMenu, katalog, it);
-    await pastikanStokCukup(
-      auth.company_id!,
-      existing.branchId,
-      body.items.filter((it) => !it.id && !it.pisah_dari),
-      tipe === "dine_in",
-    );
+    // `akanBaru`, bukan "semua yang tanpa id": baris tanpa id yang
+    // DIPASANGKAN ke baris lama (klien lama, atau pasangan per tanda add-on)
+    // sudah masuk dapur — menghitungnya lagi menolak penyimpanan ulang yang
+    // tak menambah pesanan apa pun.
+    await pastikanStokCukup(auth.company_id!, existing.branchId, akanBaru, tipe === "dine_in", katalogMenu);
     const akanTerhapus = lamaCek.filter((r) => !terpakaiCek.has(r.id));
     if (akanTerhapus.length > 0) {
       // Pesan ditulis untuk KASIR, bukan developer: klien menampilkan `error`
@@ -953,17 +969,7 @@ export const openBillRoutes = new Hono<AppEnv>()
         ),
         (a) => a.openBillItemId,
       );
-      const snapDari = (barisId: string): AddonSnapBaris[] =>
-        (snapLama.get(barisId) ?? []).map((a) => ({
-          addonId: a.addonId,
-          grupNama: a.grupNama,
-          nama: a.nama,
-          harga: a.harga,
-          jumlah: a.jumlah,
-          ingredientId: a.ingredientId,
-          qtyBahan: a.qtyBahan,
-          sortOrder: a.sortOrder,
-        }));
+      const snapDari = (barisId: string): AddonSnapBaris[] => (snapLama.get(barisId) ?? []).map(snapDariBaris);
       const lamaBertanda = lama.map((r) => ({
         id: r.id,
         menuId: r.menuId,
@@ -1059,8 +1065,8 @@ export const openBillRoutes = new Hono<AppEnv>()
         );
         const disisip = await tx.insert(openBillItems).values(
           baru.map((it, bi) => {
-            const dasar = barisBaru(id, it, katalog, addonBaruPerItem[bi]);
             const asal = it.pisah_dari ? lamaById.get(it.pisah_dari) : undefined;
+            const dasar = barisBaru(id, it, katalog, addonBaruPerItem[bi], asal?.hargaSatuan);
             if (!asal) return dasar;
             // `sajianTakeaway` SENGAJA tidak diwarisi: memecah porsi justru
             // dilakukan supaya penyajiannya BERBEDA. Penandanya lahir dari
@@ -1068,7 +1074,6 @@ export const openBillRoutes = new Hono<AppEnv>()
             return {
               ...dasar,
               menuNama: asal.menuNama,
-              hargaSatuan: asal.hargaSatuan,
               pesananStatus: asal.pesananStatus,
               pesananStatusAt: asal.pesananStatusAt,
               pesananStatusOleh: asal.pesananStatusOleh,

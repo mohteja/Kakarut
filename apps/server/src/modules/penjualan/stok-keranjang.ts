@@ -1,6 +1,6 @@
 import type { BahanKurangDto, PilihanAddon } from "@kakarut/shared";
 import { formatAngkaId } from "@kakarut/shared";
-import { snapDariPilihan, tambahKebutuhanBaris, type AddonSnap, type KatalogMenu } from "../menu/service";
+import { snapDariPilihan, tambahKebutuhanBaris, type KatalogMenu } from "../menu/service";
 
 /**
  * SATU-SATUNYA PENULIS kalimat penolakan "stok tak cukup", dan satu-satunya
@@ -33,8 +33,6 @@ export interface BarisKeranjang {
   is_dine_in?: boolean | null;
   /** pilihan add-on (dari kasir) — dipetakan lewat katalog */
   addons?: readonly PilihanAddon[];
-  /** add-on yang sudah jadi snapshot (baris bill tersimpan) — mengalahkan `addons` */
-  addonSnap?: readonly AddonSnap[];
 }
 
 /**
@@ -74,8 +72,14 @@ export function kebutuhanKeranjang(
     if (!menu) continue;
     // Delta add-on dilantai PER BARIS sebelum ditumpuk — "Tanpa mie" di satu
     // baris tak boleh mengurangi mie baris lain.
-    const addons = it.addonSnap ?? snapDariPilihan(katalog, menu.id, it.addons);
-    tambahKebutuhanBaris(butuh, katalog, menu, it.qty, it.is_dine_in ?? dineInDasar, addons);
+    tambahKebutuhanBaris(
+      butuh,
+      katalog,
+      menu,
+      it.qty,
+      it.is_dine_in ?? dineInDasar,
+      snapDariPilihan(katalog, menu.id, it.addons),
+    );
   }
   return butuh;
 }

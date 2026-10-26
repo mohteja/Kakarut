@@ -106,6 +106,8 @@ export function masalahGrup(groups: GrupForm[]): string | null {
     const namaAddon = new Set<string>();
     for (const a of g.addons) {
       if (!a.nama.trim()) return `Grup "${g.nama.trim()}": ada add-on tanpa nama.`;
+      const harga = angkaDari(a.harga || "0");
+      if (Number.isNaN(harga) || harga < 0) return `Add-on "${a.nama.trim()}": harga tidak terbaca.`;
       if (namaAddon.has(a.nama.trim().toLowerCase())) return `Add-on "${a.nama.trim()}" dipakai dua kali.`;
       namaAddon.add(a.nama.trim().toLowerCase());
       if (a.ingredientId && !(angkaDari(a.qty) > 0)) return `Add-on "${a.nama.trim()}": isi takaran bahannya.`;
@@ -270,9 +272,12 @@ export function AddonEditor({
                       />
                       <div className="relative">
                         <input
-                          inputMode="numeric"
                           value={a.harga}
-                          onChange={(e) => ubahAddon(gi, ai, { harga: e.target.value.replace(/[^\d]/g, "") })}
+                          // Koma/titik DIPERTAHANKAN: harga tersimpan bisa
+                          // berdesimal ("2500,5" dari `teksAngka`), dan
+                          // membuang komanya diam-diam menjadikannya 25005.
+                          inputMode="decimal"
+                          onChange={(e) => ubahAddon(gi, ai, { harga: e.target.value.replace(/[^\d.,]/g, "") })}
                           aria-label="Harga add-on"
                           className={inputClass}
                         />

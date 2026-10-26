@@ -18707,7 +18707,14 @@ cek "§318 sync susulan: add-on yang SEJAK ITU nonaktif DITERIMA (penjualannya s
   "$(jq '(.hasil[0].kode == 201) and ([.hasil[0].data.items[0].addons[].nama]|index("Extra telur") != null) and (.hasil[0].data.items[0].hargaSatuan == 19000)|if . then 1 else 0 end' <<<"$SY316")"
 cek "§318 sync: id add-on ASING tetap ditolak (bukan keluaran kasir jujur)" "V == 400" \
   "$(api "$REISS105" POST /sync "$(sync316 "$(jq -nc --arg m "$M312" --arg x "$(cat /proc/sys/kernel/random/uuid)" '{is_dine_in:false,metode_bayar:"tunai",items:[{menu_id:$m,qty:1,addons:[{id:$x,jumlah:1}]}]}')")" | jq '.hasil[0].kode')"
+# Telur uji HANYA dipakai add-on (tak ada di resep mana pun). Selama add-on
+# itu hidup di menu aktif, mengarsipkan bahannya meninggalkan saldo minus yang
+# tak terlihat di layar stok mana pun — penjaga arsip bahan harus melihatnya.
+cek "§318 arsip bahan yang dipakai add-on menu aktif → 409" "V == 409" \
+  "$(status_code "$OWNER" DELETE "/bahan/$TELUR312")"
 api "$OWNER" PUT "/menu/$M312" "$(jq -nc --argjson g "$(grup316 'select(.nama!="Extra telur")')" '{addon_groups:$g}')" > /dev/null
+cek "§318 …dan sesudah add-on-nya dihapus, bahannya boleh diarsip" "V == 200" \
+  "$(status_code "$OWNER" DELETE "/bahan/$TELUR312")"
 cek "§318 add-on dihapus dari form → hilang dari DTO menu" "V == 0" \
   "$(api "$OWNER" GET "/menu/$M312" | jq '[.addon_groups[].addons[]|select(.nama=="Extra telur")]|length')"
 cek "§318 …tapi struk lama tetap menyebutnya (snapshot, hapus lunak)" "V == 1" \

@@ -73,6 +73,29 @@ export function pastikanAddonSama(
   }
 }
 
+/** Baris tabel snapshot (`*_item_addons`) → bentuk hitung. Satu pemeta. */
+export function snapDariBaris(a: {
+  addonId: string | null;
+  grupNama: string;
+  nama: string;
+  harga: number;
+  jumlah: number;
+  ingredientId: string | null;
+  qtyBahan: number | null;
+  sortOrder: number;
+}): AddonSnapBaris {
+  return {
+    addonId: a.addonId,
+    grupNama: a.grupNama,
+    nama: a.nama,
+    harga: a.harga,
+    jumlah: a.jumlah,
+    ingredientId: a.ingredientId,
+    qtyBahan: a.qtyBahan,
+    sortOrder: a.sortOrder,
+  };
+}
+
 /** Baris tabel snapshot → bentuk kabel snake_case (bill, papan, slip, bon). */
 export function addonBarisDto(a: {
   addonId: string | null;

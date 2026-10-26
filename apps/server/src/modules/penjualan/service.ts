@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
   dibatalkanDapur,
@@ -15,7 +15,6 @@ import {
   branches,
   companies,
   meja,
-  openBillItemAddons,
   openBillItems,
   openBills,
   saleConsumptions,
@@ -44,7 +43,7 @@ import {
   tampilDiCabang,
   type AddonSnapBaris,
 } from "../menu/service";
-import { kelompokkanAddon, pastikanAddon, pastikanAddonSama } from "../menu/addon";
+import { kelompokkanAddon, muatAddonBill, pastikanAddon, pastikanAddonSama, snapDariBaris } from "../menu/addon";
 import { bahanKurang } from "../stok/service";
 
 /**
@@ -353,22 +352,14 @@ export async function createSale(params: CreateSaleParams) {
         .from(openBillItems)
         .where(eq(openBillItems.billId, bill.id));
       const byId = new Map(barisBill.map((b) => [b.id, b]));
-      const snapBill =
-        barisBill.length === 0
-          ? []
-          : await tx
-              .select()
-              .from(openBillItemAddons)
-              .where(
-                and(
-                  eq(openBillItemAddons.companyId, params.companyId),
-                  inArray(
-                    openBillItemAddons.openBillItemId,
-                    barisBill.map((b) => b.id),
-                  ),
-                ),
-              );
-      const snapPerBaris = kelompokkanAddon(snapBill, (r) => r.openBillItemId);
+      const snapPerBaris = kelompokkanAddon(
+        await muatAddonBill(
+          tx,
+          params.companyId,
+          barisBill.map((b) => b.id),
+        ),
+        (r) => r.openBillItemId,
+      );
       for (const item of params.items) {
         if (!item.open_bill_item_id) continue;
         const baris = byId.get(item.open_bill_item_id);
@@ -422,23 +413,10 @@ export async function createSale(params: CreateSaleParams) {
           );
         }
         hargaBill.set(item.open_bill_item_id, baris.hargaSatuan);
-        const snap = (snapPerBaris.get(baris.id) ?? []).map((a) => ({
-          addonId: a.addonId,
-          grupNama: a.grupNama,
-          nama: a.nama,
-          harga: a.harga,
-          jumlah: a.jumlah,
-          ingredientId: a.ingredientId,
-          qtyBahan: a.qtyBahan,
-          sortOrder: a.sortOrder,
-        }));
+        const snap = (snapPerBaris.get(baris.id) ?? []).map(snapDariBaris);
         // Add-on baris bill terkunci seperti harganya: kiriman yang berbeda
         // berarti keranjang kasir tak sama dengan yang dimasak dapur.
-        pastikanAddonSama(
-          baris.menuNama,
-          (snapPerBaris.get(baris.id) ?? []).map((a) => ({ addonId: a.addonId, jumlah: a.jumlah })),
-          item.addons,
-        );
+        pastikanAddonSama(baris.menuNama, snap, item.addons);
         addonBill.set(item.open_bill_item_id, snap);
         warisBill.set(item.open_bill_item_id, {
           pesananStatus: baris.pesananStatus,

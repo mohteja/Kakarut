@@ -11,9 +11,14 @@ import {
 import { Modal, btnPrimary } from "../../components/ui";
 import { formatRupiah } from "../../lib/format";
 
-/** Menu ini menawarkan add-on yang bisa dipilih saat ini? */
+/**
+ * Menu ini perlu pemilih? Ya bila ada add-on yang bisa dipilih — DAN bila ada
+ * grup WAJIB, walau semua pilihannya sedang habis. Yang terakhir itu penting:
+ * melewati pemilih berarti menu masuk keranjang polos dan baru ditolak server
+ * saat bayar; pemilih justru mengatakan sebabnya dengan tombol Tambah mati.
+ */
 export function butuhPemilihAddon(menu: MenuDto): boolean {
-  return (menu.addon_groups ?? []).some((g) => g.addons.some((a) => a.is_active));
+  return (menu.addon_groups ?? []).some((g) => g.min_pilih >= 1 || g.addons.some((a) => a.is_active));
 }
 
 /** Pilihan pemilih → snapshot baris keranjang (urut seperti form menu). */
@@ -65,6 +70,11 @@ function IsiPemilih({ menu, onPilih }: { menu: MenuDto; onPilih: (menu: MenuDto,
     [groups, snapshot],
   );
   const harga = menu.harga_jual + hargaAddon(snapshot);
+  // Grup wajib yang pilihannya habis: pesannya tampil sejak awal, bukan
+  // menunggu kasir mengetuk sesuatu yang tak bisa diketuk.
+  const wajibHabis = groups.some(
+    (g) => g.min_pilih >= 1 && g.addons.filter((a) => a.is_active).length < g.min_pilih,
+  );
 
   function atur(g: MenuAddonGroupDto, a: MenuAddonDto, n: number) {
     setJumlah((prev) => {
@@ -160,7 +170,9 @@ function IsiPemilih({ menu, onPilih }: { menu: MenuDto; onPilih: (menu: MenuDto,
           );
         })}
       </div>
-      {!hasil.ok && snapshot.length > 0 && <p className="mt-3 text-sm text-red-600">{hasil.pesan}</p>}
+      {!hasil.ok && (snapshot.length > 0 || wajibHabis) && (
+        <p className="mt-3 text-sm text-red-600">{hasil.pesan}</p>
+      )}
       <button
         type="button"
         disabled={!hasil.ok}

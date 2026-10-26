@@ -38,6 +38,8 @@ import {
   ingredientSteps,
   ingredientSuppliers,
   ingredients,
+  menuAddonGroups,
+  menuAddons,
   menuComponents,
   menus,
   productions,
@@ -2139,6 +2141,35 @@ export const bahanRoutes = new Hono<AppEnv>()
       );
       throw new HTTPException(409, {
         message: `Bahan masih dipakai menu aktif: ${[...new Set(dipakai)].join(", ")}`,
+      });
+    }
+    /*
+     * ADD-ON tertaut bahan memakai bahan ini tanpa pernah masuk resep — "Extra
+     * telur" +1 pcs pada menu yang resepnya tak berisi telur. Penjualannya
+     * tetap mengonsumsi bahan itu, jadi mengarsipkannya menghasilkan saldo
+     * minus yang tak terlihat di mana pun — lubang yang sama persis dengan
+     * paket di atas. Add-on & grup yang dihapus lunak tak menghalangi.
+     */
+    const dipakaiAddon = await db
+      .select({ menu: menus.nama, addon: menuAddons.nama })
+      .from(menuAddons)
+      .innerJoin(menuAddonGroups, eq(menuAddons.groupId, menuAddonGroups.id))
+      .innerJoin(menus, eq(menuAddonGroups.menuId, menus.id))
+      .where(
+        and(
+          eq(menuAddons.companyId, auth.company_id!),
+          eq(menuAddons.ingredientId, id),
+          isNull(menuAddons.deletedAt),
+          isNull(menuAddonGroups.deletedAt),
+          eq(menus.isActive, true),
+        ),
+      )
+      .limit(5);
+    if (dipakaiAddon.length > 0) {
+      throw new HTTPException(409, {
+        message: `Bahan masih dipakai add-on menu aktif: ${[
+          ...new Set(dipakaiAddon.map((d) => `${d.menu} (${d.addon})`)),
+        ].join(", ")}`,
       });
     }
     // Blokir bila masih dipakai resep produksi bahan lain yang aktif
