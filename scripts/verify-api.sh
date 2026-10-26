@@ -18739,6 +18739,48 @@ cek "§319 hppSatuan baris tak bergeser (fakta historis, basis tak berubah)" "ab
   "$(api "$OWNER" GET "/penjualan/$S313" | jq '.items[0].hppSatuan')"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# §320 — DATA DEMO TAMU: add-on (satu grup WAJIB), open bill, member, supplier
+# ═══════════════════════════════════════════════════════════════════════════
+# Tombol "Tamu Owner/Kasir" masuk ke SATU perusahaan demo bersama. Sejak
+# 2026-10-26 `lengkapiDataDemo` (seed/guest-data.ts) menambahkan data supaya
+# tamu bisa mencoba hampir semua layar tanpa mengisi apa pun: menu ber-add-on,
+# open bill di meja, member + riwayat 3 minggu, supplier & pembelian, karyawan.
+# Diukur dari KAWAT sebagai tamu — persis yang dilihat pengunjung.
+TOWN320=$(curl -s -X POST "$BASE/api/auth/guest" -H 'Content-Type: application/json' -d '{"peran":"owner"}' | jq -r '.token // ""')
+TKAS320=$(curl -s -X POST "$BASE/api/auth/guest" -H 'Content-Type: application/json' -d '{"peran":"kasir"}' | jq -r '.token // ""')
+cek "premis §320: tamu owner & kasir bisa masuk" "V == 2" \
+  "$( (for t in "$TOWN320" "$TKAS320"; do [ -n "$t" ] && [ "$t" != "null" ] && echo x; done) | grep -c x)"
+MENU320=$(api "$TOWN320" GET /menu)
+cek "§320 menu demo ≥ 14 (6 lama + 8 baru)" "V >= 14" "$(jq 'length' <<<"$MENU320")"
+cek "§320 ≥ 8 menu demo ber-add-on" "V >= 8" "$(jq '[.[] | select((.addon_groups|length) > 0)] | length' <<<"$MENU320")"
+cek "§320 Mie Ayam punya grup WAJIB 'Level pedas' (min 1, maks 1)" "V == 1" \
+  "$(jq '[.[] | select(.nama=="Mie Ayam") | .addon_groups[] | select(.nama=="Level pedas" and .min_pilih==1 and .maks_pilih==1)] | length' <<<"$MENU320")"
+cek "§320 minuman punya grup 'Gula' (opsional)" "V >= 1" \
+  "$(jq '[.[] | .addon_groups[] | select(.nama=="Gula" and .min_pilih==0)] | length' <<<"$MENU320")"
+cek "§320 ada menu paket demo" "V >= 1" "$(jq '[.[] | select(.tipe=="paket")] | length' <<<"$MENU320")"
+BILL320=$(api "$TKAS320" GET /open-bill)
+cek "§320 ≥ 3 open bill demo di meja" "V >= 3" "$(jq '[.[] | select(.meja_label != null)] | length' <<<"$BILL320")"
+cek "§320 open bill demo memuat baris ber-add-on" "V >= 1" \
+  "$(for id in $(jq -r '.[].id' <<<"$BILL320"); do api "$TKAS320" GET "/open-bill/$id" | jq '[.items[] | select((.addons|length) > 0)] | length'; done | awk '{s+=$1} END {print s+0}')"
+cek "§320 ≥ 6 member demo" "V >= 6" "$(api "$TOWN320" GET /customer | jq '.items | length')"
+cek "§320 ≥ 3 supplier demo" "V >= 3" "$(api "$TOWN320" GET /supplier | jq 'length')"
+cek "§320 ≥ 4 karyawan demo (owner, kasir, dapur, tim)" "V >= 4" "$(api "$TOWN320" GET /karyawan | jq 'length')"
+cek "§320 riwayat penjualan seminggu lalu terisi" "V >= 1" \
+  "$(api "$TOWN320" GET "/penjualan?tanggal=$(TZ=Asia/Jakarta date -d '7 days ago' +%F)" | jq 'length')"
+# Grup wajib benar-benar menggigit untuk tamu — dan pilihan yang sah lolos.
+MIE320=$(jq -r '[.[] | select(.nama=="Mie Ayam")][0]' <<<"$MENU320")
+MIEID320=$(jq -r '.id' <<<"$MIE320")
+PEDAS320=$(jq -r '[.addon_groups[] | select(.nama=="Level pedas") | .addons[] | select(.nama=="Pedas")][0].id' <<<"$MIE320")
+EXMIE320=$(jq -r '[.addon_groups[] | .addons[] | select(.nama=="Extra mie")][0].id' <<<"$MIE320")
+cek "§320 tamu kasir: Mie Ayam tanpa level pedas → addon_tidak_valid" "V == 1" \
+  "$(api "$TKAS320" POST /open-bill "{\"customer_nama\":\"Uji 320\",\"items\":[{\"menu_id\":\"$MIEID320\",\"qty\":1}]}" | jq '(.sebab=="addon_tidak_valid")|if . then 1 else 0 end')"
+B320=$(api "$TKAS320" POST /open-bill "$(jq -nc --arg m "$MIEID320" --arg p "$PEDAS320" --arg e "$EXMIE320" '{customer_nama:"Uji 320",items:[{menu_id:$m,qty:1,addons:[{id:$p,jumlah:1},{id:$e,jumlah:2}]}]}')")
+cek "§320 tamu kasir: Mie Ayam + Pedas + Extra mie ×2 → harga 15.000 + 8.000" "V == 23000" \
+  "$(jq '.items[0].harga_satuan // 0' <<<"$B320")"
+B320_ID=$(jq -r '.id // ""' <<<"$B320")
+[ -n "$B320_ID" ] && api "$TKAS320" DELETE "/open-bill/$B320_ID" > /dev/null
+
+# ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════
 # §309/§310 mengetuk rutenya SENDIRI, jadi jangkauannya berhenti di yang bisa

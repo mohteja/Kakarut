@@ -302,6 +302,9 @@ const DIKECUALIKAN_HOP = new Map<string, string>([
   // `harga × jumlah` add-on (berskala-2 × bilangan bulat ≤ 20) hanya DICETAK
   // di samping nama add-on; `formatRupiahAscii` membulatkan, tak memutuskan.
   ["receipt.ts:formatRupiahAscii", "tambahan add-on yang dicetak, bukan putusan"],
+  // Indeks GILIRAN bilangan bulat (baris ke-n) untuk memilih add-on demo tamu —
+  // bukan angka uang/stok yang diadili; aritmetikanya tak punya derau.
+  ["seed/guest-data.ts:pilihAddon", "indeks giliran data demo, bilangan bulat"],
 ]);
 
 describe("satu hop: nilai lewat variabel perantara", () => {
