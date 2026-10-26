@@ -120,6 +120,26 @@ export function masalahGrup(groups: GrupForm[]): string | null {
   return null;
 }
 
+/**
+ * Aturan grup DIBACAKAN dalam kalimat — "Wajib" dan "Maks pilih" saja tak
+ * mengatakan apa yang terjadi di layar kasir, dan pemilik bertanya persis itu.
+ */
+export function kalimatAturan(g: GrupForm): string {
+  const maks = g.maksPilih.trim() ? Math.round(angkaDari(g.maksPilih)) : null;
+  const min = g.wajib ? Math.max(1, Math.round(angkaDari(g.minPilih || "1"))) : 0;
+  if (min >= 1) {
+    if (maks === min) return `Kasir HARUS memilih tepat ${min} pilihan dari grup ini.`;
+    return maks
+      ? `Kasir HARUS memilih ${min}–${maks} pilihan dari grup ini.`
+      : `Kasir HARUS memilih minimal ${min} pilihan dari grup ini.`;
+  }
+  return maks
+    ? `Opsional — kasir boleh memilih sampai ${maks} pilihan, atau melewatinya.`
+    : "Opsional — kasir boleh memilih sebanyak apa pun, atau melewatinya.";
+}
+
+const labelKecil = "mb-1 block text-[11px] font-medium text-stone-500";
+
 const addonBaru = (): AddonForm => ({
   nama: "",
   harga: "0",
@@ -197,11 +217,17 @@ export function AddonEditor({
           </button>
         </div>
       </div>
-      <p className="mb-3 text-xs text-stone-500">
-        Pilihan yang ditawarkan kasir saat menu ini masuk keranjang — mis. <b>Extra mie</b> (berbayar) atau{" "}
-        <b>Tanpa sayur</b> (gratis). Tercetak di tiket dapur, papan pesanan, bon, dan struk. Harga add-on
-        ditambahkan ke harga menu.
-      </p>
+      <div className="mb-3 space-y-1 text-xs text-stone-500">
+        <p>
+          Pilihan yang ditawarkan kasir saat menu ini masuk keranjang. Harga add-on ditambahkan ke harga
+          menu, dan add-on tercetak di tiket dapur, papan pesanan, bon, dan struk.
+        </p>
+        <p>
+          <b>Grup = kelompok pilihan.</b> Contoh untuk Mie Ayam: grup <b>Level pedas</b> (wajib, pilih 1:
+          Sedang / Pedas) dan grup <b>Tambahan</b> (opsional: Extra mie Rp3.000, Tanpa sayur gratis). Bila
+          tak butuh pilihan wajib, cukup satu grup "Tambahan".
+        </p>
+      </div>
       <div className="space-y-4">
         {value.map((g, gi) => (
           <div key={gi} className="rounded-lg border border-stone-200 p-3" data-testid="grup-addon">
@@ -236,8 +262,8 @@ export function AddonEditor({
                   />
                 </div>
               )}
-              <div className="w-28">
-                <label className="mb-1 block text-xs font-medium text-stone-500">Maks pilih</label>
+              <div className="w-36">
+                <label className="mb-1 block text-xs font-medium text-stone-500">Maks pilihan berbeda</label>
                 <input
                   inputMode="numeric"
                   value={g.maksPilih}
@@ -255,22 +281,43 @@ export function AddonEditor({
                 ✕
               </button>
             </div>
-            <div className="mt-3 space-y-2">
+            <p className="mt-2 text-xs font-medium text-stone-600" data-testid="aturan-grup">
+              {kalimatAturan(g)}
+            </p>
+            {g.wajib && (
+              <p className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                Grup wajib baru aman dipakai setelah aplikasi ponsel versi terbaru terpasang di semua HP
+                kasir — ponsel lama tak menampilkan pilihan add-on.
+              </p>
+            )}
+            {/* Kepala kolom — dulu kotak harga & maks per porsi tak berlabel sama sekali. */}
+            <div className="mt-3 hidden grid-cols-[1fr_8rem_9rem_auto_auto] gap-2 px-2 text-[11px] font-medium text-stone-500 md:grid">
+              <span>Nama add-on</span>
+              <span>Harga (0 = gratis)</span>
+              <span>Maks per porsi</span>
+              <span>Tersedia</span>
+              <span className="w-4" />
+            </div>
+            <div className="mt-1 space-y-2">
               {g.addons.map((a, ai) => {
                 const b = a.ingredientId ? bahanById.get(a.ingredientId) : undefined;
                 const gratis = angkaDari(a.harga || "0") === 0;
                 return (
                   <div key={ai} className="rounded-md bg-stone-50 p-2" data-testid="baris-addon">
-                    <div className="grid grid-cols-2 gap-2 md:grid-cols-[1fr_8rem_7rem_auto_auto]">
-                      <input
-                        value={a.nama}
-                        onChange={(e) => ubahAddon(gi, ai, { nama: e.target.value })}
-                        placeholder="Nama add-on (mis. Extra mie)"
-                        maxLength={60}
-                        aria-label="Nama add-on"
-                        className={`${inputClass} col-span-2 md:col-span-1`}
-                      />
+                    <div className="grid grid-cols-2 items-end gap-2 md:grid-cols-[1fr_8rem_9rem_auto_auto] md:items-center">
+                      <div className="col-span-2 md:col-span-1">
+                        <span className={`${labelKecil} md:hidden`}>Nama add-on</span>
+                        <input
+                          value={a.nama}
+                          onChange={(e) => ubahAddon(gi, ai, { nama: e.target.value })}
+                          placeholder="Nama add-on (mis. Extra mie)"
+                          maxLength={60}
+                          aria-label="Nama add-on"
+                          className={inputClass}
+                        />
+                      </div>
                       <div className="relative">
+                        <span className={`${labelKecil} md:hidden`}>Harga (0 = gratis)</span>
                         <input
                           value={a.harga}
                           // Koma/titik DIPERTAHANKAN: harga tersimpan bisa
@@ -282,20 +329,28 @@ export function AddonEditor({
                           className={inputClass}
                         />
                         <span
-                          className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs ${gratis ? "font-semibold text-green-600" : "text-stone-400"}`}
+                          className={`pointer-events-none absolute bottom-0 right-2 flex h-[38px] items-center text-xs ${gratis ? "font-semibold text-green-600" : "text-stone-400"}`}
                         >
                           {gratis ? "Gratis" : "Rp"}
                         </span>
                       </div>
-                      <input
-                        inputMode="numeric"
-                        value={a.maksJumlah}
-                        onChange={(e) => ubahAddon(gi, ai, { maksJumlah: e.target.value.replace(/\D/g, "") })}
-                        placeholder={`maks ×${BATAS_JUMLAH_ADDON}`}
-                        title="Berapa kali boleh dipilih per porsi (mis. Extra mie ×2). Kosong = s/d 20."
-                        aria-label="Maks per porsi"
-                        className={inputClass}
-                      />
+                      <div className="relative">
+                        <span className={`${labelKecil} md:hidden`}>Maks per porsi</span>
+                        <input
+                          inputMode="numeric"
+                          value={a.maksJumlah}
+                          onChange={(e) => ubahAddon(gi, ai, { maksJumlah: e.target.value.replace(/\D/g, "") })}
+                          placeholder={`bebas (s/d ${BATAS_JUMLAH_ADDON})`}
+                          title="Berapa kali add-on ini boleh dipilih untuk SATU porsi (mis. 2 = Extra mie ×2). Kosong = s/d 20."
+                          aria-label="Maks per porsi"
+                          className={inputClass}
+                        />
+                        {a.maksJumlah.trim() && (
+                          <span className="pointer-events-none absolute bottom-0 right-2 flex h-[38px] items-center text-xs text-stone-400">
+                            × / porsi
+                          </span>
+                        )}
+                      </div>
                       <label className="flex items-center gap-1 text-sm">
                         <input
                           type="checkbox"
@@ -314,7 +369,9 @@ export function AddonEditor({
                       </button>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                      <span className="text-xs text-stone-500">Bahan (opsional):</span>
+                      <span className="text-xs text-stone-500">
+                        Bahan (opsional, supaya stok &amp; HPP ikut terhitung):
+                      </span>
                       <BahanPicker
                         bahan={bahan}
                         value={a.ingredientId}
@@ -336,14 +393,18 @@ export function AddonEditor({
                               </button>
                             ))}
                           </div>
-                          <input
-                            inputMode="decimal"
-                            value={a.qty}
-                            onChange={(e) => ubahAddon(gi, ai, { qty: e.target.value })}
-                            placeholder="takaran"
-                            aria-label="Takaran bahan add-on"
-                            className={`${inputClass} w-24`}
-                          />
+                          {/* Dibungkus: `inputClass` membawa `w-full`, jadi `w-24` di
+                              elemennya sendiri kalah dan kotaknya melebar satu baris. */}
+                          <div className="w-24">
+                            <input
+                              inputMode="decimal"
+                              value={a.qty}
+                              onChange={(e) => ubahAddon(gi, ai, { qty: e.target.value })}
+                              placeholder="takaran"
+                              aria-label="Takaran bahan add-on"
+                              className={inputClass}
+                            />
+                          </div>
                           <span className="text-xs text-stone-500">{b?.satuan} / pilih</span>
                           <button
                             type="button"
@@ -353,6 +414,13 @@ export function AddonEditor({
                             lepas
                           </button>
                         </>
+                      )}
+                      {b && angkaDari(a.qty) > 0 && (
+                        <span className="basis-full text-xs text-stone-600">
+                          Tiap dipilih: <b>{a.arah === "kurang" ? "−" : "+"}{a.qty} {b.satuan}</b> {b.nama}
+                          {a.arah === "kurang" ? " dari resep (tak pernah di bawah 0)" : ""} — dipilih 2× berarti
+                          dua kalinya.
+                        </span>
                       )}
                       {lihatBiaya && a.hppDelta != null && (
                         <span className="text-xs text-stone-500">
