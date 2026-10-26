@@ -42,6 +42,7 @@ atau **"Saya pemilik usaha"** (isi profil usaha lalu jadi owner).
 | --- | --- | --- |
 | `POST /api/onboarding/perusahaan` | `{ nama }` | `BuatPerusahaanBody` = `{ nama, jenis_usaha, alamat, telepon, timezone? }` — `.strict()`; `{nama}` saja → **400** `"jenis_usaha: wajib diisi; alamat: wajib diisi; telepon: wajib diisi"` |
 | `PATCH /api/company` | — | menerima `jenis_usaha` (kode atau `null`); **tetap** menolak `timezone` (400) |
+| `DELETE /api/onboarding/akun` | `{ password }` | `{ password, email }` — **email akun diketik ulang** (trim, tak peka huruf besar); salah/kosong → **400** dan akun tidak dihapus. Tampilkan kotak "ketik email Anda" dan nyalakan tombolnya hanya bila sama. |
 
 Pilihan & aturannya satu rumah: `packages/shared/src/profil-usaha.ts`
 (`JENIS_USAHA`, `ZONA_WAKTU` + `offsetJam`, `PROFIL_USAHA`,
