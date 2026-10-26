@@ -30,7 +30,7 @@ tanpa akses repo server.
 🟢 **BARU** — additif untuk klien lama, dengan **satu syarat rilis** (lihat
 "Urutan rilis" di bawah).
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#238 (CI cabang #501 hijau: unit, verify-api, E2E); ponsel menyusul lewat mohteja/kakarut-mobile#21 SESUDAH server tayang.
 
 **Apa.** Admin mengatur grup add-on per menu di form menu. Kasir memilihnya
 saat menu masuk keranjang; pilihannya tercetak di tiket dapur, papan pesanan,
