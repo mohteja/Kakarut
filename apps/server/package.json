@@ -28,7 +28,7 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.28",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.1.4",
     "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
