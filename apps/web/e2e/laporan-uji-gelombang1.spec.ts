@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { OWNER_EMAIL, OWNER_PASS, absenMasuk, masukLewatSesi, pastikanShiftTerbuka, tampak } from "./util";
+import { BASE, OWNER_EMAIL, OWNER_PASS, absenMasuk, masukLewatSesi, pastikanShiftTerbuka, sesiApi, tampak } from "./util";
 
 /**
  * LAPORAN UJI 31 OKT 2026 — gelombang 1, yang hanya terlihat di layar:
@@ -81,4 +81,63 @@ test("form menu: kategori baru tersimpan tanpa memuat ulang halaman, isian tetap
   await expect(page).toHaveURL(/\/menu\/baru$/);
   await expect(namaMenu).toHaveValue("Menu Uji W35");
   await expect(page.locator("select option", { hasText: namaKat })).toHaveCount(1);
+});
+
+/**
+ * UJI ULANG 31 OKT 2026 — pesan gagal cetak LAN muncul DUA kali: `printBytes`
+ * menulis status galat lalu melempar ulang ke `aksi`, dan kedua kotak merah
+ * menampilkan kalimat yang sama.
+ */
+test("printer LAN tak terjangkau: pesan gagal tampil SATU kali", async ({ page, request }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "kakarut.printer",
+      JSON.stringify({
+        v: 1, transport: "lan", lanHost: "192.0.2.10", lanPort: 9100, paperWidth: 58,
+        charsPerLine: null, autoPrint: false, cutEnabled: false, drawerKickEnabled: false,
+        feedLines: 3, btDeviceName: null, chunkSize: 100, chunkDelayMs: 20,
+      }),
+    );
+  });
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/pengaturan/printer");
+  await page.getByRole("button", { name: /Cetak Tes/ }).click();
+  const pesan = page.getByText(/Gagal mencetak ke 192\.0\.2\.10:9100/);
+  await expect(pesan.first()).toBeVisible({ timeout: 15_000 });
+  await expect(pesan).toHaveCount(1);
+});
+
+/**
+ * UJI ULANG 31 OKT 2026 — "Hapus" menu hanya menonaktifkan (riwayat penjualan
+ * tetap merujuknya), dan dulu tak ada jalan kembali dari aplikasi.
+ */
+test("menu yang dinonaktifkan bisa diaktifkan lagi dari daftar Menu", async ({ page, request }) => {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const h = { Authorization: `Bearer ${token}` };
+  const kat = (await (await request.get(`${BASE}/api/kategori`, { headers: h })).json()) as { id: string }[];
+  expect(kat.length, "PREMIS: ada kategori menu").toBeGreaterThan(0);
+  const nama = `Menu Pulih ${Date.now() % 100000}`;
+  const dibuat = await request.post(`${BASE}/api/menu`, {
+    headers: h,
+    data: { nama, category_id: kat[0].id, tipe: "regular", mult: 1, harga_jual: 12000 },
+  });
+  expect(dibuat.ok(), `POST /menu (status ${dibuat.status()})`).toBeTruthy();
+  const { id } = (await dibuat.json()) as { id: string };
+  expect((await request.delete(`${BASE}/api/menu/${id}`, { headers: h })).ok()).toBeTruthy();
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/menu");
+  const panel = page.getByTestId("menu-nonaktif");
+  await panel.getByRole("button", { name: /Menu nonaktif/ }).click();
+  const baris = panel.locator("div", { hasText: nama }).last();
+  await expect(baris).toBeVisible();
+  await baris.getByRole("button", { name: "Aktifkan lagi" }).click();
+  await expect(panel.getByText(nama)).toHaveCount(0);
+
+  const sesudah = (await (await request.get(`${BASE}/api/menu/${id}`, { headers: h })).json()) as {
+    is_active: boolean;
+  };
+  expect(sesudah.is_active).toBe(true);
+  // Rapikan: menu uji tak ikut tampil di kasir spec lain.
+  await request.delete(`${BASE}/api/menu/${id}`, { headers: h });
 });

@@ -418,7 +418,7 @@ export function MenuListPage() {
                     </Link>
                     <button
                       onClick={() => {
-                        if (confirm(`Nonaktifkan menu "${m.nama}"?`)) hapus.mutate(m.id);
+                        if (confirm(`Nonaktifkan menu "${m.nama}"? Bisa diaktifkan lagi dari "Menu nonaktif" di bawah daftar.`)) hapus.mutate(m.id);
                       }}
                       className="ml-3 text-sm font-medium text-red-500 hover:underline"
                     >
@@ -433,6 +433,72 @@ export function MenuListPage() {
           )}
         </div>
       ))}
+      <MenuNonaktif />
+    </div>
+  );
+}
+
+/**
+ * Menu yang "dihapus" sebenarnya dinonaktifkan (riwayat penjualan tetap
+ * merujuknya) — dan dulu tak ada jalan kembali dari aplikasi (uji web 31 Okt
+ * 2026). `PUT /menu/:id {is_active:true}` adalah update SEBAGIAN: resep, foto,
+ * add-on, dan lokasi tak disentuh.
+ */
+function MenuNonaktif() {
+  const queryClient = useQueryClient();
+  const [buka, setBuka] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["menu", "nonaktif"],
+    queryFn: () => api<MenuDto[]>("/menu?semua=true"),
+    enabled: buka,
+  });
+  const aktifkan = useMutation({
+    mutationFn: (id: string) => api(`/menu/${id}`, { method: "PUT", body: { is_active: true } }),
+    // awalan ["menu"] juga menyegarkan daftar aktif & ["menu","nonaktif"]
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["menu"] }),
+  });
+  const nonaktif = (data ?? []).filter((m) => !m.is_active);
+
+  return (
+    <div className="mt-6 border-t border-stone-200 pt-4" data-testid="menu-nonaktif">
+      <button
+        type="button"
+        onClick={() => setBuka((b) => !b)}
+        className="text-sm font-medium text-stone-600 hover:text-stone-900"
+      >
+        {buka ? "▾" : "▸"} Menu nonaktif{buka && data ? ` (${nonaktif.length})` : ""}
+      </button>
+      {buka && (
+        <div className="mt-3 space-y-2">
+          {isLoading && <Spinner />}
+          {/* Gagal memuat ≠ tidak ada menu nonaktif. */}
+          <ErrorText error={error} />
+          <ErrorText error={aktifkan.error} />
+          {data && nonaktif.length === 0 && (
+            <p className="text-sm text-stone-500">Tidak ada menu nonaktif.</p>
+          )}
+          {nonaktif.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center gap-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2"
+            >
+              <span className="flex-1 text-sm text-stone-700">
+                {m.kode ? <span className="mr-2 font-mono text-xs text-stone-400">{m.kode}</span> : null}
+                {m.nama}
+              </span>
+              <span className="text-sm text-stone-500">{formatRupiah(m.harga_jual)}</span>
+              <button
+                type="button"
+                disabled={aktifkan.isPending}
+                onClick={() => aktifkan.mutate(m.id)}
+                className="text-sm font-medium text-orange-600 hover:underline disabled:opacity-50"
+              >
+                Aktifkan lagi
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -544,7 +544,12 @@ export function PrinterPage() {
                 {status.message}
               </div>
             )}
-            <ErrorText error={error} />
+            {/* Kegagalan cetak sudah tampil di kotak status di atas (printBytes
+                menulisnya lalu melempar ulang ke `aksi`) — jangan dua kali
+                (uji web 31 Okt 2026). Galat lain tetap terlihat. */}
+            {!(status.state === "error" && error instanceof Error && error.message === status.message) && (
+              <ErrorText error={error} />
+            )}
 
             <div className="border-t border-stone-100 pt-3">
               <button
