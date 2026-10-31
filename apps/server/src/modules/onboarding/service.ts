@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Tx } from "../../db/client";
 import type { JenisUsaha, ZonaWaktu } from "@kakarut/shared";
-import { branches, companies, invitations, memberships } from "../../db/schema";
+import { branches, companies, invitations, memberships, menuCategories } from "../../db/schema";
 import { seedKategoriBahanPerusahaan } from "../kategori-bahan/service";
 import { seedMejaDefault } from "../meja/defaults";
 import { seedUnitsPerusahaan } from "../satuan/service";
@@ -66,6 +66,15 @@ export async function buatPerusahaanUntuk(
   await seedMejaDefault(tx, company.id, branch.id);
   await seedUnitsPerusahaan(tx, company.id);
   await seedKategoriBahanPerusahaan(tx, company.id);
+  // Kategori MENU bawaan: form menu mewajibkan kategori, dan akun baru dulu
+  // buntu di menu pertamanya (laporan uji 31 Okt 2026). Bisa diubah/dihapus.
+  await tx
+    .insert(menuCategories)
+    .values([
+      { companyId: company.id, nama: "Makanan", sortOrder: 1 },
+      { companyId: company.id, nama: "Minuman", sortOrder: 2 },
+    ])
+    .onConflictDoNothing();
   // Owner langsung dapat KODE KARYAWAN (barcode/QR absen) — sama seperti
   // karyawan yang dibuat owner & undangan; tanpa ini kolom Kode kosong dan
   // absen owner tak bisa dipindai.

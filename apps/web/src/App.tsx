@@ -12,6 +12,8 @@ import { PrivasiPage } from "./pages/publik/PrivasiPage";
 import { SyaratPage } from "./pages/publik/SyaratPage";
 import { KontakPage } from "./pages/publik/KontakPage";
 import { BantuanPage } from "./pages/publik/BantuanPage";
+import { TidakDitemukanPage } from "./pages/publik/TidakDitemukanPage";
+import { ruteWebDikenal } from "@kakarut/shared";
 import { LoginPage } from "./pages/LoginPage";
 import { SignupPage } from "./pages/SignupPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
@@ -108,6 +110,8 @@ export default function App() {
 
   // Halaman publik (tanpa login) — dapat diakses siapa pun, termasuk reviewer
   // App Store/Play Store & pengunjung umum. Didahulukan sebelum gerbang auth.
+  // Jalur yang bukan rute mana pun → "tidak ditemukan" (server menjawab 404).
+  if (!ruteWebDikenal(pathname)) return <TidakDitemukanPage />;
   if (pathname === "/tentang") return <LandingPage />;
   if (pathname === "/privasi") return <PrivasiPage />;
   if (pathname === "/syarat") return <SyaratPage />;

@@ -26,6 +26,7 @@ import {
   zonaWaktuCadangan,
 } from "../../lib/backup";
 import { sapuUnggahanYatim } from "../../lib/sapu-unggahan";
+import { resetDataDemo } from "../../lib/reset-demo";
 import { keadaanCadangan, peringatanTerakhir } from "../../lib/backup-peringatan";
 import { periksaSetelan } from "../../lib/pemeriksaan-setelan";
 import {
@@ -252,6 +253,13 @@ export const adminSystemRoutes = new Hono<AppEnv>()
       }
     }
     await db.delete(backupRuns).where(eq(backupRuns.id, id));
+    return c.json({ ok: true });
+  })
+  // Reset data demo tamu SEKARANG (biasanya otomatis tiap malam). 409 bila
+  // reset lain sedang berjalan.
+  .post("/reset-demo", async (c) => {
+    const { direset } = await resetDataDemo();
+    if (!direset) throw new HTTPException(409, { message: "Reset demo lain sedang berjalan" });
     return c.json({ ok: true });
   })
   // Terapkan retensi sekarang (buang cadangan lama di luar batas simpan).

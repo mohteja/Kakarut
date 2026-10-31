@@ -25,6 +25,24 @@ tanpa akses repo server.
 
 ---
 
+## 🔴 Laporan uji 31 Okt 2026 (gelombang 1) — PIN owner untuk refund kasir, akun tamu, logout per perangkat, harga saran & susut transfer
+
+🔴 **WAJIB** — refund oleh kasir tanpa PIN owner kini **403**.
+
+**Belum tayang.**
+
+| perubahan | yang harus dilakukan klien |
+| --- | --- |
+| `POST /api/penjualan/:id/refund` menerima `pin_owner` (6 angka); **kasir wajib** mengirimnya. Penolakan 403 ber-`sebab`: `pin_refund_wajib` · `pin_refund_belum_diatur` · `pin_refund_salah`; 429 sesudah 5 PIN salah/15 menit. | Layar refund kasir menampilkan kolom PIN owner/admin. Owner/admin tidak. |
+| `PUT /api/profil/pin` `{pin, password}` (owner/admin); `ProfilDto.pin_refund_diatur`. | Opsional — PIN diatur di web. |
+| `AuthUser.is_tamu` (akun demo bersama). Aksi berikut **403 `sebab: "akun_tamu"`** untuk tamu: tambah/undang/ubah karyawan, ganti password, PIN, hapus akun, buat perusahaan, ganti mode, `PATCH /company`, `POST /print/lan`. | Sembunyikan aksi itu bila `is_tamu`. Data demo direset tiap malam (03.00 WIB) — token tamu lama jadi 401, masuk lagi lewat tombol Tamu. |
+| `POST /api/auth/logout` — cabut token perangkat ini. | Panggil saat Keluar sukarela (best-effort). |
+| `TransferStokItemRow.qty_dikirim` — yang berangkat; status faktur `sebagian` juga bila ada baris tiba kurang. Stok asal kini berkurang sebanyak yang DIKIRIM (susut di jalan tak kembali ke asal). | Tampilkan "dikirim X · susut Y" bila `qty_dikirim > qty`. |
+| Harga saran menu = **HPP ÷ ambang food cost** perusahaan, dibulatkan ke atas Rp1.000 (`harga_saran`, `harga_jual_bulat`). `mult` tak lagi menentukan saran. | Tak ada perubahan bentuk. |
+| `POST /api/print/lan` hanya port 9100–9109, 515, 631. | Tak berdampak (printer ponsel langsung). |
+
+---
+
 ## 🔴 Halaman welcome — profil usaha wajib saat membuat perusahaan, zona waktu WIB/WITA/WIT, "Tambah karyawan" ke akun terdaftar jadi undangan
 
 🔴 **WAJIB** — `POST /api/onboarding/perusahaan` **menolak** badan lama `{nama}`.

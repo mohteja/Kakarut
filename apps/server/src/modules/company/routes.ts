@@ -1,3 +1,4 @@
+import { tolakTamu } from "../../lib/tamu";
 import type { CompanyRow, ModeCompany, UserRole } from "@kakarut/shared";
 import { KODE_JENIS_USAHA, bolehLihatBiaya, tanpaAngkaManajemenCompany } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
@@ -119,7 +120,7 @@ export const companyRoutes = new Hono<AppEnv>()
   })
   // Ganti mode Lite ↔ Pro. Upgrade ke Pro memprovisikan tata lokasi baku
   // (Central Kitchen + Cabang 2 + Kantor) SEKALI — idempoten via cek CK.
-  .post("/mode", requireRole("owner"), zValidator("json", ModeBody), async (c) => {
+  .post("/mode", requireRole("owner"), tolakTamu, zValidator("json", ModeBody), async (c) => {
     const auth = c.get("auth");
     const { mode } = c.req.valid("json");
 
@@ -200,7 +201,7 @@ export const companyRoutes = new Hono<AppEnv>()
     });
     return c.json({ ok: true, mode: "pro", lokasi_baru: lokasiBaru });
   })
-  .patch("/", requireRole("owner", "admin"), zValidator("json", PatchBody), async (c) => {
+  .patch("/", requireRole("owner", "admin"), tolakTamu, zValidator("json", PatchBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const [row] = await db

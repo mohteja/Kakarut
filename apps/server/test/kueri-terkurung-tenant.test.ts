@@ -78,8 +78,8 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
     "`loadDetail` membaca bill lalu MENOLAK di JS (`bill.companyId !== companyId`) sebelum apa pun dipakai; anaknya dibaca lewat `billId` yang sudah lolos itu. Satu situs baru (`.update(openBillItems)` pembatalan) berada di dalam transaksi yang dibuka SESUDAH penolakan itu" }],
   ["modules/penjualan/refund.ts", { situs: 1, alasan:
     "`refundSajian(tx, params)` — barisnya disaring `saleItems.id` milik nota yang sudah diverifikasi pemanggilnya (`penjualan/routes.ts` membaca sale ber-companyId lalu 404) sebelum refund dijalankan" }],
-  ["modules/profil/routes.ts", { situs: 1, alasan:
-    "`eq(users.id, auth.sub)` — profil MILIK PEMANGGIL SENDIRI. Tak ada tenant yang bisa dilanggar: kuncinya identitas di token, bukan id yang datang dari permintaan" }],
+  ["modules/profil/routes.ts", { situs: 2, alasan:
+    "`eq(users.id, auth.sub)` (baca profil & simpan PIN refund, 2026-10-31) — profil MILIK PEMANGGIL SENDIRI. Tak ada tenant yang bisa dilanggar: kuncinya identitas di token, bukan id yang datang dari permintaan" }],
   ["modules/penjualan/routes.ts", { situs: 4, alasan:
     "`sale` datang dari select ber-companyId; `saleItems.saleId = sale.id` dan `users.id = sale.cashierUserId` mengikutinya (tabel `users` memang global — venanya sendiri)" }],
   ["modules/kebersihan/routes.ts", { situs: 3, alasan:

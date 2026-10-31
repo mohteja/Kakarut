@@ -53,6 +53,32 @@ export function hargaJualBulat(saran: number): number {
 }
 
 /**
+ * HARGA SARAN DARI AMBANG FOOD COST — harga terendah yang membuat food cost
+ * menu TIDAK melewati ambang sehat perusahaan: `HPP ÷ (ambang / 100)`.
+ *
+ * Laporan uji 31 Okt 2026: saran lama `HPP × mult` (mult bawaan ×1/×1,5)
+ * menyuruh Bakso Biasa ber-food cost 65,4% (HPP Rp8.500, jual Rp13.000)
+ * TURUN ke Rp9.000 — padahal ambang sehatnya 40%. Saran yang benar ±Rp21.300.
+ *
+ * Ambang ≤ 0 atau tak terbaca → tak ada patokan; dipulangkan HPP apa adanya
+ * (bukan tak hingga) supaya layar tetap bisa menampilkan angka.
+ */
+export function hargaSaranFoodCost(hpp: number, ambangPersen: number): number {
+  if (!Number.isFinite(hpp) || hpp <= 0) return 0;
+  if (!Number.isFinite(ambangPersen) || ambangPersen <= 0) return hpp;
+  return hpp / (ambangPersen / 100);
+}
+
+/**
+ * Pembulatan harga saran ke Rp1.000 KE ATAS — ke bawah bisa mendorong food
+ * cost melewati ambang yang justru dijaga saran itu.
+ */
+export function hargaSaranBulat(saran: number): number {
+  if (!Number.isFinite(saran) || saran <= 0) return 0;
+  return Math.ceil(saran / 1000 - 1e-9) * 1000;
+}
+
+/**
  * Food cost (%) = HPP ÷ harga jual. `null` bila TAK BISA dihitung.
  *
  * Dulu memulangkan **0** saat harga jualnya nol — dan nol itu dipercaya. Menu

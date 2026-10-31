@@ -22,6 +22,13 @@ export interface AuthUser {
   company_id: string | null;
   role: UserRole | null;
   branch_id: string | null;
+  /**
+   * Akun demo bersama (tombol "Tamu Owner/Kasir"). Klien menyembunyikan aksi
+   * yang ditolak server untuk tamu (`sebab: "akun_tamu"`) dan menampilkan pita
+   * "data demo direset tiap malam". Dihitung dari email di server, bukan klaim
+   * yang bisa dipalsukan.
+   */
+  is_tamu: boolean;
 }
 
 /** Mode aplikasi yang diturunkan dari `plan` — Lite menyembunyikan fitur Pro. */
@@ -186,6 +193,11 @@ export interface ProfilDto {
   role: UserRole | null;
   cabang: string | null;
   employee_code: string | null;
+  /**
+   * Akun ini sudah mengatur PIN refund? Hanya bermakna untuk owner/admin —
+   * kasir yang mengembalikan uang wajib menyertakan PIN salah satunya.
+   */
+  pin_refund_diatur: boolean;
 }
 
 export type InvitationStatus = "pending" | "accepted" | "revoked";
@@ -1628,6 +1640,13 @@ export interface TransferStokItemRow {
   /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
   status: KonfirmasiStatus;
   alasan_tolak: string | null;
+  /**
+   * Jumlah yang BERANGKAT, dalam `satuan`. Sama dengan `qty` kecuali kiriman
+   * diterima SEBAGIAN (kirim 10, terima 8): `qty` = yang tiba, `qty_dikirim`
+   * = 10, selisihnya susut di perjalanan — mengurangi stok asal (sejak
+   * 2026-10-31; dulu angka 10 hilang dari catatan, laporan uji 31 Okt 2026).
+   */
+  qty_dikirim: number;
 }
 
 /**
@@ -1756,7 +1775,10 @@ export interface TransferStokFaktur {
   tujuan_cabang: string | null;
   catatan: string | null;
   dibuat_oleh: string | null;
-  /** agregat status baris; "sebagian" = ada yang diterima & ada yang ditolak */
+  /**
+   * agregat status baris; "sebagian" = ada yang ditolak di samping yang
+   * diterima, ATAU ada baris yang tiba kurang dari yang dikirim
+   */
   status: KonfirmasiStatus | "sebagian";
   items: TransferStokItemRow[];
 }

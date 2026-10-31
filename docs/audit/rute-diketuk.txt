@@ -155,12 +155,14 @@ POST /api/absensi/saya
 POST /api/admin/error-log/pangkas
 POST /api/admin/sistem/backup
 POST /api/admin/sistem/backup/retensi
+POST /api/admin/sistem/reset-demo
 POST /api/admin/sistem/sapu-unggahan
 POST /api/admin/sistem/smtp/test-email
 POST /api/admin/tenants
 POST /api/auth/forgot-password
 POST /api/auth/guest
 POST /api/auth/login
+POST /api/auth/logout
 POST /api/auth/register
 POST /api/auth/resend-verification
 POST /api/auth/reset-password
@@ -277,3 +279,4 @@ PUT /api/penyimpanan/:id/bahan
 PUT /api/penyimpanan/:id/petugas
 PUT /api/perlengkapan/:id/aturan
 PUT /api/perlengkapan/:id/supplier
+PUT /api/profil/pin

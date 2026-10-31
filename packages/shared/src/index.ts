@@ -27,3 +27,4 @@ export * from "./geo";
 export * from "./angka";
 export * from "./skala";
 export * from "./profil-usaha";
+export * from "./rute-web";

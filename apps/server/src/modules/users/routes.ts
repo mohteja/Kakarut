@@ -1,3 +1,4 @@
+import { tolakTamu } from "../../lib/tamu";
 import { randomBytes } from "node:crypto";
 import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
@@ -286,7 +287,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       );
     return c.json(rows.map(karyawanRow));
   })
-  .post("/", zValidator("json", KaryawanBody), async (c) => {
+  .post("/", tolakTamu, zValidator("json", KaryawanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     if (body.role === "owner" && auth.role !== "owner") {
@@ -381,6 +382,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
    */
   .post(
     "/undang",
+    tolakTamu,
     batasUndangKorban,
     batasUndangPerusahaan,
     zValidator("json", UndangBody),
@@ -460,7 +462,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
     return c.json(dto);
   })
   /** Batalkan undangan pending. */
-  .delete("/undangan/:id", async (c) => {
+  .delete("/undangan/:id", tolakTamu, async (c) => {
     const auth = c.get("auth");
     const [row] = await db
       .update(invitations)
@@ -546,6 +548,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
    */
   .put(
     "/:userId/tempat",
+    tolakTamu,
     zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()).max(2000) }).strict()),
     async (c) => {
       const auth = c.get("auth");
@@ -625,7 +628,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       return c.json({ ok: true, assigned: uniqueIds });
     },
   )
-  .patch("/:userId", zValidator("json", PatchKaryawanBody), async (c) => {
+  .patch("/:userId", tolakTamu, zValidator("json", PatchKaryawanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const userId = c.req.param("userId");

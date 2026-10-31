@@ -1,3 +1,4 @@
+import { tolakTamu } from "../../lib/tamu";
 import bcrypt from "bcryptjs";
 import type { ProfilDto } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
@@ -8,6 +9,15 @@ import { db } from "../../db/client";
 import { branches, fakturLogs, memberships, users } from "../../db/schema";
 import { verifikasiPassword, type AppEnv } from "../../middleware/auth";
 import { buatSesi } from "../auth/session";
+import { HTTPException } from "hono/http-exception";
+import { POLA_PIN_REFUND } from "../../lib/pin-refund";
+
+const PinBody = z
+  .object({
+    pin: z.string().regex(POLA_PIN_REFUND, "PIN harus tepat 6 angka"),
+    password: z.string(),
+  })
+  .strict();
 
 const GantiPasswordBody = z.object({
   password_lama: z.string(),
@@ -23,7 +33,7 @@ export const profilRoutes = new Hono<AppEnv>()
     const auth = c.get("auth");
     // nama/email diambil segar dari DB (JWT bisa basi setelah ganti nama)
     const [user] = await db
-      .select({ nama: users.nama, email: users.email })
+      .select({ nama: users.nama, email: users.email, pinRefundHash: users.pinRefundHash })
       .from(users)
       .where(eq(users.id, auth.sub));
 
@@ -53,6 +63,7 @@ export const profilRoutes = new Hono<AppEnv>()
       role: auth.role,
       cabang,
       employee_code: m?.employeeCode ?? null,
+      pin_refund_diatur: user?.pinRefundHash != null,
     } satisfies ProfilDto);
   })
   /** Riwayat kegiatan SENDIRI (log faktur yang dilakukan akun ini). */
@@ -76,8 +87,26 @@ export const profilRoutes = new Hono<AppEnv>()
       .limit(50);
     return c.json({ rows });
   })
+  /**
+   * Atur/ganti PIN REFUND (owner/admin). Kasir yang mengembalikan uang wajib
+   * mengetikkan PIN owner/admin yang hadir (`lib/pin-refund.ts`). Butuh
+   * password akun — PIN ini membuka uang laci.
+   */
+  .put("/pin", tolakTamu, zValidator("json", PinBody), async (c) => {
+    const auth = c.get("auth");
+    if (auth.role !== "owner" && auth.role !== "admin") {
+      throw new HTTPException(403, { message: "PIN refund hanya untuk owner/admin" });
+    }
+    const body = c.req.valid("json");
+    await verifikasiPassword(auth.sub, body.password);
+    await db
+      .update(users)
+      .set({ pinRefundHash: bcrypt.hashSync(body.pin, 10) })
+      .where(eq(users.id, auth.sub));
+    return c.json({ ok: true });
+  })
   /** Ganti password sendiri: verifikasi password lama dulu. */
-  .post("/password", zValidator("json", GantiPasswordBody), async (c) => {
+  .post("/password", tolakTamu, zValidator("json", GantiPasswordBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     await verifikasiPassword(auth.sub, body.password_lama);

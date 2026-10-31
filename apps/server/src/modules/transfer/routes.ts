@@ -101,9 +101,15 @@ async function pastikanCabangStok(companyId: string, id: string, peran: "Asal" |
 }
 
 /** Status agregat satu faktur transfer dari status baris-barisnya. */
-function statusFaktur(items: { status: KonfirmasiStatus }[]): KonfirmasiStatus | "sebagian" {
+function statusFaktur(
+  items: { status: KonfirmasiStatus; qty: number; qty_dikirim: number }[],
+): KonfirmasiStatus | "sebagian" {
   const set = new Set(items.map((i) => i.status));
-  if (set.size === 1) return [...set][0];
+  // Diterima semua tapi ada yang tiba KURANG dari yang dikirim → "sebagian",
+  // bukan "✅ Diterima" (laporan uji 31 Okt 2026: kirim 10 terima 8 tertulis
+  // "8 pcs ✅ Diterima", angka 10 hilang).
+  const adaKurang = items.some((i) => i.status === "dikonfirmasi" && i.qty_dikirim > i.qty);
+  if (set.size === 1) return adaKurang ? "sebagian" : [...set][0];
   if (set.has("dikonfirmasi") && set.has("ditolak") && !set.has("menunggu")) return "sebagian";
   return "menunggu";
 }
@@ -248,6 +254,7 @@ export const transferRoutes = new Hono<AppEnv>()
         satuan_beli: ingredients.satuanBeli,
         pengadaan: ingredients.pengadaan,
         qty: productions.qty,
+        qty_dipesan: productions.qtyDipesan,
         status: productions.status,
         alasan_tolak: productions.alasanTolak,
         catatan: productions.catatan,
@@ -312,6 +319,7 @@ export const transferRoutes = new Hono<AppEnv>()
         qty_setara: t.setara,
         status: r.status,
         alasan_tolak: r.alasan_tolak,
+        qty_dikirim: r.qty_dipesan ?? r.qty,
       };
       f.items.push(item);
     }

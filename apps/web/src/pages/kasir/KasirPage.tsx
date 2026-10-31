@@ -2094,13 +2094,21 @@ export function KasirPage() {
                             meja itu justru wajib, dan penjualan langsung di meja
                             terisi juga sah. Yang ditolak server hanya bill KEDUA
                             (409 `meja_sudah_ada_bill`), bukan pemilihan mejanya. */}
+                        {/* Nama di baris sendiri, status di bawahnya — dulu satu
+                            baris dengan status + tombol Kosongkan, dan di layar
+                            375 px nama meja terisi terpotong jadi "M…" sehingga
+                            Meja 1 / Meja 2 / Meja 2 demo tak bisa dibedakan
+                            (laporan uji 31 Okt 2026). Nama kini membungkus. */}
                         <button
                           onClick={() => pilihMeja(m.id)}
-                          className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
+                          className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
+                          data-testid="meja-pilih"
                         >
-                          <span className="truncate">{takeaway ? `🥡 ${m.nama}` : m.nama}</span>
+                          <span className="break-words [overflow-wrap:anywhere]">
+                            {takeaway ? `🥡 ${m.nama}` : m.nama}
+                          </span>
                           <span
-                            className={`shrink-0 text-xs font-medium ${dipilih ? "text-white/80" : "opacity-80"}`}
+                            className={`text-xs font-medium ${dipilih ? "text-white/80" : "opacity-80"}`}
                           >
                             {takeaway ? "Take away" : st ? labelStatus(st) : "Dine-in"}
                           </span>

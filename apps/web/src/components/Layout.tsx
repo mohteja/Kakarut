@@ -799,6 +799,16 @@ export function Layout() {
         ref={mainRef}
         className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 print:overflow-visible"
       >
+        {auth?.user.is_tamu && (
+          <div
+            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 print:hidden"
+            data-testid="pita-tamu"
+          >
+            🧪 <b>Akun demo bersama</b> — silakan coba bebas. Data dikembalikan seperti semula setiap malam;
+            undang karyawan, ganti password, dan pengaturan perusahaan tidak tersedia. PIN refund owner
+            demo: <b>123456</b>.
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

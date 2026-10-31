@@ -11,7 +11,7 @@ const FITUR = [
   { ikon: "🏭", judul: "Produksi & pembelian", teks: "Central Kitchen, faktur produksi & beli bahan, penerimaan barang antar cabang." },
   { ikon: "🕒", judul: "Shift & absensi", teks: "Buka/tutup kasir, rekap shift, dan absen karyawan berbasis lokasi + foto." },
   { ikon: "📊", judul: "Laporan", teks: "Penjualan, menu terlaris, laba kotor, dan laporan belanja untuk pemilik." },
-  { ikon: "📶", judul: "Mode offline", teks: "Transaksi tetap tercatat saat internet putus, lalu tersinkron otomatis." },
+  { ikon: "📶", judul: "Offline di aplikasi HP", teks: "Di aplikasi Android, transaksi tetap tercatat saat internet putus lalu tersinkron otomatis. Versi web butuh internet." },
 ];
 
 /**

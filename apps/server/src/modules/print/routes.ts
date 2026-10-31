@@ -1,3 +1,4 @@
+import { tolakTamu } from "../../lib/tamu";
 import dns from "node:dns/promises";
 import net from "node:net";
 import { zValidator } from "../../lib/validator";
@@ -6,9 +7,28 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { type AppEnv } from "../../middleware/auth";
 
+/**
+ * PORT PRINTER yang boleh dituju.
+ *
+ * Laporan uji 31 Okt 2026 (SSRF): server mengirim byte ke `host:port` apa pun
+ * yang diisi pengguna. Di server awan, bahaya terbesarnya bukan IP publik
+ * melainkan layanan DALAM di jaringan kontainer yang sama — basis data (5432),
+ * cache (6379), panel admin (80/443/8080) — yang memang beralamat LAN privat
+ * dan karenanya lolos `ipInternal`. Printer struk hanya bicara di segelintir
+ * port: RAW/JetDirect 9100–9109, LPD 515, IPP 631. Membatasi port menutup
+ * jalan ke layanan-layanan itu tanpa mematikan printer sungguhan.
+ */
+export const PORT_PRINTER = new Set([9100, 9101, 9102, 9103, 9104, 9105, 9106, 9107, 9108, 9109, 515, 631]);
+
 const LanBody = z.object({
   host: z.string().trim().min(1).max(255),
-  port: z.number().int().min(1).max(65535),
+  port: z
+    .number()
+    .int()
+    .max(65535)
+    .refine((p) => PORT_PRINTER.has(p), {
+      message: "Port printer harus 9100–9109, 515, atau 631",
+    }),
   /** byte ESC/POS dalam base64 */
   data: z.string().min(1).max(400_000),
 }).strict();
@@ -145,6 +165,7 @@ async function kirimKePrinter(ip: string, port: number, bytes: Buffer): Promise<
  */
 export const printRoutes = new Hono<AppEnv>().post(
   "/lan",
+  tolakTamu,
   zValidator("json", LanBody),
   async (c) => {
     const { host, port, data } = c.req.valid("json");

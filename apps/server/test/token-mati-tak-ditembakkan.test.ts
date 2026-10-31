@@ -115,7 +115,11 @@ describe("PASANGAN: jalur /auth publik tidak digerbangi — dan daftarnya diadu 
       .map((m) => m[1])
       .sort();
     expect(bersesi, "premis: sapuannya menemukan sesuatu").not.toHaveLength(0);
-    expect(bersesi).toEqual(["/me"]);
+    // `/logout` (2026-10-31) juga ber-sesi, tapi web memanggilnya lewat
+    // `fetch` langsung di `logout()` — BUKAN `api()` — jadi gerbang token-mati
+    // di `api.ts` tak pernah dilewatinya dan daftarnya tak perlu menyebutnya.
+    expect(bersesi).toEqual(["/logout", "/me"]);
+    expect(baca("../../web/src/context/AuthContext.tsx")).toContain('void fetch("/api/auth/logout"');
     expect(API).toContain('const JALUR_AUTH_BERSESI = new Set(["/auth/me"]);');
   });
 

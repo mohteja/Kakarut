@@ -94,6 +94,7 @@ const katalog: KatalogMenu = {
   ]),
   branchIdsByMenu: new Map(),
   addonGroupsByMenu: new Map([["m-mie", grup]]),
+  ambangFoodCost: 40,
   bahanAddon: new Map([
     ["mie", bahan({ harga_per_unit: 10 })],
     ["sayur", bahan({ harga_per_unit: 2 })],

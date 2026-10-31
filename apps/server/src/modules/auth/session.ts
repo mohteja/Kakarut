@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { adalahTamu } from "../../lib/tamu";
 import { and, eq, isNull } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import type { AuthUser, CompanyDto, SesiLogin } from "@kakarut/shared";
@@ -51,6 +53,7 @@ export async function buatSesi(user: UserRow, preferredCompanyId?: string): Prom
     company_id: null,
     role: null,
     branch_id: null,
+    is_tamu: adalahTamu(user.email),
   };
   let company: ReturnType<typeof companyDto> | null = null;
   let branch: { id: string; nama: string } | null = null;
@@ -91,8 +94,11 @@ export async function buatSesi(user: UserRow, preferredCompanyId?: string): Prom
   // Klaim `tv` (token version) menyertai token agar bisa dibatalkan saat
   // password berubah — divalidasi di requireAuth. Tidak ikut di `payload`
   // (AuthUser) yang dikembalikan ke klien: klien menyimpan token apa adanya.
+  // `jwtid` (klaim `jti`) acak per token: "Keluar" mencabut token INI saja
+  // (`token_dicabut`), bukan semua perangkat akun yang sama.
   const token = jwt.sign({ ...payload, tv: user.tokenVersion }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"],
+    jwtid: randomUUID(),
   });
   return { token, user: payload, company, branch };
 }

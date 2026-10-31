@@ -1,3 +1,4 @@
+import jwt from "jsonwebtoken";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { DaftarResult } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
@@ -16,6 +17,7 @@ import {
   companies,
   emailVerificationTokens,
   passwordResetTokens,
+  tokenDicabut,
   users,
 } from "../../db/schema";
 import { requireAuth, type AppEnv } from "../../middleware/auth";
@@ -439,6 +441,23 @@ export const authRoutes = new Hono<AppEnv>()
     // User tanpa perusahaan TETAP boleh masuk → diarahkan ke onboarding
     // (buat perusahaan / terima undangan). buatSesi mengembalikan company null.
     return c.json(await buatSesi(user));
+  })
+  // KELUAR — cabut token perangkat INI (klaim `jti`) sampai kedaluwarsanya.
+  // Perangkat lain yang masuk dengan akun yang sama tetap berjalan. Token lama
+  // tanpa `jti` tak bisa dicabut satu per satu (mati sendiri ≤ 12 jam); untuk
+  // itu tetap dijawab ok supaya klien tak perlu bercabang.
+  .post("/logout", requireAuth, async (c) => {
+    const klaim = jwt.decode(c.req.header("Authorization")!.slice(7)) as {
+      jti?: string;
+      exp?: number;
+    } | null;
+    if (klaim?.jti && klaim.exp) {
+      await db
+        .insert(tokenDicabut)
+        .values({ jti: klaim.jti, kedaluwarsa: new Date(klaim.exp * 1000) })
+        .onConflictDoNothing();
+    }
+    return c.json({ ok: true });
   })
   // Masuk sebagai TAMU (guest mode) — akun bersama untuk mencoba aplikasi,
   // tanpa password. Dua peran: owner & kasir, di perusahaan demo (tanpa

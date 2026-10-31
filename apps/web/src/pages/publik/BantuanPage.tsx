@@ -20,7 +20,7 @@ const FAQ: { t: string; j: React.ReactNode }[] = [
   },
   {
     t: "Apakah bisa dipakai saat internet putus?",
-    j: <>Ya. Transaksi tetap tercatat saat offline dan akan tersinkron otomatis begitu koneksi kembali.</>,
+    j: <>Bisa, lewat <b>aplikasi Android</b>: transaksi tetap tercatat saat offline dan tersinkron otomatis begitu koneksi kembali. Versi web (browser) membutuhkan internet untuk menyimpan transaksi.</>,
   },
   {
     t: "Bagaimana cara menghapus akun?",

@@ -99,6 +99,8 @@ const BELUM_TAYANG = new Set([
   // stempelnya dipasang DAN baris ini dihapus pada commit yang sama dengan
   // merge-nya.
   '## 🔴 Halaman welcome — profil usaha wajib saat membuat perusahaan, zona waktu WIB/WITA/WIT, "Tambah karyawan" ke akun terdaftar jadi undangan',
+  // BELUM DI-MERGE (2026-10-31): laporan uji gelombang 1, di branch yang sama.
+  '## 🔴 Laporan uji 31 Okt 2026 (gelombang 1) — PIN owner untuk refund kasir, akun tamu, logout per perangkat, harga saran & susut transfer',
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

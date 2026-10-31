@@ -146,7 +146,14 @@ export function judulHalaman(pathname: string): string | null {
  * saja (atau nama aplikasi) — lebih baik daripada judul "undefined" atau
  * tab yang mendadak kehilangan identitasnya di tengah navigasi.
  */
+/**
+ * Judul halaman depan publik (belum login) — yang dibaca mesin pencari & pratinjau
+ * tautan. "Terakasir" saja tak menyebut apa produknya (laporan uji 31 Okt 2026).
+ */
+export const JUDUL_LANDING = `${NAMA_APLIKASI} — Aplikasi Kasir F&B, Stok & HPP`;
+
 export function judulDokumen(pathname: string, perusahaan?: string | null): string {
+  if (pathname === "/" && !perusahaan?.trim()) return JUDUL_LANDING;
   const pemilik = perusahaan?.trim() || NAMA_APLIKASI;
   const halaman = judulHalaman(pathname);
   return halaman ? `${halaman} | ${pemilik}` : pemilik;

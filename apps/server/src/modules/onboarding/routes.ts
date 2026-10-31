@@ -1,3 +1,4 @@
+import { tolakTamu } from "../../lib/tamu";
 import { zValidator } from "../../lib/validator";
 import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
@@ -107,6 +108,7 @@ export const onboardingRoutes = new Hono<AppEnv>()
   // Buat perusahaan sendiri → jadi OWNER → sesi baru diarahkan ke perusahaan itu.
   .post(
     "/perusahaan",
+    tolakTamu,
     zValidator("json", BuatPerusahaanSchema),
     async (c) => {
       const auth = c.get("auth");
@@ -227,6 +229,7 @@ export const onboardingRoutes = new Hono<AppEnv>()
   // mana pun yang melewatkannya ditolak dengan kalimat yang sama.
   .delete(
     "/akun",
+    tolakTamu,
     zValidator(
       "json",
       z.object({ password: z.string(), email: z.string().trim().toLowerCase() }).strict(),

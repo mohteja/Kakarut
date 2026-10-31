@@ -25,6 +25,7 @@ import {
   deviceIdField,
 } from "../sync/idempoten";
 import { refundSajian } from "./refund";
+import { izinRefundKasir, POLA_PIN_REFUND } from "../../lib/pin-refund";
 import { strukPenjualan } from "./struk";
 import { gerbangBerlaku, kebutuhanKeranjang, pesanStokKurang } from "./stok-keranjang";
 import { loadKatalog } from "../menu/service";
@@ -517,6 +518,8 @@ export const penjualanRoutes = new Hono<AppEnv>()
         alasan: z.string().nullish(),
         client_ref: clientRefField,
         device_id: deviceIdField,
+        /** PIN owner/admin yang hadir — WAJIB bila yang merefund kasir */
+        pin_owner: z.string().regex(POLA_PIN_REFUND, "PIN harus 6 angka").nullish(),
         items: z
           .array(
             z.object({
@@ -579,11 +582,15 @@ export const penjualanRoutes = new Hono<AppEnv>()
               throw new HTTPException(404, { message: "Transaksi tidak ditemukan" });
             }
           }
+          // Kasir butuh izin owner/admin di tempat (laporan uji 31 Okt 2026).
+          const disetujuiOleh =
+            auth.role === "cashier" ? await izinRefundKasir(auth.company_id!, body.pin_owner, auth.sub) : null;
           const hasil = await db.transaction((tx) =>
             refundSajian(tx, {
               saleId,
               companyId: auth.company_id!,
               userId: auth.sub,
+              disetujuiOleh,
               alasan: body.alasan,
               items: body.items.map((i) => ({ saleItemId: i.sale_item_id, qty: i.qty })),
             }),

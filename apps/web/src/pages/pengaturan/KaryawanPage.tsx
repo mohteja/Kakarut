@@ -22,6 +22,7 @@ import type {
   UndanganKaryawanRow,
   UserRole,
 } from "@kakarut/shared";
+import { useAuth } from "../../context/AuthContext";
 import { labelCabang, useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
@@ -217,6 +218,8 @@ function TempatSOModal({ karyawan, onClose }: { karyawan: KaryawanRow; onClose: 
 }
 
 export function KaryawanPage() {
+  // Akun demo: tambah/undang/ubah karyawan ditolak server (`akun_tamu`).
+  const tamu = useAuth().auth?.user.is_tamu === true;
   const { cabang } = useBranch();
   const { isPro } = useCompanyMode();
   // Admin selalu berlokasi di Kantor (pusat) — lokasi kerjanya dikunci ke sini.
@@ -362,6 +365,11 @@ export function KaryawanPage() {
     <div className="max-w-4xl">
       <PageTitle
         aksi={
+          tamu ? (
+            <span className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Tambah & undang karyawan tidak tersedia di akun demo
+            </span>
+          ) : (
           <div className="flex gap-2">
             <button
               onClick={() =>
@@ -386,6 +394,7 @@ export function KaryawanPage() {
               + Tambah Karyawan
             </button>
           </div>
+          )
         }
       >
         Karyawan

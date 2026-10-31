@@ -244,6 +244,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    // Cabut token perangkat ini di server (POST /auth/logout) — best-effort dan
+    // tanpa ditunggu: keluar dari layar tak boleh tertahan jaringan. `fetch`
+    // langsung, bukan `api()`: token yang sudah mati menjawab 401, dan jalur
+    // 401 `api()` memicu penanganan "sesi berakhir" yang tak relevan di sini.
+    const token = loadAuth()?.token;
+    if (token) {
+      void fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true,
+      }).catch(() => undefined);
+    }
     saveAuth(null);
     hapusLokal("kakarut.branch");
     hapusLokal("kakarut.cabang-data");

@@ -268,6 +268,12 @@ export const users = pgTable("users", {
    */
   tokenVersion: integer("token_version").notNull().default(0),
   /**
+   * PIN REFUND (bcrypt, 6 angka) — owner/admin mengaturnya di Profil. Kasir
+   * yang mengembalikan uang wajib menyertakan PIN owner/admin yang hadir
+   * (laporan uji 31 Okt 2026: kasir bisa refund sendirian). Null = belum diatur.
+   */
+  pinRefundHash: text("pin_refund_hash"),
+  /**
    * Verifikasi email: terisi = email sudah dikonfirmasi (klik tautan). NULL =
    * belum → login diblokir (kecuali super admin). Pendaftaran mandiri dibuat
    * NULL; akun yang dibuat admin/seed/undangan langsung terisi (pra-verifikasi).
@@ -1695,6 +1701,11 @@ export const saleRefunds = pgTable(
      * itu — laci itulah yang uangnya benar-benar keluar.
      */
     shiftId: uuid("shift_id").references(() => shifts.id, { onDelete: "set null" }),
+    /**
+     * Owner/admin yang PIN-nya mengizinkan refund oleh kasir. Null = yang
+     * merefund owner/admin sendiri (tak butuh izin) atau baris lama.
+     */
+    disetujuiOleh: uuid("disetujui_oleh").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -2632,6 +2643,21 @@ export const supplyPurchases = pgTable(
  * pra-fitur) cukup berjalan SEKALI; boot berikutnya melompatinya sehingga
  * start server tetap cepat saat data membesar. Baris = satu backfill selesai.
  */
+/**
+ * TOKEN YANG DICABUT lewat "Keluar" — satu baris per token (klaim `jti`).
+ *
+ * Laporan uji 31 Okt 2026: token lama tetap berlaku setelah Keluar, padahal
+ * tablet kasir sering dipakai bergantian. Mencabut lewat `token_version` akan
+ * mengeluarkan SEMUA perangkat akun itu sekaligus; tabel ini mencabut token
+ * perangkat yang menekan Keluar saja. Barisnya tak berguna lagi sesudah
+ * `kedaluwarsa` (token itu toh sudah mati) — dipangkas `pangkas-token`.
+ */
+export const tokenDicabut = pgTable("token_dicabut", {
+  jti: text("jti").primaryKey(),
+  kedaluwarsa: timestamp("kedaluwarsa", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const bootFlags = pgTable("boot_flags", {
   key: text("key").primaryKey(),
   selesaiAt: timestamp("selesai_at", { withTimezone: true }).notNull().defaultNow(),

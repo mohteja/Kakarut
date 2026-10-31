@@ -46,6 +46,8 @@ export async function refundSajian(
     saleId: string;
     companyId: string;
     userId: string;
+    /** owner/admin yang PIN-nya mengizinkan refund kasir; null = tak perlu */
+    disetujuiOleh?: string | null;
     alasan?: string | null;
     items: PermintaanRefund[];
   },
@@ -182,6 +184,7 @@ export async function refundSajian(
       alasan: params.alasan?.trim() || null,
       userId: params.userId,
       shiftId: shiftAktif?.id ?? null,
+      disetujuiOleh: params.disetujuiOleh ?? null,
     });
   }
 

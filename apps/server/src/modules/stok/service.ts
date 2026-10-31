@@ -114,7 +114,11 @@ export async function hitungSaldoCabang(
       -- ke cabang lain (asal_branch_id = cabang ini) & sudah DITERIMA
       -- (dikonfirmasi) → mengurangi saldo CK. Produksi work-order (asal null)
       -- tak termasuk — itu produksi baru, bukan pemindahan stok yang ada.
-      SELECT SUM(pr.qty) AS qty
+      -- YANG BERANGKAT, bukan yang tiba: terima sebagian (kirim 10, terima 8)
+      -- menyimpan 10 di qty_dipesan. Dulu SUM(pr.qty) mengembalikan 2 yang
+      -- hilang di jalan ke saldo CK secara diam-diam (laporan uji 31 Okt
+      -- 2026); kini CK berkurang 10 dan selisihnya tampil sebagai susut kirim.
+      SELECT SUM(COALESCE(pr.qty_dipesan, pr.qty)) AS qty
       FROM productions pr
       WHERE pr.asal_branch_id = ${branchId} AND pr.ingredient_id = i.id
         AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
@@ -389,7 +393,7 @@ export async function kartuStok(params: {
       + COALESCE((
         -- KIRIM KELUAR: stok dipindah dari cabang ini ke cabang lain & sudah
         -- diterima — komponen yang sama dgn hitungSaldoCabang (asal_branch_id)
-        SELECT SUM(pr.qty) FROM productions pr
+        SELECT SUM(COALESCE(pr.qty_dipesan, pr.qty)) FROM productions pr
         WHERE pr.asal_branch_id = ${branchId} AND pr.ingredient_id = ${ingredientId}
           AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL AND pr.prod_date < ${dari}
           AND (NOT EXISTS (SELECT 1 FROM baseline) OR pr.waktu > (SELECT created_at FROM baseline))
@@ -449,8 +453,13 @@ export async function kartuStok(params: {
       -- KIRIM KELUAR: stok dipindah dari cabang ini & sudah diterima cabang
       -- tujuan (asal_branch_id = cabang ini) — komponen saldo yang sama dgn
       -- hitungSaldoCabang; sebelumnya tak tercatat di kartu (saldo melenceng).
-      SELECT pr.waktu, 'kirim' AS jenis, pr.qty,
-             ('Kirim ke ' || bt.nama) AS catatan,
+      SELECT pr.waktu, 'kirim' AS jenis, COALESCE(pr.qty_dipesan, pr.qty) AS qty,
+             ('Kirim ke ' || bt.nama ||
+               CASE WHEN pr.qty_dipesan IS NOT NULL AND pr.qty_dipesan > pr.qty
+                 THEN ' · diterima ' || trim(to_char(pr.qty, 'FM999999990.###')) ||
+                      ', susut di jalan ' ||
+                      trim(to_char(pr.qty_dipesan - pr.qty, 'FM999999990.###'))
+                 ELSE '' END) AS catatan,
              COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
              NULL AS supplier, NULL AS tempat, false AS is_batch, pr.id AS ev_id
       FROM productions pr
@@ -633,7 +642,7 @@ export async function saldoBahanPerCabang(
         )
     ) pc ON TRUE
     LEFT JOIN LATERAL (
-      SELECT SUM(pr.qty) AS qty FROM productions pr
+      SELECT SUM(COALESCE(pr.qty_dipesan, pr.qty)) AS qty FROM productions pr
       WHERE pr.asal_branch_id = br.id AND pr.ingredient_id = ${ingredientId}
         AND pr.status = 'dikonfirmasi' AND pr.deleted_at IS NULL
         AND (b.created_at IS NULL OR pr.waktu > b.created_at)
@@ -721,7 +730,7 @@ export async function fifoBahan(params: {
         AND (${sejak}::timestamptz IS NULL OR pc.waktu >= ${sejak})
       UNION ALL
       -- KELUAR: kiriman ke cabang lain yang sudah diterima
-      SELECT pr.waktu, 'keluar', 'kirim', pr.qty, NULL, NULL,
+      SELECT pr.waktu, 'keluar', 'kirim', COALESCE(pr.qty_dipesan, pr.qty), NULL, NULL,
              COALESCE(dn.nomor_teks, pr.no_faktur), NULL,
              ('Kirim ke ' || bt.nama), pr.id
       FROM productions pr

@@ -20,6 +20,7 @@ import { createSale } from "../modules/penjualan/service";
 import { seedUnitsPerusahaan } from "../modules/satuan/service";
 import { resolveKodeKaryawan } from "../modules/users/service";
 import { lengkapiDataDemoSekali } from "./guest-data";
+import { EMAIL_TAMU_KASIR, EMAIL_TAMU_OWNER } from "../lib/tamu";
 
 /**
  * Akun & perusahaan TAMU (guest mode) — dipakai bersama siapa pun untuk
@@ -29,9 +30,11 @@ import { lengkapiDataDemoSekali } from "./guest-data";
  */
 export const GUEST = {
   slug: "terakasir-demo",
-  ownerEmail: "owner-demo@terakasir.app",
-  kasirEmail: "kasir-demo@terakasir.app",
+  ownerEmail: EMAIL_TAMU_OWNER,
+  kasirEmail: EMAIL_TAMU_KASIR,
   password: "demoterakasir",
+  /** PIN refund owner demo — ditampilkan di pita akun demo (web & ponsel) */
+  pinRefund: "123456",
 } as const;
 
 const BAHAN = [
@@ -57,8 +60,24 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
   // 1) Dua user tamu (idempoten; aktifkan bila pernah dinonaktifkan).
   const [owner] = await dbc
     .insert(users)
-    .values({ email: GUEST.ownerEmail, passwordHash: hash, nama: "Owner Demo (Tamu)", emailVerifiedAt: new Date() })
-    .onConflictDoUpdate({ target: users.email, set: { isActive: true, deletedAt: null, emailVerifiedAt: new Date() } })
+    .values({
+      email: GUEST.ownerEmail,
+      passwordHash: hash,
+      nama: "Owner Demo (Tamu)",
+      emailVerifiedAt: new Date(),
+      // PIN refund demo — tertulis di pita akun demo supaya Tamu Kasir bisa
+      // mencoba refund (kasir wajib PIN owner sejak 2026-10-31).
+      pinRefundHash: bcrypt.hashSync(GUEST.pinRefund, 10),
+    })
+    .onConflictDoUpdate({
+      target: users.email,
+      set: {
+        isActive: true,
+        deletedAt: null,
+        emailVerifiedAt: new Date(),
+        pinRefundHash: bcrypt.hashSync(GUEST.pinRefund, 10),
+      },
+    })
     .returning();
   const [kasir] = await dbc
     .insert(users)

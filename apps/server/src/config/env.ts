@@ -98,6 +98,12 @@ const EnvSchema = z.object({
    */
   BACKUP_HOUR: z.coerce.number().int().min(0).max(23).default(2),
   /**
+   * Jam WIB (0–23) reset harian data DEMO TAMU (`lib/reset-demo.ts`): perusahaan
+   * demo bersama dihapus lalu diprovisi ulang supaya pengunjung berikutnya
+   * melihat demo yang bersih. Default 3 = 03:00 WIB. -1 mematikannya.
+   */
+  DEMO_RESET_HOUR: z.coerce.number().int().min(-1).max(23).default(3),
+  /**
    * Paksa zona waktu jadwal cadangan. Kosongkan (disarankan) agar server
    * memakai zona waktu tenant TERBANYAK — cadangan jatuh saat outlet benar-
    * benar tutup, bukan saat tengah malam di zona server.

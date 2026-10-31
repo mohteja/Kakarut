@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   TransferStokDaftar,
   TransferStokFaktur,
+  TransferStokItemRow,
   TransferStokSaldo,
   TransferStokSaldoRow,
 } from "@kakarut/shared";
@@ -722,6 +723,7 @@ export function TransferStokPage() {
                         <span className="font-medium">{it.nama}</span>
                         <span className="shrink-0 tabular-nums text-sm">
                           {it.qty_teks}
+                          <SusutKirim it={it} />
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -753,6 +755,7 @@ export function TransferStokPage() {
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
                             {it.qty_teks}
+                            <SusutKirim it={it} />
                           </td>
                           <td className="px-3 py-1.5 text-xs text-stone-500">
                             {(BADGE_STATUS[it.status] ?? BADGE_STATUS.menunggu).label}
@@ -784,5 +787,19 @@ export function TransferStokPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Kiriman yang tiba KURANG dari yang berangkat: tampilkan yang dikirim dan
+ * susutnya. Dulu "kirim 10, terima 8" tertulis "8 pcs ✅ Diterima" dan angka 10
+ * lenyap dari catatan (laporan uji 31 Okt 2026).
+ */
+function SusutKirim({ it }: { it: TransferStokItemRow }) {
+  if (it.status !== "dikonfirmasi" || !(it.qty_dikirim > it.qty)) return null;
+  return (
+    <span className="block text-xs font-medium text-red-600">
+      dikirim {formatAngka(it.qty_dikirim)} · susut {formatAngka(it.qty_dikirim - it.qty)} {it.satuan}
+    </span>
   );
 }

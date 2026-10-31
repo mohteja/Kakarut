@@ -3,10 +3,9 @@ import {
   bahanPembatas,
   validasiPilihanAddon,
   foodCostPersen,
-  hargaJualBulat,
+  hargaSaranBulat,
+  hargaSaranFoodCost,
   hargaPerUnit,
-  hargaSaran,
-  hargaSaranPaket,
   hitungHpp,
   qtyBahanPerPorsi,
   qtyEfektif,
@@ -19,6 +18,7 @@ import {
 } from "@kakarut/shared";
 import { db, type Db, type Tx } from "../../db/client";
 import {
+  companies,
   ingredients,
   menuAddonGroups,
   menuAddons,
@@ -47,6 +47,8 @@ export interface KatalogMenu {
   addonGroupsByMenu: Map<string, GrupKatalog[]>;
   /** info bahan yang ditautkan add-on — banyak yang TIDAK ada di resep menu */
   bahanAddon: Map<string, BahanKatalog>;
+  /** `companies.food_cost_maks` (%) — patokan harga saran (`hargaSaranFoodCost`) */
+  ambangFoodCost: number;
 }
 
 export interface BahanKatalog {
@@ -439,7 +441,21 @@ export async function loadKatalog(dbx: Db | Tx, companyId: string): Promise<Kata
     }
   }
 
-  return { rows, categoryNameById, komponenByMenu, branchIdsByMenu, addonGroupsByMenu, bahanAddon };
+  const [co] = await dbx
+    .select({ foodCostMaks: companies.foodCostMaks })
+    .from(companies)
+    .where(eq(companies.id, companyId));
+  const ambangFoodCost = co?.foodCostMaks ?? 40;
+
+  return {
+    rows,
+    categoryNameById,
+    komponenByMenu,
+    branchIdsByMenu,
+    addonGroupsByMenu,
+    bahanAddon,
+    ambangFoodCost,
+  };
 }
 
 /**
@@ -702,14 +718,9 @@ export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDtoPenuh {
   const hpp = hitungHargaMenu(menu, katalog);
   const hppDineIn = hitungHargaMenu(menu, katalog, true);
 
-  let saran: number;
-  if (menu.tipe === "paket" && menu.baseMenuId) {
-    const base = toKomponenHpp(katalog.komponenByMenu.get(menu.baseMenuId) ?? []);
-    const topping = toKomponenHpp(katalog.komponenByMenu.get(menu.id) ?? []);
-    saran = hargaSaranPaket(hitungHpp(base), menu.baseMult ?? 1, hitungHpp(topping));
-  } else {
-    saran = hargaSaran(hpp, menu.mult ?? 1);
-  }
+  // Saran = HPP ÷ ambang food cost perusahaan (paket: HPP total paket).
+  // `mult`/`base_mult` lama tak lagi menentukan saran (laporan uji 31 Okt 2026).
+  const saran = hargaSaranFoodCost(hpp, katalog.ambangFoodCost);
 
   const baseMenu = menu.baseMenuId
     ? katalog.rows.find((r) => r.id === menu.baseMenuId)
@@ -737,7 +748,7 @@ export function toMenuDto(menu: MenuRow, katalog: KatalogMenu): MenuDtoPenuh {
     hpp,
     hpp_dine_in: hppDineIn,
     harga_saran: saran,
-    harga_jual_bulat: hargaJualBulat(saran),
+    harga_jual_bulat: hargaSaranBulat(saran),
     food_cost_persen: foodCostPersen(hpp, menu.hargaJual),
     addon_groups: addonGroupsDto(menu, katalog, hpp),
   };

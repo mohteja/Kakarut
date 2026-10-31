@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { JUDUL_RUTE, judulDokumen, judulHalaman, NAMA_APLIKASI } from "../../web/src/lib/judul-halaman";
+import { JUDUL_LANDING, JUDUL_RUTE, judulDokumen, judulHalaman, NAMA_APLIKASI } from "../../web/src/lib/judul-halaman";
 
 const baca = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const APP = baca("../../web/src/App.tsx");
@@ -114,5 +114,10 @@ describe("judulDokumen", () => {
   it("rute tak dikenal → identitasnya saja, bukan 'undefined'", () => {
     expect(judulDokumen("/", "Basooopa")).toBe("Basooopa");
     expect(judulDokumen("/entah-apa", null)).toBe(NAMA_APLIKASI);
+  });
+
+  it("halaman depan publik menyebut produknya (SEO, laporan uji 31 Okt 2026)", () => {
+    expect(judulDokumen("/", null)).toBe(JUDUL_LANDING);
+    expect(JUDUL_LANDING).toContain("Aplikasi Kasir");
   });
 });

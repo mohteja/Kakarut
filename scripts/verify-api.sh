@@ -238,6 +238,11 @@ echo "== 1. Login =="
 OWNER=$(login "$OWNER_EMAIL" "$OWNER_PASS");  [ -n "$OWNER" ] && ok "login owner"
 KASIR=$(login "$KASIR_EMAIL" "$KASIR_PASS");  [ -n "$KASIR" ] && ok "login kasir"
 SA=$(login "$SA_EMAIL" "$SA_PASS");           [ -n "$SA" ]    && ok "login super admin"
+# PIN refund owner — kasir yang mengembalikan uang wajib menyertakannya sejak
+# 2026-10-31 (laporan uji 31 Okt 2026). Diatur sekali di sini; tiap refund
+# oleh kasir di bawah membawa `"pin_owner":"$PIN_OWNER"`.
+PIN_OWNER="246810"
+api "$OWNER" PUT /profil/pin "{\"pin\":\"$PIN_OWNER\",\"password\":\"$OWNER_PASS\"}" > /dev/null
 
 echo "== 2. Katalog menu (HPP live) =="
 MENUS=$(api "$OWNER" GET /menu)
@@ -246,11 +251,14 @@ PBA=$(echo "$MENUS" | jq '[.[] | select(.nama | startswith("Premium Basooopa A")
 PBA_ID=$(echo "$PBA" | jq -r .id)
 cek "HPP PBA ≈ 16993" "abs(V - 16993) <= 1" "$(echo "$PBA" | jq .hpp)"
 cek "HPP dine-in PBA < HPP" "V == 1" "$(echo "$PBA" | jq '(.hpp_dine_in < .hpp) | if . then 1 else 0 end')"
-cek "harga jual bulat PBA = 34000" "V == 34000" "$(echo "$PBA" | jq .harga_jual_bulat)"
+# Harga saran = HPP ÷ ambang food cost (40%), dibulatkan KE ATAS Rp1.000 —
+# bukan HPP × mult lagi (laporan uji 31 Okt 2026). 16.993 ÷ 0,4 = 42.482 → 43.000.
+cek "harga jual PBA (seed) = 34000" "V == 34000" "$(echo "$PBA" | jq .harga_jual)"
+cek "harga saran bulat PBA = 43000 (HPP ÷ 40%)" "V == 43000" "$(echo "$PBA" | jq .harga_jual_bulat)"
 PYO=$(echo "$MENUS" | jq '[.[] | select(.nama == "Paket Yamin Original")][0]')
 PYO_ID=$(echo "$PYO" | jq -r .id)
-cek "Paket Yamin Ori bulat = 11000" "V == 11000" "$(echo "$PYO" | jq .harga_jual_bulat)"
-cek "Paket Yamin Misdasem bulat = 15000" "V == 15000" \
+cek "Paket Yamin Ori saran bulat = 15000 (HPP paket 5.662 ÷ 40%)" "V == 15000" "$(echo "$PYO" | jq .harga_jual_bulat)"
+cek "Paket Yamin Misdasem saran bulat = 22000 (HPP paket 8.623 ÷ 40%)" "V == 22000" \
   "$(echo "$MENUS" | jq '[.[] | select(.nama == "Paket Yamin Misdasem")][0].harga_jual_bulat')"
 
 stok_of() { echo "$1" | jq --arg s "$2" '[.[] | select(.slug == $s)][0].saldo'; }
@@ -1166,7 +1174,7 @@ api "$OWNER" PATCH /company '{"diskon_maks_persen":0}' > /dev/null
 cek "batas 0: kasir diskon 5% ditolak (400)" "V == 400" \
   "$(jp "$KASIR" "{\"is_dine_in\":false,\"diskon_tipe\":\"persen\",\"diskon_nilai\":5,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")"
 # INTI: pita di BAWAH toleransi — yang dulu lolos diam-diam. Harga PBA 34.000
-# (dijamin asersi "harga jual bulat PBA = 34000" di §2), jadi 0,5% = 170.
+# (dijamin asersi "harga jual PBA (seed) = 34000" di §2), jadi 0,5% = 170.
 # Rp 100 = 0,29% dan Rp 170 = tepat 0,5%: keduanya dulu DITERIMA walau batasnya
 # nol, karena toleransi pembulatan ikut dipakai pada batas yang tak punya apa
 # pun untuk dibulatkan. Pada nota Rp 2 juta pita itu bernilai Rp 10.000, tiap
@@ -1987,6 +1995,8 @@ kirim52b() { # <faktur> <row> <qty> — beli di CK → dikirim ke Pusat (jadi ki
 }
 
 # A) kirim (pesan 10) → batas qty ditolak → terima SEBAGIAN 6 (prorata harga)
+saldo_ck52() { api "$OWNER" GET "/stok?branch_id=$CK52_UTAMA" | jq --arg id "$1" '([.[] | select(.ingredient_id==$id)][0].saldo) // 0'; }
+SCK52B=$(saldo_ck52 "$BELI52B")   # saldo di CK (pengirim) sebelum beli+kirim
 FA52=$(api "$OWNER" POST /pembelian/faktur "{\"branch_id\":\"$CK52_UTAMA\",\"items\":[{\"ingredient_id\":\"$BELI52B\",\"mode\":\"pcs\",\"jumlah\":10,\"total_harga\":1000}]}")
 FA52_ID=$(echo "$FA52" | jq -r .faktur_id)
 cek "kiriman rencana belum tampil di /penerimaan" "V == 0" \
@@ -2001,6 +2011,10 @@ cek "terima-sebagian qty>dikirim ditolak (400)" "V == 400" \
 cek "kasir terima-sebagian 6 ok (200)" "V == 200" \
   "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penerimaan/$FA52_ID/terima-sebagian" -H "Authorization: Bearer $KASIR" -H 'Content-Type: application/json' -d "{\"items\":[{\"id\":\"$RA52\",\"qty_diterima\":6}]}")"
 cek "saldo +6 (bukan +10) setelah terima sebagian" "abs(V - ($S52B + 6)) < 0.001" "$(saldo_pusat "$BELI52B")"
+# SUSUT DI JALAN (laporan uji 31 Okt 2026): CK membeli 10 lalu MENGIRIM 10 —
+# yang 4 tak sampai tak boleh diam-diam kembali ke saldo CK. CK = semula.
+cek "CK berkurang 10 (yang berangkat), bukan 6 — susut 4 tak kembali ke CK" "abs(V - $SCK52B) < 0.001" \
+  "$(saldo_ck52 "$BELI52B")"
 cek "baris: qty=6, dipesan=10, harga prorata 600, dikonfirmasi" "V == 1" \
   "$(api "$OWNER" GET "/pembelian?branch_id=all&per_page=500" | jq --arg f "$FA52_ID" '([.rows[]|select(.faktur_id==$f)][0] | (.qty==6 and .qty_dipesan==10 and .total_harga==600 and .status=="dikonfirmasi")) | if . then 1 else 0 end')"
 # Barisnya baru saja BERUBAH ANGKANYA (10 -> 6, 1000 -> 600), jadi `diubah_oleh`
@@ -4321,6 +4335,16 @@ cek "print/lan → 127.0.0.1 ditolak 400" "V == 400" "$(ssrf_code 127.0.0.1)"
 cek "print/lan → ::ffff:127.0.0.1 (bypass lama) ditolak 400" "V == 400" "$(ssrf_code ::ffff:127.0.0.1)"
 cek "print/lan → metadata 169.254.169.254 ditolak 400" "V == 400" "$(ssrf_code 169.254.169.254)"
 cek "print/lan → 0.0.0.0 ditolak 400" "V == 400" "$(ssrf_code 0.0.0.0)"
+# Port bukan printer (basis data, cache, panel web di jaringan kontainer yang
+# sama) ditolak SEBELUM resolve — laporan uji 31 Okt 2026.
+ssrf_port() { # ssrf_port <port>
+  curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/print/lan" \
+    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -d "{\"host\":\"10.0.0.5\",\"port\":$1,\"data\":\"$D64\"}"
+}
+cek "print/lan → port 5432 (Postgres) ditolak 400" "V == 400" "$(ssrf_port 5432)"
+cek "print/lan → port 6379 (Redis) ditolak 400" "V == 400" "$(ssrf_port 6379)"
+cek "print/lan → port 80 ditolak 400" "V == 400" "$(ssrf_port 80)"
 
 echo "== 102. Path-param sinkron wajib UUID (cegah manipulasi jalur) =="
 # faktur_id/supply_id di-interpolasi ke URL sub-request → wajib UUID valid.
@@ -6798,13 +6822,14 @@ api "$OWNER" PATCH /company '{"food_cost_maks":40}' > /dev/null
 cek "kasir terapkan harga saran → 403" "V == 403" \
   "$(status_code_body "$REISS105" POST /menu/terapkan-saran "{\"ids\":[\"$MID145\"]}")"
 TS145=$(api "$OWNER" POST /menu/terapkan-saran "{\"ids\":[\"$MID145\"]}")
-# HPP 20000 × mult 3 = 60000 → harga_jual_bulat 60000 (dari 55000)
-cek "terapkan saran: 1 menu diperbarui 55000 → 60000" "V == 1" \
-  "$(echo "$TS145" | jq --arg m "$MID145" '((.diperbarui==1) and ([.rincian[]|select(.menu_id==$m and .harga_lama==55000 and .harga_baru==60000 and .diperbarui)]|length==1))|if . then 1 else 0 end')"
-cek "harga jual menu benar-benar berubah jadi 60000" "V == 60000" \
+# HPP 20000 ÷ ambang 40% = 50000 → harga_jual_bulat 50000 (dari 55000).
+# Sejak 2026-10-31 saran = HPP ÷ ambang food cost, bukan HPP × mult.
+cek "terapkan saran: 1 menu diperbarui 55000 → 50000" "V == 1" \
+  "$(echo "$TS145" | jq --arg m "$MID145" '((.diperbarui==1) and ([.rincian[]|select(.menu_id==$m and .harga_lama==55000 and .harga_baru==50000 and .diperbarui)]|length==1))|if . then 1 else 0 end')"
+cek "harga jual menu benar-benar berubah jadi 50000" "V == 50000" \
   "$(api "$OWNER" GET "/menu/$MID145" | jq '.harga_jual')"
 cek "terapkan saran tercatat di riwayat harga" "V == 1" \
-  "$(api "$OWNER" GET "/menu/$MID145/riwayat-harga" | jq '[.[]|select(.sebab=="terapkan_saran" and .harga_lama==55000 and .harga_baru==60000)]|length==1|if . then 1 else 0 end')"
+  "$(api "$OWNER" GET "/menu/$MID145/riwayat-harga" | jq '[.[]|select(.sebab=="terapkan_saran" and .harga_lama==55000 and .harga_baru==50000)]|length==1|if . then 1 else 0 end')"
 TS145B=$(api "$OWNER" POST /menu/terapkan-saran "{\"ids\":[\"$MID145\"]}")
 cek "terapkan saran kedua kali → dilewati (harga sudah sama)" "V == 1" \
   "$(echo "$TS145B" | jq '((.diperbarui==0) and (.dilewati==1))|if . then 1 else 0 end')"
@@ -8224,7 +8249,7 @@ cek "sebelum refund: bahan terpakai 3 × 100 gr" "abs(V - 300) < 0.001" \
 HPP159_0=$(hpp156 "$SID159")
 
 # (a) Refund 1 porsi. Uang, HPP, dan stok bahan bergerak bersama-sama.
-R159=$(api "$REISS105" POST "/penjualan/$SID159/refund" "{\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":1}]}")
+R159=$(api "$REISS105" POST "/penjualan/$SID159/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":1}]}")
 cek "KASIR boleh merefund sendiri (tanpa memanggil owner)" "V == 1" \
   "$(echo "$R159" | jq '(.ok == true)|if . then 1 else 0 end')"
 cek "nominal = 8.910, BUKAN 9.000 — diskon & PB1 porsi itu ikut kembali" "abs(V - 8910) < 0.001" \
@@ -8247,14 +8272,14 @@ cek "STOK BAHAN KEMBALI: pemakaian tinggal 2 × 100 gr" "abs(V - 200) < 0.001" \
 # (b) Penolakan divalidasi SELURUHNYA sebelum menulis apa pun. Menolak di tengah
 #     akan meninggalkan sebagian refund tertulis dengan uang yang tak diserahkan.
 cek "melebihi sisa porsi → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":99}]}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"pin_owner\":\"$PIN_OWNER\",\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":99}]}")"
 cek "ditolak: tak ada yang berubah (refund_total masih 8.910)" "abs(V - 8910) < 0.001" \
   "$(jual159 | jq -r '.sale.refundTotal')"
 
 # (c) BERTAHAP = SEKALIGUS. Jangkar `*_asal` yang membuatnya benar: tanpa itu,
 #     refund kedua menghitung diskon dari angka yang sudah menyusut dan
 #     potongannya tergerus dua kali.
-R159B=$(api "$REISS105" POST "/penjualan/$SID159/refund" "{\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":2}]}")
+R159B=$(api "$REISS105" POST "/penjualan/$SID159/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":2}]}")
 cek "refund sisanya = 17.820 (bertahap 8.910 + 17.820 = 26.730 persis)" "abs(V - 17820) < 0.001" \
   "$(echo "$R159B" | jq -r '.nominal')"
 cek "seluruh porsi dikembalikan → total 0" "abs(V) < 0.001" "$(jual159 | jq -r '.sale.total')"
@@ -8264,7 +8289,7 @@ cek "stok bahan kembali SELURUHNYA ke angka sebelum transaksi" "abs(V) < 0.001" 
   "$(python3 -c "print($ISI159_0 - $(isi156))")"
 cek "HPP jadi 0 — tak ada satu porsi pun yang jadi dibuat" "abs(V) < 0.001" "$(hpp156 "$SID159")"
 cek "sudah habis: refund lagi → 400" "V == 400" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":1}]}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"pin_owner\":\"$PIN_OWNER\",\"items\":[{\"sale_item_id\":\"$IT159\",\"qty\":1}]}")"
 
 # (d) Penjualan di Tempat Sampah tak punya arti untuk direfund — seluruh laporan
 #     sudah mengabaikannya, jadi angkanya tak akan pernah terbaca siapa pun.
@@ -8272,7 +8297,7 @@ S159C=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_baya
 SID159C=$(echo "$S159C" | jq -r '.sale.id'); IT159C=$(echo "$S159C" | jq -r '.items[0].id')
 api "$OWNER" DELETE "/penjualan/$SID159C" > /dev/null
 cek "penjualan terhapus → refund 404" "V == 404" \
-  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159C/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"items\":[{\"sale_item_id\":\"$IT159C\",\"qty\":1}]}")"
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/penjualan/$SID159C/refund" -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' -d "{\"pin_owner\":\"$PIN_OWNER\",\"items\":[{\"sale_item_id\":\"$IT159C\",\"qty\":1}]}")"
 api "$OWNER" PATCH /company '{"pb1_enabled":false,"pb1_rate":0}' > /dev/null
 
 echo "── §160 Refund tidak boleh cuma menyusutkan angka besar ──"
@@ -8307,7 +8332,7 @@ cek "3 porsi terjual → omzet Menu Terlaris naik 27.000" "abs(V - 27000) < 0.00
 cek "rekap shift berjalan naik 27.000" "abs(V - 27000) < 0.001" \
   "$(python3 -c "print($(rekap160 .penjualan_tunai) - $TUNAI160_0)")"
 
-api "$REISS105" POST "/penjualan/$SID160/refund" "{\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT160\",\"qty\":1}]}" > /dev/null
+api "$REISS105" POST "/penjualan/$SID160/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT160\",\"qty\":1}]}" > /dev/null
 cek "refund 1 porsi → Menu Terlaris tinggal +2, bukan tetap +3" "abs(V - 2) < 0.001" \
   "$(python3 -c "print($(laris160 qty) - $LARIS160_0)")"
 cek "refund 1 porsi → omzet Menu Terlaris tinggal +18.000" "abs(V - 18000) < 0.001" \
@@ -8337,7 +8362,7 @@ KAS160L=$(api "$OWNER" GET "/shift/$SHIFT160L" | jq -r '.kas_sistem')
 api "$REISS105" POST /shift/tutup "{\"uang_fisik\":$KAS160L,\"catatan\":\"uji 160\"}" > /dev/null
 TUNAI160L=$(api "$OWNER" GET "/shift/$SHIFT160L" | jq -r '.penjualan_tunai')
 api "$REISS105" POST /shift/buka '{"modal_awal":0}' > /dev/null
-api "$REISS105" POST "/penjualan/$SID160/refund" "{\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT160\",\"qty\":1}]}" > /dev/null
+api "$REISS105" POST "/penjualan/$SID160/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"alasan\":\"Bahan habis\",\"items\":[{\"sale_item_id\":\"$IT160\",\"qty\":1}]}" > /dev/null
 cek "refund lintas shift TIDAK menggeser rekap shift yang sudah ditutup" "abs(V) < 0.001" \
   "$(python3 -c "print($(api "$OWNER" GET "/shift/$SHIFT160L" | jq -r '.penjualan_tunai') - $TUNAI160L)")"
 cek "shift BARU yang mencatat uang keluar laci: −9.000" "abs(V + 9000) < 0.001" \
@@ -12387,7 +12412,7 @@ kembalikanSemua220(){
     baris=$(echo "$ITEMS" | jq -r 'map(select(.qty>0))[0] // empty'); [ -z "$baris" ] && break
     iid=$(echo "$baris" | jq -r .id)
     r=$(api "$REISS105" POST "/penjualan/$SID/refund" \
-      "{\"items\":[{\"sale_item_id\":\"$iid\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}")
+      "{\"pin_owner\":\"$PIN_OWNER\",\"items\":[{\"sale_item_id\":\"$iid\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}")
     JUMLAH=$((JUMLAH + $(echo "$r" | jq -r '.nominal // 0')))
     ITEMS=$(echo "$ITEMS" | jq --arg i "$iid" 'map(if .id==$i then .qty=(.qty-1) else . end)')
   done
@@ -12418,7 +12443,7 @@ SID220=$(echo "$S220" | jq -r '.sale.id')
 BAYAR220=$(echo "$S220" | jq -r '.sale.total')
 IT220=$(api "$OWNER" GET "/penjualan/$SID220" | jq -r '(.items // .sale.items)[0].id')
 NOM220=$(api "$REISS105" POST "/penjualan/$SID220/refund" \
-  "{\"items\":[{\"sale_item_id\":\"$IT220\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" | jq -r '.nominal // 0')
+  "{\"pin_owner\":\"$PIN_OWNER\",\"items\":[{\"sale_item_id\":\"$IT220\",\"qty\":1}],\"client_ref\":\"$(cat /proc/sys/kernel/random/uuid)\"}" | jq -r '.nominal // 0')
 cek "PASANGAN: refund SEBAGIAN (1 dari 4) lebih kecil dari yang dibayar" "V == 1" \
   "$([ "$NOM220" -gt 0 ] && [ "$NOM220" -lt "$BAYAR220" ] && echo 1 || echo 0)"
 cek "PASANGAN: …dan notanya masih menyisakan tagihan" "V == 1" \
@@ -16875,8 +16900,8 @@ done
 
 IT286_1A=$(echo "$S286_1" | jq -r --arg m "$M286A" '[.items[]|select(.menuId==$m)][0].id // ""')
 IT286_3B=$(echo "$S286_3" | jq -r --arg m "$M286B" '[.items[]|select(.menuId==$m)][0].id // ""')
-R286_1=$(api "$K286" POST "/penjualan/$SID286_1/refund" "{\"alasan\":\"uji 286\",\"items\":[{\"sale_item_id\":\"$IT286_1A\",\"qty\":1}]}")
-R286_3=$(api "$K286" POST "/penjualan/$SID286_3/refund" "{\"alasan\":\"uji 286\",\"items\":[{\"sale_item_id\":\"$IT286_3B\",\"qty\":3}]}")
+R286_1=$(api "$K286" POST "/penjualan/$SID286_1/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"alasan\":\"uji 286\",\"items\":[{\"sale_item_id\":\"$IT286_1A\",\"qty\":1}]}")
+R286_3=$(api "$K286" POST "/penjualan/$SID286_3/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"alasan\":\"uji 286\",\"items\":[{\"sale_item_id\":\"$IT286_3B\",\"qty\":3}]}")
 cek "premis §286: refund S1 A×1 nominal 19.800" "abs(V - 19800) < 0.001" "$(echo "$R286_1" | jq -r '.nominal // 0')"
 cek "premis §286: refund S3 B×3 nominal 26.400 (penuh)" "abs(V - 26400) < 0.001" "$(echo "$R286_3" | jq -r '.nominal // 0')"
 
@@ -17605,7 +17630,7 @@ R296L=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/jso
 R296M=$(api "$OWNER" GET "/auth/me")
 R296C=$(api "$OWNER" GET "/cabang")
 R296CK=$(api "$REISS105" GET "/cabang")
-cek "§296 premis: kontrak terbaca dari types.ts (AuthUser 7 + CompanyDto 9 + SesiDto 3 + SesiLogin 1 + CabangDto 14)" "V == 34" \
+cek "§296 premis: kontrak terbaca dari types.ts (AuthUser 8 + CompanyDto 9 + SesiDto 3 + SesiLogin 1 + CabangDto 14)" "V == 35" \
   "$(printf '%s\n%s\n%s\n%s\n%s\n' "$K296_USER" "$K296_CO" "$K296_SESI" "$(medan296 SesiLogin)" "$K296_CAB" | grep -c .)"
 cek "§296 premis: owner punya company (bukan null) dan /cabang ≥ 2 baris" "V == 1" \
   "$([ "$(jq -r '.company|type' <<<"$R296M")" = object ] && [ "$(jq 'length' <<<"$R296C")" -ge 2 ] && echo 1 || echo 0)"
@@ -18739,7 +18764,7 @@ api "$OWNER" PUT "/menu/$M312" "$(jq -nc --argjson g "$(grup316 'if .nama=="Extr
 cek "premis §319: takaran Extra mie di katalog kini 500" "V == 500" \
   "$(api "$OWNER" GET "/menu/$M312" | jq '[.addon_groups[].addons[]|select(.nama=="Extra mie")][0].qty_bahan')"
 SM2=$(saldo312 "$MIE312")
-api "$REISS105" POST "/penjualan/$S313/refund" "{\"alasan\":\"uji 317\",\"items\":[{\"sale_item_id\":\"$IT313\",\"qty\":1}]}" > /dev/null
+api "$REISS105" POST "/penjualan/$S313/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"alasan\":\"uji 317\",\"items\":[{\"sale_item_id\":\"$IT313\",\"qty\":1}]}" > /dev/null
 SM3=$(saldo312 "$MIE312")
 cek "§319 refund 1 porsi: saldo mie naik 280 (snapshot 100 g), bukan dari takaran baru" "abs(V - 280) < 1e-6" \
   "$(python3 -c "print($SM3 - $SM2)")"
@@ -18869,6 +18894,84 @@ cek "§321 …password sendiri tetap berlaku" "V == 200" \
   "$(status_code_body "" POST /auth/login "{\"email\":\"$EB321\",\"password\":\"Rahasia321!\"}")"
 cek "§321 Tambah karyawan dgn email yang sudah anggota aktif → 409" "V == 409" \
   "$(status_code_body "$TO321" POST /karyawan "{\"nama\":\"X\",\"email\":\"$EB321\",\"password\":\"PasswordOwner1\",\"role\":\"cashier\",\"branch_id\":\"$CAB321\"}")"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §322 — LAPORAN UJI 31 OKT 2026, GELOMBANG 1: akun tamu, logout per perangkat,
+#        404 & SEO, harga saran = HPP ÷ ambang food cost, PIN refund kasir
+# ═══════════════════════════════════════════════════════════════════════════
+T322O=$(curl -s -X POST "$BASE/api/auth/guest" -H 'Content-Type: application/json' -d '{"peran":"owner"}' | jq -r '.token // ""')
+T322K=$(curl -s -X POST "$BASE/api/auth/guest" -H 'Content-Type: application/json' -d '{"peran":"kasir"}' | jq -r '.token // ""')
+cek "§322 sesi tamu bertanda is_tamu, owner asli tidak" "V == 1" \
+  "$( [ "$(api "$T322O" GET /auth/me | jq '.user.is_tamu')" = "true" ] && [ "$(api "$OWNER" GET /auth/me | jq '.user.is_tamu')" = "false" ] && echo 1 || echo 0)"
+sebab322() { # sebab322 <token> <method> <path> <body> → "<status>:<sebab>"
+  local out
+  out=$(curl -s -w '\n%{http_code}' -X "$2" "$BASE/api$3" -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$4")
+  printf '%s:%s' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -r '.sebab // ""')"
+}
+for jalur322 in \
+  "POST|/karyawan/undang|{\"email\":\"korban322@example.com\",\"role\":\"cashier\"}" \
+  "POST|/karyawan|{\"nama\":\"X\",\"email\":\"korban322b@example.com\",\"password\":\"Rahasia123\",\"role\":\"admin\"}" \
+  "POST|/profil/password|{\"password_lama\":\"demoterakasir\",\"password_baru\":\"dikunciorang\"}" \
+  "PUT|/profil/pin|{\"pin\":\"111111\",\"password\":\"demoterakasir\"}" \
+  "POST|/company/mode|{\"mode\":\"pro\"}" \
+  "PATCH|/company|{\"nama\":\"Diubah Tamu\"}" \
+  "POST|/print/lan|{\"host\":\"10.0.0.5\",\"port\":9100,\"data\":\"AA==\"}" \
+  "DELETE|/onboarding/akun|{\"password\":\"demoterakasir\",\"email\":\"owner-demo@terakasir.app\"}" \
+  ; do
+  IFS='|' read -r m322 p322 b322 <<< "$jalur322"
+  cek "§322 tamu owner $m322 $p322 → 403 akun_tamu" "V == 1" \
+    "$([ "$(sebab322 "$T322O" "$m322" "$p322" "$b322")" = "403:akun_tamu" ] && echo 1 || echo 0)"
+done
+# Tamu TETAP bisa mencoba fitur inti: membuka & menghapus open bill.
+MENU322=$(api "$T322K" GET /menu | jq -r '[.[] | select(.addon_groups|length==0)][0].id')
+B322=$(api "$T322K" POST /open-bill "{\"customer_nama\":\"Uji 322\",\"items\":[{\"menu_id\":\"$MENU322\",\"qty\":1}]}")
+cek "§322 tamu kasir tetap bisa membuat open bill" "V == 1" "$(jq '((.id|length)>0)|if . then 1 else 0 end' <<<"$B322")"
+api "$T322K" DELETE "/open-bill/$(jq -r '.id' <<<"$B322")" > /dev/null
+# RESET DEMO: data buatan pengunjung lenyap, demo kembali utuh.
+api "$T322O" POST /customer '{"nama":"oppaaaa 322","wa":"081322322322"}' > /dev/null
+cek "§322 premis: member buatan pengunjung ada sebelum reset" "V == 1" \
+  "$(api "$T322O" GET /customer | jq '[.items[] | select(.nama=="oppaaaa 322")] | length')"
+cek "§322 super admin reset demo → 200" "V == 200" "$(status_code_body "$SA" POST /admin/sistem/reset-demo '{}')"
+cek "§322 token tamu lama tak berlaku sesudah reset (401)" "V == 401" "$(status_code "$T322O" GET /auth/me)"
+T322O=$(curl -s -X POST "$BASE/api/auth/guest" -H 'Content-Type: application/json' -d '{"peran":"owner"}' | jq -r '.token // ""')
+cek "§322 sesudah reset: member pengunjung hilang" "V == 0" \
+  "$(api "$T322O" GET /customer | jq '[.items[] | select(.nama=="oppaaaa 322")] | length')"
+T322K=$(curl -s -X POST "$BASE/api/auth/guest" -H 'Content-Type: application/json' -d '{"peran":"kasir"}' | jq -r '.token // ""')
+cek "§322 sesudah reset: demo utuh lagi (≥ 14 menu, ≥ 3 open bill)" "V == 1" \
+  "$( [ "$(api "$T322O" GET /menu | jq 'length')" -ge 14 ] && [ "$(api "$T322K" GET /open-bill | jq 'length')" -ge 3 ] && echo 1 || echo 0)"
+cek "§322 owner biasa tak boleh memicu reset demo (403)" "V == 403" "$(status_code_body "$OWNER" POST /admin/sistem/reset-demo '{}')"
+# LOGOUT mencabut token PERANGKAT ITU saja.
+L322A=$(login "$OWNER_EMAIL" "$OWNER_PASS")
+L322B=$(login "$OWNER_EMAIL" "$OWNER_PASS")
+cek "§322 logout → 200" "V == 200" "$(status_code_body "$L322A" POST /auth/logout '{}')"
+cek "§322 token yang keluar → 401" "V == 401" "$(status_code "$L322A" GET /auth/me)"
+cek "§322 perangkat lain akun yang sama tetap masuk (200)" "V == 200" "$(status_code "$L322B" GET /auth/me)"
+# 404 & SEO
+cek "§322 jalur asing /abc-322 → status 404" "V == 404" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/abc-322")"
+cek "§322 rute web dikenal /kasir → 200" "V == 200" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/kasir")"
+if curl -s "$BASE/" | grep -q '<div id="root">'; then
+  cek "§322 robots.txt ada & menunjuk sitemap" "V == 1" "$(curl -s "$BASE/robots.txt" | grep -c '^Sitemap: ')"
+  cek "§322 sitemap.xml ada" "V >= 5" "$(curl -s "$BASE/sitemap.xml" | grep -c '<loc>')"
+  cek "§322 halaman depan punya meta description" "V == 1" "$(curl -s "$BASE/" | grep -c 'name="description"')"
+fi
+# HARGA SARAN = HPP ÷ ambang food cost (dibulatkan ke atas Rp1.000).
+FC322=$(api "$OWNER" GET /company | jq '.foodCostMaks')
+cek "§322 harga saran tiap menu = HPP ÷ ambang food cost, bulat ke atas" "V == 0" \
+  "$(api "$OWNER" GET /menu | jq --argjson fc "$FC322" '[.[] | select(.hpp > 0) | select((.harga_saran - (.hpp / ($fc/100)) | fabs) > 0.01 or .harga_jual_bulat != (((.harga_saran/1000) - 1e-9 | ceil) * 1000))] | length')"
+# PIN REFUND: kasir tanpa / salah PIN ditolak, PIN benar → refund jalan.
+S322=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+SID322=$(jq -r '.sale.id // ""' <<<"$S322")
+IT322=$(api "$OWNER" GET "/penjualan/$SID322" | jq -r '(.items // .sale.items)[0].id')
+cek "§322 kasir refund TANPA PIN → 403 pin_refund_wajib" "V == 1" \
+  "$([ "$(sebab322 "$REISS105" POST "/penjualan/$SID322/refund" "{\"items\":[{\"sale_item_id\":\"$IT322\",\"qty\":1}]}")" = "403:pin_refund_wajib" ] && echo 1 || echo 0)"
+cek "§322 kasir refund PIN SALAH → 403 pin_refund_salah" "V == 1" \
+  "$([ "$(sebab322 "$REISS105" POST "/penjualan/$SID322/refund" "{\"pin_owner\":\"000000\",\"items\":[{\"sale_item_id\":\"$IT322\",\"qty\":1}]}")" = "403:pin_refund_salah" ] && echo 1 || echo 0)"
+cek "§322 kasir refund dengan PIN owner → berhasil" "V == 1" \
+  "$(api "$REISS105" POST "/penjualan/$SID322/refund" "{\"pin_owner\":\"$PIN_OWNER\",\"items\":[{\"sale_item_id\":\"$IT322\",\"qty\":1}]}" | jq '(.ok==true)|if . then 1 else 0 end')"
+cek "§322 PIN refund: profil owner menandai sudah diatur" "V == 1" \
+  "$(api "$OWNER" GET /profil | jq '(.pin_refund_diatur==true)|if . then 1 else 0 end')"
+cek "§322 kasir tak boleh mengatur PIN refund (403)" "V == 403" \
+  "$(status_code_body "$REISS105" PUT /profil/pin '{"pin":"123123","password":"x"}')"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

@@ -105,9 +105,13 @@ function KartuMode({ company }: { company: Company }) {
             )}
           </div>
         ) : (
+          auth?.user.is_tamu ? (
+            <p className="text-sm text-amber-800">Upgrade ke Pro tidak tersedia di akun demo.</p>
+          ) : (
           <button onClick={() => setKonfirmasiPro(true)} className={btnPrimary}>
             ⬆ Upgrade ke Pro (multi-lokasi)
           </button>
+          )
         )
       ) : (
         <p className="text-xs text-stone-500">Hanya owner yang dapat mengubah mode.</p>
@@ -154,6 +158,8 @@ function KartuMode({ company }: { company: Company }) {
 }
 
 export function PerusahaanPage() {
+  // Akun demo: PATCH /company ditolak server (`akun_tamu`).
+  const tamu = useAuth().auth?.user.is_tamu === true;
   const queryClient = useQueryClient();
   const { data: company, isLoading, error: errorCompany } = useQuery({
     queryKey: ["company"],
@@ -435,9 +441,14 @@ export function PerusahaanPage() {
           </p>
         )}
         <ErrorText error={simpan.error} />
+        {tamu && (
+          <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Pengaturan perusahaan tidak bisa disimpan di akun demo.
+          </p>
+        )}
         <button
           onClick={() => simpan.mutate()}
-          disabled={simpan.isPending || persenSalahKetik.length > 0}
+          disabled={tamu || simpan.isPending || persenSalahKetik.length > 0}
           className={btnPrimary}
         >
           {simpan.isPending ? "Menyimpan…" : "Simpan"}

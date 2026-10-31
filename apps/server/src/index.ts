@@ -1,3 +1,4 @@
+import { ruteWebDikenal } from "@kakarut/shared";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { Context, Next } from "hono";
@@ -17,6 +18,7 @@ import { jadwalkanPemeriksaanSetelan } from "./lib/pemeriksaan-setelan";
 import { catatGalat, jadwalkanPangkasErrorLog } from "./lib/error-log";
 import { jadwalkanSapuUnggahan } from "./lib/sapu-unggahan";
 import { jadwalkanPangkasToken } from "./lib/pangkas-token";
+import { jadwalkanResetDemo } from "./lib/reset-demo";
 import { runMigrations } from "./db/migrate";
 import { backfillKodeMenu } from "./modules/menu/service";
 import { backfillKodeBahan } from "./modules/bahan/kode";
@@ -248,6 +250,14 @@ if (existsSync(webDist)) {
       c.header("Cache-Control", "no-cache");
       return c.text("Aset tidak ditemukan (kemungkinan chunk dari build lama)", 404);
     }
+    // Jalur yang bukan rute web mana pun (mis. /abc) → shell dengan status
+    // 404, bukan 200. Mesin pencari tak lagi mengindeks halaman hantu, dan SPA
+    // tetap menampilkan halaman "tidak ditemukan" yang ramah (laporan uji
+    // 31 Okt 2026). Rute yang dikenal tetap 200 — deep-link react-router.
+    if (!ruteWebDikenal(c.req.path)) {
+      c.header("Cache-Control", "no-cache");
+      return c.html(indexHtml, 404);
+    }
     return kirimShell(c);
   });
 } else {
@@ -281,6 +291,9 @@ jadwalkanSapuUnggahan((env.BACKUP_HOUR + 1) % 24);
 // Pemangkas token mati (reset/verifikasi kedaluwarsa, undangan yang sudah
 // selesai) — jam berikutnya lagi supaya tak menumpuk dengan sapuan di atas.
 jadwalkanPangkasToken((env.BACKUP_HOUR + 2) % 24);
+
+// Data demo tamu dikembalikan bersih tiap malam (laporan uji 31 Okt 2026).
+jadwalkanResetDemo(env.DEMO_RESET_HOUR);
 
 // Pemeriksaan setelan: hal-hal yang SAH menurut skema env, servernya menyala
 // tanpa keluhan, dan salahnya baru ketahuan berbulan-bulan kemudian.
