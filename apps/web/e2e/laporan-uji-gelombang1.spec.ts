@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { absenMasuk, masukLewatSesi, pastikanShiftTerbuka, tampak } from "./util";
+import { OWNER_EMAIL, OWNER_PASS, absenMasuk, masukLewatSesi, pastikanShiftTerbuka, tampak } from "./util";
 
 /**
  * LAPORAN UJI 31 OKT 2026 — gelombang 1, yang hanya terlihat di layar:
@@ -55,4 +55,30 @@ test("Pilih Meja di layar 375 px: nama meja terisi terbaca utuh", async ({ page,
   for (const nama of ["Meja 1", "Meja 2", "Meja 3"]) {
     await expect(tombol.filter({ hasText: nama }).first()).toBeVisible();
   }
+});
+
+/**
+ * UJI WEB 31 OKT 2026, W-35: "+ Kategori baru" dari form menu dulu memuat
+ * ulang halaman — modal kategori (bukan portal) dirender DI DALAM form menu,
+ * jadi Simpan kategori mengirim form menu secara native dan isiannya hilang.
+ */
+test("form menu: kategori baru tersimpan tanpa memuat ulang halaman, isian tetap", async ({ page, request }) => {
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/menu/baru");
+  const namaMenu = page.locator("label", { hasText: "Nama menu" }).locator("xpath=following-sibling::input");
+  await namaMenu.fill("Menu Uji W35");
+
+  await page.getByRole("button", { name: "+ Kategori baru" }).click();
+  await page.getByRole("button", { name: "+ Tambah Kategori" }).click();
+  const namaKat = `Kat W35 ${Date.now() % 100000}`;
+  const dialog = page.locator("form").filter({ has: page.getByRole("button", { name: "Simpan", exact: true }) }).last();
+  await dialog.locator("input").first().fill(namaKat);
+  await dialog.getByRole("button", { name: "Simpan", exact: true }).click();
+
+  // Kategori muncul di daftar modal → simpan sungguh terjadi, bukan reload.
+  await expect(page.locator("span", { hasText: namaKat })).toBeVisible();
+  await page.getByRole("button", { name: "Tutup" }).click();
+  await expect(page).toHaveURL(/\/menu\/baru$/);
+  await expect(namaMenu).toHaveValue("Menu Uji W35");
+  await expect(page.locator("select option", { hasText: namaKat })).toHaveCount(1);
 });

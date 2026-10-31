@@ -25,11 +25,21 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ `POST /api/print/lan`: printer tak terjangkau kini 422 ber-`sebab`, bukan 502
+
+⚪️ **INFO** — rute ini hanya dipakai web (ponsel mencetak langsung ke printer).
+
+**Belum tayang.**
+
+- Printer yang tak terjangkau dari server kini dibalas **422** `{ message, sebab: "printer_tak_terjangkau" }`, dulu **502**. Cloudflare mengganti balasan 502 dari origin dengan halaman galat HTML miliknya, jadi kalimat "printer tidak merespons" tak pernah sampai ke layar (uji web 31 Okt 2026).
+
+---
+
 ## ⚪️ Laporan uji 31 Okt 2026 (gelombang 3) — cek tautan reset, /health ramping, rekomendasi beli bawaan 7 hari
 
 ⚪️ **INFO** — tak menuntut perubahan kode; satu bawaan berubah.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#241 (`bf257d4`, CI cabang #511 hijau: unit, verify-api, E2E); ponsel lewat mohteja/kakarut-mobile#22.
 
 - `POST /api/auth/reset-password/cek` `{token}` → `{ok}` atau 400 (kalimat sama dengan `/reset-password`). Opsional: layar reset bisa memeriksa tautan sebelum formulir diisi.
 - `GET /api/health` publik kini `{ ok, build }` — `storage` dicabut.
@@ -43,7 +53,7 @@ tanpa akses repo server.
 
 🟡 **PERLU DICEK** — tak ada yang memutus klien lama; dua aturan berubah.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#241 (`bf257d4`, CI cabang #511 hijau: unit, verify-api, E2E); ponsel lewat mohteja/kakarut-mobile#22.
 
 | perubahan | klien |
 | --- | --- |
@@ -61,7 +71,7 @@ tanpa akses repo server.
 
 🔴 **WAJIB** — refund oleh kasir tanpa PIN owner kini **403**.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#241 (`bf257d4`, CI cabang #511 hijau: unit, verify-api, E2E); ponsel lewat mohteja/kakarut-mobile#22.
 
 | perubahan | yang harus dilakukan klien |
 | --- | --- |
@@ -79,7 +89,7 @@ tanpa akses repo server.
 
 🔴 **WAJIB** — `POST /api/onboarding/perusahaan` **menolak** badan lama `{nama}`.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#241 (`bf257d4`, CI cabang #511 hijau: unit, verify-api, E2E); ponsel lewat mohteja/kakarut-mobile#22.
 
 **Apa.** Daftar tetap tak membuatkan perusahaan. Layar welcome (akun tanpa
 perusahaan) kini meminta orangnya memilih: **"Saya karyawan"** (tunggu

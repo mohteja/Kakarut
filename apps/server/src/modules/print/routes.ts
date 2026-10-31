@@ -127,6 +127,18 @@ export function sebabGagalCetak(e: unknown): string {
 
 const CONNECT_TIMEOUT_MS = 6000;
 
+/**
+ * 422 ber-`sebab`, BUKAN 502: Cloudflare di depan production mengganti balasan
+ * 502 dari origin dengan halaman galat HTML miliknya, jadi kalimat "printer
+ * tidak merespons" tak pernah sampai ke layar (uji web 31 Okt 2026).
+ */
+export class PrinterTakTerjangkau extends HTTPException {
+  readonly sebab = "printer_tak_terjangkau";
+  constructor(message: string) {
+    super(422, { message });
+  }
+}
+
 /** Teruskan byte ESC/POS ke printer jaringan lewat TCP (mis. port 9100). */
 async function kirimKePrinter(ip: string, port: number, bytes: Buffer): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -179,9 +191,9 @@ export const printRoutes = new Hono<AppEnv>().post(
     try {
       await kirimKePrinter(ip, port, bytes);
     } catch (e) {
-      throw new HTTPException(502, {
-        message: `Gagal mencetak ke ${host}:${port} — ${sebabGagalCetak(e)}. Pastikan server bisa menjangkau IP printer.`,
-      });
+      throw new PrinterTakTerjangkau(
+        `Gagal mencetak ke ${host}:${port} — ${sebabGagalCetak(e)}. Pastikan server bisa menjangkau IP printer.`,
+      );
     }
     return c.json({ ok: true });
   },

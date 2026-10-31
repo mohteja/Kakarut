@@ -58,6 +58,9 @@ export function KategoriManagerModal({
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    // Jangan sampai ikut mengirim form induk bila modal ini dirender di dalam
+    // form lain (sintetis React merambat lewat pohon komponen).
+    e.stopPropagation();
     if (form) simpan.mutate(form);
   }
 
@@ -72,12 +75,14 @@ export function KategoriManagerModal({
             <span className="flex-1 text-sm font-medium text-stone-800">{k.nama}</span>
             <span className="w-10 text-right text-xs text-stone-400">{k.sort_order}</span>
             <button
+              type="button"
               onClick={() => setForm({ id: k.id, nama: k.nama, sort_order: String(k.sort_order) })}
               className="text-sm font-medium text-orange-600 hover:underline"
             >
               Ubah
             </button>
             <button
+              type="button"
               onClick={() => {
                 if (confirm(`Hapus kategori "${k.nama}"?`)) hapus.mutate(k);
               }}
@@ -145,7 +150,7 @@ export function KategoriManagerModal({
           </div>
         </form>
       ) : (
-        <button onClick={() => setForm({ nama: "", sort_order: "0" })} className={btnPrimary}>
+        <button type="button" onClick={() => setForm({ nama: "", sort_order: "0" })} className={btnPrimary}>
           + Tambah Kategori
         </button>
       )}

@@ -94,15 +94,12 @@ const BELUM_TAYANG = new Set([
   // menu tayang lewat merge PR #238; stempelnya dipasang pada commit yang SAMA
   // dengan penghapusan baris ini.
   //
-  // BELUM DI-MERGE (2026-10-26): halaman welcome. Server dulu, baru ponsel
-  // (badan `POST /onboarding/perusahaan` kini `.strict()` berprofil);
-  // stempelnya dipasang DAN baris ini dihapus pada commit yang sama dengan
-  // merge-nya.
-  '## 🔴 Halaman welcome — profil usaha wajib saat membuat perusahaan, zona waktu WIB/WITA/WIT, "Tambah karyawan" ke akun terdaftar jadi undangan',
-  // BELUM DI-MERGE (2026-10-31): laporan uji gelombang 1, di branch yang sama.
-  '## ⚪️ Laporan uji 31 Okt 2026 (gelombang 3) — cek tautan reset, /health ramping, rekomendasi beli bawaan 7 hari',
-  '## 🟡 Laporan uji 31 Okt 2026 (gelombang 2) — no. referensi QRIS/transfer, shift > 24 jam, WA member 9–15 angka, kartu stok "terima"',
-  '## 🔴 Laporan uji 31 Okt 2026 (gelombang 1) — PIN owner untuk refund kasir, akun tamu, logout per perangkat, harga saran & susut transfer',
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-10-31 — halaman welcome dan
+  // laporan uji gelombang 1–3 tayang lewat merge PR #241 (`bf257d4`, CI #511);
+  // stempelnya dipasang pada commit yang SAMA dengan penghapusan baris ini.
+  //
+  // BELUM DI-MERGE (2026-10-31): status galat `POST /print/lan` (hasil uji web).
+  "## ⚪️ `POST /api/print/lan`: printer tak terjangkau kini 422 ber-`sebab`, bukan 502",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */
