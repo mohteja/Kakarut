@@ -4,6 +4,7 @@
  */
 import { teksAddon } from "./addon";
 import { EscPosBuilder } from "./escpos";
+import { labelCabangKertas } from "./order-slip";
 import type { MetodeBayar } from "./types";
 
 const METODE_LABEL: Record<MetodeBayar, string> = {
@@ -118,7 +119,7 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
     if (data.alamat) b.text(data.alamat);
     if (data.telepon) b.text(`Telp: ${data.telepon}`);
   }
-  b.text(`Cabang ${data.branchNama}`);
+  b.text(labelCabangKertas(data.branchNama));
   b.align("left").divider();
   b.line(data.nomor, data.waktu);
   b.text(data.isDineIn ? "Dine-in" : "Bawa pulang");

@@ -80,9 +80,10 @@ const tanpaTanggal = pemakai.filter((b) => b.golongan === "tanpa-tanggal").map((
 describe("formatWaktu tanpa tanggal — tiap berkas diputuskan", () => {
   it("premis: sapuannya memulangkan populasi web, bukan pecahannya", () => {
     // Sapuan tipis tak menuduh siapa pun — ia hanya berhenti bisa menuduh.
-    // 32 berkas pemakai saat ditulis.
+    // 32 berkas pemakai saat ditulis; 25 sejak 2026-10-31 (struk layar &
+    // jam buka shift kini memakai `formatTanggalJam`, bukan jam saja).
     expect(pemakai.length, "pemakai formatWaktu terlalu sedikit — jalur atau regexnya rusak")
-      .toBeGreaterThan(25);
+      .toBeGreaterThan(22);
     for (const k of Object.keys(DIPUTUSKAN)) {
       expect(populasi.some((b) => b.nama === k), `entri DIPUTUSKAN tak ada di disk: ${k}`).toBe(true);
     }

@@ -193,6 +193,14 @@ export function PenerimaanPage() {
       }),
     onSuccess: segarkan,
   });
+  /** Galat aksi terakhir yang menyasar kiriman `g` (untuk ditampilkan di kartunya). */
+  function galatKartu(g: KirimanGroup): unknown {
+    if (terima.error && terima.variables === g.fakturId) return terima.error;
+    if (terimaSebagian.error && terimaSebagian.variables?.key === g.key) return terimaSebagian.error;
+    if (tolak.error && tolak.variables === g.fakturId) return tolak.error;
+    return null;
+  }
+
   const batalTolak = useMutation({
     mutationFn: (fakturId: string) =>
       api(`/penerimaan/${fakturId}/batal-tolak`, { method: "POST" }),
@@ -447,6 +455,12 @@ export function PenerimaanPage() {
                     </>
                   )}
                 </div>
+                {/* Galat kiriman INI, tepat di bawah tombolnya. Spanduk di
+                    puncak halaman bisa berada di luar layar saat petugas
+                    menekan tombol di kartu bawah — penolakan server ("qty
+                    diterima melebihi yang dikirim") dulu terasa tak terjadi
+                    apa-apa (laporan uji 31 Okt 2026). */}
+                <ErrorText error={galatKartu(g)} />
               </Card>
             );
           })}

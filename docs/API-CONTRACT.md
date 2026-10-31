@@ -3258,7 +3258,14 @@ export interface StokRowDto {
   tempat_id: string | null;
   stok_awal: number;
   produksi: number;
+  /** SEMUA pengurang saldo: konsumsi (penjualan/produksi) + `kirim_keluar` */
   terpakai: number;
+  /**
+   * Bagian `terpakai` yang berupa KIRIMAN keluar (transfer ke lokasi lain),
+   * bukan pemakaian. Dipisah supaya Central Kitchen tak membaca kiriman sebagai
+   * konsumsi (laporan uji 31 Okt 2026). `terpakai − kirim_keluar` = pemakaian.
+   */
+  kirim_keluar: number;
   saldo: number;
   status: StokStatus;
   /** ambang batas stok minimum yang diatur untuk bahan ini (0 = pakai rasio default) */
@@ -3904,7 +3911,12 @@ export type MutasiJenis =
   | "penjualan"
   | "pemakaian"
   /** kiriman keluar: stok dipindah dari cabang ini ke cabang lain (diterima) */
-  | "kirim";
+  | "kirim"
+  /**
+   * kiriman MASUK dari lokasi lain yang sudah diterima (baris ber-asal) —
+   * dulu tertulis "Produksi" di kartu stok penerima (laporan uji 31 Okt 2026)
+   */
+  | "terima";
 
 /** Satu baris kartu stok (buku besar mutasi per bahan). */
 export interface MutasiStok {
@@ -4148,6 +4160,8 @@ export interface SaleRow {
   customerWa: string | null;
   metodeBayar: MetodeBayar;
   uangDiterima: number | null;
+  /** no. referensi QRIS/transfer yang diketik kasir; null = tak diisi / tunai */
+  refBayar: string | null;
   waktu: string;
   saleDate: string;
   shiftId: string | null;
@@ -5148,6 +5162,12 @@ export interface ShiftPantauRow {
   telat_buka: boolean;
   /** kasir masih terbuka padahal sudah lewat jam tutup */
   lupa_tutup: boolean;
+  /**
+   * shift terbuka LEBIH DARI 24 JAM — hampir pasti lupa ditutup di hari lain
+   * (laporan uji 31 Okt 2026: shift dibuka 27 Jul masih terbuka 3 bulan, tapi
+   * layar hanya menulis "21.48" tanpa tanggal dan tak menandai apa pun)
+   */
+  terbuka_lama: boolean;
 }
 
 /** Baris ringan hasil pencarian member (autocomplete keranjang kasir). */

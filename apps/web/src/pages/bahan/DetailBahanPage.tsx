@@ -15,6 +15,7 @@ const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
   penjualan: { label: "Penjualan", cls: "bg-red-100 text-red-700" },
   pemakaian: { label: "Pemakaian produksi", cls: "bg-amber-100 text-amber-800" },
   kirim: { label: "Kirim keluar", cls: "bg-purple-100 text-purple-800" },
+  terima: { label: "Terima transfer", cls: "bg-green-100 text-green-800" },
 };
 
 const FIFO_JENIS: Record<string, { label: string; cls: string }> = {

@@ -1,6 +1,6 @@
 import { bulanQueryAtau, tanggalQuery } from "../../lib/tanggal-query";
 import { zValidator } from "../../lib/validator";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -670,6 +670,10 @@ export const absensiRoutes = new Hono<AppEnv>()
           eq(memberships.companyId, auth.company_id!),
           branchId ? eq(memberships.branchId, branchId) : undefined,
           saringStatus,
+          // Owner tak wajib absen: dulu ia terhitung "tidak hadir" tiap hari
+          // sebulan penuh (laporan uji 31 Okt 2026). Absen owner yang memang
+          // dicatat tetap terlihat di Absensi harian.
+          ne(memberships.role, "owner"),
         ),
       )
       .orderBy(users.nama);

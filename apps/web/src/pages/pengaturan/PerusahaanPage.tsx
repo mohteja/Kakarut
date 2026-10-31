@@ -270,6 +270,13 @@ export function PerusahaanPage() {
       <Card className="space-y-4 p-5">
         <div className="text-sm text-stone-500">
           Paket langganan: <span className="font-semibold uppercase">{company.plan}</span>
+          {company.mode === "pro" && (
+            /* Pro belum berbayar dan tak punya tanggal berakhir — dikatakan
+               terang (laporan uji 31 Okt 2026: "naik Pro tanpa tagihan?"). */
+            <span className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
+              Gratis selama masa perkenalan
+            </span>
+          )}
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Nama perusahaan</label>

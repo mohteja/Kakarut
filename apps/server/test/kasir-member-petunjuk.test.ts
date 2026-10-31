@@ -24,10 +24,14 @@ import { normalizeWa } from "../src/modules/customer/service";
 const baca = (p: string) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 
 describe("kasir: nama saja tak pernah jadi member — dan kasir DIBERI TAHU", () => {
-  it("premis: server memang tak membuat member tanpa WA sah (≥ 6 angka)", () => {
+  it("premis: server memang tak membuat member tanpa WA sah (9–15 angka)", () => {
     expect(normalizeWa("Budi")).toBeNull();
     expect(normalizeWa("0812-3")).toBeNull();
-    expect(normalizeWa("+62 812-34")).toBe("6281234");
+    // 7 angka — dulu sah (ambang 6), sejak 2026-10-31 terlalu pendek.
+    expect(normalizeWa("+62 812-34")).toBeNull();
+    expect(normalizeWa("646464")).toBeNull();
+    expect(normalizeWa("+62 812-3456-78")).toBe("6281234567" + "8");
+    expect(normalizeWa("1".repeat(16))).toBeNull();
     const SVC = baca("../src/modules/customer/service.ts");
     const iUpsert = SVC.indexOf("export async function upsertCustomer(");
     expect(iUpsert).toBeGreaterThan(-1);
@@ -35,11 +39,11 @@ describe("kasir: nama saja tak pernah jadi member — dan kasir DIBERI TAHU", ()
   });
 
   it("ambang layar MENYALIN ambang server, bukan menebaknya", () => {
-    for (let n = 0; n <= 8; n++) {
+    for (let n = 0; n <= 17; n++) {
       const wa = "8".repeat(n);
       expect(petunjukMember("Budi", wa) === null, `WA ${n} angka`).toBe(normalizeWa(wa) !== null);
     }
-    expect(MIN_DIGIT_WA).toBe(6);
+    expect(MIN_DIGIT_WA).toBe(9);
   });
 
   it("nama tanpa WA → menyebut nama & tempatnya; WA pendek → menyebut jumlah angkanya", () => {

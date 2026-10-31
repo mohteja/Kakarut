@@ -38,6 +38,9 @@ export function SignupPage() {
   const [email, setEmail] = useState(() => paramDaftar.get("email")?.trim().toLowerCase() ?? "");
   const [password, setPassword] = useState("");
   const [konfirmasi, setKonfirmasi] = useState("");
+  // Persetujuan Syarat & Kebijakan Privasi — wajib dicentang sebelum daftar
+  // (laporan uji 31 Okt 2026: form daftar tak punya persetujuan apa pun).
+  const [setuju, setSetuju] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -184,6 +187,7 @@ export function SignupPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className={inputClass}
                 placeholder="anda@email.com"
+                autoComplete="email"
               />
             </div>
             <div>
@@ -215,6 +219,26 @@ export function SignupPage() {
               />
               {tidakCocok && <p className="mt-1 text-xs text-red-600">Password tidak sama.</p>}
             </div>
+            <label className="flex items-start gap-2 text-sm text-stone-600">
+              <input
+                type="checkbox"
+                required
+                checked={setuju}
+                onChange={(e) => setSetuju(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                Saya menyetujui{" "}
+                <a href="/syarat" target="_blank" rel="noreferrer" className="font-medium text-orange-600 underline">
+                  Syarat &amp; Ketentuan
+                </a>{" "}
+                dan{" "}
+                <a href="/privasi" target="_blank" rel="noreferrer" className="font-medium text-orange-600 underline">
+                  Kebijakan Privasi
+                </a>
+                .
+              </span>
+            </label>
             {error && (
               <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
                 {error}
@@ -230,7 +254,7 @@ export function SignupPage() {
             )}
             <button
               type="submit"
-              disabled={loading || terlaluPendek || tidakCocok}
+              disabled={loading || terlaluPendek || tidakCocok || !setuju}
               className={`${btnPrimary} w-full`}
             >
               {loading ? "Mendaftar…" : "Daftar"}

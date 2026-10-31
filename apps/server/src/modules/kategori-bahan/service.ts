@@ -11,6 +11,22 @@ import { companies, ingredientCategories, ingredients } from "../../db/schema";
 export const KATEGORI_BAHAN_DEFAULT = ["baso", "minuman", "lain"] as const;
 
 /**
+ * Kategori bawaan menurut JENIS USAHA yang dipilih di halaman welcome.
+ * Laporan uji 31 Okt 2026: kafe baru langsung mendapat kategori "baso". Yang
+ * tak terdaftar (atau jenis kosong: super admin, tamu) memakai bawaan lama.
+ * "lain" selalu ada — itu nilai bawaan `ingredients.kategori`.
+ */
+export const KATEGORI_BAHAN_PER_JENIS: Record<string, readonly string[]> = {
+  warung_makan: ["bahan pokok", "lauk", "sayur", "bumbu", "minuman", "lain"],
+  kafe_kopi: ["kopi", "susu", "sirup", "kemasan", "lain"],
+  bakso_mie: ["baso", "mie", "bumbu", "minuman", "lain"],
+  minuman: ["teh", "buah", "sirup", "kemasan", "lain"],
+  roti_camilan: ["tepung", "mentega & susu", "topping", "kemasan", "lain"],
+  katering: ["bahan pokok", "lauk", "sayur", "bumbu", "kemasan", "lain"],
+  lainnya: ["bahan", "minuman", "kemasan", "lain"],
+};
+
+/**
  * Pastikan satu perusahaan punya master kategori bahan: sisipkan default +
  * kategori yang sudah dipakai bahannya (yang belum ada). Idempotent.
  * Dipanggil saat provisioning tenant baru & backfill boot.
@@ -18,17 +34,20 @@ export const KATEGORI_BAHAN_DEFAULT = ["baso", "minuman", "lain"] as const;
 export async function seedKategoriBahanPerusahaan(
   dbx: Db | Tx,
   companyId: string,
+  jenisUsaha?: string | null,
 ): Promise<number> {
+  const bawaan: readonly string[] =
+    (jenisUsaha && KATEGORI_BAHAN_PER_JENIS[jenisUsaha]) || KATEGORI_BAHAN_DEFAULT;
   const bahanKategori = await dbx
     .select({ kategori: ingredients.kategori })
     .from(ingredients)
     .where(eq(ingredients.companyId, companyId));
-  const nama = new Set<string>(KATEGORI_BAHAN_DEFAULT);
+  const nama = new Set<string>(bawaan);
   for (const b of bahanKategori) if (b.kategori?.trim()) nama.add(b.kategori.trim());
 
   const daftar = [...nama];
   const rows = daftar.map((n, i) => {
-    const idx = KATEGORI_BAHAN_DEFAULT.indexOf(n as (typeof KATEGORI_BAHAN_DEFAULT)[number]);
+    const idx = bawaan.indexOf(n);
     return { companyId, nama: n, sortOrder: idx >= 0 ? idx : 100 + i };
   });
   const res = await dbx

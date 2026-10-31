@@ -25,6 +25,24 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 Laporan uji 31 Okt 2026 (gelombang 2) — no. referensi QRIS/transfer, shift > 24 jam, WA member 9–15 angka, kartu stok "terima"
+
+🟡 **PERLU DICEK** — tak ada yang memutus klien lama; dua aturan berubah.
+
+**Belum tayang.**
+
+| perubahan | klien |
+| --- | --- |
+| `POST /api/penjualan` (dan perintah `penjualan` di `/sync`) menerima `ref_bayar` (≤ 64, diabaikan untuk tunai); `SaleRow.refBayar`. | Opsional: kolom "No. referensi" di lembar bayar non-tunai & tampil di struk. |
+| `ShiftPantauRow.terbuka_lama` — shift terbuka > 24 jam. | Tampilkan peringatan. Jam buka shift sebaiknya ditulis dengan tanggal. |
+| `StokRow.kirim_keluar` — bagian `terpakai` yang berupa kiriman keluar (`terpakai` tetap gabungan). | Opsional. |
+| `MutasiJenis` bertambah **`terima`** — kiriman masuk dari lokasi lain (dulu `produksi`). Arahnya MASUK. | Beri label "Terima transfer"; jenis tak dikenal jangan dianggap keluar. |
+| Member: WA sah = **9–15 angka** (dulu ≥ 6). `POST/PATCH /customer` dengan WA di luar itu → 400; penjualan dengan WA pendek tak membuat member. | Cerminkan ambangnya (`member_wa.dart`). |
+| Owner tak lagi ada di `GET /absensi/rekap`. Rekap absen hanya karyawan wajib absen. | — |
+| Struk/bon/slip: awalan "Cabang" tak lagi digandakan (`labelCabangKertas`). | Cerminkan di pembangun struk. |
+
+---
+
 ## 🔴 Laporan uji 31 Okt 2026 (gelombang 1) — PIN owner untuk refund kasir, akun tamu, logout per perangkat, harga saran & susut transfer
 
 🔴 **WAJIB** — refund oleh kasir tanpa PIN owner kini **403**.

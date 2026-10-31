@@ -65,7 +65,7 @@ export async function buatPerusahaanUntuk(
     .returning();
   await seedMejaDefault(tx, company.id, branch.id);
   await seedUnitsPerusahaan(tx, company.id);
-  await seedKategoriBahanPerusahaan(tx, company.id);
+  await seedKategoriBahanPerusahaan(tx, company.id, opts.jenis_usaha);
   // Kategori MENU bawaan: form menu mewajibkan kategori, dan akun baru dulu
   // buntu di menu pertamanya (laporan uji 31 Okt 2026). Bisa diubah/dihapus.
   await tx

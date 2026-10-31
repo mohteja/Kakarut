@@ -74,6 +74,7 @@ export function contohStruk(opts: OpsiContohStruk): SaleResult {
       customerWa: null,
       metodeBayar: "tunai" as MetodeBayar,
       uangDiterima: Math.ceil(total / 10_000) * 10_000,
+      refBayar: null,
       catatan: "CETAK UJI — bukan transaksi",
       subtotalAsal: null,
       diskonAsal: null,

@@ -65,8 +65,17 @@ export function varianWa(digits: string): string[] {
 export function normalizeWa(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const digits = raw.replace(/\D/g, "");
-  return digits.length >= 6 ? digits : null;
+  // 9–15 angka: nomor HP Indonesia terpendek "08xx xxxx x" = 10 (9 tanpa 0
+  // depan), terpanjang E.164 = 15. Dulu cukup 6 angka, jadi "646464" lolos
+  // sebagai member (laporan uji 31 Okt 2026). Dicerminkan `member-wa.ts`
+  // (web) dan `member_wa.dart` (ponsel).
+  return digits.length >= MIN_DIGIT_WA_SERVER && digits.length <= MAKS_DIGIT_WA_SERVER
+    ? digits
+    : null;
 }
+
+export const MIN_DIGIT_WA_SERVER = 9;
+export const MAKS_DIGIT_WA_SERVER = 15;
 
 /**
  * Member yang setara dengan nomor ini — dalam bentuk tersimpan apa pun.

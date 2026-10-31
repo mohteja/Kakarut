@@ -13,7 +13,7 @@ import {
 } from "../../components/ui";
 import { ShiftDetailModal } from "../../components/ShiftDetailModal";
 import { api, bacaTerpotong } from "../../lib/api";
-import { formatRupiah, formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { formatRupiah, formatTanggalJam, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 /** Label + warna selisih kas (fisik − seharusnya). */
 function selisihInfo(selisih: number | null) {
@@ -202,7 +202,7 @@ function KartuCabang({
       </div>
 
       {/* Tanda peringatan operasional */}
-      {(row.telat_buka || row.lupa_tutup) && (
+      {(row.telat_buka || row.lupa_tutup || row.terbuka_lama) && (
         <div className="mt-2 space-y-1">
           {row.telat_buka && (
             <div className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">
@@ -214,6 +214,11 @@ function KartuCabang({
               ⚠️ Lupa tutup — kasir masih terbuka padahal sudah lewat jam tutup
             </div>
           )}
+          {row.terbuka_lama && (
+            <div className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">
+              ⚠️ Shift terbuka lebih dari 24 jam — tutup kasir lalu buka shift baru
+            </div>
+          )}
         </div>
       )}
 
@@ -221,7 +226,8 @@ function KartuCabang({
       {buka && (
         <div className="mt-2 text-xs text-stone-500">
           🔓 Dibuka oleh <b className="text-stone-700">{row.dibuka_oleh}</b>
-          {row.dibuka_pada ? ` · ${formatWaktu(row.dibuka_pada)}` : ""}
+          {/* Tanggal + jam: shift bisa berumur lebih dari sehari. */}
+          {row.dibuka_pada ? ` · ${formatTanggalJam(row.dibuka_pada)}` : ""}
         </div>
       )}
 
@@ -243,12 +249,13 @@ function KartuCabang({
           value={buka ? formatRupiah(row.kas_sistem) : "—"}
           warna="text-orange-600"
           catatan={
-            buka &&
-            row.penjualan_tunai_shift != null &&
-            row.penjualan_tunai_shift !== row.penjualan_tunai ? (
+            buka && row.penjualan_tunai_shift != null && row.modal_awal != null ? (
+              /* Kas seharusnya = modal awal + tunai shift ini. Dulu ditulis
+                 "sisanya dari shift yang sudah ditutup" padahal belum ada shift
+                 yang ditutup — selisih itu modal awal (laporan uji 31 Okt 2026). */
               <>
-                shift ini {formatRupiah(row.penjualan_tunai_shift)} tunai — sisanya dari shift
-                yang sudah ditutup
+                modal awal {formatRupiah(row.modal_awal)} + tunai shift ini{" "}
+                {formatRupiah(row.penjualan_tunai_shift)}
               </>
             ) : undefined
           }

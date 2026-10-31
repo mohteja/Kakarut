@@ -77,7 +77,7 @@ const MENU_BARU: MenuBaru[] = [
   { nama: "Es Kopi Hitam", kat: "Minuman", jual: 12000, resep: [["kopi", 1], ["es", 1], ["cup", 1]] },
   { nama: "Teh Tarik", kat: "Minuman", jual: 10000, resep: [["teh", 1], ["susu", 1], ["cup", 1]] },
   { nama: "Jus Jeruk", kat: "Minuman", jual: 12000, resep: [["jeruk", 1], ["es", 1], ["cup", 1]] },
-  { nama: "Paket Hemat Bakso + Es Teh", kat: "Paket", jual: 16000, resep: [["es", 1], ["sirup", 1]], dasar: "Bakso Biasa" },
+  { nama: "Paket Hemat Bakso + Es Teh", kat: "Paket", jual: 16000, resep: [["teh", 1], ["gula", 1], ["es", 1]], dasar: "Bakso Biasa" },
 ];
 
 type AddonSpec = { nama: string; harga: number; maks?: number; bahan?: [string, number] };
@@ -218,6 +218,7 @@ export async function lengkapiDataDemo(companyId: string, ownerId: string, kasir
           satuan: b.satuan,
           kategori: "lain",
           isPackaging: "kemasan" in b ? b.kemasan : false,
+          stokMinimum: Math.ceil(b.stok * 0.15),
         })),
       )
       .onConflictDoNothing()
@@ -505,9 +506,15 @@ async function penjualanDemo(
   if (menuAktif.length === 0) return 0;
   const metode = ["tunai", "qris", "transfer"] as const;
   let dibuat = 0;
-  for (let n = 0; n < 40; n += 1) {
+  // Diurutkan menurut waktu supaya nomor struk urut, dan jamnya jam WIB
+  // (10.00–19.00) — `setUTCHours`, sebab server berjalan UTC (laporan uji
+  // 31 Okt 2026: demo menumpuk 17.00–02.59 dan nomornya tak urut).
+  const urutan40 = Array.from({ length: 40 }, (_, n) => {
     const waktu = new Date(Date.now() - (1 + (n % 21)) * 86_400_000);
-    waktu.setHours(10 + (n % 10), (n * 13) % 60, 0, 0);
+    waktu.setUTCHours(10 + (n % 10) - 7, (n * 13) % 60, 0, 0);
+    return { n, waktu };
+  }).sort((a, b) => a.waktu.getTime() - b.waktu.getTime());
+  for (const { n, waktu } of urutan40) {
     const items: { menu_id: string; qty: number; addons?: PilihanAddon[] }[] = [];
     let total = 0;
     const jumlahItem = 1 + (n % 3);

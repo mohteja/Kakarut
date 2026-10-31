@@ -82,6 +82,8 @@ export interface CreateSaleParams {
   /** pembayaran: metode + uang tunai diterima (untuk kembalian) */
   metodeBayar?: "tunai" | "qris" | "transfer";
   uangDiterima?: number | null;
+  /** no. referensi QRIS/transfer; diabaikan untuk tunai */
+  refBayar?: string | null;
   /**
    * Waktu kejadian transaksi (sinkron offline). Bila diisi: dipakai sebagai
    * timestamp struk + tanggal bisnis (untuk nomor & rekap/shift). Bila kosong:
@@ -727,6 +729,7 @@ export async function createSale(params: CreateSaleParams) {
         customerWa: member?.wa ?? null,
         metodeBayar,
         uangDiterima,
+        refBayar: metodeBayar === "tunai" ? null : params.refBayar?.trim() || null,
         saleDate,
         shiftId,
         asalOpenBillId: params.openBillId ?? null,

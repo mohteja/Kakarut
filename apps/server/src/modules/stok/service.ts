@@ -269,6 +269,7 @@ export async function hitungSaldoCabang(
       stok_awal: stokAwal,
       produksi,
       terpakai,
+      kirim_keluar: keSkalaKolom(Number(row.kirim_keluar), SKALA_QTY_STOK_KOLOM),
       saldo,
       // `statusStok` memanggil `saldoStok` di dalamnya, dan sejak vena ini
       // `saldoStok` sendiri yang membulatkan — jadi badge dan angka di
@@ -419,7 +420,11 @@ export async function kartuStok(params: {
         AND so.penyesuaian_status = 'disetujui'
         AND so.opname_date >= ${dari} AND so.opname_date <= ${sampai}
       UNION ALL
-      SELECT pr.waktu, pr.tipe::text AS jenis, pr.qty, pr.catatan,
+      SELECT pr.waktu,
+             -- Barang KIRIMAN (punya cabang asal) bukan produksi di sini.
+             CASE WHEN pr.asal_branch_id IS NOT NULL AND pr.asal_branch_id <> pr.branch_id
+               THEN 'terima' ELSE pr.tipe::text END AS jenis,
+             pr.qty, pr.catatan,
              -- nomor dokumen otomatis (PB-/PR-); nota supplier sebagai cadangan
              COALESCE(dn.nomor_teks, pr.no_faktur) AS nomor,
              sp.nama AS supplier, sl.nama AS tempat, pr.is_batch, pr.id AS ev_id

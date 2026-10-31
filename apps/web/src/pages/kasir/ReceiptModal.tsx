@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { qtyDitagih, tarifPb1Struk, teksAddonKertas } from "@kakarut/shared";
+import { labelCabangKertas, qtyDitagih, tarifPb1Struk, teksAddonKertas } from "@kakarut/shared";
 import type {
   CabangDto,
   CompanyRow,
@@ -19,7 +19,7 @@ import { ErrorText, btnPrimary, btnSecondary } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { usePrinter } from "../../context/PrinterContext";
 import { api } from "../../lib/api";
-import { formatRupiah, formatWaktu, waktuKertasWIB } from "../../lib/format";
+import { formatRupiah, formatTanggalJam, waktuKertasWIB } from "../../lib/format";
 import { RefundPanel } from "./RefundPanel";
 import { AreaCetak } from "../../components/AreaCetak";
 
@@ -248,10 +248,12 @@ export function ReceiptModal({
               </div>
               {showAlamat && alamatStruk && <div>{alamatStruk}</div>}
               {showAlamat && teleponStruk && <div>Telp: {teleponStruk}</div>}
-              <div>Cabang {data.branch_nama}</div>
+              <div>{labelCabangKertas(data.branch_nama)}</div>
               <div className="mt-1">{data.sale.nomor}</div>
               <div>
-                {formatWaktu(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
+                {/* Tanggal + jam: struk dibaca di luar hari transaksinya
+                    (laporan uji 31 Okt 2026 — dulu hanya jam). */}
+                {formatTanggalJam(data.sale.waktu)} · {data.sale.isDineIn ? "Dine-in" : "Bawa pulang"}
               </div>
               {antrian != null && <div className="mt-1 text-xl font-bold">Antrian {antrian}</div>}
               {(data.sale.customerNama || data.sale.mejaLabel) && (
@@ -322,6 +324,12 @@ export function ReceiptModal({
               <span>Metode</span>
               <span>{METODE_LABEL[data.sale.metodeBayar]}</span>
             </div>
+            {data.sale.refBayar && (
+              <div className="flex justify-between">
+                <span>No. ref</span>
+                <span className="font-mono">{data.sale.refBayar}</span>
+              </div>
+            )}
             {data.sale.metodeBayar === "tunai" && data.sale.uangDiterima != null && (
               <>
                 <div className="flex justify-between">

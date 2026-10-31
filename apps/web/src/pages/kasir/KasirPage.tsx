@@ -251,6 +251,8 @@ export function KasirPage() {
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
   const [diskonNilai, setDiskonNilai] = useState("");
   const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>("tunai");
+  // No. referensi QRIS/transfer — opsional, jejak untuk dicocokkan ke mutasi.
+  const [refBayar, setRefBayar] = useState("");
   const [uangDiterima, setUangDiterima] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
   // Modal "Resume Order" muncul saat tombol Lanjut ditekan
@@ -716,6 +718,7 @@ export function KasirPage() {
           ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           metode_bayar: metodeBayar,
           ...(metodeBayar === "tunai" && uangNum > 0 ? { uang_diterima: uangNum } : {}),
+          ...(metodeBayar !== "tunai" && refBayar.trim() ? { ref_bayar: refBayar.trim() } : {}),
           // Yang DIKIRIM harus sama persis dengan yang DITAMPILKAN. `diskon` di
           // atas sudah dipotong ke jatah maksimal kasir, dan layar resume sudah
           // menuliskan angka terpotong itu berikut totalnya — uang yang
@@ -793,6 +796,7 @@ export function KasirPage() {
     setMemberOpen(false);
     setDiskonNilai("");
     setMetodeBayar("tunai");
+    setRefBayar("");
     setUangDiterima("");
     setLangkahBayar("resume");
     setMejaId(null);
@@ -1423,12 +1427,17 @@ export function KasirPage() {
                     )}
                     {/* Harga menu berubah setelah bill dibuat: pembeli tetap
                         ditagih harga saat memesan — katakan apa adanya. */}
-                    {l.hargaKunci != null && l.hargaKunci !== l.menu.harga_jual && (
+                    {/* Dibanding harga katalog TERMASUK add-on: harga terkunci bill
+                        sudah memuat add-on, jadi membandingkannya dengan harga
+                        menu polos menyalakan tanda palsu tiap kali ada topping
+                        (laporan uji 31 Okt 2026). Cermin `hargaBeda` ponsel. */}
+                    {l.hargaKunci != null &&
+                      Math.abs(l.hargaKunci - (l.menu.harga_jual + hargaAddon(l.addons))) > 0.005 && (
                       <div
                         className="text-[11px] text-amber-700"
-                        title={`Harga menu sekarang ${formatRupiah(l.menu.harga_jual)}`}
+                        title={`Harga menu sekarang ${formatRupiah(l.menu.harga_jual + hargaAddon(l.addons))}`}
                       >
-                        🔒 harga saat dipesan (menu kini {formatRupiah(l.menu.harga_jual)})
+                        🔒 harga saat dipesan (kini {formatRupiah(l.menu.harga_jual + hargaAddon(l.addons))})
                       </div>
                     )}
                   </div>
@@ -1818,6 +1827,15 @@ export function KasirPage() {
                   </button>
                 ))}
               </div>
+              )}
+              {langkahBayar === "bayar" && metodeBayar !== "tunai" && (
+                <input
+                  value={refBayar}
+                  onChange={(e) => setRefBayar(e.target.value.slice(0, 64))}
+                  placeholder={metodeBayar === "qris" ? "No. referensi QRIS (opsional)" : "No. referensi transfer (opsional)"}
+                  aria-label="No. referensi pembayaran"
+                  className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+                />
               )}
               {langkahBayar === "bayar" && metodeBayar === "tunai" && (
                 <div className="space-y-1.5">

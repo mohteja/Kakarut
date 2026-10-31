@@ -453,6 +453,7 @@ const execPenjualan: Eksekutor = async ({ auth }, payload, waktu) => {
     customerWa: p.customer_wa,
     metodeBayar: p.metode_bayar,
     uangDiterima: p.uang_diterima,
+    refBayar: p.ref_bayar,
     waktu,
     shiftId: shift.id,
     openBillId: p.open_bill_id,

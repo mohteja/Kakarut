@@ -5548,6 +5548,29 @@ cek "setelah diterima: stok ASAL turun -1" "abs(V + 1) < 0.001" \
 cek "status faktur transfer jadi dikonfirmasi" "V == 1" \
   "$(api "$OWNER" GET /transfer-stok | jq --arg f "$TFID132" '[.rows[]|select(.faktur_id==$f)][0].status=="dikonfirmasi"|if . then 1 else 0 end')"
 
+# TERIMA SEBAGIAN pada transfer sungguhan (ber-asal): kirim 2, tiba 1. Yang
+# BERANGKAT mengurangi asal (susut di jalan tak kembali ke CK), riwayat
+# menyebut keduanya, kartu stok berlabel benar (laporan uji 31 Okt 2026).
+SA132B=$(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+ST132B=$(api "$OWNER" GET "/stok?branch_id=$TUJUAN132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
+TFS132=$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":2}]}")
+TFSID132=$(jq -r '.faktur_id // ""' <<<"$TFS132")
+RS132=$(api "$OWNER" GET "/penerimaan?branch_id=$TUJUAN132" | jq -r --arg f "$TFSID132" '[.rows[]|select(.faktur_id==$f)][0].id')
+cek "terima sebagian transfer (kirim 2, tiba 1) → 200" "V == 200" \
+  "$(status_code_body "$OWNER" POST "/penerimaan/$TFSID132/terima-sebagian?branch_id=$TUJUAN132" "{\"items\":[{\"id\":\"$RS132\",\"qty_diterima\":1}],\"alasan\":\"1 pecah di jalan\"}")"
+cek "asal berkurang 2 (yang berangkat), bukan 1" "abs(V + 2) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0') - $SA132B)")"
+cek "tujuan bertambah 1 (yang tiba)" "abs(V - 1) < 0.001" \
+  "$(python3 -c "print($(api "$OWNER" GET "/stok?branch_id=$TUJUAN132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0') - $ST132B)")"
+cek "riwayat transfer: qty 1, qty_dikirim 2, status sebagian" "V == 1" \
+  "$(api "$OWNER" GET /transfer-stok | jq --arg f "$TFSID132" '[.rows[]|select(.faktur_id==$f)][0] | (.status=="sebagian" and .items[0].qty==1 and .items[0].qty_dikirim==2) | if . then 1 else 0 end')"
+cek "kartu stok tujuan: kiriman masuk berjenis 'terima'" "V >= 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$ING132?branch_id=$TUJUAN132" | jq '[.mutasi[] | select(.jenis=="terima")] | length')"
+cek "kartu stok asal: kirim 2 menyebut susut di jalan 1" "V >= 1" \
+  "$(api "$OWNER" GET "/stok/kartu/$ING132?branch_id=$ASAL132" | jq '[.mutasi[] | select(.jenis=="kirim" and .keluar==2 and ((.keterangan // "") | contains("susut di jalan 1")))] | length')"
+cek "GET /stok asal: kirim_keluar terpisah & termasuk dalam terpakai" "V == 1" \
+  "$(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '([.[]|select(.ingredient_id==$i)][0]) | ((.kirim_keluar >= 2) and (.terpakai >= .kirim_keluar)) | if . then 1 else 0 end')"
+
 
 # ── §185 idempotensi di bawah PERMINTAAN BERSAMAAN ──
 #
@@ -17707,7 +17730,7 @@ R298=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu
 ID298=$(jq -r '.sale.id // ""' <<<"$R298")
 G298K=$(api "$REISS105" GET "/penjualan/$ID298")
 G298O=$(api "$OWNER" GET "/penjualan/$ID298")
-cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 30 + SaleItemRow 17 + SaleResult 4)" "V == 51" \
+cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 31 + SaleItemRow 17 + SaleResult 4)" "V == 52" \
   "$(printf '%s\n%s\n%s\n' "$K298_SALE" "$K298_ITEM" "$K298_ATAS" | grep -c .)"
 cek "§298 premis: kasir berhasil membuat transaksi (ada sale.id & satu baris)" "V == 1" \
   "$([ -n "$ID298" ] && [ "$(jq '.items|length' <<<"$R298")" -ge 1 ] && echo 1 || echo 0)"
@@ -18972,6 +18995,30 @@ cek "§322 PIN refund: profil owner menandai sudah diatur" "V == 1" \
   "$(api "$OWNER" GET /profil | jq '(.pin_refund_diatur==true)|if . then 1 else 0 end')"
 cek "§322 kasir tak boleh mengatur PIN refund (403)" "V == 403" \
   "$(status_code_body "$REISS105" PUT /profil/pin '{"pin":"123123","password":"x"}')"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# §323 — LAPORAN UJI 31 OKT 2026, GELOMBANG 2: shift > 24 jam, no. referensi
+#        QRIS/transfer, WA member, rekap absen tanpa owner, kategori bawaan
+# ═══════════════════════════════════════════════════════════════════════════
+cek "§323 pantau shift: tiap baris punya tanda terbuka_lama (boolean)" "V == 1" \
+  "$(api "$OWNER" GET /shift/pantau | jq 'all(.[]; (.terbuka_lama|type)=="boolean") | if . then 1 else 0 end')"
+S323Q=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"qris\",\"ref_bayar\":\" QR-323-ABC \",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "§323 QRIS menyimpan no. referensi (dirapikan)" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$(jq -r '.sale.id' <<<"$S323Q")" | jq '(.sale.refBayar=="QR-323-ABC")|if . then 1 else 0 end')"
+S323T=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"metode_bayar\":\"tunai\",\"ref_bayar\":\"abaikan\",\"items\":[{\"menu_id\":\"$PBA_ID\",\"qty\":1}]}")
+cek "§323 tunai: no. referensi diabaikan (null)" "V == 1" \
+  "$(api "$OWNER" GET "/penjualan/$(jq -r '.sale.id' <<<"$S323T")" | jq '(.sale.refBayar==null)|if . then 1 else 0 end')"
+cek "§323 member WA 6 angka (646464) ditolak 400" "V == 400" \
+  "$(status_code_body "$OWNER" POST /customer '{"nama":"Oop 323","wa":"646464"}')"
+cek "§323 member WA 10 angka diterima" "V == 201" \
+  "$(status_code_body "$OWNER" POST /customer "{\"nama\":\"Sah 323\",\"wa\":\"0813$(date +%s | tail -c 7)\"}")"
+cek "§323 rekap absen tak memuat owner" "V == 0" \
+  "$(api "$OWNER" GET "/absensi/rekap?branch_id=all" | jq '[.rows[] | select(.role=="owner")] | length')"
+# Perusahaan kafe dari §321: kategori bawaan mengikuti jenis usahanya.
+cek "§323 kafe baru: kategori bahan 'kopi' ada, 'baso' tidak" "V == 1" \
+  "$(api "$TO321" GET /kategori-bahan | jq '([.[].nama] | (index("kopi") != null and index("baso") == null)) | if . then 1 else 0 end')"
+cek "§323 kafe baru: kategori menu bawaan Makanan & Minuman" "V == 2" \
+  "$(api "$TO321" GET /kategori | jq '[.[] | select(.nama=="Makanan" or .nama=="Minuman")] | length')"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

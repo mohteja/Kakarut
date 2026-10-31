@@ -55,6 +55,17 @@ export interface OrderSlipData {
 }
 
 /**
+ * Baris cabang di kepala kertas & struk layar: "Cabang <nama>" — kecuali
+ * namanya SUDAH diawali "Cabang" (laporan uji 31 Okt 2026: "Cabang Cabang
+ * Demo"). Satu rumah untuk struk, bon tagihan, dan slip pesanan; ponsel
+ * mencerminkannya di `receipt_builder.dart`.
+ */
+export function labelCabangKertas(nama: string): string {
+  const n = nama.trim();
+  return /^cabang\b/i.test(n) ? n : `Cabang ${n}`;
+}
+
+/**
  * Waktu untuk KERTAS: "21/08, 14.30" — tanggal & jam pada zona yang diminta.
  *
  * Di sini, bukan di masing-masing klien: struk dan slip beredar berdampingan di
@@ -94,7 +105,7 @@ export function buildOrderSlipBytes(data: OrderSlipData, opts: ReceiptOptions): 
   // olehnya adalah "ini bukan bukti bayar".
   b.align("center").bold(true).size("tall").text("PESANAN").size("normal");
   b.text(data.companyNama).bold(false);
-  b.text(`Cabang ${data.branchNama}`);
+  b.text(labelCabangKertas(data.branchNama));
   b.align("left").divider();
 
   if (data.nomor) b.line(data.nomor, data.waktu);

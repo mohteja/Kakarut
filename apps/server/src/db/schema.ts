@@ -1492,6 +1492,12 @@ export const sales = pgTable(
     // dihitung dari uang_diterima − total saat perlu (struk/riwayat).
     metodeBayar: metodeBayarEnum("metode_bayar").notNull().default("tunai"),
     uangDiterima: numeric("uang_diterima", { precision: 14, scale: 2, mode: "number" }),
+    /**
+     * No. referensi pembayaran non-tunai (QRIS/transfer) — opsional, diketik
+     * kasir dari layar pembeli/mutasi bank. Laporan uji 31 Okt 2026: kasir
+     * hanya menandai lunas tanpa jejak apa pun untuk dicocokkan ke mutasi.
+     */
+    refBayar: text("ref_bayar"),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     saleDate: date("sale_date").notNull(),
     /**

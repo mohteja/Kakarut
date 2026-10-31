@@ -271,6 +271,28 @@ export function TransferStokPage() {
     !adaQtyLebih &&
     !adaSalahKemasan;
 
+  /**
+   * Kenapa tombol Kirim mati — DIKATAKAN di sebelahnya. Dulu tombolnya mati
+   * tanpa satu kata pun untuk empat dari enam sebabnya (laporan uji 31 Okt
+   * 2026: "Transfer 60 dari stok 50: tombol Kirim mati tanpa penjelasan").
+   * `null` = bisa kirim, atau sebabnya sudah dikatakan kalimat merah di atas.
+   */
+  const sebabTakBisaKirim: string | null = !asalId
+    ? "Pilih lokasi asal dulu."
+    : !tujuanId
+      ? "Pilih lokasi tujuan dulu."
+      : asalId === tujuanId
+        ? "Asal dan tujuan tak boleh sama."
+        : barisTerisi.length === 0
+          ? "Pilih bahan dan isi jumlah kirimnya."
+          : adaQtyLebih
+            ? "Jumlah kirim melebihi stok tersedia."
+            : qtyTerbuang.length > 0
+              ? "Ada jumlah yang belum terbaca sebagai angka."
+              : adaSalahKemasan
+                ? "Ada jumlah yang bukan kelipatan kemasannya."
+                : null;
+
   const namaCabang = (id: string) => cabang.find((b) => b.id === id)?.nama ?? "—";
 
   return (
@@ -636,6 +658,11 @@ export function TransferStokPage() {
             >
               {kirim.isPending ? "Mengirim…" : "🔄 Kirim Transfer"}
             </button>
+            {!bisaKirim && sebabTakBisaKirim && (
+              <span className="text-sm font-medium text-amber-700" data-testid="sebab-tak-bisa-kirim">
+                {sebabTakBisaKirim}
+              </span>
+            )}
             {barisTerisi.length > 0 && (
               <span className="text-sm text-stone-500">
                 {barisTerisi.length} bahan → {tujuanId ? namaCabang(tujuanId) : "pilih tujuan"}

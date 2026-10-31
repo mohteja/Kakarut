@@ -84,6 +84,7 @@ export const KOLOM_SALE = {
   customerWa: sales.customerWa,
   metodeBayar: sales.metodeBayar,
   uangDiterima: sales.uangDiterima,
+  refBayar: sales.refBayar,
   waktu: sales.waktu,
   saleDate: sales.saleDate,
   shiftId: sales.shiftId,

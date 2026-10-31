@@ -47,6 +47,8 @@ export const SaleBody = z.object({
   /** pembayaran */
   metode_bayar: z.enum(["tunai", "qris", "transfer"]).optional(),
   uang_diterima: z.number().nonnegative().max(BATAS_UANG).optional(),
+  /** no. referensi QRIS/transfer (opsional; diabaikan untuk tunai) */
+  ref_bayar: z.string().trim().max(64).nullish(),
   /** idempotensi antarjalur (online ↔ /sync) — UUID v4 dari perangkat, opsional */
   client_ref: clientRefField,
   device_id: deviceIdField,
@@ -220,6 +222,7 @@ export const penjualanRoutes = new Hono<AppEnv>()
           customerWa: body.customer_wa,
           metodeBayar: body.metode_bayar,
           uangDiterima: body.uang_diterima,
+          refBayar: body.ref_bayar,
           openBillId: body.open_bill_id,
           items: body.items,
         });
