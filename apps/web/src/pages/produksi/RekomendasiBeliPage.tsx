@@ -49,7 +49,9 @@ export function RekomendasiBeliPage() {
   const [targetInput, setTargetInput] = useState("");
   const [targetInited, setTargetInited] = useState(false);
   const [targetApplied, setTargetApplied] = useState("");
-  const [acuan, setAcuan] = useState<AcuanJenis>("minggu_lalu");
+  // Bawaan rata-rata 7 hari: satu hari (hari yang sama minggu lalu) terlalu
+  // goyah sebagai acuan belanja (laporan uji 31 Okt 2026: 1 hari, 2 transaksi).
+  const [acuan, setAcuan] = useState<AcuanJenis>("7hari");
   const [dari, setDari] = useState("");
   const [sampai, setSampai] = useState("");
   const [pakaiMode, setPakaiMode] = useState<"hari_ini" | "tanggal" | "rentang">("hari_ini");

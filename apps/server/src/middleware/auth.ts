@@ -1,3 +1,4 @@
+import { adalahTamu } from "../lib/tamu";
 import bcrypt from "bcryptjs";
 import { and, eq, isNull, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
@@ -7,7 +8,7 @@ import jwt from "jsonwebtoken";
 import type { AuthUser, UserRole } from "@kakarut/shared";
 import { env } from "../config/env";
 import { db } from "../db/client";
-import { branches, companies, memberships, users } from "../db/schema";
+import { branches, companies, memberships, tokenDicabut, users } from "../db/schema";
 
 export type AppEnv = { Variables: { auth: AuthUser } };
 
@@ -28,12 +29,12 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!header?.startsWith("Bearer ")) {
     throw new HTTPException(401, { message: "Perlu login (token tidak ada)" });
   }
-  let payload: AuthUser & { tv?: number };
+  let payload: AuthUser & { tv?: number; jti?: string };
   try {
     // Pin algoritma HMAC (hindari kejutan alg-confusion di masa depan).
     payload = jwt.verify(header.slice(7), env.JWT_SECRET, {
       algorithms: ["HS256"],
-    }) as AuthUser & { tv?: number };
+    }) as AuthUser & { tv?: number; jti?: string };
   } catch (e) {
     // DUA SEBAB YANG MENUNTUT REAKSI BERLAWANAN, dan dulu keduanya menulis
     // baris log yang IDENTIK — status, pesan, dan `sidikGalat` sama persis:
@@ -92,6 +93,19 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     throw new HTTPException(401, { message: "Sesi tidak berlaku lagi — silakan masuk kembali" });
   }
 
+  // Token yang sudah "Keluar" (POST /auth/logout) — dicabut per perangkat.
+  // Token lama tanpa `jti` (terbit sebelum fitur ini) tak bisa dicabut satu
+  // per satu; ia mati sendiri dalam ≤ 12 jam.
+  if (payload.jti) {
+    const [dicabut] = await db
+      .select({ jti: tokenDicabut.jti })
+      .from(tokenDicabut)
+      .where(eq(tokenDicabut.jti, payload.jti));
+    if (dicabut) {
+      throw new HTTPException(401, { message: "Sesi tidak berlaku lagi — silakan masuk kembali" });
+    }
+  }
+
   // Super admin platform: tanpa perusahaan.
   if (u.isSuperAdmin) {
     c.set("auth", {
@@ -102,6 +116,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       company_id: null,
       role: null,
       branch_id: null,
+      is_tamu: adalahTamu(u.email),
     });
     return next();
   }
@@ -116,6 +131,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       company_id: null,
       role: null,
       branch_id: null,
+      is_tamu: adalahTamu(u.email),
     });
     return next();
   }
@@ -145,6 +161,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     company_id: payload.company_id,
     role: m.role,
     branch_id: m.branchId,
+    is_tamu: adalahTamu(u.email),
   });
   return next();
 };

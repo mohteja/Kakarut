@@ -125,8 +125,12 @@ describe("lambang foto-belum-ada: satu rumah, sisanya diadili", () => {
       "apps/web/src/pages/menu/LihatMenuPage.tsx",
       "apps/web/src/pages/menu/MenuFormPage.tsx",
     ]) {
-      expect(baca(rel), rel).toContain("IKON_MENU_KOSONG");
+      // Sejak 2026-10-31 lambangnya mengikuti kategori lewat `ikonMenuKosong`
+      // (yang jatuh ke IKON_MENU_KOSONG); keduanya dari rumah yang sama.
+      expect(/IKON_MENU_KOSONG|ikonMenuKosong/.test(baca(rel)), rel).toBe(true);
     }
+    expect(KARTU).toMatch(/export function ikonMenuKosong/);
+    expect(KARTU).toContain("return IKON_MENU_KOSONG;");
   });
 
   it("tak ada salinan literalnya di luar rumah & daftar yang diadili", () => {

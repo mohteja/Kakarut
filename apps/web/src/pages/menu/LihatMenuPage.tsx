@@ -5,7 +5,7 @@ import type {
   MenuDto,
 } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, btnPrimary, btnSecondary } from "../../components/ui";
-import { IKON_MENU_KOSONG } from "../../components/KartuMenuKasir";
+import { ikonMenuKosong } from "../../components/KartuMenuKasir";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
 import { api } from "../../lib/api";
@@ -263,7 +263,7 @@ export function LihatMenuPage() {
                         />
                       ) : (
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-stone-100 text-base">
-                          {IKON_MENU_KOSONG}
+                          {ikonMenuKosong(m)}
                         </span>
                       )}
                       <span className="min-w-0 flex-1">

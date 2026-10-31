@@ -6,7 +6,7 @@ import { RiwayatHargaPanel } from "../../components/RiwayatHargaModal";
 import { Card, ErrorText, PageTitle, Spinner, SpinnerAtauGalat, btnSecondary, tdClass, thClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
-import { formatAngka, formatRupiah, formatTanggal, hariIniWIB } from "../../lib/format";
+import { formatAngka, formatRupiah, formatTanggal, hariIniWIB, zonaPerusahaan } from "../../lib/format";
 
 const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
   opname: { label: "Opname", cls: "bg-blue-100 text-blue-800" },
@@ -15,6 +15,7 @@ const JENIS_BADGE: Record<MutasiJenis, { label: string; cls: string }> = {
   penjualan: { label: "Penjualan", cls: "bg-red-100 text-red-700" },
   pemakaian: { label: "Pemakaian produksi", cls: "bg-amber-100 text-amber-800" },
   kirim: { label: "Kirim keluar", cls: "bg-purple-100 text-purple-800" },
+  terima: { label: "Terima transfer", cls: "bg-green-100 text-green-800" },
 };
 
 const FIFO_JENIS: Record<string, { label: string; cls: string }> = {
@@ -46,7 +47,7 @@ const TIPE_FILTER: { key: "semua" | MutasiJenis; label: string }[] = [
 ];
 
 function tanggalNHariLalu(hari: number): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(
+  return new Intl.DateTimeFormat("en-CA", { timeZone: zonaPerusahaan() }).format(
     new Date(Date.now() - (hari - 1) * 24 * 3600 * 1000),
   );
 }
@@ -68,7 +69,7 @@ function waktuRingkas(iso: string): string {
     year: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "Asia/Jakarta",
+    timeZone: zonaPerusahaan(),
   }).format(new Date(iso));
 }
 

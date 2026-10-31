@@ -77,9 +77,9 @@ describe("CompanyRow == bentuk yang dibangun companyRow", () => {
   const dibangun = kunciCompanyRow(rute);
   const kontrak = medanInterface(tipe, "CompanyRow");
 
-  it("PREMIS: sebesar yang diukur lewat HTTP (22 kunci) — 21 kolom + mode", () => {
-    expect(dibangun.length).toBe(22);
-    expect(kontrak.length).toBe(22);
+  it("PREMIS: sebesar yang diukur lewat HTTP (23 kunci) — 22 kolom + mode", () => {
+    expect(dibangun.length).toBe(23);
+    expect(kontrak.length).toBe(23);
     // Keempat kunci yang MASUK tanpa terlihat §273 — kalau salah satu lenyap
     // dari kontrak lagi, uji ini menyebut namanya.
     for (const k of ["alamat", "telepon", "logoUrl", "planExpiresAt"]) {

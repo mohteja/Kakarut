@@ -1,6 +1,6 @@
 import { and, lt, ne } from "drizzle-orm";
 import { db } from "../db/client";
-import { emailVerificationTokens, invitations, passwordResetTokens } from "../db/schema";
+import { emailVerificationTokens, invitations, passwordResetTokens, tokenDicabut } from "../db/schema";
 
 /**
  * PEMANGKAS TABEL TOKEN — melengkapi retensi yang sudah berdiri.
@@ -60,6 +60,11 @@ export async function pangkasTokenMati(sekarang = new Date()): Promise<HasilPang
     .delete(invitations)
     .where(and(ne(invitations.status, "pending"), lt(invitations.createdAt, batasUndangan)))
     .returning({ id: invitations.id });
+
+  // Token yang dicabut lewat "Keluar" tak perlu diingat sesudah kedaluwarsa:
+  // token itu toh sudah ditolak `jwt.verify`. Dibuang SEGERA, tanpa retensi —
+  // barisnya tak memuat kredensial dan tak punya nilai penyelidikan.
+  await db.delete(tokenDicabut).where(lt(tokenDicabut.kedaluwarsa, sekarang));
 
   return { reset: reset.length, verifikasi: verifikasi.length, undangan: undangan.length };
 }

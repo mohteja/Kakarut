@@ -26,7 +26,7 @@ export function BahanPage() {
   const { auth } = useAuth();
   // karyawan CK (tim) hanya MELIHAT master bahan — ubah/tambah tetap manajemen
   const bolehUbah = auth?.user.role === "owner" || auth?.user.role === "admin";
-  const { data: bahan, isLoading } = useQuery({
+  const { data: bahan, isLoading, error: galatBahan } = useQuery({
     queryKey: ["bahan"],
     queryFn: () => api<BahanDto[]>("/bahan"),
   });
@@ -301,12 +301,37 @@ export function BahanPage() {
           ) : undefined
         }
         kosong={
-          <>
-            Tidak ada bahan yang cocok dengan filter.{" "}
-            <button onClick={resetFilter} className="font-medium text-orange-600 hover:underline">
-              Reset filter
-            </button>
-          </>
+          // Belum ada bahan SAMA SEKALI ≠ filter yang terlalu sempit. Dulu
+          // akun baru membaca "tidak ada yang cocok dengan filter. Reset
+          // filter" padahal belum ada apa pun (laporan uji 31 Okt 2026).
+          galatBahan ? (
+            <span className="text-red-600">Daftar bahan gagal dimuat — muat ulang halaman.</span>
+          ) : semua.length === 0 ? (
+            <span data-testid="bahan-kosong-awal">
+              Belum ada bahan baku. Mulai dengan{" "}
+              {bolehUbah ? (
+                <>
+                  <button onClick={() => navigate("/bahan/baru")} className="font-medium text-orange-600 hover:underline">
+                    + Tambah bahan
+                  </button>{" "}
+                  atau{" "}
+                  <button onClick={() => setImporCsv(true)} className="font-medium text-orange-600 hover:underline">
+                    📥 Impor CSV
+                  </button>
+                  .
+                </>
+              ) : (
+                "meminta owner menambahkannya."
+              )}
+            </span>
+          ) : (
+            <>
+              Tidak ada bahan yang cocok dengan filter.{" "}
+              <button onClick={resetFilter} className="font-medium text-orange-600 hover:underline">
+                Reset filter
+              </button>
+            </>
+          )
         }
         kolom={[
           ...(bolehUbah

@@ -32,6 +32,7 @@ export function GrafikTransaksiPerJam({ data }: { data: LaporanHarian["per_jam"]
   // sumbernya berubah).
   const skala = puncak > 0 ? puncak : 1;
   const iPuncak = data.findIndex((d) => d.jumlah === puncak);
+  const jamPuncak = data.filter((d) => d.jumlah === puncak).map((d) => d.jam);
   const totalTransaksi = data.reduce((a, d) => a + d.jumlah, 0);
   // Keduanya ANGKA YANG MENDAMAIKAN: dicetak di kaki tabel supaya Σ batang
   // bisa dicocokkan dengan kartu di atasnya (server menjamin sama — §224/§286).
@@ -45,8 +46,14 @@ export function GrafikTransaksiPerJam({ data }: { data: LaporanHarian["per_jam"]
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3">
         <h2 className="text-lg font-semibold text-stone-700">Transaksi per Jam</h2>
         <p className="text-xs text-stone-400">
-          {jamTeks(data[0].jam)}–{jamTeks(data[data.length - 1].jam)} · puncak{" "}
-          {puncak} transaksi pukul {jamTeks(data[iPuncak].jam)}
+          {jamTeks(data[0].jam)}–{jamTeks(data[data.length - 1].jam)} · puncak {puncak} transaksi{" "}
+          {/* Seri di puncak DISEBUT, bukan jam pertama saja — dulu "puncak pukul
+              00.00" padahal 10 jam sama-sama 4 transaksi (laporan uji 31 Okt 2026). */}
+          {jamPuncak.length === 1
+            ? `pukul ${jamTeks(data[iPuncak].jam)}`
+            : jamPuncak.length <= 3
+              ? `pukul ${jamPuncak.map(jamTeks).join(", ")}`
+              : `di ${jamPuncak.length} jam (sama banyak)`}
         </p>
       </div>
 

@@ -16,6 +16,22 @@ import { formatRupiah } from "../lib/format";
 export const IKON_MENU_KOSONG = "🍜";
 
 /**
+ * Lambang foto-kosong MENURUT KATEGORI menu — dulu semua menu, termasuk
+ * minuman, memakai mangkuk mi (laporan uji 31 Okt 2026). Dibaca dari nama
+ * kategori (teks bebas) dengan kata kunci; yang tak dikenali tetap
+ * `IKON_MENU_KOSONG`. Satu rumah: kartu kasir & daftar Lihat Menu memakainya.
+ */
+export function ikonMenuKosong(menu: Pick<MenuDto, "kategori" | "tipe">): string {
+  const k = (menu.kategori ?? "").toLowerCase();
+  if (/kopi|coffee/.test(k)) return "☕";
+  if (/minum|drink|jus|juice|teh|tea|es\b|boba|susu/.test(k)) return "🥤";
+  if (/roti|kue|cake|dessert|camilan|snack/.test(k)) return "🍰";
+  if (menu.tipe === "paket" || /paket/.test(k)) return "🍱";
+  if (/nasi|rice/.test(k)) return "🍚";
+  return IKON_MENU_KOSONG;
+}
+
+/**
  * KARTU MENU DI LAYAR KASIR — dan sekarang juga pratinjaunya di Menu & HPP.
  *
  * SATU komponen, dua layar, dan itu bukan kerapian melainkan syarat kebenaran.
@@ -62,7 +78,7 @@ export function KartuMenuKasir({
         />
       ) : (
         <div className="mb-2 flex h-20 w-full items-center justify-center rounded-lg bg-orange-50 text-2xl">
-          {IKON_MENU_KOSONG}
+          {ikonMenuKosong(menu)}
         </div>
       )}
       <div className="flex items-start gap-1.5">

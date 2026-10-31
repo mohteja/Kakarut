@@ -1,3 +1,4 @@
+import { tolakTamu } from "../../lib/tamu";
 import { randomBytes } from "node:crypto";
 import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
@@ -7,6 +8,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type {
   KaryawanBaruResult,
+  KaryawanDiundangResult,
+  UserRole,
   KaryawanRow,
   KaryawanTempatDto,
   UndanganKaryawanRow,
@@ -94,6 +97,69 @@ const batasUndangPerusahaan = rlUndang(
     message: "Terlalu banyak undangan dikirim — coba lagi beberapa menit lagi.",
   }),
 );
+
+/**
+ * Tulis undangan PENDING — dipakai `POST /karyawan/undang` dan `POST /karyawan`
+ * (email yang sudah punya akun). Satu rumah untuk dua penolakannya (sudah
+ * karyawan aktif / sudah diundang) supaya kedua pintu menjawab dengan kalimat
+ * yang sama. Peran & cabang sudah diperiksa pemanggil.
+ */
+async function simpanUndangan(
+  companyId: string,
+  invitedBy: string,
+  body: { email: string; role: UserRole; branch_id?: string | null },
+): Promise<{ id: string }> {
+  // sudah jadi karyawan aktif perusahaan ini?
+  const [aktif] = await db
+    .select({ id: memberships.id })
+    .from(memberships)
+    .innerJoin(users, eq(memberships.userId, users.id))
+    .where(
+      and(
+        eq(memberships.companyId, companyId),
+        eq(users.email, body.email),
+        isNull(memberships.archivedAt),
+      ),
+    );
+  if (aktif) {
+    throw new HTTPException(409, { message: `${body.email} sudah jadi karyawan aktif` });
+  }
+  // sudah ada undangan pending?
+  const [pending] = await db
+    .select({ id: invitations.id })
+    .from(invitations)
+    .where(
+      and(
+        eq(invitations.companyId, companyId),
+        eq(invitations.email, body.email),
+        eq(invitations.status, "pending"),
+      ),
+    );
+  if (pending) {
+    throw new HTTPException(409, { message: `${body.email} sudah diundang (menunggu diterima)` });
+  }
+  // Pra-cek di atas punya jeda sebelum tulisannya; yang benar-benar menjaga
+  // "satu undangan pending per email per perusahaan" adalah indeks parsial
+  // `invitations_company_email_pending_uq`. Yang KALAH balapan dulu menerima
+  // 23505 mentah alias 500 — pesannya kini sama persis dengan pra-ceknya.
+  const [inv] = await tanpaBentrok(
+    `${body.email} sudah diundang (menunggu diterima)`,
+    () =>
+      db
+        .insert(invitations)
+        .values({
+          companyId: companyId,
+          email: body.email,
+          role: body.role,
+          branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
+          token: randomBytes(24).toString("hex"),
+          invitedBy,
+        })
+        .returning({ id: invitations.id }),
+    "invitations_company_email_pending_uq",
+  );
+  return inv;
+}
 
 const KaryawanBody = z.object({
   nama: z.string().trim().min(1),
@@ -221,7 +287,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       );
     return c.json(rows.map(karyawanRow));
   })
-  .post("/", zValidator("json", KaryawanBody), async (c) => {
+  .post("/", tolakTamu, zValidator("json", KaryawanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     if (body.role === "owner" && auth.role !== "owner") {
@@ -239,7 +305,24 @@ export const karyawanRoutes = new Hono<AppEnv>()
       .from(users)
       .where(eq(users.email, body.email));
     if (existing) {
-      throw new HTTPException(409, { message: `Email ${body.email} sudah terdaftar` });
+      /*
+       * EMAIL SUDAH PUNYA AKUN → UNDANG, bukan 409.
+       *
+       * Orang yang mendaftar sendiri lalu memilih "tunggu diundang" di halaman
+       * welcome sudah punya akun dan password-nya sendiri. Dulu owner yang
+       * mengetik emailnya di "Tambah karyawan" menerima 409 "sudah terdaftar"
+       * — buntu, padahal maksudnya jelas. Kini jadi undangan pending dengan
+       * peran & cabang yang sama; orangnya tinggal menekan Terima (halaman
+       * welcome menyegarkan dirinya sendiri). Password yang diketik owner
+       * DIABAIKAN: akun itu milik orangnya, bukan milik perusahaan.
+       *
+       * Tanpa surel: yang menunggu sudah memandangi halaman welcome-nya, dan
+       * pintu ini tak berpagar laju seperti `/undang` — jadi ia tak boleh
+       * menjadi relai surat.
+       */
+      const inv = await simpanUndangan(auth.company_id!, auth.sub, body);
+      const diundang: KaryawanDiundangResult = { diundang: true, id: inv.id, email: body.email, role: body.role };
+      return c.json(diundang, 200);
     }
     // Retry bila kode karyawan bentrok: generate kode membaca snapshot, jadi dua
     // pembuatan bersamaan dgn inisial sama bisa memilih kode yang sama → coba
@@ -299,6 +382,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
    */
   .post(
     "/undang",
+    tolakTamu,
     batasUndangKorban,
     batasUndangPerusahaan,
     zValidator("json", UndangBody),
@@ -315,55 +399,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       const cb = await pastikanCabangMilikPerusahaan(body.branch_id, auth.company_id!);
       pastikanPeranCocokCabang(body.role, cb.tipe);
     }
-    // sudah jadi karyawan aktif perusahaan ini?
-    const [aktif] = await db
-      .select({ id: memberships.id })
-      .from(memberships)
-      .innerJoin(users, eq(memberships.userId, users.id))
-      .where(
-        and(
-          eq(memberships.companyId, auth.company_id!),
-          eq(users.email, body.email),
-          isNull(memberships.archivedAt),
-        ),
-      );
-    if (aktif) {
-      throw new HTTPException(409, { message: `${body.email} sudah jadi karyawan aktif` });
-    }
-    // sudah ada undangan pending?
-    const [pending] = await db
-      .select({ id: invitations.id })
-      .from(invitations)
-      .where(
-        and(
-          eq(invitations.companyId, auth.company_id!),
-          eq(invitations.email, body.email),
-          eq(invitations.status, "pending"),
-        ),
-      );
-    if (pending) {
-      throw new HTTPException(409, { message: `${body.email} sudah diundang (menunggu diterima)` });
-    }
-    // Pra-cek di atas punya jeda sebelum tulisannya; yang benar-benar menjaga
-    // "satu undangan pending per email per perusahaan" adalah indeks parsial
-    // `invitations_company_email_pending_uq`. Yang KALAH balapan dulu menerima
-    // 23505 mentah alias 500 — pesannya kini sama persis dengan pra-ceknya.
-    const [inv] = await tanpaBentrok(
-      `${body.email} sudah diundang (menunggu diterima)`,
-      () =>
-        db
-          .insert(invitations)
-          .values({
-            companyId: auth.company_id!,
-            email: body.email,
-            role: body.role,
-            branchId: WAJIB_CABANG.has(body.role) ? body.branch_id : (body.branch_id ?? null),
-            token: randomBytes(24).toString("hex"),
-            invitedBy: auth.sub,
-          })
-          .returning({ id: invitations.id }),
-      "invitations_company_email_pending_uq",
-    );
+    const inv = await simpanUndangan(auth.company_id!, auth.sub, body);
     // Email undangan (best-effort — jangan gagalkan bila email belum diatur).
     try {
       const [co] = await db
@@ -426,7 +462,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
     return c.json(dto);
   })
   /** Batalkan undangan pending. */
-  .delete("/undangan/:id", async (c) => {
+  .delete("/undangan/:id", tolakTamu, async (c) => {
     const auth = c.get("auth");
     const [row] = await db
       .update(invitations)
@@ -512,6 +548,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
    */
   .put(
     "/:userId/tempat",
+    tolakTamu,
     zValidator("json", z.object({ tempat_ids: z.array(z.string().uuid()).max(2000) }).strict()),
     async (c) => {
       const auth = c.get("auth");
@@ -591,7 +628,7 @@ export const karyawanRoutes = new Hono<AppEnv>()
       return c.json({ ok: true, assigned: uniqueIds });
     },
   )
-  .patch("/:userId", zValidator("json", PatchKaryawanBody), async (c) => {
+  .patch("/:userId", tolakTamu, zValidator("json", PatchKaryawanBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
     const userId = c.req.param("userId");

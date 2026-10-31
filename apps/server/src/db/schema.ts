@@ -157,6 +157,12 @@ export const companies = pgTable("companies", {
   telepon: text("telepon"),
   logoUrl: text("logo_url"),
   timezone: text("timezone").notNull().default("Asia/Jakarta"),
+  /**
+   * Jenis usaha (`JENIS_USAHA` di shared) — diisi pemilik saat membuat
+   * perusahaan dari halaman welcome. Null untuk perusahaan yang lahir sebelum
+   * kolom ini ada, atau dibuat super admin / seed.
+   */
+  jenisUsaha: text("jenis_usaha"),
   pb1Enabled: boolean("pb1_enabled").notNull().default(false),
   pb1Rate: numeric("pb1_rate", { precision: 5, scale: 2, mode: "number" })
     .notNull()
@@ -261,6 +267,12 @@ export const users = pgTable("users", {
    * memaksa logout massal saat fitur ini dirilis).
    */
   tokenVersion: integer("token_version").notNull().default(0),
+  /**
+   * PIN REFUND (bcrypt, 6 angka) — owner/admin mengaturnya di Profil. Kasir
+   * yang mengembalikan uang wajib menyertakan PIN owner/admin yang hadir
+   * (laporan uji 31 Okt 2026: kasir bisa refund sendirian). Null = belum diatur.
+   */
+  pinRefundHash: text("pin_refund_hash"),
   /**
    * Verifikasi email: terisi = email sudah dikonfirmasi (klik tautan). NULL =
    * belum → login diblokir (kecuali super admin). Pendaftaran mandiri dibuat
@@ -1480,6 +1492,12 @@ export const sales = pgTable(
     // dihitung dari uang_diterima − total saat perlu (struk/riwayat).
     metodeBayar: metodeBayarEnum("metode_bayar").notNull().default("tunai"),
     uangDiterima: numeric("uang_diterima", { precision: 14, scale: 2, mode: "number" }),
+    /**
+     * No. referensi pembayaran non-tunai (QRIS/transfer) — opsional, diketik
+     * kasir dari layar pembeli/mutasi bank. Laporan uji 31 Okt 2026: kasir
+     * hanya menandai lunas tanpa jejak apa pun untuk dicocokkan ke mutasi.
+     */
+    refBayar: text("ref_bayar"),
     waktu: timestamp("waktu", { withTimezone: true }).notNull().defaultNow(),
     saleDate: date("sale_date").notNull(),
     /**
@@ -1689,6 +1707,11 @@ export const saleRefunds = pgTable(
      * itu — laci itulah yang uangnya benar-benar keluar.
      */
     shiftId: uuid("shift_id").references(() => shifts.id, { onDelete: "set null" }),
+    /**
+     * Owner/admin yang PIN-nya mengizinkan refund oleh kasir. Null = yang
+     * merefund owner/admin sendiri (tak butuh izin) atau baris lama.
+     */
+    disetujuiOleh: uuid("disetujui_oleh").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -2626,6 +2649,21 @@ export const supplyPurchases = pgTable(
  * pra-fitur) cukup berjalan SEKALI; boot berikutnya melompatinya sehingga
  * start server tetap cepat saat data membesar. Baris = satu backfill selesai.
  */
+/**
+ * TOKEN YANG DICABUT lewat "Keluar" — satu baris per token (klaim `jti`).
+ *
+ * Laporan uji 31 Okt 2026: token lama tetap berlaku setelah Keluar, padahal
+ * tablet kasir sering dipakai bergantian. Mencabut lewat `token_version` akan
+ * mengeluarkan SEMUA perangkat akun itu sekaligus; tabel ini mencabut token
+ * perangkat yang menekan Keluar saja. Barisnya tak berguna lagi sesudah
+ * `kedaluwarsa` (token itu toh sudah mati) — dipangkas `pangkas-token`.
+ */
+export const tokenDicabut = pgTable("token_dicabut", {
+  jti: text("jti").primaryKey(),
+  kedaluwarsa: timestamp("kedaluwarsa", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const bootFlags = pgTable("boot_flags", {
   key: text("key").primaryKey(),
   selesaiAt: timestamp("selesai_at", { withTimezone: true }).notNull().defaultNow(),

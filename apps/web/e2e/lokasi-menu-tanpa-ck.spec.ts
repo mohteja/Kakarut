@@ -74,7 +74,12 @@ async function tenantPro(request: APIRequestContext) {
   const { token: tokenVerif } = (await verif.json()) as { token: string };
   const dibuat = await request.post(`${BASE}/api/onboarding/perusahaan`, {
     headers: { Authorization: `Bearer ${tokenVerif}` },
-    data: { nama: "Warung Uji Lokasi Menu" },
+    data: {
+      nama: "Warung Uji Lokasi Menu",
+      jenis_usaha: "warung_makan",
+      alamat: "Jl. Uji No. 1",
+      telepon: "081234567890",
+    },
   });
   expect(dibuat.ok(), `onboarding/perusahaan (${dibuat.status()})`).toBeTruthy();
   const { token } = (await dibuat.json()) as { token: string };

@@ -10,6 +10,7 @@ import {
   type StokRowDto,
 } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, StatCard, StatusBadge, tdClass, thClass } from "../components/ui";
+import { PanduanAwal } from "../components/PanduanAwal";
 import { useAuth } from "../context/AuthContext";
 import { labelCabang, useBranch } from "../context/BranchContext";
 import { api } from "../lib/api";
@@ -235,6 +236,7 @@ export function DashboardPage() {
   return (
     <div>
       <PageTitle>Beranda</PageTitle>
+      <PanduanAwal />
       <div className="mb-4 text-sm text-stone-500">
         {formatTanggal(hari)}
         {namaCabang ? ` · ${namaCabang}` : ""} · Halo, {auth?.user.nama} 👋

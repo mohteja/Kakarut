@@ -20,6 +20,7 @@ import { createSale } from "../modules/penjualan/service";
 import { seedUnitsPerusahaan } from "../modules/satuan/service";
 import { resolveKodeKaryawan } from "../modules/users/service";
 import { lengkapiDataDemoSekali } from "./guest-data";
+import { EMAIL_TAMU_KASIR, EMAIL_TAMU_OWNER } from "../lib/tamu";
 
 /**
  * Akun & perusahaan TAMU (guest mode) — dipakai bersama siapa pun untuk
@@ -29,9 +30,11 @@ import { lengkapiDataDemoSekali } from "./guest-data";
  */
 export const GUEST = {
   slug: "terakasir-demo",
-  ownerEmail: "owner-demo@terakasir.app",
-  kasirEmail: "kasir-demo@terakasir.app",
+  ownerEmail: EMAIL_TAMU_OWNER,
+  kasirEmail: EMAIL_TAMU_KASIR,
   password: "demoterakasir",
+  /** PIN refund owner demo — ditampilkan di pita akun demo (web & ponsel) */
+  pinRefund: "123456",
 } as const;
 
 const BAHAN = [
@@ -40,15 +43,22 @@ const BAHAN = [
   { slug: "kuah", nama: "Kaldu Kuah", harga: 1500, satuan: "porsi", stok: 250 },
   { slug: "es", nama: "Es Batu", harga: 500, satuan: "gelas", stok: 400 },
   { slug: "sirup", nama: "Sirup", harga: 1000, satuan: "gelas", stok: 150 },
+  // Resep demo yang masuk akal (laporan uji 31 Okt 2026: Mie Ayam tanpa ayam,
+  // Es Teh = Es Jeruk = es + sirup, Air Mineral HPP 0).
+  { slug: "ayam", nama: "Ayam Suwir", harga: 4000, satuan: "porsi", stok: 80 },
+  { slug: "teh", nama: "Teh Seduh", harga: 800, satuan: "gelas", stok: 150 },
+  { slug: "jeruk", nama: "Jeruk Peras", harga: 2500, satuan: "gelas", stok: 80 },
+  { slug: "gula", nama: "Gula Cair", harga: 300, satuan: "gelas", stok: 200 },
+  { slug: "air", nama: "Air Mineral Botol", harga: 2000, satuan: "botol", stok: 48 },
 ] as const;
 
 const MENU: { nama: string; kat: "Makanan" | "Minuman"; jual: number; resep: [string, number][] }[] = [
   { nama: "Bakso Spesial", kat: "Makanan", jual: 18000, resep: [["bakso", 8], ["mie", 1], ["kuah", 1]] },
   { nama: "Bakso Biasa", kat: "Makanan", jual: 13000, resep: [["bakso", 5], ["mie", 1], ["kuah", 1]] },
-  { nama: "Mie Ayam", kat: "Makanan", jual: 15000, resep: [["mie", 1], ["kuah", 1]] },
-  { nama: "Es Teh Manis", kat: "Minuman", jual: 5000, resep: [["es", 1], ["sirup", 1]] },
-  { nama: "Es Jeruk", kat: "Minuman", jual: 8000, resep: [["es", 1], ["sirup", 1]] },
-  { nama: "Air Mineral", kat: "Minuman", jual: 4000, resep: [] },
+  { nama: "Mie Ayam", kat: "Makanan", jual: 15000, resep: [["mie", 1], ["kuah", 1], ["ayam", 1]] },
+  { nama: "Es Teh Manis", kat: "Minuman", jual: 5000, resep: [["teh", 1], ["gula", 1], ["es", 1]] },
+  { nama: "Es Jeruk", kat: "Minuman", jual: 8000, resep: [["jeruk", 1], ["gula", 1], ["es", 1]] },
+  { nama: "Air Mineral", kat: "Minuman", jual: 4000, resep: [["air", 1]] },
 ];
 
 /** Provisi akun+perusahaan tamu bila belum ada. Aman dipanggil tiap boot. */
@@ -57,8 +67,24 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
   // 1) Dua user tamu (idempoten; aktifkan bila pernah dinonaktifkan).
   const [owner] = await dbc
     .insert(users)
-    .values({ email: GUEST.ownerEmail, passwordHash: hash, nama: "Owner Demo (Tamu)", emailVerifiedAt: new Date() })
-    .onConflictDoUpdate({ target: users.email, set: { isActive: true, deletedAt: null, emailVerifiedAt: new Date() } })
+    .values({
+      email: GUEST.ownerEmail,
+      passwordHash: hash,
+      nama: "Owner Demo (Tamu)",
+      emailVerifiedAt: new Date(),
+      // PIN refund demo — tertulis di pita akun demo supaya Tamu Kasir bisa
+      // mencoba refund (kasir wajib PIN owner sejak 2026-10-31).
+      pinRefundHash: bcrypt.hashSync(GUEST.pinRefund, 10),
+    })
+    .onConflictDoUpdate({
+      target: users.email,
+      set: {
+        isActive: true,
+        deletedAt: null,
+        emailVerifiedAt: new Date(),
+        pinRefundHash: bcrypt.hashSync(GUEST.pinRefund, 10),
+      },
+    })
     .returning();
   const [kasir] = await dbc
     .insert(users)
@@ -117,7 +143,18 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
     for (const b of BAHAN) {
       const [row] = await tx
         .insert(ingredients)
-        .values({ companyId: company.id, slug: b.slug, nama: b.nama, hargaBeli: b.harga, isi: 1, satuan: b.satuan, kategori: "lain" })
+        .values({
+          companyId: company.id,
+          slug: b.slug,
+          nama: b.nama,
+          hargaBeli: b.harga,
+          isi: 1,
+          satuan: b.satuan,
+          kategori: "lain",
+          // ±15% stok awal: peringatan "bahan menipis" di Beranda bisa muncul
+          // (dulu semua 0 → tak pernah muncul).
+          stokMinimum: Math.ceil(b.stok * 0.15),
+        })
         .returning();
       ingId.set(b.slug, row.id);
     }
@@ -167,12 +204,22 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
   const menuIds = [...hasil.hargaByMenuId.keys()];
   const sekarang = Date.now();
   let dibuat = 0;
-  for (let n = 0; n < 14; n += 1) {
-    // Sebar ke hari 0..6 lalu (beberapa hari ini juga).
+  // Waktu dirakit LEBIH DULU lalu diurutkan: nomor struk dibagikan menurut
+  // urutan penyimpanan, jadi struk yang dibuat acak-waktu bernomor tak urut
+  // (laporan uji 31 Okt 2026: -0001 23.28, -0002 00.41).
+  const urutWaktu = Array.from({ length: 14 }, (_, n) => {
+    // Sebar ke hari 0..6 lalu (beberapa hari ini juga), jam buka 09.00–16.00
+    // WIB — setUTCHours, bukan setHours: server berjalan UTC, dan jam lokal
+    // server membuat demo menumpuk di 16.00–23.00 WIB.
     const hariLalu = n % 7;
-    const jam = 9 + (n % 8); // 09:00–16:00
+    const jamWib = 9 + (n % 8);
     const waktu = new Date(sekarang - hariLalu * 86_400_000);
-    waktu.setHours(jam, (n * 7) % 60, 0, 0);
+    waktu.setUTCHours(jamWib - 7, (n * 7) % 60, 0, 0);
+    return { n, waktu };
+  })
+    .filter((x) => x.waktu.getTime() <= sekarang)
+    .sort((a, b) => a.waktu.getTime() - b.waktu.getTime());
+  for (const { n, waktu } of urutWaktu) {
     // 1–3 item acak-terkendali (deterministik cukup untuk demo).
     const jumlahItem = 1 + (n % 3);
     const items: { menu_id: string; qty: number }[] = [];

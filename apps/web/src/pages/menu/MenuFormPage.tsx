@@ -7,15 +7,16 @@ import {
   teksAngka,
   draftIsiMenu,
   foodCostPersen,
-  hargaJualBulat,
-  hargaSaran,
-  hargaSaranPaket,
+  hargaSaranBulat,
+  hargaSaranFoodCost,
   hitungHpp,
   type BahanDto,
+  type CompanyRow,
   type KategoriDto,
   type MenuDto,
 } from "@kakarut/shared";
 import { BahanPicker } from "../../components/BahanPicker";
+import { KategoriManagerModal } from "../../components/KategoriManagerModal";
 import { AddonEditor, grupDariDto, grupKeBody, masalahGrup, type GrupForm } from "./AddonEditor";
 import { ImageUpload } from "../../components/ImageUpload";
 import { IKON_MENU_KOSONG } from "../../components/KartuMenuKasir";
@@ -65,6 +66,12 @@ export function MenuFormPage() {
     queryFn: () => api<MenuDto[]>("/menu"),
   });
   // Muat via /menu/:id (bukan daftar aktif) agar menu nonaktif tetap bisa diedit
+  // Ambang food cost perusahaan = patokan harga saran (sama dengan server).
+  const { data: company } = useQuery({
+    queryKey: ["company"],
+    queryFn: () => api<Pick<CompanyRow, "foodCostMaks">>("/company"),
+  });
+  const ambangFoodCost = company?.foodCostMaks ?? 40;
   const { data: menuEdit, error: menuEditGagal } = useQuery({
     queryKey: ["menu", id],
     queryFn: () => api<MenuDto>(`/menu/${id}`),
@@ -98,6 +105,8 @@ export function MenuFormPage() {
   const [addonGroups, setAddonGroups] = useState<GrupForm[]>([]);
   /** dialog "menu ini belum punya kemasan take away" sedang terbuka */
   const [tanyaKemasan, setTanyaKemasan] = useState(false);
+  const [tanyaFoodCost, setTanyaFoodCost] = useState(false);
+  const [kelolaKategori, setKelolaKategori] = useState(false);
   const dimuat = useRef(false);
 
   // muat data saat edit
@@ -149,17 +158,17 @@ export function MenuFormPage() {
     if (tipe === "paket") {
       const base = menus?.find((m) => m.id === baseMenuId);
       const baseHpp = base?.hpp ?? 0;
-      const saran = hargaSaranPaket(baseHpp, angkaDari(baseMult) || 0, ownHpp);
+      const saran = hargaSaranFoodCost(baseHpp + ownHpp, ambangFoodCost);
       return {
         hpp: baseHpp + ownHpp,
         hppDineIn: (base?.hpp_dine_in ?? 0) + ownHppDineIn,
         saran,
-        bulat: hargaJualBulat(saran),
+        bulat: hargaSaranBulat(saran),
       };
     }
-    const saran = hargaSaran(ownHpp, angkaDari(mult) || 0);
-    return { hpp: ownHpp, hppDineIn: ownHppDineIn, saran, bulat: hargaJualBulat(saran) };
-  }, [komponen, bahanById, tipe, mult, baseMenuId, baseMult, menus]);
+    const saran = hargaSaranFoodCost(ownHpp, ambangFoodCost);
+    return { hpp: ownHpp, hppDineIn: ownHppDineIn, saran, bulat: hargaSaranBulat(saran) };
+  }, [komponen, bahanById, tipe, baseMenuId, menus, ambangFoodCost]);
 
   /**
    * Apakah menu ini punya bahan KEMASAN TAKE AWAY?
@@ -206,6 +215,22 @@ export function MenuFormPage() {
   const adaResep =
     komponen.some((k) => k.ingredient_id && angkaDari(k.qty) > 0) || resepDasarPaket;
   const perluKemasan = adaResep && !punyaKemasan;
+
+  /**
+   * Food cost harga jual ini melewati ambang sehat perusahaan? Dulu form hanya
+   * memperingatkan soal kemasan; menu ber-food cost 66,7% tersimpan tanpa satu
+   * kata pun (laporan uji 31 Okt 2026). Bukan larangan — harga promo/komplimen
+   * sah — tapi keputusannya harus disadari.
+   */
+  const foodCostKini = foodCostPersen(preview.hpp, angkaDari(hargaJual));
+  const foodCostTinggi = foodCostKini != null && foodCostKini > ambangFoodCost;
+  function simpanBilaFoodCostSehat() {
+    if (foodCostTinggi) {
+      setTanyaFoodCost(true);
+      return;
+    }
+    simpan.mutate();
+  }
 
   /**
    * Baris resep yang SUDAH DIISI takarannya tapi tidak akan ikut tersimpan.
@@ -327,7 +352,7 @@ export function MenuFormPage() {
             setTanyaKemasan(true);
             return;
           }
-          simpan.mutate();
+          simpanBilaFoodCostSehat();
         }}
         className="space-y-5"
       >
@@ -381,20 +406,45 @@ export function MenuFormPage() {
               </p>
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Kategori</label>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="block text-sm font-medium">Kategori</label>
+                {/* Kategori wajib, tapi dulu form ini tak punya cara membuatnya:
+                    akun baru buntu di menu pertama dengan tooltip bawaan browser
+                    (laporan uji 31 Okt 2026). */}
+                <button
+                  type="button"
+                  onClick={() => setKelolaKategori(true)}
+                  className="text-xs font-semibold text-orange-600 hover:underline"
+                >
+                  + Kategori baru
+                </button>
+              </div>
               <select
                 required
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
                 className={inputClass}
               >
-                <option value="">— pilih —</option>
+                <option value="">{kategori.length === 0 ? "— belum ada kategori —" : "— pilih —"}</option>
                 {kategori.map((k) => (
                   <option key={k.id} value={k.id}>
                     {k.nama}
                   </option>
                 ))}
               </select>
+              {kategori.length === 0 && (
+                <p className="mt-1 text-xs text-amber-700">
+                  Buat kategori dulu (mis. Makanan, Minuman) lewat “+ Kategori baru”.
+                </p>
+              )}
+              <KategoriManagerModal
+                open={kelolaKategori}
+                onClose={() => setKelolaKategori(false)}
+                endpoint="/kategori"
+                queryKey="kategori"
+                judul="Kategori Menu"
+                deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus."
+              />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Tipe</label>
@@ -403,27 +453,14 @@ export function MenuFormPage() {
                 onChange={(e) => setTipe(e.target.value as "regular" | "paket")}
                 className={inputClass}
               >
-                <option value="regular">Reguler (HPP × markup)</option>
-                <option value="paket">Paket (menu dasar + topping tanpa markup)</option>
+                <option value="regular">Reguler</option>
+                <option value="paket">Paket (menu dasar + topping)</option>
               </select>
             </div>
-            {tipe === "regular" ? (
-              <div>
-                <label className="mb-1 block text-sm font-medium">Markup (mult)</label>
-                <input
-                  required
-                  /* Markup menentukan harga jual. `type="number"` MEMBUANG koma
-                     saat diketik — "2,5" tersimpan "25" tanpa `badInput`, jadi
-                     markup 2,5× diam-diam jadi 25×. Koma adalah pemisah desimal
-                     bahasa Indonesia; `angkaDari` yang membacanya. */
-                  type="text"
-                  inputMode="decimal"
-                  value={mult}
-                  onChange={(e) => setMult(e.target.value)}
-                  className={inputClass}
-                />
-              </div>
-            ) : (
+            {/* Markup (`mult`) tak lagi diisi di sini: harga saran kini
+                HPP ÷ ambang food cost perusahaan (laporan uji 31 Okt 2026).
+                Nilai lamanya tetap dikirim apa adanya. */}
+            {tipe === "paket" && (
               <>
                 <div>
                   <label className="mb-1 block text-sm font-medium">Menu dasar</label>
@@ -442,17 +479,6 @@ export function MenuFormPage() {
                         </option>
                       ))}
                   </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium">Markup menu dasar (base_mult)</label>
-                  <input
-                    required
-                    type="text"
-                    inputMode="decimal"
-                    value={baseMult}
-                    onChange={(e) => setBaseMult(e.target.value)}
-                    className={inputClass}
-                  />
                 </div>
               </>
             )}
@@ -709,7 +735,9 @@ export function MenuFormPage() {
               <div className="text-lg font-bold">{formatRupiah(preview.hppDineIn)}</div>
             </div>
             <div>
-              <div className="text-stone-500">Harga saran</div>
+              <div className="text-stone-500" title="HPP ÷ ambang food cost (Pengaturan → Perusahaan)">
+                Harga saran (food cost {ambangFoodCost}%)
+              </div>
               <div className="text-lg font-bold">{formatRupiah(preview.saran)}</div>
             </div>
             <div>
@@ -824,12 +852,51 @@ export function MenuFormPage() {
               type="button"
               onClick={() => {
                 setTanyaKemasan(false);
-                simpan.mutate();
+                simpanBilaFoodCostSehat();
               }}
               disabled={simpan.isPending}
               className={btnSecondary}
             >
               Simpan tanpa kemasan
+            </button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        open={tanyaFoodCost}
+        onClose={() => setTanyaFoodCost(false)}
+        title="Food cost di atas ambang sehat"
+      >
+        <div className="space-y-4 text-sm text-stone-700">
+          <p>
+            Dengan harga jual {formatRupiah(angkaDari(hargaJual))}, food cost <b>{nama || "menu ini"}</b> ={" "}
+            <b>{foodCostKini?.toFixed(1)}%</b> — di atas ambang sehat <b>{ambangFoodCost}%</b>.
+          </p>
+          <p className="text-stone-600">
+            Harga saran agar food cost ≤ {ambangFoodCost}%: <b>{formatRupiah(preview.bulat)}</b>.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setHargaJual(teksAngka(preview.bulat));
+                setTanyaFoodCost(false);
+              }}
+              className={btnPrimary}
+              autoFocus
+            >
+              Pakai harga saran
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTanyaFoodCost(false);
+                simpan.mutate();
+              }}
+              disabled={simpan.isPending}
+              className={btnSecondary}
+            >
+              Simpan dengan harga ini
             </button>
           </div>
         </div>

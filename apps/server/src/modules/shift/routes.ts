@@ -713,6 +713,7 @@ export const shiftRoutes = new Hono<AppEnv>()
         buka_hari_ini: bukaHariIni,
         telat_buka: Boolean(b.jamBuka) && !open && !bukaHariIni && now > b.jamBuka!,
         lupa_tutup: Boolean(open) && Boolean(b.jamTutup) && now > b.jamTutup!,
+        terbuka_lama: Boolean(open) && Date.now() - open!.openedAt.getTime() > 24 * 3_600_000,
       };
     });
     return c.json(hasil);

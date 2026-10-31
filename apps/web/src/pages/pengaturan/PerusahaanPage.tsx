@@ -1,4 +1,4 @@
-import { angkaDari, teksAngka, type CompanyRow } from "@kakarut/shared";
+import { JENIS_USAHA, ZONA_WAKTU, angkaDari, teksAngka, type CompanyRow } from "@kakarut/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ImageUpload } from "../../components/ImageUpload";
@@ -27,6 +27,8 @@ type Company = Pick<
   | "nama"
   | "alamat"
   | "telepon"
+  | "jenisUsaha"
+  | "timezone"
   | "logoUrl"
   | "pb1Enabled"
   | "pb1Rate"
@@ -103,9 +105,13 @@ function KartuMode({ company }: { company: Company }) {
             )}
           </div>
         ) : (
+          auth?.user.is_tamu ? (
+            <p className="text-sm text-amber-800">Upgrade ke Pro tidak tersedia di akun demo.</p>
+          ) : (
           <button onClick={() => setKonfirmasiPro(true)} className={btnPrimary}>
             ⬆ Upgrade ke Pro (multi-lokasi)
           </button>
+          )
         )
       ) : (
         <p className="text-xs text-stone-500">Hanya owner yang dapat mengubah mode.</p>
@@ -152,6 +158,8 @@ function KartuMode({ company }: { company: Company }) {
 }
 
 export function PerusahaanPage() {
+  // Akun demo: PATCH /company ditolak server (`akun_tamu`).
+  const tamu = useAuth().auth?.user.is_tamu === true;
   const queryClient = useQueryClient();
   const { data: company, isLoading, error: errorCompany } = useQuery({
     queryKey: ["company"],
@@ -161,6 +169,7 @@ export function PerusahaanPage() {
   const [nama, setNama] = useState("");
   const [alamat, setAlamat] = useState("");
   const [telepon, setTelepon] = useState("");
+  const [jenisUsaha, setJenisUsaha] = useState("");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [pb1Enabled, setPb1Enabled] = useState(false);
   const [pb1Rate, setPb1Rate] = useState("10");
@@ -183,6 +192,7 @@ export function PerusahaanPage() {
     setNama(company.nama);
     setAlamat(company.alamat ?? "");
     setTelepon(company.telepon ?? "");
+    setJenisUsaha(company.jenisUsaha ?? "");
     setLogoUrl(company.logoUrl);
     setPb1Enabled(company.pb1Enabled);
     setPb1Rate(teksAngka(company.pb1Rate));
@@ -235,6 +245,7 @@ export function PerusahaanPage() {
           nama,
           alamat: alamat || null,
           telepon: telepon || null,
+          jenis_usaha: jenisUsaha || null,
           logo_url: logoUrl,
           pb1_enabled: pb1Enabled,
           pb1_rate: Math.min(100, Math.max(0, angkaDari(pb1Rate) || 0)),
@@ -259,6 +270,13 @@ export function PerusahaanPage() {
       <Card className="space-y-4 p-5">
         <div className="text-sm text-stone-500">
           Paket langganan: <span className="font-semibold uppercase">{company.plan}</span>
+          {company.mode === "pro" && (
+            /* Pro belum berbayar dan tak punya tanggal berakhir — dikatakan
+               terang (laporan uji 31 Okt 2026: "naik Pro tanpa tagihan?"). */
+            <span className="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
+              Gratis selama masa perkenalan
+            </span>
+          )}
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Nama perusahaan</label>
@@ -271,6 +289,26 @@ export function PerusahaanPage() {
         <div>
           <label className="mb-1 block text-sm font-medium">Telepon</label>
           <input value={telepon} onChange={(e) => setTelepon(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Jenis usaha</label>
+          <select value={jenisUsaha} onChange={(e) => setJenisUsaha(e.target.value)} className={inputClass}>
+            <option value="">— Belum diisi —</option>
+            {JENIS_USAHA.map((j) => (
+              <option key={j.kode} value={j.kode}>
+                {j.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">Zona waktu</label>
+          <div className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-700">
+            {ZONA_WAKTU.find((z) => z.kode === company.timezone)?.label ?? company.timezone}
+            <span className="block text-xs text-stone-500">
+              Dipilih saat perusahaan dibuat dan tidak bisa diubah — data yang sudah tercatat bertanggal di zona ini.
+            </span>
+          </div>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">Logo</label>
@@ -410,9 +448,14 @@ export function PerusahaanPage() {
           </p>
         )}
         <ErrorText error={simpan.error} />
+        {tamu && (
+          <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Pengaturan perusahaan tidak bisa disimpan di akun demo.
+          </p>
+        )}
         <button
           onClick={() => simpan.mutate()}
-          disabled={simpan.isPending || persenSalahKetik.length > 0}
+          disabled={tamu || simpan.isPending || persenSalahKetik.length > 0}
           className={btnPrimary}
         >
           {simpan.isPending ? "Menyimpan…" : "Simpan"}

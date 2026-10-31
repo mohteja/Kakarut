@@ -105,7 +105,7 @@ test("kasir: keranjang melebihi stok → kalimat server muncul, dan setelannya y
     await tombolMenu.click();
     // qty = porsi + 1 → keranjangnya PASTI melebihi stok, berapa pun sisanya.
     for (let i = 0; i < klik; i += 1) {
-      await page.getByRole("button", { name: "+", exact: true }).first().click();
+      await page.getByRole("button", { name: "Tambah jumlah", exact: true }).first().click();
     }
 
     const kuning = page.getByText(/Keranjang ini membuat stok minus/);
@@ -125,7 +125,7 @@ test("kasir: keranjang melebihi stok → kalimat server muncul, dan setelannya y
      * badannya, dan itulah cara paling jujur memancing pembacaan ulang: lewat
      * layar, seperti yang dilakukan kasir.
      */
-    await page.getByRole("button", { name: "+", exact: true }).first().click();
+    await page.getByRole("button", { name: "Tambah jumlah", exact: true }).first().click();
 
     const merah = page.getByText(/Pesanan ini akan DITOLAK saat Bayar/);
     await expect(merah).toBeVisible();

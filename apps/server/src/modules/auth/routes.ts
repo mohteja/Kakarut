@@ -1,3 +1,4 @@
+import jwt from "jsonwebtoken";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { DaftarResult } from "@kakarut/shared";
 import { zValidator } from "../../lib/validator";
@@ -16,6 +17,7 @@ import {
   companies,
   emailVerificationTokens,
   passwordResetTokens,
+  tokenDicabut,
   users,
 } from "../../db/schema";
 import { requireAuth, type AppEnv } from "../../middleware/auth";
@@ -440,6 +442,23 @@ export const authRoutes = new Hono<AppEnv>()
     // (buat perusahaan / terima undangan). buatSesi mengembalikan company null.
     return c.json(await buatSesi(user));
   })
+  // KELUAR — cabut token perangkat INI (klaim `jti`) sampai kedaluwarsanya.
+  // Perangkat lain yang masuk dengan akun yang sama tetap berjalan. Token lama
+  // tanpa `jti` tak bisa dicabut satu per satu (mati sendiri ≤ 12 jam); untuk
+  // itu tetap dijawab ok supaya klien tak perlu bercabang.
+  .post("/logout", requireAuth, async (c) => {
+    const klaim = jwt.decode(c.req.header("Authorization")!.slice(7)) as {
+      jti?: string;
+      exp?: number;
+    } | null;
+    if (klaim?.jti && klaim.exp) {
+      await db
+        .insert(tokenDicabut)
+        .values({ jti: klaim.jti, kedaluwarsa: new Date(klaim.exp * 1000) })
+        .onConflictDoNothing();
+    }
+    return c.json({ ok: true });
+  })
   // Masuk sebagai TAMU (guest mode) — akun bersama untuk mencoba aplikasi,
   // tanpa password. Dua peran: owner & kasir, di perusahaan demo (tanpa
   // geofence → absen bebas). Data bersifat sandbox bersama.
@@ -669,6 +688,32 @@ export const authRoutes = new Hono<AppEnv>()
     },
   )
   // Reset password dengan token dari email.
+  // CEK tautan reset SEBELUM formulir diisi — tautan palsu/kedaluwarsa dulu
+  // baru ketahuan sesudah orangnya mengetik password baru dua kali (laporan uji
+  // 31 Okt 2026). Kalimatnya SAMA dengan penolakan `/reset-password`, dan tak
+  // membocorkan apa pun selain yang token itu sendiri sudah buktikan.
+  .post(
+    "/reset-password/cek",
+    batasReset,
+    zValidator("json", z.object({ token: z.string().min(1) }).strict()),
+    async (c) => {
+      const { token } = c.req.valid("json");
+      const [row] = await db
+        .select({ id: passwordResetTokens.id })
+        .from(passwordResetTokens)
+        .where(
+          and(
+            eq(passwordResetTokens.tokenHash, hashToken(token)),
+            isNull(passwordResetTokens.usedAt),
+            gt(passwordResetTokens.expiresAt, new Date()),
+          ),
+        );
+      if (!row) {
+        throw new HTTPException(400, { message: "Tautan reset tidak valid atau sudah kedaluwarsa" });
+      }
+      return c.json({ ok: true });
+    },
+  )
   .post(
     "/reset-password",
     batasReset,

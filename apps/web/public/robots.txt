@@ -1,0 +1,22 @@
+# Terakasir — halaman publik boleh diindeks; aplikasi & API tidak.
+User-agent: *
+Allow: /$
+Allow: /tentang
+Allow: /bantuan
+Allow: /kontak
+Allow: /privasi
+Allow: /syarat
+Allow: /daftar
+Allow: /login
+Disallow: /api/
+Disallow: /uploads/
+Disallow: /kasir
+Disallow: /dashboard
+Disallow: /beranda
+Disallow: /pengaturan
+Disallow: /laporan
+Disallow: /superadmin
+Disallow: /reset-password
+Disallow: /verifikasi-email
+
+Sitemap: https://terakasir.com/sitemap.xml

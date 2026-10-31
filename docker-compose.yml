@@ -57,6 +57,7 @@ services:
       # Pencadangan otomatis (semuanya opsional; bawaan di config/env.ts).
       BACKUP_ENABLED: ${BACKUP_ENABLED:-}
       BACKUP_HOUR: ${BACKUP_HOUR:-}
+      DEMO_RESET_HOUR: ${DEMO_RESET_HOUR:-}
       BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-}
       BACKUP_KEEP: ${BACKUP_KEEP:-}
       BACKUP_ALERT_DAYS: ${BACKUP_ALERT_DAYS:-}

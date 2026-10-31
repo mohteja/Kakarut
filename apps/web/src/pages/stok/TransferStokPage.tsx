@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   TransferStokDaftar,
   TransferStokFaktur,
+  TransferStokItemRow,
   TransferStokSaldo,
   TransferStokSaldoRow,
 } from "@kakarut/shared";
@@ -269,6 +270,28 @@ export function TransferStokPage() {
     qtyTerbuang.length === 0 &&
     !adaQtyLebih &&
     !adaSalahKemasan;
+
+  /**
+   * Kenapa tombol Kirim mati — DIKATAKAN di sebelahnya. Dulu tombolnya mati
+   * tanpa satu kata pun untuk empat dari enam sebabnya (laporan uji 31 Okt
+   * 2026: "Transfer 60 dari stok 50: tombol Kirim mati tanpa penjelasan").
+   * `null` = bisa kirim, atau sebabnya sudah dikatakan kalimat merah di atas.
+   */
+  const sebabTakBisaKirim: string | null = !asalId
+    ? "Pilih lokasi asal dulu."
+    : !tujuanId
+      ? "Pilih lokasi tujuan dulu."
+      : asalId === tujuanId
+        ? "Asal dan tujuan tak boleh sama."
+        : barisTerisi.length === 0
+          ? "Pilih bahan dan isi jumlah kirimnya."
+          : adaQtyLebih
+            ? "Jumlah kirim melebihi stok tersedia."
+            : qtyTerbuang.length > 0
+              ? "Ada jumlah yang belum terbaca sebagai angka."
+              : adaSalahKemasan
+                ? "Ada jumlah yang bukan kelipatan kemasannya."
+                : null;
 
   const namaCabang = (id: string) => cabang.find((b) => b.id === id)?.nama ?? "—";
 
@@ -635,6 +658,11 @@ export function TransferStokPage() {
             >
               {kirim.isPending ? "Mengirim…" : "🔄 Kirim Transfer"}
             </button>
+            {!bisaKirim && sebabTakBisaKirim && (
+              <span className="text-sm font-medium text-amber-700" data-testid="sebab-tak-bisa-kirim">
+                {sebabTakBisaKirim}
+              </span>
+            )}
             {barisTerisi.length > 0 && (
               <span className="text-sm text-stone-500">
                 {barisTerisi.length} bahan → {tujuanId ? namaCabang(tujuanId) : "pilih tujuan"}
@@ -722,6 +750,7 @@ export function TransferStokPage() {
                         <span className="font-medium">{it.nama}</span>
                         <span className="shrink-0 tabular-nums text-sm">
                           {it.qty_teks}
+                          <SusutKirim it={it} />
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -753,6 +782,7 @@ export function TransferStokPage() {
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
                             {it.qty_teks}
+                            <SusutKirim it={it} />
                           </td>
                           <td className="px-3 py-1.5 text-xs text-stone-500">
                             {(BADGE_STATUS[it.status] ?? BADGE_STATUS.menunggu).label}
@@ -784,5 +814,19 @@ export function TransferStokPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Kiriman yang tiba KURANG dari yang berangkat: tampilkan yang dikirim dan
+ * susutnya. Dulu "kirim 10, terima 8" tertulis "8 pcs ✅ Diterima" dan angka 10
+ * lenyap dari catatan (laporan uji 31 Okt 2026).
+ */
+function SusutKirim({ it }: { it: TransferStokItemRow }) {
+  if (it.status !== "dikonfirmasi" || !(it.qty_dikirim > it.qty)) return null;
+  return (
+    <span className="block text-xs font-medium text-red-600">
+      dikirim {formatAngka(it.qty_dikirim)} · susut {formatAngka(it.qty_dikirim - it.qty)} {it.satuan}
+    </span>
   );
 }

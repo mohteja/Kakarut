@@ -204,7 +204,9 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   - **Umur kode: 60 menit.** Simpan sesi yang dikembalikan seperti hasil login.
 - `POST /api/auth/resend-verification` — [public] — req: `{ email }` — res: **200** `{ ok: true, sebab, message, retry_after_detik, dev_verify_kode?, dev_verify_url? }` — SELALU 200, tapi **sejak 2026-09-05 `sebab` menyebut keadaannya** (`SEBAB_DAFTAR`, lihat `/register` untuk kosakata, keputusan, dan biayanya). Enam keadaan kini terbedakan, termasuk satu yang sebelumnya mustahil dilihat dari luar: `jarak_kirim_ulang` — kode terakhir masih berlaku dan **tak ada surat baru yang berangkat**; `retry_after_detik` menyebut sisanya. Sampai tanggal itu keadaan ini tak bisa dibedakan dari "terkirim", dan orang menunggu surat yang memang tak akan datang. Benar-benar mengirim hanya bila akun ADA, aktif, & BELUM terverifikasi **dan** kode hidup terakhirnya sudah lebih tua dari `retry_after_detik` (**120 dtk**). **JARAK 2 MENIT itu dijaga server, bukan cuma tampilan** — tekanan yang terlalu cepat dibalas `200` yang sama tetapi **tidak** mengirim apa pun, dan **tidak** merusak kode yang sedang dipegang user (kode lamanya tetap berlaku). Klien: pakai `retry_after_detik` untuk hitung mundur, dan **simpan tenggatnya** supaya muat-ulang layar tak membuat tombolnya tampak siap padahal server akan menolak. Dibatasi rate limit juga (429 + `Retry-After`).
 - `POST /api/auth/forgot-password` — [public] — req: `{ email }` — res: **200** `{ ok: true, dev_reset_url? }` — SELALU 200 (tak bocorkan apakah email ada). Bila akun aktif: token reset dibuat + tautan dikirim via email. `dev_reset_url` HANYA muncul saat email server belum dikonfigurasi & bukan produksi (bantuan setup) — abaikan di produksi.
+- `POST /api/auth/reset-password/cek` — [public] — req: `{ token }` — res: `{ ok }` — error: **400** `"Tautan reset tidak valid atau sudah kedaluwarsa"` (kalimat sama dengan `/reset-password`). Untuk memeriksa tautan sebelum formulir diisi; tak mengubah apa pun.
 - `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` (tanpa sesi — pengguna login ulang dengan password baru) — error: **400** token tidak valid/kedaluwarsa/terpakai. **Sejak 2026-09-02: sekaligus menandai email TERVERIFIKASI** bila belum (tautan reset hanya pernah dikirim ke alamat yang tercatat, jadi memegangnya = bukti kepemilikan inbox, standar yang sama dengan kode verifikasi); akun yang sudah terverifikasi tak berubah. Klien: sesudah reset sukses, login langsung bisa — jangan lagi mengarahkan ke layar verifikasi. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB); email reset juga menampilkan **kode yang mudah disalin** (identik dengan parameter `token`) untuk klien tempel-manual. **Efek samping:** menaikkan token_version user → semua token lama user itu jadi **401** (lihat bagian Autentikasi).
+- `POST /api/auth/logout` — [any authenticated] — mencabut token YANG DIPAKAI (klaim `jti`) sampai kedaluwarsanya; perangkat lain akun yang sama tetap masuk — res: `{ ok }`. Token lama tanpa `jti` dijawab ok tapi tak bisa dicabut (mati sendiri ≤ 12 jam). Klien memanggilnya saat Keluar sukarela, best-effort.
 - `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: **`SesiDto`** = `{ user: AuthUser, company: CompanyDto | null, branch: BranchRingkas | null }` (sesi tanpa `token`; `company` dirakit SATU penulis, `companyDto`, sama dengan login) — error: **401**
   > **Ini sumber kebenaran peran & cabang, bukan isi token.** `requireAuth`
   > membaca ulang keanggotaan dari database pada **setiap** request, jadi
@@ -227,10 +229,10 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > MENGGANTI sesi tersimpan (seperti login), bukan menggabung.
 
 - `GET /api/onboarding/status` — res: `{ has_company: bool, email: string, undangan: [{ id, company_nama, role, cabang_nama|null, diundang_pada }] }`
-- `POST /api/onboarding/perusahaan` — req: `{ nama }` — res: **201** sesi baru (jadi owner perusahaan baru) — error: **403** super-admin
+- `POST /api/onboarding/perusahaan` — req: **`BuatPerusahaanBody`** = `{ nama (1..80), jenis_usaha (kode `JENIS_USAHA`), alamat (5..300), telepon (8–15 angka, boleh `+`/spasi/-), timezone? (`Asia/Jakarta` | `Asia/Makassar` | `Asia/Jayapura`, bawaan `Asia/Jakarta`) }` — `.strict()` — res: **201** sesi baru (jadi owner perusahaan baru; `company.timezone` = zona yang dipilih) — error: **400** isian kurang/tak sah (kalimat menyebut isiannya, mis. `alamat: wajib diisi`), **403** super-admin. **BERUBAH 2026-10-26:** dulu cukup `{ nama }`; klien lama kini menerima 400. Alamat & telepon ikut ditulis ke cabang "Pusat". **Zona waktu hanya bisa dipilih di sini** — `PATCH /company` tak menerimanya; klien wajib menampilkan tanggal/jam di zona `company.timezone` dari sesi, bukan zona perangkat. Pilihan & aturan: `packages/shared/src/profil-usaha.ts`.
 - `POST /api/onboarding/undangan/:id/terima` — res: sesi baru (bergabung ke perusahaan) — error: **404** bukan untuk email ini, **400** undangan tak berlaku
 - `POST /api/onboarding/undangan/:id/tolak` — res: `{ ok }` — error: **404**
-- `DELETE /api/onboarding/akun` — req: `{ password }` — SOFT delete akun sendiri — res: `{ ok }` — error: **401** password salah, **400** owner terakhir sebuah perusahaan (harus serahkan/hapus perusahaan dulu)
+- `DELETE /api/onboarding/akun` — req: `{ password, email }` — SOFT delete akun sendiri — **`email` = email akun ini diketik ulang** (trim, tak peka huruf besar; wajib sejak 2026-10-26 — klien lama yang hanya mengirim `password` menerima 400) — res: `{ ok }` — error: **400** `"Email yang diketik tidak sama dengan email akun ini — akun tidak dihapus"` (diperiksa SEBELUM password), **401** password salah, **400** owner terakhir sebuah perusahaan (harus serahkan/hapus perusahaan dulu)
 
 ---
 
@@ -463,7 +465,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/penjualan/cek-stok` — **[cashier only]** — req `{ branch_id?: uuid, is_dine_in: bool=false, open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, addons?: [{id, jumlah}]}] (min 1, max 500) }` (`.strict()`; `addons` dipetakan tanpa diadili — id asing dilewati) — res: **`CekStokResult`** = `{ blokir_jual_minus, akan_ditolak, kurang: BahanKurangDto[], pesan: string|null }`. **PRACEK kecukupan stok SELURUH KERANJANG sebelum Bayar; tidak menulis apa pun.** Ada sejak 2026-09-06 karena `GET /api/menu/ketersediaan` menjawab pertanyaan yang BERBEDA — "menu ini bisa dibuat berapa porsi lagi", bukan "keranjang ini muat atau tidak" — dan keduanya menyimpang persis saat dua baris memperebutkan satu bahan. Terukur pada DB gerbang: **38 dari 57 menu** berbagi bahan pembatas dengan menu lain (12 kelompok); keranjang 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa porsi 40) membuat kedua klien DIAM sebelum `POST /api/penjualan` menolaknya. Dihitung `kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku` — fungsi yang SAMA dengan gerbangnya — dan `pesan` dirakit perakit yang sama dengan pesan penolakan, jadi ramalan dan vonis berbunyi identik (dijaga verify-api §300, dibandingkan byte per byte dari kawat). `akan_ditolak` MENCERMINKAN gerbangnya, bukan sekadar `kurang.length > 0`: ia `false` saat setelan `blokir_jual_minus` mati, dan `false` untuk `open_bill_id` (gerbangnya sengaja lewat di sana — barangnya sudah dimasak). `kurang` tetap dihitung dalam kedua keadaan itu. **RAMALAN, bukan janji** — dijalankan di luar transaksi, jadi stok bisa bergerak sebelum Bayar; gerbang sesungguhnya tetap di dalam transaksi `createSale` — error: **400** badan tak sah, **403** peran selain kasir / kasir di luar cabang, **404** perusahaan tak ada
 - `GET /api/penjualan/:id` — [any] — res: **`SaleResult`** — bentuk yang SAMA PERSIS dengan `POST /api/penjualan` (satu penulis, `strukPenjualan`; dijaga verify-api §298 dari kawat, dua arah). Biaya ditahan untuk non-manajemen, sama seperti di POST — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
-- `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, client_ref?: uuid, device_id?: string|null, items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini)
+- `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, client_ref?: uuid, device_id?: string|null, pin_owner?: string (6 angka), items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **403** (KASIR saja, sejak 2026-10-31) `sebab`: `pin_refund_wajib` (tak mengirim `pin_owner`) · `pin_refund_belum_diatur` (belum ada owner/admin ber-PIN — minta owner mengatur di `PUT /api/profil/pin`) · `pin_refund_salah`; **429** sesudah 5 PIN salah dalam 15 menit; **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini). Owner/admin tak perlu PIN. Penyetujunya tercatat di `sale_refunds.disetujui_oleh`.
 
 > **`client_ref` SANGAT DIANJURKAN di sini** — lebih penting daripada pada
 > `POST /api/penjualan`, karena refund yang terkirim dua kali **mengembalikan
@@ -1402,7 +1404,8 @@ Laporan:
 
 ## `/api/profil` — Akun sendiri (`modules/profil/routes.ts`) — [any]
 
-- `GET /api/profil` — res: `ProfilDto` `{ nama, email, role, cabang, employee_code }`
+- `GET /api/profil` — res: `ProfilDto` `{ nama, email, role, cabang, employee_code, pin_refund_diatur }`
+- `PUT /api/profil/pin` — **[owner/admin]** — req: `{ pin: string (tepat 6 angka), password: string }` — atur/ganti PIN refund (kasir wajib mengetikkan PIN owner/admin saat refund) — res: `{ ok }` — error: **401** password salah, **403** bukan owner/admin atau akun tamu (`sebab: "akun_tamu"`)
 - `GET /api/profil/aktivitas` — res: `{ rows: [...] }` (log aktivitas faktur sendiri, maks 50)
 - `POST /api/profil/password` — req: `{ password_lama: string, password_baru: string (min 8) }` — res: **`{ ok: true, token, user, company, branch }`** (bentuk **sesi** yang sama seperti login) — error: **401** password lama salah. **PENTING:** ganti password menaikkan token_version → token LAMA (perangkat/tab lain) langsung jadi **401**. Endpoint ini **menerbitkan token baru** untuk tab/perangkat yang melakukan perubahan agar TIDAK ikut ter-logout — **klien WAJIB menyimpan `token` baru ini menggantikan yang lama**. Perusahaan aktif dipertahankan (penting untuk akun multi-perusahaan).
 
@@ -1530,7 +1533,7 @@ Laporan:
 
 ## `/api/print` — Relay printer jaringan (`modules/print/routes.ts`) — [any]
 
-- `POST /api/print/lan` — req: `{ host: string (1..255), port: int(1..65535), data: string (base64 ESC/POS, 1..400000) }` — res: `{ ok: true }` — error: **400** (host terlarang/internal, data kosong), **502** printer tak terjangkau
+- `POST /api/print/lan` — req: `{ host: string (1..255), port: int — HANYA port printer 9100–9109, 515, 631 (sejak 2026-10-31, mitigasi SSRF), data: string (base64 ESC/POS, 1..400000) }` — res: `{ ok: true }` — error: **400** (host terlarang/internal, port bukan printer, data kosong), **403** akun tamu, **502** printer tak terjangkau
 
 > Untuk cetak Bluetooth thermal di aplikasi Flutter, byte ESC/POS **struk
 > pembayaran** dibangun di sisi klien; endpoint ini hanya relay TCP untuk
@@ -1550,7 +1553,7 @@ Laporan:
 ## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin]**
 
 - `GET /api/karyawan` — query: `arsip=true` (daftar arsip) — res: row karyawan
-- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen"|"bar", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen/bar butuh cabang; mismatch peran/tipe cabang — kitchen/bar hanya cabang store), **403** hanya owner boleh buat owner, **409** email ada — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)*
+- `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen"|"bar", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen/bar butuh cabang; mismatch peran/tipe cabang — kitchen/bar hanya cabang store), **403** hanya owner boleh buat owner, **409** email sudah karyawan aktif / sudah punya undangan pending — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)* **SEJAK 2026-10-26: email yang SUDAH punya akun tak lagi 409** — balasannya **200** `KaryawanDiundangResult` = `{ diundang: true, id, email, role }`: dibuat undangan pending (peran & cabang sama), `password` diabaikan, tanpa surel; orangnya menekan Terima di halaman welcome. Klien wajib membedakan 200 `diundang` dari 201 akun baru.
 - `POST /api/karyawan/undang` — req: `{ email, role: enum, branch_id?: uuid|null }` — buat UNDANGAN pending (tanpa password; email dikirim best-effort). Saat email itu daftar/menerima → membership dibuat otomatis — res: **201** `{ id, email, role }` — error: **400** (cashier/tim butuh cabang), **403** hanya owner boleh undang owner, **409** sudah jadi karyawan aktif / sudah diundang
 - `GET /api/karyawan/undangan` — res: `UndanganKaryawanRow[]` (`{id,email,role,cabang_nama|null,status,diundang_pada}`, hanya pending)
 - `DELETE /api/karyawan/undangan/:id` — batalkan undangan pending — res: `{ ok }` — error: **404**
@@ -1676,6 +1679,13 @@ export interface AuthUser {
   company_id: string | null;
   role: UserRole | null;
   branch_id: string | null;
+  /**
+   * Akun demo bersama (tombol "Tamu Owner/Kasir"). Klien menyembunyikan aksi
+   * yang ditolak server untuk tamu (`sebab: "akun_tamu"`) dan menampilkan pita
+   * "data demo direset tiap malam". Dihitung dari email di server, bukan klaim
+   * yang bisa dipalsukan.
+   */
+  is_tamu: boolean;
 }
 
 /** Mode aplikasi yang diturunkan dari `plan` — Lite menyembunyikan fitur Pro. */
@@ -1716,6 +1726,11 @@ export interface CompanyRow {
   telepon: string | null;
   logoUrl: string | null;
   timezone: string;
+  /**
+   * Kode `JENIS_USAHA` (`profil-usaha.ts`); `null` untuk perusahaan yang lahir
+   * sebelum kolomnya ada, atau dibuat super admin / seed.
+   */
+  jenisUsaha: string | null;
   pb1Enabled: boolean;
   pb1Rate: number;
   receiptFooter: string | null;
@@ -1835,6 +1850,11 @@ export interface ProfilDto {
   role: UserRole | null;
   cabang: string | null;
   employee_code: string | null;
+  /**
+   * Akun ini sudah mengatur PIN refund? Hanya bermakna untuk owner/admin —
+   * kasir yang mengembalikan uang wajib menyertakan PIN salah satunya.
+   */
+  pin_refund_diatur: boolean;
 }
 
 export type InvitationStatus = "pending" | "accepted" | "revoked";
@@ -1914,6 +1934,19 @@ export interface KaryawanBaruResult {
 }
 
 /**
+ * Balasan 200 `POST /api/karyawan` bila emailnya SUDAH punya akun (mis.
+ * mendaftar sendiri lalu memilih "tunggu diundang"): bukan akun baru, melainkan
+ * undangan pending — orangnya menekan Terima di halaman welcome.
+ */
+export interface KaryawanDiundangResult {
+  diundang: true;
+  /** id undangan */
+  id: string;
+  email: string;
+  role: UserRole;
+}
+
+/**
  * SATU PENYEWA sebagaimana `GET /api/admin/tenants` mengirimnya (9 kunci).
  *
  * `plan_expires_at` sampai 2026-09-11 DIKIRIM tanpa disebut tipe mana pun:
@@ -1979,9 +2012,10 @@ export interface StokAwalItem {
  * `tanggal` di tingkat amplop adalah tanggal saldo pembuka TERKINI (yang
  * terbesar di antara `items`), atau HARI INI bila belum ada satu pun. Dan
  * "hari ini" itu dihitung server di ZONA PERUSAHAAN (`tanggalDi(timezone)`),
- * bukan di zona peramban — pembedaan yang hari ini tak terlihat karena
- * `companies.timezone` belum bisa diubah, dan yang menahan pasangan itu tetap
- * konsisten adalah `zona-waktu-satu-suara.test.ts`.
+ * bukan di zona peramban. Sejak 2026-10-26 zona itu bisa dipilih (WIB/WITA/
+ * WIT) saat perusahaan dibuat, dan web mengikutinya lewat
+ * `aturZonaPerusahaan` — yang menahan pasangan itu tetap konsisten adalah
+ * `zona-waktu-satu-suara.test.ts`.
  */
 export interface StokAwalTersimpan {
   tanggal: string;
@@ -3225,7 +3259,14 @@ export interface StokRowDto {
   tempat_id: string | null;
   stok_awal: number;
   produksi: number;
+  /** SEMUA pengurang saldo: konsumsi (penjualan/produksi) + `kirim_keluar` */
   terpakai: number;
+  /**
+   * Bagian `terpakai` yang berupa KIRIMAN keluar (transfer ke lokasi lain),
+   * bukan pemakaian. Dipisah supaya Central Kitchen tak membaca kiriman sebagai
+   * konsumsi (laporan uji 31 Okt 2026). `terpakai − kirim_keluar` = pemakaian.
+   */
+  kirim_keluar: number;
   saldo: number;
   status: StokStatus;
   /** ambang batas stok minimum yang diatur untuk bahan ini (0 = pakai rasio default) */
@@ -3263,6 +3304,13 @@ export interface TransferStokItemRow {
   /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
   status: KonfirmasiStatus;
   alasan_tolak: string | null;
+  /**
+   * Jumlah yang BERANGKAT, dalam `satuan`. Sama dengan `qty` kecuali kiriman
+   * diterima SEBAGIAN (kirim 10, terima 8): `qty` = yang tiba, `qty_dikirim`
+   * = 10, selisihnya susut di perjalanan — mengurangi stok asal (sejak
+   * 2026-10-31; dulu angka 10 hilang dari catatan, laporan uji 31 Okt 2026).
+   */
+  qty_dikirim: number;
 }
 
 /**
@@ -3391,7 +3439,10 @@ export interface TransferStokFaktur {
   tujuan_cabang: string | null;
   catatan: string | null;
   dibuat_oleh: string | null;
-  /** agregat status baris; "sebagian" = ada yang diterima & ada yang ditolak */
+  /**
+   * agregat status baris; "sebagian" = ada yang ditolak di samping yang
+   * diterima, ATAU ada baris yang tiba kurang dari yang dikirim
+   */
   status: KonfirmasiStatus | "sebagian";
   items: TransferStokItemRow[];
 }
@@ -3861,7 +3912,12 @@ export type MutasiJenis =
   | "penjualan"
   | "pemakaian"
   /** kiriman keluar: stok dipindah dari cabang ini ke cabang lain (diterima) */
-  | "kirim";
+  | "kirim"
+  /**
+   * kiriman MASUK dari lokasi lain yang sudah diterima (baris ber-asal) —
+   * dulu tertulis "Produksi" di kartu stok penerima (laporan uji 31 Okt 2026)
+   */
+  | "terima";
 
 /** Satu baris kartu stok (buku besar mutasi per bahan). */
 export interface MutasiStok {
@@ -4105,6 +4161,8 @@ export interface SaleRow {
   customerWa: string | null;
   metodeBayar: MetodeBayar;
   uangDiterima: number | null;
+  /** no. referensi QRIS/transfer yang diketik kasir; null = tak diisi / tunai */
+  refBayar: string | null;
   waktu: string;
   saleDate: string;
   shiftId: string | null;
@@ -5105,6 +5163,12 @@ export interface ShiftPantauRow {
   telat_buka: boolean;
   /** kasir masih terbuka padahal sudah lewat jam tutup */
   lupa_tutup: boolean;
+  /**
+   * shift terbuka LEBIH DARI 24 JAM — hampir pasti lupa ditutup di hari lain
+   * (laporan uji 31 Okt 2026: shift dibuka 27 Jul masih terbuka 3 bulan, tapi
+   * layar hanya menulis "21.48" tanpa tanggal dan tak menandai apa pun)
+   */
+  terbuka_lama: boolean;
 }
 
 /** Baris ringan hasil pencarian member (autocomplete keranjang kasir). */

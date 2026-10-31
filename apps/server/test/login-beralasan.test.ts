@@ -245,7 +245,10 @@ describe("layar masuk PONSEL bercabang pada kode yang sama — bila repo itu ada
 describe("/lupa-password TIDAK ikut bicara", () => {
   const auth = baca(AUTH);
   const i = auth.indexOf('"/forgot-password"');
-  const j = auth.indexOf('"/reset-password"', i);
+  // Rute berikutnya sesudah lupa-password: sejak 2026-10-31 `/reset-password/cek`
+  // berdiri di depan `/reset-password`, jadi potongannya berhenti di yang PERTAMA.
+  const jCek = auth.indexOf('"/reset-password/cek"', i);
+  const j = jCek > i ? jCek : auth.indexOf('"/reset-password"', i);
   const handler = auth.slice(i, j);
 
   it("jangkarnya ada dan potongannya benar-benar berisi", () => {

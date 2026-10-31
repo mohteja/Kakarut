@@ -757,6 +757,34 @@
       "when": 1792970622379,
       "tag": "0107_happy_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1793018973382,
+      "tag": "0108_special_nextwave",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1793407330055,
+      "tag": "0109_complete_joystick",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1793407915300,
+      "tag": "0110_outstanding_sasquatch",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1793409976245,
+      "tag": "0111_giant_wildside",
+      "breakpoints": true
     }
   ]
 }

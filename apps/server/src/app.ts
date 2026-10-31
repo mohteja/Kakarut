@@ -132,9 +132,12 @@ export function createApp() {
     })
     .get("/health", async (c) => {
       await db.execute(sql`SELECT 1`);
+      // Publik: hanya yang dibutuhkan klien. `build` dipakai web untuk
+      // menawarkan muat ulang setelah deploy (UpdatePrompt). Mode penyimpanan
+      // TIDAK lagi dibuka ke publik (laporan uji 31 Okt 2026) — panel super
+      // admin membacanya dari /admin/sistem.
       return c.json({
         ok: true,
-        storage: getStorage().mode,
         build: getBuildId(),
       });
     })
@@ -303,11 +306,13 @@ export function createApp() {
         objectSrc: ["'none'"],
         frameAncestors: ["'self'"],
         formAction: ["'self'"],
-        scriptSrc: ["'self'"],
+        // Cloudflare Web Analytics (beacon) diizinkan: tanpanya tiap halaman
+        // menulis galat CSP di konsol (laporan uji 31 Okt 2026).
+        scriptSrc: ["'self'", "https://static.cloudflareinsights.com"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         fontSrc: ["'self'", "data:"],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "https://cloudflareinsights.com"],
         workerSrc: ["'self'", "blob:"],
       },
     }),

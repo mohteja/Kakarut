@@ -22,6 +22,13 @@ export interface AuthUser {
   company_id: string | null;
   role: UserRole | null;
   branch_id: string | null;
+  /**
+   * Akun demo bersama (tombol "Tamu Owner/Kasir"). Klien menyembunyikan aksi
+   * yang ditolak server untuk tamu (`sebab: "akun_tamu"`) dan menampilkan pita
+   * "data demo direset tiap malam". Dihitung dari email di server, bukan klaim
+   * yang bisa dipalsukan.
+   */
+  is_tamu: boolean;
 }
 
 /** Mode aplikasi yang diturunkan dari `plan` — Lite menyembunyikan fitur Pro. */
@@ -62,6 +69,11 @@ export interface CompanyRow {
   telepon: string | null;
   logoUrl: string | null;
   timezone: string;
+  /**
+   * Kode `JENIS_USAHA` (`profil-usaha.ts`); `null` untuk perusahaan yang lahir
+   * sebelum kolomnya ada, atau dibuat super admin / seed.
+   */
+  jenisUsaha: string | null;
   pb1Enabled: boolean;
   pb1Rate: number;
   receiptFooter: string | null;
@@ -181,6 +193,11 @@ export interface ProfilDto {
   role: UserRole | null;
   cabang: string | null;
   employee_code: string | null;
+  /**
+   * Akun ini sudah mengatur PIN refund? Hanya bermakna untuk owner/admin —
+   * kasir yang mengembalikan uang wajib menyertakan PIN salah satunya.
+   */
+  pin_refund_diatur: boolean;
 }
 
 export type InvitationStatus = "pending" | "accepted" | "revoked";
@@ -260,6 +277,19 @@ export interface KaryawanBaruResult {
 }
 
 /**
+ * Balasan 200 `POST /api/karyawan` bila emailnya SUDAH punya akun (mis.
+ * mendaftar sendiri lalu memilih "tunggu diundang"): bukan akun baru, melainkan
+ * undangan pending — orangnya menekan Terima di halaman welcome.
+ */
+export interface KaryawanDiundangResult {
+  diundang: true;
+  /** id undangan */
+  id: string;
+  email: string;
+  role: UserRole;
+}
+
+/**
  * SATU PENYEWA sebagaimana `GET /api/admin/tenants` mengirimnya (9 kunci).
  *
  * `plan_expires_at` sampai 2026-09-11 DIKIRIM tanpa disebut tipe mana pun:
@@ -325,9 +355,10 @@ export interface StokAwalItem {
  * `tanggal` di tingkat amplop adalah tanggal saldo pembuka TERKINI (yang
  * terbesar di antara `items`), atau HARI INI bila belum ada satu pun. Dan
  * "hari ini" itu dihitung server di ZONA PERUSAHAAN (`tanggalDi(timezone)`),
- * bukan di zona peramban — pembedaan yang hari ini tak terlihat karena
- * `companies.timezone` belum bisa diubah, dan yang menahan pasangan itu tetap
- * konsisten adalah `zona-waktu-satu-suara.test.ts`.
+ * bukan di zona peramban. Sejak 2026-10-26 zona itu bisa dipilih (WIB/WITA/
+ * WIT) saat perusahaan dibuat, dan web mengikutinya lewat
+ * `aturZonaPerusahaan` — yang menahan pasangan itu tetap konsisten adalah
+ * `zona-waktu-satu-suara.test.ts`.
  */
 export interface StokAwalTersimpan {
   tanggal: string;
@@ -1571,7 +1602,14 @@ export interface StokRowDto {
   tempat_id: string | null;
   stok_awal: number;
   produksi: number;
+  /** SEMUA pengurang saldo: konsumsi (penjualan/produksi) + `kirim_keluar` */
   terpakai: number;
+  /**
+   * Bagian `terpakai` yang berupa KIRIMAN keluar (transfer ke lokasi lain),
+   * bukan pemakaian. Dipisah supaya Central Kitchen tak membaca kiriman sebagai
+   * konsumsi (laporan uji 31 Okt 2026). `terpakai − kirim_keluar` = pemakaian.
+   */
+  kirim_keluar: number;
   saldo: number;
   status: StokStatus;
   /** ambang batas stok minimum yang diatur untuk bahan ini (0 = pakai rasio default) */
@@ -1609,6 +1647,13 @@ export interface TransferStokItemRow {
   /** menunggu = dalam perjalanan; dikonfirmasi = diterima; ditolak = tak diterima */
   status: KonfirmasiStatus;
   alasan_tolak: string | null;
+  /**
+   * Jumlah yang BERANGKAT, dalam `satuan`. Sama dengan `qty` kecuali kiriman
+   * diterima SEBAGIAN (kirim 10, terima 8): `qty` = yang tiba, `qty_dikirim`
+   * = 10, selisihnya susut di perjalanan — mengurangi stok asal (sejak
+   * 2026-10-31; dulu angka 10 hilang dari catatan, laporan uji 31 Okt 2026).
+   */
+  qty_dikirim: number;
 }
 
 /**
@@ -1737,7 +1782,10 @@ export interface TransferStokFaktur {
   tujuan_cabang: string | null;
   catatan: string | null;
   dibuat_oleh: string | null;
-  /** agregat status baris; "sebagian" = ada yang diterima & ada yang ditolak */
+  /**
+   * agregat status baris; "sebagian" = ada yang ditolak di samping yang
+   * diterima, ATAU ada baris yang tiba kurang dari yang dikirim
+   */
   status: KonfirmasiStatus | "sebagian";
   items: TransferStokItemRow[];
 }
@@ -2207,7 +2255,12 @@ export type MutasiJenis =
   | "penjualan"
   | "pemakaian"
   /** kiriman keluar: stok dipindah dari cabang ini ke cabang lain (diterima) */
-  | "kirim";
+  | "kirim"
+  /**
+   * kiriman MASUK dari lokasi lain yang sudah diterima (baris ber-asal) —
+   * dulu tertulis "Produksi" di kartu stok penerima (laporan uji 31 Okt 2026)
+   */
+  | "terima";
 
 /** Satu baris kartu stok (buku besar mutasi per bahan). */
 export interface MutasiStok {
@@ -2451,6 +2504,8 @@ export interface SaleRow {
   customerWa: string | null;
   metodeBayar: MetodeBayar;
   uangDiterima: number | null;
+  /** no. referensi QRIS/transfer yang diketik kasir; null = tak diisi / tunai */
+  refBayar: string | null;
   waktu: string;
   saleDate: string;
   shiftId: string | null;
@@ -3451,6 +3506,12 @@ export interface ShiftPantauRow {
   telat_buka: boolean;
   /** kasir masih terbuka padahal sudah lewat jam tutup */
   lupa_tutup: boolean;
+  /**
+   * shift terbuka LEBIH DARI 24 JAM — hampir pasti lupa ditutup di hari lain
+   * (laporan uji 31 Okt 2026: shift dibuka 27 Jul masih terbuka 3 bulan, tapi
+   * layar hanya menulis "21.48" tanpa tanggal dan tak menandai apa pun)
+   */
+  terbuka_lama: boolean;
 }
 
 /** Baris ringan hasil pencarian member (autocomplete keranjang kasir). */

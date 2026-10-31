@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import type { AktivitasRow, ProfilDto } from "@kakarut/shared";
@@ -10,8 +10,10 @@ import {
   SpinnerAtauGalat,
   InputPassword,
   btnPrimary,
+  inputClass,
 } from "../../components/ui";
 import { HapusAkunButton } from "../../components/HapusAkunButton";
+import { useAuth } from "../../context/AuthContext";
 import { api, saveAuth, type AuthState } from "../../lib/api";
 import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
@@ -26,6 +28,8 @@ const LABEL_ROLE: Record<string, string> = {
  * absen (ditunjukkan ke admin/kasir untuk dipindai), dan ganti password.
  */
 export function ProfilPage() {
+  // Akun demo bersama: ganti password & hapus akun ditolak server (`akun_tamu`).
+  const tamu = useAuth().auth?.user.is_tamu === true;
   const { data: profil, isLoading, error } = useQuery({
     queryKey: ["profil"],
     queryFn: () => api<ProfilDto>("/profil"),
@@ -149,7 +153,21 @@ export function ProfilPage() {
         </Card>
       )}
 
+      {/* PIN refund — owner/admin. Kasir yang mengembalikan uang wajib
+          mengetikkan PIN owner/admin yang hadir. */}
+      {(profil.role === "owner" || profil.role === "admin") && !tamu && (
+        <AturPinRefund sudahDiatur={profil.pin_refund_diatur} />
+      )}
+
       {/* Ganti password */}
+      {tamu ? (
+        <Card className="p-4">
+          <h2 className="mb-2 font-bold text-stone-800">🔒 Ganti Password</h2>
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800" data-testid="catatan-tamu">
+          Tidak tersedia di akun demo — daftar akun sendiri untuk memakai fitur ini.
+        </p>
+        </Card>
+      ) : (
       <Card className="p-4">
         <h2 className="mb-2 font-bold text-stone-800">🔒 Ganti Password</h2>
         <form onSubmit={onSubmit} className="space-y-3">
@@ -202,6 +220,7 @@ export function ProfilPage() {
           </button>
         </form>
       </Card>
+      )}
 
       {/* Zona bahaya: hapus akun sendiri */}
       <Card className="mt-4 border-red-200 p-4">
@@ -210,8 +229,78 @@ export function ProfilPage() {
           Menghapus akun berarti Anda tak bisa login lagi. Owner terakhir sebuah perusahaan
           harus menyerahkan kepemilikan atau menghapus perusahaan lebih dulu.
         </p>
-        <HapusAkunButton />
+        {tamu ? (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Tidak tersedia di akun demo — daftar akun sendiri untuk memakai fitur ini.
+          </p>
+        ) : (
+          <HapusAkunButton />
+        )}
       </Card>
     </div>
+  );
+}
+
+/** Atur / ganti PIN refund (6 angka) — butuh password akun. */
+function AturPinRefund({ sudahDiatur }: { sudahDiatur: boolean }) {
+  const queryClient = useQueryClient();
+  const [pin, setPin] = useState("");
+  const [password, setPassword] = useState("");
+  const simpan = useMutation({
+    mutationFn: () => api("/profil/pin", { method: "PUT", body: { pin, password } }),
+    onSuccess: () => {
+      setPin("");
+      setPassword("");
+      // Hanya profil yang berubah (bendera PIN); aktivitas akun tak tersentuh,
+      // tapi kuncinya disebut juga supaya awalan yang mirip tak menipu.
+      void queryClient.invalidateQueries({ queryKey: ["profil"] });
+      void queryClient.invalidateQueries({ queryKey: ["profil-aktivitas"] });
+    },
+  });
+  return (
+    <Card className="mb-4 p-4">
+      <h2 className="mb-1 font-bold text-stone-800">🔑 PIN Refund</h2>
+      <p className="mb-3 text-sm text-stone-500">
+        Kasir yang mengembalikan uang pembeli wajib mengetikkan PIN owner/admin.{" "}
+        {sudahDiatur ? (
+          <span className="font-medium text-green-700">PIN Anda sudah diatur.</span>
+        ) : (
+          <span className="font-medium text-amber-700">PIN Anda belum diatur.</span>
+        )}
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          simpan.mutate();
+        }}
+        className="space-y-3"
+      >
+        <input
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          inputMode="numeric"
+          type="password"
+          autoComplete="off"
+          placeholder="PIN baru (6 angka)"
+          aria-label="PIN baru"
+          className={inputClass}
+        />
+        <InputPassword
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password akun Anda"
+          autoComplete="current-password"
+        />
+        <ErrorText error={simpan.error} />
+        {simpan.isSuccess && <p className="text-sm text-green-700">PIN tersimpan ✓</p>}
+        <button
+          type="submit"
+          disabled={pin.length !== 6 || !password || simpan.isPending}
+          className={`${btnPrimary} w-full`}
+        >
+          {simpan.isPending ? "Menyimpan…" : sudahDiatur ? "Ganti PIN" : "Atur PIN"}
+        </button>
+      </form>
+    </Card>
   );
 }

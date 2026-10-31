@@ -261,15 +261,11 @@ const ATURAN: Aturan[] = [
       // gagal. Terukur 8 ronde dua boot serentak: 4/8 galat 23505, dan 1/8
       // mencetak kalimat yang KELIRU — "email sudah dipakai akun lain" tentang
       // email milik super admin yang baru saja lahir. Hanya 3/8 yang bersih.
-      "modules/onboarding/service.ts": {
-        pintu: 1,
-        alasan:
-          "`buatPerusahaanUntuk` MEMANG dijaga, tapi penjaganya di PEMANGGIL — " +
-          "`POST /onboarding/perusahaan` mengulang transaksinya saat " +
-          "`companies_slug_unique` bentrok, sebab slug di sini dipilihkan sistem " +
-          "(akhiran acak) dan bukan diketik orang. Sapuan ini bergranularitas " +
-          "badan, jadi ia tak bisa melihat ke pemanggil",
-      },
+      // `modules/onboarding/service.ts` DIHAPUS (2026-10-31): `buatPerusahaanUntuk`
+      // kini juga menanam kategori menu bawaan dengan `onConflictDoNothing`, dan
+      // sapuan bergranularitas badan menganggap badannya berpenjaga. Penjaga
+      // sesungguhnya untuk `companies_slug_unique` tetap di PEMANGGIL —
+      // `POST /onboarding/perusahaan` mengulang transaksinya saat slug bentrok.
       // `seed/guest.ts` DIHAPUS dari daftar ini, dan bukan karena pintunya
       // ditutup: `provisionGuest` memang memakai `onConflictDoUpdate` pada
       // insert `users`-nya, jadi dulu ia tertuduh hanya karena pola penjaganya

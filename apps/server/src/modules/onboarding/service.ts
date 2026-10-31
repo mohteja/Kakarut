@@ -2,7 +2,8 @@ import { randomInt } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { Tx } from "../../db/client";
-import { branches, companies, invitations, memberships } from "../../db/schema";
+import type { JenisUsaha, ZonaWaktu } from "@kakarut/shared";
+import { branches, companies, invitations, memberships, menuCategories } from "../../db/schema";
 import { seedKategoriBahanPerusahaan } from "../kategori-bahan/service";
 import { seedMejaDefault } from "../meja/defaults";
 import { seedUnitsPerusahaan } from "../satuan/service";
@@ -33,20 +34,47 @@ async function slugUnik(tx: Tx, nama: string): Promise<string> {
  */
 export async function buatPerusahaanUntuk(
   tx: Tx,
-  opts: { nama: string; userId: string },
+  opts: {
+    nama: string;
+    userId: string;
+    jenis_usaha: JenisUsaha;
+    alamat: string;
+    telepon: string;
+    timezone: ZonaWaktu;
+  },
 ): Promise<string> {
   const slug = await slugUnik(tx, opts.nama);
+  // Zona waktu ditulis HANYA di sini — satu-satunya saat ia boleh dipilih.
   const [company] = await tx
     .insert(companies)
-    .values({ nama: opts.nama, slug, plan: "lite" })
+    .values({
+      nama: opts.nama,
+      slug,
+      plan: "lite",
+      jenisUsaha: opts.jenis_usaha,
+      alamat: opts.alamat,
+      telepon: opts.telepon,
+      timezone: opts.timezone,
+    })
     .returning();
+  // Cabang Pusat ikut membawa alamat & telepon usaha: di mode Lite cabang itu
+  // ADALAH usahanya, dan layar cabang tak semestinya kosong di hari pertama.
   const [branch] = await tx
     .insert(branches)
-    .values({ companyId: company.id, nama: "Pusat" })
+    .values({ companyId: company.id, nama: "Pusat", alamat: opts.alamat, telepon: opts.telepon })
     .returning();
   await seedMejaDefault(tx, company.id, branch.id);
   await seedUnitsPerusahaan(tx, company.id);
-  await seedKategoriBahanPerusahaan(tx, company.id);
+  await seedKategoriBahanPerusahaan(tx, company.id, opts.jenis_usaha);
+  // Kategori MENU bawaan: form menu mewajibkan kategori, dan akun baru dulu
+  // buntu di menu pertamanya (laporan uji 31 Okt 2026). Bisa diubah/dihapus.
+  await tx
+    .insert(menuCategories)
+    .values([
+      { companyId: company.id, nama: "Makanan", sortOrder: 1 },
+      { companyId: company.id, nama: "Minuman", sortOrder: 2 },
+    ])
+    .onConflictDoNothing();
   // Owner langsung dapat KODE KARYAWAN (barcode/QR absen) — sama seperti
   // karyawan yang dibuat owner & undangan; tanpa ini kolom Kode kosong dan
   // absen owner tak bisa dipindai.

@@ -113,6 +113,20 @@ interface CartLine {
 }
 
 /**
+ * Tombol uang cepat: pembulatan KE ATAS total ke pecahan uang kertas yang
+ * lazim (5rb/10rb/20rb/50rb/100rb), unik, paling banyak tiga, tak ada yang
+ * kurang dari total.
+ */
+export function pecahanCepat(total: number): number[] {
+  if (!(total > 0)) return [20000, 50000, 100000];
+  const hasil = new Set<number>();
+  for (const satuan of [5000, 10000, 20000, 50000, 100000]) {
+    hasil.add(Math.ceil(total / satuan) * satuan);
+  }
+  return [...hasil].filter((n) => n >= total).sort((a, b) => a - b).slice(0, 3);
+}
+
+/**
  * Harga yang benar-benar ditagih untuk satu baris keranjang — rumus server:
  * harga terkunci bill, atau harga menu + Σ harga add-on × jumlah.
  */
@@ -251,6 +265,8 @@ export function KasirPage() {
   const [diskonTipe, setDiskonTipe] = useState<"persen" | "nominal">("nominal");
   const [diskonNilai, setDiskonNilai] = useState("");
   const [metodeBayar, setMetodeBayar] = useState<MetodeBayar>("tunai");
+  // No. referensi QRIS/transfer — opsional, jejak untuk dicocokkan ke mutasi.
+  const [refBayar, setRefBayar] = useState("");
   const [uangDiterima, setUangDiterima] = useState("");
   const [struk, setStruk] = useState<SaleResult | null>(null);
   // Modal "Resume Order" muncul saat tombol Lanjut ditekan
@@ -716,6 +732,7 @@ export function KasirPage() {
           ...(konsumenWa.trim() ? { customer_wa: konsumenWa.trim() } : {}),
           metode_bayar: metodeBayar,
           ...(metodeBayar === "tunai" && uangNum > 0 ? { uang_diterima: uangNum } : {}),
+          ...(metodeBayar !== "tunai" && refBayar.trim() ? { ref_bayar: refBayar.trim() } : {}),
           // Yang DIKIRIM harus sama persis dengan yang DITAMPILKAN. `diskon` di
           // atas sudah dipotong ke jatah maksimal kasir, dan layar resume sudah
           // menuliskan angka terpotong itu berikut totalnya — uang yang
@@ -793,6 +810,7 @@ export function KasirPage() {
     setMemberOpen(false);
     setDiskonNilai("");
     setMetodeBayar("tunai");
+    setRefBayar("");
     setUangDiterima("");
     setLangkahBayar("resume");
     setMejaId(null);
@@ -1423,12 +1441,17 @@ export function KasirPage() {
                     )}
                     {/* Harga menu berubah setelah bill dibuat: pembeli tetap
                         ditagih harga saat memesan — katakan apa adanya. */}
-                    {l.hargaKunci != null && l.hargaKunci !== l.menu.harga_jual && (
+                    {/* Dibanding harga katalog TERMASUK add-on: harga terkunci bill
+                        sudah memuat add-on, jadi membandingkannya dengan harga
+                        menu polos menyalakan tanda palsu tiap kali ada topping
+                        (laporan uji 31 Okt 2026). Cermin `hargaBeda` ponsel. */}
+                    {l.hargaKunci != null &&
+                      Math.abs(l.hargaKunci - (l.menu.harga_jual + hargaAddon(l.addons))) > 0.005 && (
                       <div
                         className="text-[11px] text-amber-700"
-                        title={`Harga menu sekarang ${formatRupiah(l.menu.harga_jual)}`}
+                        title={`Harga menu sekarang ${formatRupiah(l.menu.harga_jual + hargaAddon(l.addons))}`}
                       >
-                        🔒 harga saat dipesan (menu kini {formatRupiah(l.menu.harga_jual)})
+                        🔒 harga saat dipesan (kini {formatRupiah(l.menu.harga_jual + hargaAddon(l.addons))})
                       </div>
                     )}
                   </div>
@@ -1463,6 +1486,7 @@ export function KasirPage() {
                           ? "Sudah masuk pesanan — batalkan dari Papan Pesanan supaya ada jejaknya"
                           : "Kurangi jumlah"
                       }
+                      aria-label="Kurangi jumlah"
                       className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
                       −
@@ -1471,6 +1495,8 @@ export function KasirPage() {
                     <button
                       onClick={() => ubahQty(l.key, 1)}
                       disabled={batal}
+                      title="Tambah jumlah"
+                      aria-label="Tambah jumlah"
                       className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
                       +
@@ -1755,7 +1781,14 @@ export function KasirPage() {
                       max={diskonTipe === "persen" ? (isKasir ? maksDiskonPersen : 100) : undefined}
                       disabled={!diskonBoleh}
                       value={diskonNilai}
-                      onChange={(e) => setDiskonNilai(e.target.value)}
+                      onChange={(e) => {
+                        // Persen dibatasi 100 SAAT DIKETIK — dulu "150" tetap
+                        // tertulis 150 walau dihitung 100% (laporan uji 31 Okt
+                        // 2026). Nominal dibatasi subtotal di perhitungan.
+                        const v = e.target.value;
+                        if (diskonTipe === "persen" && (angkaDari(v) ?? 0) > 100) setDiskonNilai("100");
+                        else setDiskonNilai(v);
+                      }}
                       placeholder="0"
                       className="w-20 rounded-md border border-stone-300 px-2 py-1 text-right text-sm disabled:bg-stone-100"
                     />
@@ -1819,6 +1852,15 @@ export function KasirPage() {
                 ))}
               </div>
               )}
+              {langkahBayar === "bayar" && metodeBayar !== "tunai" && (
+                <input
+                  value={refBayar}
+                  onChange={(e) => setRefBayar(e.target.value.slice(0, 64))}
+                  placeholder={metodeBayar === "qris" ? "No. referensi QRIS (opsional)" : "No. referensi transfer (opsional)"}
+                  aria-label="No. referensi pembayaran"
+                  className="w-full rounded-lg border border-stone-300 px-3 py-1.5 text-sm"
+                />
+              )}
               {langkahBayar === "bayar" && metodeBayar === "tunai" && (
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1.5">
@@ -1846,7 +1888,9 @@ export function KasirPage() {
                     </button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {[20000, 50000, 100000].map((n) => (
+                    {/* Pecahan uang yang masuk akal untuk TOTAL INI saja —
+                        dulu tetap Rp 20.000 untuk tagihan Rp 50.000. */}
+                    {pecahanCepat(total).map((n) => (
                       <button
                         key={n}
                         type="button"
@@ -2094,13 +2138,21 @@ export function KasirPage() {
                             meja itu justru wajib, dan penjualan langsung di meja
                             terisi juga sah. Yang ditolak server hanya bill KEDUA
                             (409 `meja_sudah_ada_bill`), bukan pemilihan mejanya. */}
+                        {/* Nama di baris sendiri, status di bawahnya — dulu satu
+                            baris dengan status + tombol Kosongkan, dan di layar
+                            375 px nama meja terisi terpotong jadi "M…" sehingga
+                            Meja 1 / Meja 2 / Meja 2 demo tak bisa dibedakan
+                            (laporan uji 31 Okt 2026). Nama kini membungkus. */}
                         <button
                           onClick={() => pilihMeja(m.id)}
-                          className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
+                          className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left"
+                          data-testid="meja-pilih"
                         >
-                          <span className="truncate">{takeaway ? `🥡 ${m.nama}` : m.nama}</span>
+                          <span className="break-words [overflow-wrap:anywhere]">
+                            {takeaway ? `🥡 ${m.nama}` : m.nama}
+                          </span>
                           <span
-                            className={`shrink-0 text-xs font-medium ${dipilih ? "text-white/80" : "opacity-80"}`}
+                            className={`text-xs font-medium ${dipilih ? "text-white/80" : "opacity-80"}`}
                           >
                             {takeaway ? "Take away" : st ? labelStatus(st) : "Dine-in"}
                           </span>

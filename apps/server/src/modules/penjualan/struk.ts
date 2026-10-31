@@ -72,6 +72,7 @@ export function strukPenjualan(
     customerWa: sale.customerWa,
     metodeBayar: sale.metodeBayar,
     uangDiterima: sale.uangDiterima,
+    refBayar: sale.refBayar,
     waktu: iso(sale.waktu),
     saleDate: sale.saleDate,
     shiftId: sale.shiftId,

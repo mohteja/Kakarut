@@ -674,6 +674,12 @@ export function StokPage() {
             sel: (s) => (
               <span className="text-red-600">
                 {s.terpakai > 0 ? `−${formatAngka(s.terpakai)}` : "—"}
+                {/* Kiriman keluar bukan pemakaian — disebut terpisah. */}
+                {s.kirim_keluar > 0 && (
+                  <span className="block text-[11px] font-normal text-stone-500">
+                    termasuk kirim {formatAngka(s.kirim_keluar)}
+                  </span>
+                )}
               </span>
             ),
           },

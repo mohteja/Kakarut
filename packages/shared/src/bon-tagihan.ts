@@ -30,6 +30,7 @@
  * membiarkan tamu menemukan selisihnya di struk.
  */
 import { EscPosBuilder } from "./escpos";
+import { labelCabangKertas } from "./order-slip";
 import { formatRupiahAscii, teksAddonKertas, type AddonKertas, type ReceiptOptions } from "./receipt";
 
 export interface BonItem {
@@ -111,7 +112,7 @@ export function buildBonBytes(data: BonData, opts: ReceiptOptions): Uint8Array {
   b.align("center").bold(true).size("tall").text("BON TAGIHAN").size("normal");
   b.text("BELUM DIBAYAR").bold(false);
   b.text(data.companyNama);
-  b.text(`Cabang ${data.branchNama}`);
+  b.text(labelCabangKertas(data.branchNama));
   b.align("left").divider();
 
   // TIDAK ada nomor nota dan TIDAK ada nomor antrian: keduanya lahir saat

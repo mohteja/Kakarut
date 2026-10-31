@@ -25,6 +25,102 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Laporan uji 31 Okt 2026 (gelombang 3) — cek tautan reset, /health ramping, rekomendasi beli bawaan 7 hari
+
+⚪️ **INFO** — tak menuntut perubahan kode; satu bawaan berubah.
+
+**Belum tayang.**
+
+- `POST /api/auth/reset-password/cek` `{token}` → `{ok}` atau 400 (kalimat sama dengan `/reset-password`). Opsional: layar reset bisa memeriksa tautan sebelum formulir diisi.
+- `GET /api/health` publik kini `{ ok, build }` — `storage` dicabut.
+- `GET /api/rekomendasi/beli` tanpa `acuan` kini memakai **rata-rata 7 hari** (dulu `minggu_lalu`). Klien yang ingin perilaku lama mengirim `acuan=minggu_lalu`.
+- Kode otomatis bahan baru paling sedikit 3 huruf (`UJT`, `TEP`), bukan 2.
+- CSP mengizinkan Cloudflare Web Analytics.
+
+---
+
+## 🟡 Laporan uji 31 Okt 2026 (gelombang 2) — no. referensi QRIS/transfer, shift > 24 jam, WA member 9–15 angka, kartu stok "terima"
+
+🟡 **PERLU DICEK** — tak ada yang memutus klien lama; dua aturan berubah.
+
+**Belum tayang.**
+
+| perubahan | klien |
+| --- | --- |
+| `POST /api/penjualan` (dan perintah `penjualan` di `/sync`) menerima `ref_bayar` (≤ 64, diabaikan untuk tunai); `SaleRow.refBayar`. | Opsional: kolom "No. referensi" di lembar bayar non-tunai & tampil di struk. |
+| `ShiftPantauRow.terbuka_lama` — shift terbuka > 24 jam. | Tampilkan peringatan. Jam buka shift sebaiknya ditulis dengan tanggal. |
+| `StokRow.kirim_keluar` — bagian `terpakai` yang berupa kiriman keluar (`terpakai` tetap gabungan). | Opsional. |
+| `MutasiJenis` bertambah **`terima`** — kiriman masuk dari lokasi lain (dulu `produksi`). Arahnya MASUK. | Beri label "Terima transfer"; jenis tak dikenal jangan dianggap keluar. |
+| Member: WA sah = **9–15 angka** (dulu ≥ 6). `POST/PATCH /customer` dengan WA di luar itu → 400; penjualan dengan WA pendek tak membuat member. | Cerminkan ambangnya (`member_wa.dart`). |
+| Owner tak lagi ada di `GET /absensi/rekap`. Rekap absen hanya karyawan wajib absen. | — |
+| Struk/bon/slip: awalan "Cabang" tak lagi digandakan (`labelCabangKertas`). | Cerminkan di pembangun struk. |
+
+---
+
+## 🔴 Laporan uji 31 Okt 2026 (gelombang 1) — PIN owner untuk refund kasir, akun tamu, logout per perangkat, harga saran & susut transfer
+
+🔴 **WAJIB** — refund oleh kasir tanpa PIN owner kini **403**.
+
+**Belum tayang.**
+
+| perubahan | yang harus dilakukan klien |
+| --- | --- |
+| `POST /api/penjualan/:id/refund` menerima `pin_owner` (6 angka); **kasir wajib** mengirimnya. Penolakan 403 ber-`sebab`: `pin_refund_wajib` · `pin_refund_belum_diatur` · `pin_refund_salah`; 429 sesudah 5 PIN salah/15 menit. | Layar refund kasir menampilkan kolom PIN owner/admin. Owner/admin tidak. |
+| `PUT /api/profil/pin` `{pin, password}` (owner/admin); `ProfilDto.pin_refund_diatur`. | Opsional — PIN diatur di web. |
+| `AuthUser.is_tamu` (akun demo bersama). Aksi berikut **403 `sebab: "akun_tamu"`** untuk tamu: tambah/undang/ubah karyawan, ganti password, PIN, hapus akun, buat perusahaan, ganti mode, `PATCH /company`, `POST /print/lan`. | Sembunyikan aksi itu bila `is_tamu`. Data demo direset tiap malam (03.00 WIB) — token tamu lama jadi 401, masuk lagi lewat tombol Tamu. |
+| `POST /api/auth/logout` — cabut token perangkat ini. | Panggil saat Keluar sukarela (best-effort). |
+| `TransferStokItemRow.qty_dikirim` — yang berangkat; status faktur `sebagian` juga bila ada baris tiba kurang. Stok asal kini berkurang sebanyak yang DIKIRIM (susut di jalan tak kembali ke asal). | Tampilkan "dikirim X · susut Y" bila `qty_dikirim > qty`. |
+| Harga saran menu = **HPP ÷ ambang food cost** perusahaan, dibulatkan ke atas Rp1.000 (`harga_saran`, `harga_jual_bulat`). `mult` tak lagi menentukan saran. | Tak ada perubahan bentuk. |
+| `POST /api/print/lan` hanya port 9100–9109, 515, 631. | Tak berdampak (printer ponsel langsung). |
+
+---
+
+## 🔴 Halaman welcome — profil usaha wajib saat membuat perusahaan, zona waktu WIB/WITA/WIT, "Tambah karyawan" ke akun terdaftar jadi undangan
+
+🔴 **WAJIB** — `POST /api/onboarding/perusahaan` **menolak** badan lama `{nama}`.
+
+**Belum tayang.**
+
+**Apa.** Daftar tetap tak membuatkan perusahaan. Layar welcome (akun tanpa
+perusahaan) kini meminta orangnya memilih: **"Saya karyawan"** (tunggu
+diundang — layar menanyakan `GET /onboarding/status` sendiri tiap 10 detik)
+atau **"Saya pemilik usaha"** (isi profil usaha lalu jadi owner).
+
+**Yang berubah di permintaan:**
+
+| rute | dulu | kini |
+| --- | --- | --- |
+| `POST /api/onboarding/perusahaan` | `{ nama }` | `BuatPerusahaanBody` = `{ nama, jenis_usaha, alamat, telepon, timezone? }` — `.strict()`; `{nama}` saja → **400** `"jenis_usaha: wajib diisi; alamat: wajib diisi; telepon: wajib diisi"` |
+| `PATCH /api/company` | — | menerima `jenis_usaha` (kode atau `null`); **tetap** menolak `timezone` (400) |
+| `DELETE /api/onboarding/akun` | `{ password }` | `{ password, email }` — **email akun diketik ulang** (trim, tak peka huruf besar); salah/kosong → **400** dan akun tidak dihapus. Tampilkan kotak "ketik email Anda" dan nyalakan tombolnya hanya bila sama. |
+
+Pilihan & aturannya satu rumah: `packages/shared/src/profil-usaha.ts`
+(`JENIS_USAHA`, `ZONA_WAKTU` + `offsetJam`, `PROFIL_USAHA`,
+`validasiProfilUsaha`). Alamat & telepon ikut ditulis ke cabang "Pusat".
+
+**Yang berubah di balasan:**
+
+| tempat | medan | isi |
+| --- | --- | --- |
+| `CompanyRow` (`GET /company`) | `jenisUsaha` | kode `JENIS_USAHA`; `null` untuk perusahaan lama |
+| `POST /api/karyawan` | **200** `KaryawanDiundangResult` | `{ diundang: true, id, email, role }` bila email itu **sudah punya akun** — dibuat undangan pending (bukan 409 lagi), `password` diabaikan, tanpa surel. Akun baru tetap **201** `KaryawanBaruResult`. Klien wajib membedakan keduanya. |
+
+**Zona waktu — yang harus dicerminkan klien.** Pemilik memilih WIB
+(`Asia/Jakarta`), WITA (`Asia/Makassar`), atau WIT (`Asia/Jayapura`) **sekali**,
+saat perusahaan dibuat; sesudahnya tak bisa diubah. Server sudah lama
+menghitung "hari ini" di `company.timezone`; kini nilainya bisa selain WIB, jadi
+klien **wajib** menghitung tanggal query (`tanggal=`) dan menampilkan jam di
+zona `company.timezone` dari sesi, bukan WIB yang dipaku dan bukan zona
+perangkat. Web: `aturZonaPerusahaan` (`lib/format.ts`). Ponsel: `aturZonaPerusahaan`
++ `kOffsetZona` (`core/format.dart`) — Indonesia tanpa jam musim panas, jadi
+offset tetap aman.
+
+**Urutan rilis.** Server dulu. APK lama tetap bisa login dan bekerja di
+perusahaan yang sudah ada, tapi tombol "Buat & Jadi Owner"-nya akan menerima
+400 (kalimatnya terbaca di layar) sampai APK baru terpasang.
+
+---
+
 ## 🟢 Add-on per menu — "Extra mie" berbayar, "Tanpa sayur" gratis, grup wajib "Level pedas"
 
 🟢 **BARU** — additif untuk klien lama, dengan **satu syarat rilis** (lihat

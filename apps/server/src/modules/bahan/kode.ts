@@ -9,6 +9,29 @@ import { ingredients } from "../../db/schema";
 import { kunciBackfillKode } from "../../lib/kunci";
 import { kodeDariNama, kodeUnik } from "../menu/service";
 
+/**
+ * Kode bahan dari nama — paling sedikit TIGA huruf.
+ *
+ * Inisial per kata saja (pola kode menu) memberi dua huruf untuk nama dua kata
+ * ("UJI-Tepung" → "UT", "UJI-Roti" → "UR"), rawan sama untuk nama berawalan
+ * mirip (laporan uji 31 Okt 2026). Kini: ≥ 3 kata → inisial (maks 4); dua kata
+ * → dua huruf kata pertama + inisial kata kedua ("UJT"); satu kata → tiga huruf
+ * pertamanya ("TEP"). Singkatan dalam kurung tetap dihormati (`kodeDariNama`).
+ */
+export function kodeBahanDariNama(nama: string): string {
+  if (/\([^)]+\)/.test(nama)) return kodeDariNama(nama);
+  const kata = nama
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.toUpperCase());
+  if (kata.length === 0) return "BHN";
+  if (kata.length >= 3) return kata.map((w) => w[0]).join("").slice(0, 4);
+  if (kata.length === 2) return (kata[0].slice(0, 2) + kata[1][0]).padEnd(3, "X");
+  return kata[0].slice(0, 3).padEnd(3, "X");
+}
+
 /** Himpunan kode terpakai (uppercase) di sebuah perusahaan, kecuali `selfId`. */
 async function kodeDipakai(
   dbx: Db | Tx,
@@ -38,7 +61,7 @@ export async function resolveKodeBahan(
 ): Promise<string> {
   const dipakai = await kodeDipakai(dbx, companyId, selfId);
   const manual = desired?.trim();
-  const base = manual && manual.length > 0 ? manual : kodeDariNama(nama);
+  const base = manual && manual.length > 0 ? manual : kodeBahanDariNama(nama);
   return kodeUnik(base, dipakai);
 }
 
@@ -54,7 +77,7 @@ export async function resolveKodeBahanBatch(
   const dipakai = await kodeDipakai(dbx, companyId);
   return baris.map((b) => {
     const manual = b.kode?.trim();
-    const base = manual && manual.length > 0 ? manual : kodeDariNama(b.nama);
+    const base = manual && manual.length > 0 ? manual : kodeBahanDariNama(b.nama);
     const kode = kodeUnik(base, dipakai);
     dipakai.add(kode.toUpperCase());
     return kode;
@@ -102,7 +125,7 @@ async function backfillKodeBahanTx(dbx: Tx): Promise<number> {
   let terisi = 0;
   for (const [, g] of perusahaan) {
     for (const r of g.kosong) {
-      const kode = kodeUnik(kodeDariNama(r.nama), g.dipakai);
+      const kode = kodeUnik(kodeBahanDariNama(r.nama), g.dipakai);
       g.dipakai.add(kode.toUpperCase());
       await dbx.update(ingredients).set({ kode }).where(eq(ingredients.id, r.id));
       terisi += 1;

@@ -72,6 +72,7 @@ function katalog(
       branchIdsByMenu: new Map(),
       addonGroupsByMenu: new Map(),
       bahanAddon: new Map(),
+      ambangFoodCost: 40,
     },
     menuById: new Map(menus.map((m) => [m.id, m])),
   };

@@ -124,7 +124,7 @@ describe("struk memakainya, dan `null` benar-benar berarti tanpa persen", () => 
     expect(STRUK).toContain(
       "pb1Rate: tarifPb1Struk(data.sale.subtotal, data.sale.diskon, data.sale.pb1Amount)",
     );
-    expect(STRUK).toContain('import { qtyDitagih, tarifPb1Struk, teksAddonKertas } from "@kakarut/shared";');
+    expect(STRUK).toContain('import { labelCabangKertas, qtyDitagih, tarifPb1Struk, teksAddonKertas } from "@kakarut/shared";');
   });
 
   it("dan TIDAK lagi mengambilnya dari setelan perusahaan hari ini", () => {

@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { hitungUangSetelahRefund, nominalRefund, qtyDitagih } from "@kakarut/shared";
 import { ErrorText, btnSecondary } from "../../components/ui";
+import { useAuth } from "../../context/AuthContext";
 import { api } from "../../lib/api";
 import { formatRupiah } from "../../lib/format";
 import { uuidV4 } from "../../lib/idempoten";
@@ -36,6 +37,9 @@ export function RefundPanel({
   // saleItemId -> porsi yang dipilih untuk dikembalikan pada kejadian ini
   const [pilih, setPilih] = useState<Record<string, number>>({});
   const [alasan, setAlasan] = useState("Bahan habis");
+  // Kasir wajib PIN owner/admin yang hadir (laporan uji 31 Okt 2026).
+  const butuhPin = useAuth().auth?.user.role === "cashier";
+  const [pin, setPin] = useState("");
 
   const asal = {
     subtotal: data.sale.subtotalAsal ?? data.sale.subtotal,
@@ -108,6 +112,7 @@ export function RefundPanel({
         body: {
           client_ref: refKejadian.current,
           alasan: alasan.trim() || null,
+          ...(butuhPin ? { pin_owner: pin } : {}),
           items: dipilih.map(([sale_item_id, qty]) => ({ sale_item_id, qty })),
         },
       });
@@ -199,6 +204,22 @@ export function RefundPanel({
         </div>
       )}
 
+      {butuhPin && (
+        <label className="block">
+          <span className="text-xs font-medium text-amber-900">PIN owner/admin (6 angka)</span>
+          <input
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            type="password"
+            autoComplete="off"
+            placeholder="Minta owner/admin mengetikkan PIN"
+            aria-label="PIN owner/admin"
+            className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm tracking-widest"
+          />
+        </label>
+      )}
+
       <ErrorText error={kirim.error} />
       <div className="flex gap-2">
         <button type="button" onClick={onBatal} className={`${btnSecondary} flex-1`}>
@@ -207,7 +228,7 @@ export function RefundPanel({
         <button
           type="button"
           onClick={() => kirim.mutate()}
-          disabled={dipilih.length === 0 || kirim.isPending}
+          disabled={dipilih.length === 0 || kirim.isPending || (butuhPin && pin.length !== 6)}
           className="flex-1 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
         >
           {kirim.isPending ? "Memproses…" : `Kembalikan ${formatRupiah(nominal)}`}

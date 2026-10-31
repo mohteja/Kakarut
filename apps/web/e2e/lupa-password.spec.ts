@@ -97,10 +97,10 @@ test.describe("lupa / reset password dari browser", () => {
 
     // Tautan yang sama dibuka lagi SEBELUM masuk (rute publik hanya hidup
     // saat belum ada sesi): sudah mati — dan orangnya harus punya jalan keluar
-    // yang terlihat, bukan formulir yang menolak diam-diam berulang.
+    // yang terlihat, bukan formulir yang menolak diam-diam berulang. Sejak
+    // laporan uji 31 Okt 2026 halaman MEMERIKSA tautannya begitu dibuka
+    // (`POST /auth/reset-password/cek`), jadi formulirnya tak pernah ditawarkan.
     await page.goto(tautan!);
-    await isiPasswordBaru(page, PASS_BARU, PASS_BARU);
-    await page.getByRole("button", { name: "Simpan Password Baru" }).click();
     await expect(page.getByText(/tidak valid atau sudah kedaluwarsa/)).toBeVisible();
     await expect(page.getByRole("link", { name: "Minta tautan baru" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Simpan Password Baru" })).toHaveCount(0);

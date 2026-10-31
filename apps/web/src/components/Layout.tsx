@@ -43,6 +43,8 @@ const BOLEH_STORE = [
 // balik ke /produksi begitu halaman dibuka — gejalanya "menu diklik tak terjadi
 // apa-apa", bukan galat, jadi sulit dilacak. `/transfer-stok` pernah terlewat.
 const BOLEH_CK = [
+  // Beranda: dulu hilang di lokasi CK (laporan uji 31 Okt 2026)
+  "/dashboard",
   "/absen",
   "/kebersihan",
   "/profil",
@@ -289,6 +291,10 @@ export function Layout() {
   const dStore = divisi === "store";
   const dCk = divisi === "central_kitchen";
   const penuh = !divisi || divisi === "kantor";
+  // Kantor di mode Pro tak berjualan: Meja, Pesanan Masuk, dan Printer milik
+  // toko (laporan uji 31 Okt 2026). Mode Lite tetap menampilkannya — di sana
+  // satu-satunya lokasi ADALAH tokonya.
+  const kantorPro = isPro && divisi === "kantor";
   // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi.
   // Karyawan (tim) di CENTRAL KITCHEN menunya beda: profil, produksi bahan
   // baku, beli bahan baku, dan bahan baku.
@@ -486,10 +492,23 @@ export function Layout() {
             </>
           ) : (
             <>
-              {isManajemen && !dCk && (
+              {isManajemen && (
                 <NavLink to="/dashboard" className={linkClass}>
                   🏠 Beranda
                 </NavLink>
+              )}
+              {/* Di lokasi toko owner/admin melihat menu versi karyawan toko —
+                  Laporan, Menu & HPP, dan Pengaturan ada di lokasi Kantor.
+                  Dulu tanpa petunjuk apa pun, jadi menu itu terasa "hilang"
+                  (laporan uji 31 Okt 2026). */}
+              {isManajemen && dStore && adaKantor && (
+                <div
+                  className="mx-1 my-2 rounded-lg bg-stone-800 px-3 py-2 text-xs text-stone-300"
+                  data-testid="petunjuk-kantor"
+                >
+                  Laporan, Menu &amp; HPP, dan Pengaturan ada di lokasi <b>Kantor</b> — ganti lokasi di
+                  atas.
+                </div>
               )}
               {/* Laporan tepat di bawah Beranda — gating tetap sama seperti
                   posisi lamanya di blok Operasional (manajemen di Kantor). */}
@@ -581,7 +600,7 @@ export function Layout() {
               {/* Papan Pesanan Masuk — layar kerja lantai toko: dapur/bar/tim
                   melihat pesanan kasir (termasuk yang belum dibayar) dan
                   menandainya selesai. Bukan urusan Central Kitchen. */}
-              {!timDiCk && !dCk && (
+              {!timDiCk && !dCk && !kantorPro && (
                 <NavLink to="/pesanan" className={navFlex}>
                   <span>🛎 Pesanan Masuk</span>
                   {badgeOranye(pesananDikerjakan, pesananGagal, "nav-lencana-pesanan")}
@@ -615,7 +634,7 @@ export function Layout() {
                   syarat Meja yang lama: setiap cabang baru — termasuk Central
                   Kitchen — disemai meja bawaan, jadi tanpa `!timDiCk` tim CK
                   akan menata denah dapur yang tak pernah dilihat siapa pun. */}
-              {!timDiCk && !dCk && (
+              {!timDiCk && !dCk && !kantorPro && (
                 <NavLink to="/pengaturan/meja" className={navFlex}>
                   <span>🍽 Meja</span>
                   {badgeOranye(mejaTerisi, mejaGagal, "nav-lencana-meja")}
@@ -656,7 +675,7 @@ export function Layout() {
                   hanya Central Kitchen. Semua peran cabang (termasuk kasir dan
                   divisi kitchen/bar) tetap perlu melihatnya untuk tahu barang
                   apa yang sedang menuju ke sini. */}
-              {(isKasir || isTim || isKitchen || isBar || (isManajemen && dStore)) && !timDiCk && (
+              {isPro && (isKasir || isTim || isKitchen || isBar || (isManajemen && dStore)) && !timDiCk && (
                 <NavLink to="/transfer-stok" className={linkClass}>
                   🔄 Transfer Stok
                 </NavLink>
@@ -676,7 +695,7 @@ export function Layout() {
                   )}
                 </NavLink>
               )}
-              {!isTim && !isKitchen && !isBar && !dCk && (
+              {!isTim && !isKitchen && !isBar && !dCk && !kantorPro && (
                 <NavLink to="/pengaturan/printer" className={linkClass}>
                   🖨 Printer
                 </NavLink>
@@ -707,10 +726,13 @@ export function Layout() {
                     <span>🧺 Beli Perlengkapan</span>
                     {badgeOranye(perlengkapanBelum, bpGagal, "nav-lencana-perlengkapan")}
                   </NavLink>
-                  {/* pindahkan stok READY antar lokasi (mis. ganti barang rusak) */}
-                  <NavLink to="/transfer-stok" className={linkClass}>
-                    🔄 Transfer Stok
-                  </NavLink>
+                  {/* pindahkan stok READY antar lokasi (mis. ganti barang rusak).
+                      Mode Lite hanya satu lokasi — tak ada tujuan transfer. */}
+                  {isPro && (
+                    <NavLink to="/transfer-stok" className={linkClass}>
+                      🔄 Transfer Stok
+                    </NavLink>
+                  )}
                   {dCk && (
                     <>
                       <NavLink to="/bahan" className={linkClass}>
@@ -728,9 +750,12 @@ export function Layout() {
                     <>
                       {/* halaman "Tambah Stok dari Menu" diakses lewat tombol
                           ➕ di halaman Permintaan Stok (tidak lagi di sidebar) */}
-                      <NavLink to="/permintaan-stok" className={linkClass}>
-                        📋 Permintaan Stok
-                      </NavLink>
+                      {/* Permintaan Stok = permintaan ke Central Kitchen: hanya Pro */}
+                      {isPro && (
+                        <NavLink to="/permintaan-stok" className={linkClass}>
+                          📋 Permintaan Stok
+                        </NavLink>
+                      )}
                       <NavLink to="/sampah" className={linkClass}>
                         🗑 Tempat Sampah
                       </NavLink>
@@ -799,6 +824,16 @@ export function Layout() {
         ref={mainRef}
         className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 print:overflow-visible"
       >
+        {auth?.user.is_tamu && (
+          <div
+            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 print:hidden"
+            data-testid="pita-tamu"
+          >
+            🧪 <b>Akun demo bersama</b> — silakan coba bebas. Data dikembalikan seperti semula setiap malam;
+            undang karyawan, ganti password, dan pengaturan perusahaan tidak tersedia. PIN refund owner
+            demo: <b>123456</b>.
+          </div>
+        )}
         <Outlet />
       </main>
     </div>
