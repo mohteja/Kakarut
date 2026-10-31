@@ -2353,6 +2353,8 @@ cek "kasir dgn branch_id=all masih melihat transaksi cabangnya" "V == 1" \
 echo "== 61. Deteksi pembaruan: build id di /api/health + header X-Kakarut-Build =="
 HEALTH61=$(curl -s "$BASE/api/health")
 cek "health ok:true" "V == 1" "$(echo "$HEALTH61" | jq '.ok == true | if . then 1 else 0 end')"
+# Mode penyimpanan tak lagi dibuka ke publik (laporan uji 31 Okt 2026).
+cek "health publik tak membuka mode penyimpanan" "V == 0" "$(echo "$HEALTH61" | jq 'has("storage") | if . then 1 else 0 end')"
 if [ "$ADA_DIST" = 1 ]; then
   BUILD61=$(echo "$HEALTH61" | jq -r '.build // empty')
   cek "health menyertakan build id" "V == 1" \
@@ -4091,6 +4093,11 @@ RHOST=$(curl -s -X POST "$BASE/api/auth/forgot-password" -H 'Content-Type: appli
 cek "reset url mengikuti host permintaan (bukan localhost hardcode)" "V == 1" \
   "$(echo "$RHOST" | grep -Eq '^https://app\.reset97\.example/reset-password\?token=' && echo 1 || echo 0)"
 RTOK=$(echo "$FP" | jq -r '.dev_reset_url' | sed 's/.*token=//')
+# Cek tautan SEBELUM formulir diisi (laporan uji 31 Okt 2026).
+cek "cek token reset yang hidup → 200" "V == 200" \
+  "$(status_code_body "" POST /auth/reset-password/cek "{\"token\":\"$RTOK\"}")"
+cek "cek token reset palsu → 400" "V == 400" \
+  "$(status_code_body "" POST /auth/reset-password/cek '{"token":"palsu-sekali"}')"
 cek "reset dgn token → ok" "V == 1" \
   "$(api "" POST /auth/reset-password "{\"token\":\"$RTOK\",\"password\":\"Baru12345\"}" | jq '(.ok==true)|if . then 1 else 0 end')"
 cek "login password BARU → 200" "V == 200" \
@@ -5551,6 +5558,10 @@ cek "status faktur transfer jadi dikonfirmasi" "V == 1" \
 # TERIMA SEBAGIAN pada transfer sungguhan (ber-asal): kirim 2, tiba 1. Yang
 # BERANGKAT mengurangi asal (susut di jalan tak kembali ke CK), riwayat
 # menyebut keduanya, kartu stok berlabel benar (laporan uji 31 Okt 2026).
+# Stoknya disiapkan SENDIRI (pola §187): `ING132` bisa bersaldo pas-pasan di
+# CI, dan kiriman 2 ini dulu menguras sisa yang dibutuhkan §185.
+api "$OWNER" POST /stok/awal \
+  "{\"branch_id\":\"$ASAL132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":100}]}" >/dev/null
 SA132B=$(api "$OWNER" GET "/stok?branch_id=$ASAL132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
 ST132B=$(api "$OWNER" GET "/stok?branch_id=$TUJUAN132" | jq --arg i "$ING132" '[.[]|select(.ingredient_id==$i)][0].saldo // 0')
 TFS132=$(api "$OWNER" POST /transfer-stok "{\"asal_branch_id\":\"$ASAL132\",\"tujuan_branch_id\":\"$TUJUAN132\",\"items\":[{\"ingredient_id\":\"$ING132\",\"qty\":2}]}")

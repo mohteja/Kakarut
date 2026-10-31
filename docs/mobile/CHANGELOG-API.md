@@ -25,6 +25,20 @@ tanpa akses repo server.
 
 ---
 
+## ⚪️ Laporan uji 31 Okt 2026 (gelombang 3) — cek tautan reset, /health ramping, rekomendasi beli bawaan 7 hari
+
+⚪️ **INFO** — tak menuntut perubahan kode; satu bawaan berubah.
+
+**Belum tayang.**
+
+- `POST /api/auth/reset-password/cek` `{token}` → `{ok}` atau 400 (kalimat sama dengan `/reset-password`). Opsional: layar reset bisa memeriksa tautan sebelum formulir diisi.
+- `GET /api/health` publik kini `{ ok, build }` — `storage` dicabut.
+- `GET /api/rekomendasi/beli` tanpa `acuan` kini memakai **rata-rata 7 hari** (dulu `minggu_lalu`). Klien yang ingin perilaku lama mengirim `acuan=minggu_lalu`.
+- Kode otomatis bahan baru paling sedikit 3 huruf (`UJT`, `TEP`), bukan 2.
+- CSP mengizinkan Cloudflare Web Analytics.
+
+---
+
 ## 🟡 Laporan uji 31 Okt 2026 (gelombang 2) — no. referensi QRIS/transfer, shift > 24 jam, WA member 9–15 angka, kartu stok "terima"
 
 🟡 **PERLU DICEK** — tak ada yang memutus klien lama; dua aturan berubah.

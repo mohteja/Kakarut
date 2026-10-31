@@ -113,6 +113,20 @@ interface CartLine {
 }
 
 /**
+ * Tombol uang cepat: pembulatan KE ATAS total ke pecahan uang kertas yang
+ * lazim (5rb/10rb/20rb/50rb/100rb), unik, paling banyak tiga, tak ada yang
+ * kurang dari total.
+ */
+export function pecahanCepat(total: number): number[] {
+  if (!(total > 0)) return [20000, 50000, 100000];
+  const hasil = new Set<number>();
+  for (const satuan of [5000, 10000, 20000, 50000, 100000]) {
+    hasil.add(Math.ceil(total / satuan) * satuan);
+  }
+  return [...hasil].filter((n) => n >= total).sort((a, b) => a - b).slice(0, 3);
+}
+
+/**
  * Harga yang benar-benar ditagih untuk satu baris keranjang — rumus server:
  * harga terkunci bill, atau harga menu + Σ harga add-on × jumlah.
  */
@@ -1472,6 +1486,7 @@ export function KasirPage() {
                           ? "Sudah masuk pesanan — batalkan dari Papan Pesanan supaya ada jejaknya"
                           : "Kurangi jumlah"
                       }
+                      aria-label="Kurangi jumlah"
                       className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
                       −
@@ -1480,6 +1495,8 @@ export function KasirPage() {
                     <button
                       onClick={() => ubahQty(l.key, 1)}
                       disabled={batal}
+                      title="Tambah jumlah"
+                      aria-label="Tambah jumlah"
                       className="h-7 w-7 rounded-lg border border-stone-300 text-stone-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:border-stone-200 disabled:text-stone-300 disabled:hover:bg-transparent"
                     >
                       +
@@ -1764,7 +1781,14 @@ export function KasirPage() {
                       max={diskonTipe === "persen" ? (isKasir ? maksDiskonPersen : 100) : undefined}
                       disabled={!diskonBoleh}
                       value={diskonNilai}
-                      onChange={(e) => setDiskonNilai(e.target.value)}
+                      onChange={(e) => {
+                        // Persen dibatasi 100 SAAT DIKETIK — dulu "150" tetap
+                        // tertulis 150 walau dihitung 100% (laporan uji 31 Okt
+                        // 2026). Nominal dibatasi subtotal di perhitungan.
+                        const v = e.target.value;
+                        if (diskonTipe === "persen" && (angkaDari(v) ?? 0) > 100) setDiskonNilai("100");
+                        else setDiskonNilai(v);
+                      }}
                       placeholder="0"
                       className="w-20 rounded-md border border-stone-300 px-2 py-1 text-right text-sm disabled:bg-stone-100"
                     />
@@ -1864,7 +1888,9 @@ export function KasirPage() {
                     </button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {[20000, 50000, 100000].map((n) => (
+                    {/* Pecahan uang yang masuk akal untuk TOTAL INI saja —
+                        dulu tetap Rp 20.000 untuk tagihan Rp 50.000. */}
+                    {pecahanCepat(total).map((n) => (
                       <button
                         key={n}
                         type="button"

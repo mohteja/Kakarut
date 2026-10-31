@@ -83,8 +83,9 @@ export const rekomendasiRoutes = new Hono<AppEnv>().get("/beli", async (c) => {
   const target = Number.isFinite(targetRaw) && targetRaw > 0 ? targetRaw : 0;
 
   const acuanQ = c.req.query("acuan");
+  // Bawaan rata-rata 7 hari (sejak 2026-10-31; dulu hari sama minggu lalu).
   const acuan: AcuanJenis =
-    acuanQ === "7hari" ? "7hari" : acuanQ === "rentang" ? "rentang" : "minggu_lalu";
+    acuanQ === "minggu_lalu" ? "minggu_lalu" : acuanQ === "rentang" ? "rentang" : "7hari";
 
   // terima hanya format tanggal YYYY-MM-DD; selain itu diabaikan (default hari ini)
   // Regex-saja dihapus: `2026-02-30` lolos bentuknya lalu ditolak Postgres.

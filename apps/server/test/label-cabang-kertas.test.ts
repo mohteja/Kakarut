@@ -25,3 +25,16 @@ describe("labelCabangKertas", () => {
     expect(typeof buildReceiptBytes).toBe("function");
   });
 });
+
+import { kodeBahanDariNama } from "../src/modules/bahan/kode";
+
+describe("kodeBahanDariNama — paling sedikit tiga huruf", () => {
+  it("dua kata tak lagi dua huruf (UJI-Tepung ≠ UJI-Roti)", () => {
+    expect(kodeBahanDariNama("UJI-Tepung")).toBe("UJT");
+    expect(kodeBahanDariNama("UJI-Roti")).toBe("UJR");
+    expect(kodeBahanDariNama("Tepung")).toBe("TEP");
+    expect(kodeBahanDariNama("Mie Kuah Rebus Pedas Sekali")).toBe("MKRP");
+    expect(kodeBahanDariNama("Bawang (BWG)")).toBe("BWG");
+    expect(kodeBahanDariNama("A")).toBe("AXX");
+  });
+});

@@ -10,7 +10,8 @@ export const EMAIL_KONTAK = "terahokiindonesia@gmail.com";
 export const TANGGAL_BERLAKU = "21 Juli 2026";
 /** Daftar tautan situs publik (dipakai header & footer). */
 export const TAUTAN_PUBLIK: { ke: string; label: string }[] = [
-  { ke: "/tentang", label: "Beranda" },
+  // "/" = halaman depan (pengunjung) — /tentang tetap ada untuk yang sudah masuk.
+  { ke: "/", label: "Beranda" },
   { ke: "/bantuan", label: "Bantuan" },
   { ke: "/kontak", label: "Kontak" },
   { ke: "/privasi", label: "Kebijakan Privasi" },

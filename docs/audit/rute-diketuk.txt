@@ -166,6 +166,7 @@ POST /api/auth/logout
 POST /api/auth/register
 POST /api/auth/resend-verification
 POST /api/auth/reset-password
+POST /api/auth/reset-password/cek
 POST /api/auth/verify-email
 POST /api/bahan
 POST /api/bahan/:id/harga

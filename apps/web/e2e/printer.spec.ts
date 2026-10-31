@@ -159,7 +159,10 @@ test("halaman pengaturan printer render dan Cetak Tes merekam byte", async ({ pa
   // Owner mendarat di /dashboard (lihat catatan di pos.spec.ts).
   await expect(page).toHaveURL(/\/dashboard/);
 
-  await page.getByRole("link", { name: /Printer/ }).click();
+  // Dibuka lewat URL, bukan tautan sidebar: sejak laporan uji 31 Okt 2026
+  // lokasi Kantor (Pro) tak menampilkan Printer — milik toko. Tautannya sempat
+  // terlihat sekejap sebelum lokasi termuat, jadi klik lewat sidebar goyah.
+  await page.goto("/pengaturan/printer");
   await expect(page).toHaveURL(/\/pengaturan\/printer/);
   // dua elemen memuat teks ini (judul halaman + judul kartu) → ambil yang pertama
   await expect(page.getByText("Pengaturan Printer").first()).toBeVisible();

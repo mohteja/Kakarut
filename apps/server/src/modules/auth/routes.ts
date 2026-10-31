@@ -688,6 +688,32 @@ export const authRoutes = new Hono<AppEnv>()
     },
   )
   // Reset password dengan token dari email.
+  // CEK tautan reset SEBELUM formulir diisi — tautan palsu/kedaluwarsa dulu
+  // baru ketahuan sesudah orangnya mengetik password baru dua kali (laporan uji
+  // 31 Okt 2026). Kalimatnya SAMA dengan penolakan `/reset-password`, dan tak
+  // membocorkan apa pun selain yang token itu sendiri sudah buktikan.
+  .post(
+    "/reset-password/cek",
+    batasReset,
+    zValidator("json", z.object({ token: z.string().min(1) }).strict()),
+    async (c) => {
+      const { token } = c.req.valid("json");
+      const [row] = await db
+        .select({ id: passwordResetTokens.id })
+        .from(passwordResetTokens)
+        .where(
+          and(
+            eq(passwordResetTokens.tokenHash, hashToken(token)),
+            isNull(passwordResetTokens.usedAt),
+            gt(passwordResetTokens.expiresAt, new Date()),
+          ),
+        );
+      if (!row) {
+        throw new HTTPException(400, { message: "Tautan reset tidak valid atau sudah kedaluwarsa" });
+      }
+      return c.json({ ok: true });
+    },
+  )
   .post(
     "/reset-password",
     batasReset,

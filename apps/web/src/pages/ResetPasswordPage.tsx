@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { btnPrimary, InputPassword } from "../components/ui";
 import { api } from "../lib/api";
@@ -24,6 +24,24 @@ export function ResetPasswordPage() {
 
   const terlaluPendek = password.length > 0 && password.length < 8;
   const tidakCocok = konfirmasi.length > 0 && password !== konfirmasi;
+
+  // Tautannya diperiksa begitu halaman dibuka — formulir tak ditawarkan untuk
+  // token yang sudah mati (laporan uji 31 Okt 2026).
+  useEffect(() => {
+    if (!token) return;
+    let batal = false;
+    api("/auth/reset-password/cek", { method: "POST", body: { token } }).catch((err: unknown) => {
+      if (batal) return;
+      const pesan = err instanceof Error ? err.message : "";
+      if (/tidak valid|kedaluwarsa/i.test(pesan)) {
+        setError(pesan);
+        setTautanMati(true);
+      }
+    });
+    return () => {
+      batal = true;
+    };
+  }, [token]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
