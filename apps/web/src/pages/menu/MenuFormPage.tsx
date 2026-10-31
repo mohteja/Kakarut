@@ -437,14 +437,6 @@ export function MenuFormPage() {
                   Buat kategori dulu (mis. Makanan, Minuman) lewat “+ Kategori baru”.
                 </p>
               )}
-              <KategoriManagerModal
-                open={kelolaKategori}
-                onClose={() => setKelolaKategori(false)}
-                endpoint="/kategori"
-                queryKey="kategori"
-                judul="Kategori Menu"
-                deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus."
-              />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Tipe</label>
@@ -811,6 +803,18 @@ export function MenuFormPage() {
           </Link>
         </div>
       </form>
+      {/* DI LUAR <form> menu: `Modal` bukan portal, jadi form kategori di
+          dalamnya dulu bersarang di form ini — Simpan kategori mengirim form
+          menu secara native, halaman dimuat ulang, isian hilang (uji web 31
+          Okt 2026, W-35). */}
+      <KategoriManagerModal
+        open={kelolaKategori}
+        onClose={() => setKelolaKategori(false)}
+        endpoint="/kategori"
+        queryKey="kategori"
+        judul="Kategori Menu"
+        deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus."
+      />
 
       {/*
         Konfirmasi, bukan larangan: ada menu yang memang tak pernah dibawa

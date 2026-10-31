@@ -1533,7 +1533,7 @@ Laporan:
 
 ## `/api/print` — Relay printer jaringan (`modules/print/routes.ts`) — [any]
 
-- `POST /api/print/lan` — req: `{ host: string (1..255), port: int — HANYA port printer 9100–9109, 515, 631 (sejak 2026-10-31, mitigasi SSRF), data: string (base64 ESC/POS, 1..400000) }` — res: `{ ok: true }` — error: **400** (host terlarang/internal, port bukan printer, data kosong), **403** akun tamu, **502** printer tak terjangkau
+- `POST /api/print/lan` — req: `{ host: string (1..255), port: int — HANYA port printer 9100–9109, 515, 631 (sejak 2026-10-31, mitigasi SSRF), data: string (base64 ESC/POS, 1..400000) }` — res: `{ ok: true }` — error: **400** (host terlarang/internal, port bukan printer, data kosong), **403** akun tamu, **422** `sebab: "printer_tak_terjangkau"` printer tak terjangkau (sejak 2026-10-31; dulu 502 — diganti halaman galat Cloudflare)
 
 > Untuk cetak Bluetooth thermal di aplikasi Flutter, byte ESC/POS **struk
 > pembayaran** dibangun di sisi klien; endpoint ini hanya relay TCP untuk

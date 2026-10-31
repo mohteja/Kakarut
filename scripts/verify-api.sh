@@ -4352,6 +4352,15 @@ ssrf_port() { # ssrf_port <port>
 cek "print/lan → port 5432 (Postgres) ditolak 400" "V == 400" "$(ssrf_port 5432)"
 cek "print/lan → port 6379 (Redis) ditolak 400" "V == 400" "$(ssrf_port 6379)"
 cek "print/lan → port 80 ditolak 400" "V == 400" "$(ssrf_port 80)"
+# Printer yang TAK TERJANGKAU (TEST-NET 192.0.2.2, tak pernah dirutekan) → 422
+# ber-sebab, bukan 502: Cloudflare mengganti 502 dari origin dengan halaman
+# galat HTML miliknya, jadi kalimatnya tak sampai ke layar (uji web 31 Okt 2026).
+LAN101=$(curl -s -w '\n%{http_code}' -X POST "$BASE/api/print/lan" \
+  -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+  -d "{\"host\":\"192.0.2.2\",\"port\":9100,\"data\":\"$D64\"}")
+cek "print/lan → printer tak terjangkau 422 (bukan 502)" "V == 422" "$(tail -n1 <<<"$LAN101")"
+cek "print/lan → sebab printer_tak_terjangkau + kalimat menyebut printer" "V == 1" \
+  "$(head -n -1 <<<"$LAN101" | jq '(.sebab=="printer_tak_terjangkau" and (.error|test("printer")))|if . then 1 else 0 end')"
 
 echo "== 102. Path-param sinkron wajib UUID (cegah manipulasi jalur) =="
 # faktur_id/supply_id di-interpolasi ke URL sub-request → wajib UUID valid.
