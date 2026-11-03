@@ -11771,8 +11771,12 @@ cek "INTI: 4 pembuatan karyawan beremail sama → TAK ADA 5xx" "V == 0" "$(lima2
 cek "…tepat SATU yang lahir (201), sisanya 409" "V == 1" "$(kode213 "$D213" 201)"
 cek "…dan hanya satu baris karyawan beremail itu" "V == 1" \
   "$(api "$OWNER" GET /karyawan | jq --arg e "$E213" '[.[]|select(.email==$e)]|length')"
+# Dua kalimat sah sejak "Tambah karyawan" ke akun terdaftar jadi undangan
+# (PR #241): yang kalah di constraint unik → "sudah terdaftar"; yang datang
+# SESUDAH karyawannya lahir → jalur berurutan → "sudah jadi karyawan aktif".
+# Mana yang muncul bergantung timing — CI pernah merah karena yang kedua.
 cek "…pesan penolakannya sama dgn jalur berurutan (bukan pesan generik)" "V == 1" \
-  "$(cat "$D213"/b* | jq -s --arg e "$E213" '[.[]|select(.error != null)]|all(.[]; .error | test("sudah terdaftar"))|if . then 1 else 0 end')"
+  "$(cat "$D213"/b* | jq -s --arg e "$E213" '[.[]|select(.error != null)]|all(.[]; .error | test("sudah terdaftar|sudah jadi karyawan aktif"))|if . then 1 else 0 end')"
 
 # ── POST /karyawan/undang (invitations_company_email_pending_uq) ───────────
 # Diukur atas bug yang disuntikkan kembali: 1 burst × 4 hanya menuduh 6/8
