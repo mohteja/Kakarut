@@ -98,8 +98,11 @@ const BELUM_TAYANG = new Set([
   // laporan uji gelombang 1–3 tayang lewat merge PR #241 (`bf257d4`, CI #511);
   // stempelnya dipasang pada commit yang SAMA dengan penghapusan baris ini.
   //
-  // BELUM DI-MERGE (2026-10-31): status galat `POST /print/lan` (hasil uji web).
-  "## ⚪️ `POST /api/print/lan`: printer tak terjangkau kini 422 ber-`sebab`, bukan 502",
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-11-03 — entri `POST /print/lan`
+  // tayang lewat merge PR #243; stempelnya dipasang pada commit yang SAMA.
+  //
+  // BELUM DI-MERGE (2026-11-03): papan pesanan lihat-saja untuk owner/admin.
+  "## 🟡 Papan Pesanan Masuk: owner & admin LIHAT SAJA — `POST /api/pesanan/*` → 403",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

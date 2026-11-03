@@ -1117,6 +1117,11 @@ Layar kerja dapur/bar/kasir di lantai toko. **Ini satu-satunya cara dapur bisa
 melihat pesanan yang belum dibayar** — `/api/open-bill` tetap `cashier only` dan
 tidak dilonggarkan.
 
+**Owner & admin: LIHAT SAJA** (sejak 2026-11-03). Semua `GET` terbuka untuk
+mereka; semua `POST` (status, sajian, per baris maupun pintasan kartu) dibalas
+**403** `{ error, sebab: "pesanan_lihat_saja" }` — penjaganya jalan sebelum
+kartu dicari. Yang menandai pesanan: cashier/tim/kitchen/bar.
+
 - `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]` — tiap `items[]` membawa `addons: AddonBarisDto[]` (snapshot add-on baris itu, untuk dapur)
 - `POST /api/pesanan/:jenis/:id/item/:itemId/status` — **tombol utama papan** — `:jenis` = `open_bill|penjualan`, `:itemId` = `PesananItemRow.id` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status, kartu_status }` (`kartu_status` = status kartu setelah diturunkan ulang) — error: **404** bukan cabangnya / kartu atau barisnya tak ada, **409** status baris baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
 - `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway, total_hpp }` (`total_hpp` = HPP transaksi SESUDAH hitung-ulang; `null` untuk open bill) — error: **404**, **409** bill sudah dibayar. ⚠️ **Menggeser biaya & stok** pada penjualan yang sudah dibayar — lihat blok `sajian_takeaway` di bawah.

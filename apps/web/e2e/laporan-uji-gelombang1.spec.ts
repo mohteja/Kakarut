@@ -141,3 +141,17 @@ test("menu yang dinonaktifkan bisa diaktifkan lagi dari daftar Menu", async ({ p
   // Rapikan: menu uji tak ikut tampil di kasir spec lain.
   await request.delete(`${BASE}/api/menu/${id}`, { headers: h });
 });
+
+/**
+ * PERMINTAAN PEMILIK 2026-11-03: owner & admin MEMANTAU papan Pesanan Masuk —
+ * terlihat juga dari lokasi Kantor — tapi tak bisa menandai apa pun.
+ */
+test("papan Pesanan Masuk: owner lihat saja, tanpa tombol tanda", async ({ page, request }) => {
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await expect(page.getByRole("link", { name: /Pesanan Masuk/ })).toBeVisible();
+  await page.goto("/pesanan");
+  await expect(page.getByTestId("pesanan-lihat-saja")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Pindahkan ke Selesai/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /✅ Selesai/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Kembalikan/ })).toHaveCount(0);
+});

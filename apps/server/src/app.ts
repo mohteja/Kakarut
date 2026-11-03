@@ -197,9 +197,9 @@ export function createApp() {
   // Transaksi POS (jual, open bill) HANYA peran kasir.
   // Owner/admin memantau lewat Riwayat/Laporan, tak meng-input transaksi.
   tenant.use("/open-bill/*", requireRole("cashier"));
-  // Papan pesanan masuk: seluruh peran cabang boleh melihat & menandai —
-  // dapur (kitchen/bar) justru pengguna utamanya, dan sampai sekarang mereka
-  // tak punya cara apa pun untuk tahu ada pesanan masuk.
+  // Papan pesanan masuk: seluruh peran cabang boleh melihat; MENANDAI hanya
+  // kasir/tim/kitchen/bar — owner & admin lihat saja (dijaga di modulnya,
+  // `PesananLihatSaja`). Dapur (kitchen/bar) justru pengguna utamanya.
   tenant.use(
     "/pesanan/*",
     requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),

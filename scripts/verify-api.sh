@@ -7513,7 +7513,7 @@ cek "menandai bill yang SUDAH dibayar → 409 (kartunya ada di penjualan)" "V ==
 #     (Kasus kemasan yang MEMANG harus bergerak diuji di §156.)
 HPP154A=$(api "$OWNER" GET "/penjualan/$SID154" | jq -r '[.items[].hppSatuan]|add')
 SALDO154A=$(saldo154)
-api "$OWNER" POST "/pesanan/penjualan/$SID154/sajian" '{"takeaway":false}' > /dev/null
+api "$TKIT154" POST "/pesanan/penjualan/$SID154/sajian" '{"takeaway":false}' > /dev/null
 cek "resep tanpa kemasan: saldo bahan cabang sama persis sebelum & sesudah" "abs(V) < 0.001" \
   "$(python3 -c "print($(saldo154) - $SALDO154A)")"
 cek "resep tanpa kemasan: hpp_satuan tak bergeser sepeser pun" "abs(V) < 0.001" \
@@ -8038,7 +8038,7 @@ cek "dine-in: isi tetap terpakai 2 × 100 gr" "abs(V - 200) < 0.001" \
 #     dipakai, jadi HPP naik TEPAT sebesar kemasannya dan stok dus turun.
 BR156=$(api "$OWNER" GET "/pesanan?branch_id=$CB156" | jq -r --arg id "$SID156" '[.[]|select(.id==$id)][0].items[0].id')
 DUS156_1=$(dus156); ISI156_1=$(isi156)
-api "$OWNER" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":true}' > /dev/null
+api "$REISS105" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":true}' > /dev/null
 cek "diubah jadi TA: total_hpp 2000 → 6000 (naik tepat 2 × Rp 2.000 kemasan)" "V == 6000" \
   "$(hpp156 "$SID156")"
 cek "diubah jadi TA: stok dus BERKURANG tepat 2 pcs" "abs(V - 2) < 0.001" \
@@ -8053,7 +8053,7 @@ cek "riwayat mencatat perpindahan HPP-nya (bukan cuma labelnya)" "V == 1" \
 # (c) IDEMPOTEN: dikembalikan ke makan di tempat → angkanya kembali PERSIS.
 #     Hitung-ulang selalu dari nol (bukan selisih), jadi bolak-balik tak
 #     menumpuk galat sepeser pun.
-api "$OWNER" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":false}' > /dev/null
+api "$REISS105" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":false}' > /dev/null
 cek "dikembalikan ke dine-in: total_hpp kembali PERSIS 2000" "V == 2000" "$(hpp156 "$SID156")"
 cek "dikembalikan ke dine-in: stok dus kembali PERSIS ke angka awal" "abs(V) < 0.001" \
   "$(python3 -c "print($(dus156) - $DUS156_1)")"
@@ -8062,7 +8062,7 @@ cek "dikembalikan ke dine-in: stok dus kembali PERSIS ke angka awal" "abs(V) < 0
 #      ulang. Saldo stok mem-window-kan `sc.waktu > baseline_opname`; kalau
 #      hitung-ulang memakai now(), konsumsi lama melompat ke seberang garis
 #      opname dan stok berkurang DUA KALI di pembukuan yang sudah ditutup.
-api "$OWNER" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":true}' > /dev/null
+api "$REISS105" POST "/pesanan/penjualan/$SID156/item/$BR156/sajian" '{"takeaway":true}' > /dev/null
 TGL156=$(api "$OWNER" GET "/penjualan/$SID156" | jq -r '.sale.saleDate')
 NOM156=$(api "$OWNER" GET "/penjualan/$SID156" | jq -r '.sale.nomor')
 cek "kartu stok dus: pemakaiannya tetap di TANGGAL TRANSAKSI, keluar 2 pcs" "V == 1" \
@@ -8074,7 +8074,7 @@ cek "kartu stok dus: pemakaiannya tetap di TANGGAL TRANSAKSI, keluar 2 pcs" "V =
 OB156=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$MEJA156\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":1},{\"menu_id\":\"$M156\",\"qty\":1}]}")
 OBID156=$(echo "$OB156" | jq -r .id)
 BRA156=$(echo "$OB156" | jq -r '.items[0].id'); BRB156=$(echo "$OB156" | jq -r '.items[1].id')
-api "$OWNER" POST "/pesanan/open_bill/$OBID156/item/$BRA156/sajian" '{"takeaway":true}' > /dev/null
+api "$REISS105" POST "/pesanan/open_bill/$OBID156/item/$BRA156/sajian" '{"takeaway":true}' > /dev/null
 DUS156_2=$(dus156)
 S156B=$(api "$REISS105" POST /penjualan "{\"meja_id\":\"$MEJA156\",\"metode_bayar\":\"tunai\",\"open_bill_id\":\"$OBID156\",\"items\":[{\"menu_id\":\"$M156\",\"qty\":1,\"open_bill_item_id\":\"$BRA156\"},{\"menu_id\":\"$M156\",\"qty\":1,\"open_bill_item_id\":\"$BRB156\"}]}")
 SID156B=$(echo "$S156B" | jq -r '.sale.id')
@@ -8087,7 +8087,7 @@ cek "transaksi tetap dibukukan dine-in walau satu barisnya dibungkus" "V == 1" \
 
 # (e) Pintasan "semua baris": kedua porsi dibungkus → basis bawa pulang penuh.
 DUS156_3=$(dus156)
-api "$OWNER" POST "/pesanan/penjualan/$SID156B/sajian" '{"takeaway":true}' > /dev/null
+api "$REISS105" POST "/pesanan/penjualan/$SID156B/sajian" '{"takeaway":true}' > /dev/null
 cek "tombol 'semua': total_hpp jadi 2 × 3000 (bawa pulang penuh)" "V == 6000" "$(hpp156 "$SID156B")"
 cek "tombol 'semua': dus turun 1 lagi (baris yang tadi masih di piring)" "abs(V - 1) < 0.001" \
   "$(python3 -c "print($DUS156_3 - $(dus156))")"
@@ -8100,7 +8100,7 @@ SID156C=$(echo "$S156C" | jq -r '.sale.id')
 BR156C=$(api "$OWNER" GET "/pesanan?branch_id=$CB156" | jq -r --arg id "$SID156C" '[.[]|select(.id==$id)][0].items[0].id')
 api "$OWNER" DELETE "/penjualan/$SID156C" > /dev/null
 DUS156_4=$(dus156)
-api "$OWNER" POST "/pesanan/penjualan/$SID156C/item/$BR156C/sajian" '{"takeaway":true}' > /dev/null 2>&1 || true
+api "$REISS105" POST "/pesanan/penjualan/$SID156C/item/$BR156C/sajian" '{"takeaway":true}' > /dev/null 2>&1 || true
 cek "penjualan terhapus: menandainya TA tidak menggerakkan stok apa pun" "abs(V) < 0.001" \
   "$(python3 -c "print($DUS156_4 - $(dus156))")"
 
@@ -9587,7 +9587,7 @@ DUS180=$(dus156)
 R180A=$(mktemp); R180B=$(mktemp)
 for f in "$R180A" "$R180B"; do
   curl -s -X POST "$BASE/api/pesanan/penjualan/$SID180/item/$BR180/sajian" \
-    -H "Authorization: Bearer $OWNER" -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $REISS105" -H 'Content-Type: application/json' \
     -d '{"takeaway":true}' -w '\n%{http_code}' > "$f" &
 done
 wait
@@ -14341,9 +14341,9 @@ cek "premis: penjualan dine-in ber-HPP TEPAT di langit-langit → 201" "V == 1" 
 IT249=$(api "$OWNER" GET /pesanan | jq -r --arg s "$SID249" '[.[]|select(.id==$s)][0].items[0].id // ""')
 cek "premis: barisnya terlihat di papan" "V == 1" "$( [ -n "$IT249" ] && [ "$IT249" != "null" ] && echo 1 || echo 0 )"
 cek "flip 🥡 di langit-langit → 400 MENYEBUT MENUNYA, bukan generik/500" "V == 1" \
-  "$(api "$OWNER" POST "/pesanan/penjualan/$SID249/item/$IT249/sajian" '{"takeaway":true}' | jq '(.error | test("HPP satuan") and test("Menu Langit 249")) | if . then 1 else 0 end')"
+  "$(api "$REISS105" POST "/pesanan/penjualan/$SID249/item/$IT249/sajian" '{"takeaway":true}' | jq '(.error | test("HPP satuan") and test("Menu Langit 249")) | if . then 1 else 0 end')"
 cek "jenis jalur salah (\"sale\") → 400, BUKAN 500 ZodError mentah" "V == 400" \
-  "$(status_code_body "$OWNER" POST "/pesanan/sale/$SID249/item/$IT249/sajian" '{"takeaway":true}')"
+  "$(status_code_body "$REISS105" POST "/pesanan/sale/$SID249/item/$IT249/sajian" '{"takeaway":true}')"
 # PASANGAN: flip pada penjualan biasa tetap bekerja. Menunya DIBUAT di sini —
 # "menu pertama yang bukan Langit" pernah memungut menu warisan seksi balapan
 # (§245/§248) yang isinya beda antar-run, dan pasangannya jadi 404 sekali-sekali.
@@ -14352,7 +14352,7 @@ MEN249=$(api "$OWNER" POST /menu "{\"nama\":\"Menu Biasa 249\",\"category_id\":\
 J2249=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MEN249\",\"qty\":1}]}" | jq -r '.sale.id // ""')
 IT2249=$(api "$OWNER" GET /pesanan | jq -r --arg s "$J2249" '[.[]|select(.id==$s)][0].items[0].id // ""')
 cek "PASANGAN: flip 🥡 penjualan biasa tetap 200" "V == 200" \
-  "$(status_code_body "$OWNER" POST "/pesanan/penjualan/$J2249/item/$IT2249/sajian" '{"takeaway":true}')"
+  "$(status_code_body "$REISS105" POST "/pesanan/penjualan/$J2249/item/$IT2249/sajian" '{"takeaway":true}')"
 
 echo "── §250 Cabang NIAT pada perintah sinkron offline ──"
 #
@@ -19039,6 +19039,22 @@ cek "§323 kafe baru: kategori bahan 'kopi' ada, 'baso' tidak" "V == 1" \
   "$(api "$TO321" GET /kategori-bahan | jq '([.[].nama] | (index("kopi") != null and index("baso") == null)) | if . then 1 else 0 end')"
 cek "§323 kafe baru: kategori menu bawaan Makanan & Minuman" "V == 2" \
   "$(api "$TO321" GET /kategori | jq '[.[] | select(.nama=="Makanan" or .nama=="Minuman")] | length')"
+
+echo "── §324 papan pesanan: owner & admin LIHAT SAJA ──"
+# Permintaan pemilik 2026-11-03: owner/admin memantau papan, yang menandai
+# pesanan orang lantai. Penjaganya jalan SEBELUM kartu dicari, jadi id palsu
+# cukup: owner/admin → 403 ber-sebab, kasir → 404 (lolos penjaga).
+ID324=$(uuid99)
+cek "§324 owner boleh MELIHAT papan (200)" "V == 200" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pesanan" -H "Authorization: Bearer $OWNER")"
+cek "§324 owner menandai selesai → 403" "V == 403" \
+  "$(status_code_body "$OWNER" POST "/pesanan/penjualan/$ID324/status" '{"status":"selesai"}')"
+cek "§324 owner → sebab pesanan_lihat_saja" "V == 1" \
+  "$(api "$OWNER" POST "/pesanan/penjualan/$ID324/item/$ID324/sajian" '{"takeaway":true}' | jq '(.sebab=="pesanan_lihat_saja")|if . then 1 else 0 end')"
+cek "§324 admin menandai baris → 403" "V == 403" \
+  "$(status_code_body "$TADM250" POST "/pesanan/open_bill/$ID324/item/$ID324/status" '{"status":"selesai"}')"
+cek "§324 admin boleh MELIHAT papan (200)" "V == 200" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pesanan" -H "Authorization: Bearer $TADM250")"
+cek "§324 kasir lolos penjaga (id palsu → 404, bukan 403)" "V == 404" \
+  "$(status_code_body "$REISS105" POST "/pesanan/penjualan/$ID324/status" '{"status":"selesai"}')"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
