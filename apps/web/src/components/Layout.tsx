@@ -291,8 +291,9 @@ export function Layout() {
   const dStore = divisi === "store";
   const dCk = divisi === "central_kitchen";
   const penuh = !divisi || divisi === "kantor";
-  // Kantor di mode Pro tak berjualan: Meja, Pesanan Masuk, dan Printer milik
-  // toko (laporan uji 31 Okt 2026). Mode Lite tetap menampilkannya — di sana
+  // Kantor di mode Pro tak berjualan: Meja dan Printer milik toko (laporan uji
+  // 31 Okt 2026); Pesanan Masuk tetap tampil untuk dipantau owner/admin.
+  // Mode Lite tetap menampilkannya — di sana
   // satu-satunya lokasi ADALAH tokonya.
   const kantorPro = isPro && divisi === "kantor";
   // Tim: cek stok, lihat menu, profil, penerimaan barang, riwayat transaksi.
@@ -599,8 +600,10 @@ export function Layout() {
               )}
               {/* Papan Pesanan Masuk — layar kerja lantai toko: dapur/bar/tim
                   melihat pesanan kasir (termasuk yang belum dibayar) dan
-                  menandainya selesai. Bukan urusan Central Kitchen. */}
-              {!timDiCk && !dCk && !kantorPro && (
+                  menandainya selesai. Bukan urusan Central Kitchen. Owner &
+                  admin ikut MEMANTAU (lihat saja), juga dari lokasi Kantor —
+                  papannya punya pemilih toko (permintaan pemilik 2026-11-03). */}
+              {!timDiCk && !dCk && (
                 <NavLink to="/pesanan" className={navFlex}>
                   <span>🛎 Pesanan Masuk</span>
                   {badgeOranye(pesananDikerjakan, pesananGagal, "nav-lencana-pesanan")}

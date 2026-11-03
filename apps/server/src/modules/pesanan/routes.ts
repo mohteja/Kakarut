@@ -315,7 +315,27 @@ async function pastikanKartu(
   if (!row) throw new HTTPException(404, { message: "Pesanan tidak ditemukan" });
 }
 
+/**
+ * Papan pesanan untuk OWNER & ADMIN hanya untuk DIPANTAU (permintaan pemilik
+ * 2026-11-03): yang menandai selesai / membatalkan / mengubah bawa pulang
+ * adalah orang lantai — kasir, tim, dapur, bar. Layar web & ponsel
+ * menyembunyikan tombolnya; server menolak supaya klien lama tak bisa.
+ */
+export class PesananLihatSaja extends HTTPException {
+  readonly sebab = "pesanan_lihat_saja";
+  constructor() {
+    super(403, {
+      message: "Owner dan admin hanya bisa melihat papan pesanan — yang menandai pesanan adalah kasir atau dapur",
+    });
+  }
+}
+
 export const pesananRoutes = new Hono<AppEnv>()
+  .use("*", async (c, next) => {
+    const role = c.get("auth").role;
+    if (c.req.method !== "GET" && (role === "owner" || role === "admin")) throw new PesananLihatSaja();
+    await next();
+  })
   /**
    * Papan pesanan satu cabang. Isinya tiga hal, dan aturannya sengaja tidak
    * seragam:

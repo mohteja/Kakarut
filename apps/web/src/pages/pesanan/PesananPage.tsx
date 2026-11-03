@@ -1,5 +1,5 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import {
   durasiPesananDetik,
   dibatalkanDapur,
@@ -139,6 +139,13 @@ function RiwayatModal({
  * sudah tampil sebelum permintaan berangkat, jadi tak ada yang perlu ditunggu;
  * menekan dua kali pun aman karena perintahnya "jadikan X", bukan "naikkan satu".
  */
+/**
+ * Owner & admin hanya MEMANTAU papan (permintaan pemilik 2026-11-03) — server
+ * menolak tanda mereka (`sebab: "pesanan_lihat_saja"`), jadi tombolnya tak
+ * ditawarkan sama sekali.
+ */
+const LihatSaja = createContext(false);
+
 function BarisPesanan({
   it,
   onStatus,
@@ -156,6 +163,7 @@ function BarisPesanan({
    * seperti kesalahan sistem, bukan seperti keputusan yang memang diambil.
    */
   const habisRefund = it.qty_refund > 0 && it.qty <= 0;
+  const lihatSaja = useContext(LihatSaja);
   return (
     <li className="rounded-lg border border-stone-100 bg-stone-50/60 px-2 py-1.5">
       <div className="flex items-start justify-between gap-2">
@@ -181,6 +189,11 @@ function BarisPesanan({
           {LABEL_BARIS[it.status]}
         </span>
       </div>
+      {lihatSaja ? (
+        <div className="mt-1 text-[11px] font-semibold text-stone-500">
+          {it.sajian_takeaway ? "🥡 Bawa pulang" : "🍽 Di tempat"}
+        </div>
+      ) : (
       <div className="mt-1 flex flex-wrap items-center gap-1">
         {it.status !== "selesai" && (
           <button
@@ -232,6 +245,7 @@ function BarisPesanan({
           {it.sajian_takeaway ? "🥡 Bawa pulang" : "🍽 Di tempat"}
         </button>
       </div>
+      )}
       <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10px] text-stone-400">
         {/*
           Baris SELESAI menampilkan lama pengerjaannya; baris yang masih
@@ -273,6 +287,7 @@ function KartuPesanan({
   onPindahSelesai: () => void;
   onRiwayat: () => void;
 }) {
+  const lihatSaja = useContext(LihatSaja);
   // label meja SUDAH berbunyi "Meja 1"/"Ruang Tunggu" — jangan diberi awalan
   // lagi, hasilnya "Meja Meja 1".
   const judul = p.nomor ?? p.meja ?? "Pesanan";
@@ -367,7 +382,7 @@ function KartuPesanan({
         adalah koreksi, dan koreksi menunjuk sajian tertentu.
       */}
       <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-stone-100 pt-2">
-        {p.status !== "selesai" && p.items.length > 0 && (
+        {!lihatSaja && p.status !== "selesai" && p.items.length > 0 && (
           <button
             onClick={onPindahSelesai}
             title="Tandai semua sajian yang masih dikerjakan sebagai selesai (yang batal tetap batal)"
@@ -644,11 +659,22 @@ export function PesananPage() {
    */
   const gagalTotal = error != null && data === undefined;
   const gagalSegar = error != null && data !== undefined;
+  const lihatSaja = auth?.user.role === "owner" || auth?.user.role === "admin";
 
   return (
+    <LihatSaja.Provider value={lihatSaja}>
     <div className="max-w-6xl">
       <PageTitle>Papan Pesanan Masuk</PageTitle>
       <CabangDataBar />
+      {lihatSaja && (
+        <div
+          className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-4 py-2 text-sm text-stone-700"
+          data-testid="pesanan-lihat-saja"
+        >
+          👀 <b>Mode pantau.</b> Owner dan admin hanya melihat papan ini — pesanan ditandai
+          selesai oleh kasir atau dapur.
+        </div>
+      )}
       <div className="mb-3 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
         Setiap pesanan yang diinput kasir muncul di sini — termasuk yang{" "}
         <b>belum dibayar</b>. Tandai <b>tiap sajian</b> begitu keluar dari dapur, jadi
@@ -796,5 +822,6 @@ export function PesananPage() {
         />
       )}
     </div>
+    </LihatSaja.Provider>
   );
 }

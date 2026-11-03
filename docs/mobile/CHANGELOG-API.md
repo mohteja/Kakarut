@@ -25,11 +25,28 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 Papan Pesanan Masuk: owner & admin LIHAT SAJA — `POST /api/pesanan/*` → 403
+
+🟡 **PERLU DICEK** — layar papan pesanan untuk owner/admin.
+
+**Belum tayang.**
+
+- Owner & admin tetap boleh membaca semua `GET /api/pesanan…` (papan & riwayat).
+- Semua `POST /api/pesanan/…` (status & sajian, per baris maupun pintasan
+  kartu) dari owner/admin kini **403** `{ error, sebab: "pesanan_lihat_saja" }`.
+  Kasir, tim, kitchen, dan bar tak berubah.
+- Ponsel: `papan_pesanan_page.dart` menyembunyikan tombol ✅ Selesai,
+  ↩ Kembalikan, 🍽/🥡, dan "Pindahkan ke Selesai" bila `user.isManajemen`, dan
+  menampilkan keterangan "Mode pantau" (mohteja/kakarut-mobile, branch yang sama).
+- Web: menu Pesanan Masuk kini tampil juga di lokasi Kantor (Pro) untuk dipantau.
+
+---
+
 ## ⚪️ `POST /api/print/lan`: printer tak terjangkau kini 422 ber-`sebab`, bukan 502
 
 ⚪️ **INFO** — rute ini hanya dipakai web (ponsel mencetak langsung ke printer).
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#243 (`46d3a20`, CI cabang #513 hijau).
 
 - Printer yang tak terjangkau dari server kini dibalas **422** `{ message, sebab: "printer_tak_terjangkau" }`, dulu **502**. Cloudflare mengganti balasan 502 dari origin dengan halaman galat HTML miliknya, jadi kalimat "printer tidak merespons" tak pernah sampai ke layar (uji web 31 Okt 2026).
 
