@@ -49,7 +49,6 @@ export function RiwayatPage() {
     auth?.user.role === "owner" || auth?.user.role === "admin" || auth?.user.role === "cashier";
 
   const list = rows ?? [];
-  const totalHari = list.reduce((a, r) => a + r.total, 0);
 
   /**
    * Uang & stok sama-sama bergerak saat transaksi dihapus ATAU direfund, jadi
@@ -88,7 +87,9 @@ export function RiwayatPage() {
         />
         {list.length > 0 && (
           <div className="text-sm text-stone-500">
-            {list.length} transaksi · total <b>{formatRupiah(totalHari)}</b>
+            {/* Total harian sengaja tak ditampilkan di Riwayat (permintaan
+                pemilik 2026-11-07) — angka omzet ada di Laporan. */}
+            {list.length} transaksi
           </div>
         )}
       </div>
