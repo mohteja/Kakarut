@@ -85,6 +85,12 @@ const SistemPage = lazy(() => import("./pages/superadmin/SistemPage").then((m) =
 const BackupPage = lazy(() => import("./pages/superadmin/BackupPage").then((m) => ({ default: m.BackupPage })));
 const ErrorLogPage = lazy(() => import("./pages/superadmin/ErrorLogPage").then((m) => ({ default: m.ErrorLogPage })));
 const TenantsPage = lazy(() => import("./pages/superadmin/TenantsPage").then((m) => ({ default: m.TenantsPage })));
+const PeriodeGajiPage = lazy(() => import("./pages/gaji/PeriodeGajiPage").then((m) => ({ default: m.PeriodeGajiPage })));
+const DetailPeriodeGajiPage = lazy(() =>
+  import("./pages/gaji/DetailPeriodeGajiPage").then((m) => ({ default: m.DetailPeriodeGajiPage })),
+);
+const SetelanGajiPage = lazy(() => import("./pages/gaji/SetelanGajiPage").then((m) => ({ default: m.SetelanGajiPage })));
+const KasbonPage = lazy(() => import("./pages/gaji/KasbonPage").then((m) => ({ default: m.KasbonPage })));
 const TempatSampahPage = lazy(() => import("./pages/TempatSampahPage").then((m) => ({ default: m.TempatSampahPage })));
 
 /** Fallback saat chunk halaman sedang dimuat (lazy). */
@@ -173,6 +179,10 @@ export default function App() {
                 <Route path="/absen" element={<AbsenPage />} />
                 <Route path="/kebersihan" element={<LaporanKebersihanPage />} />
                 <Route path="/profil" element={<ProfilPage />} />
+                <Route path="/gaji" element={<PeriodeGajiPage />} />
+                <Route path="/gaji/periode/:id" element={<DetailPeriodeGajiPage />} />
+                <Route path="/gaji/karyawan" element={<SetelanGajiPage />} />
+                <Route path="/gaji/kasbon" element={<KasbonPage />} />
                 <Route path="*" element={<Navigate to="/rekap-absen" replace />} />
               </Route>
             </Routes>
@@ -326,6 +336,16 @@ export default function App() {
                   <Route path="/pengaturan/satuan" element={<SatuanPage />} />
                   <Route path="/bahan/baru" element={<TambahBahanBakuPage />} />
                   <Route path="/bahan/ubah" element={<UbahBahanBakuPage />} />
+                </>
+              )}
+              {/* Penggajian: owner (dan HRD di blok sendiri) — admin TIDAK,
+                  sama dengan gerbang `/gaji/*` di server. */}
+              {auth.user.role === "owner" && (
+                <>
+                  <Route path="/gaji" element={<PeriodeGajiPage />} />
+                  <Route path="/gaji/periode/:id" element={<DetailPeriodeGajiPage />} />
+                  <Route path="/gaji/karyawan" element={<SetelanGajiPage />} />
+                  <Route path="/gaji/kasbon" element={<KasbonPage />} />
                 </>
               )}
             </>

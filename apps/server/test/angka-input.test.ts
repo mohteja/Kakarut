@@ -57,6 +57,9 @@ const KELUARGA = [
   "pages/produksi/TambahStokPage.tsx",
   "pages/stok/CatatWasteModal.tsx",
   "pages/pengaturan/PerusahaanPage.tsx",
+  // Penggajian (2026-11-08): gaji, tunjangan, bonus, kasbon diketik "3.000.000".
+  "pages/gaji/DetailPeriodeGajiPage.tsx",
+  "pages/gaji/KasbonPage.tsx",
 ];
 
 /**
@@ -85,6 +88,10 @@ const BOLEH_NUMBER: Record<string, { n: number; alasan: string }> = {
   },
   "pages/superadmin/SmtpPage.tsx": { n: 1, alasan: "port SMTP — bulat" },
   "pages/stok/TambahStokDariMenuPage.tsx": { n: 1, alasan: "porsi rencana — bulat" },
+  "pages/gaji/SetelanGajiPage.tsx": {
+    n: 2,
+    alasan: "tanggal mulai periode (1–28) & toleransi telat (menit) — bulat kecil; rupiahnya type=text",
+  },
 };
 
 /** Semua `.tsx` di bawah `apps/web/src`. */

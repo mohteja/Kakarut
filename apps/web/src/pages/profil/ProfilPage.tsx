@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
-import type { AktivitasRow, ProfilDto } from "@kakarut/shared";
+import type { AktivitasRow, ProfilDto, SlipGajiSayaRow } from "@kakarut/shared";
+import { SlipGajiModal } from "../../components/SlipGajiModal";
 import {
   Card,
   ErrorText,
@@ -15,7 +16,7 @@ import {
 import { HapusAkunButton } from "../../components/HapusAkunButton";
 import { useAuth } from "../../context/AuthContext";
 import { api, saveAuth, type AuthState } from "../../lib/api";
-import { formatTanggalRingkas, formatWaktu } from "../../lib/format";
+import { formatRupiah, formatTanggal, formatTanggalRingkas, formatWaktu } from "../../lib/format";
 
 const LABEL_ROLE: Record<string, string> = {
   owner: "Owner",
@@ -159,6 +160,8 @@ export function ProfilPage() {
         <AturPinRefund sudahDiatur={profil.pin_refund_diatur} />
       )}
 
+      <SlipGajiSaya />
+
       {/* Ganti password */}
       {tamu ? (
         <Card className="p-4">
@@ -238,6 +241,51 @@ export function ProfilPage() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * SLIP GAJI SAYA — slip periode final/dibayar milik sendiri. Server tak
+ * mengirim slip draft; daftar kosong = bagian ini disembunyikan.
+ */
+function SlipGajiSaya() {
+  const { data, error } = useQuery({
+    queryKey: ["slip-gaji", "saya"],
+    queryFn: () => api<SlipGajiSayaRow[]>("/profil/slip-gaji"),
+  });
+  const [lihat, setLihat] = useState<string | null>(null);
+  // Gagal dimuat ≠ belum punya slip: galatnya ditampilkan, bukan disembunyikan.
+  if (error) {
+    return (
+      <Card className="mb-4 p-4">
+        <h2 className="mb-2 font-bold text-stone-800">💰 Slip Gaji Saya</h2>
+        <ErrorText error={error} />
+      </Card>
+    );
+  }
+  if (!data || data.length === 0) return null;
+  return (
+    <Card className="mb-4 p-4">
+      <h2 className="mb-2 font-bold text-stone-800">💰 Slip Gaji Saya</h2>
+      <ul className="divide-y divide-stone-100" data-testid="slip-gaji-saya">
+        {data.map((s) => (
+          <li key={s.id}>
+            <button
+              type="button"
+              onClick={() => setLihat(s.id)}
+              className="flex w-full items-center justify-between gap-3 py-2 text-left text-sm hover:bg-stone-50"
+            >
+              <span>
+                {formatTanggal(s.mulai)} – {formatTanggal(s.selesai)}
+                <span className="ml-2 text-xs text-stone-500">{s.status === "dibayar" ? "Dibayar" : "Final"}</span>
+              </span>
+              <span className="font-semibold text-stone-800">{formatRupiah(s.total)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <SlipGajiModal sumber="profil" slipId={lihat} onClose={() => setLihat(null)} />
+    </Card>
   );
 }
 

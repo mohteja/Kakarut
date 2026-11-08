@@ -27,7 +27,7 @@ export const KOLOM_CSV = [
 ] as const;
 
 /** Bungkus satu sel CSV (kutip bila mengandung koma/kutip/baris baru). */
-function selCsv(v: string): string {
+export function selCsv(v: string): string {
   return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
@@ -61,7 +61,7 @@ const AWALAN_FORMULA = /^'?[=+\-@\t\r]/;
  * `selAngka` (hanya digit/koma/eksponen — dan angka negatif memang negatif,
  * bukan rumus), sel boolean oleh `ya`.
  */
-function selTeks(v: string): string {
+export function selTeks(v: string): string {
   return AWALAN_FORMULA.test(v) ? `'${v}` : v;
 }
 

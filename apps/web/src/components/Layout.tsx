@@ -508,6 +508,9 @@ export function Layout() {
               <NavLink to="/pengaturan/karyawan" className={linkClass}>
                 👥 Karyawan
               </NavLink>
+              <NavLink to="/gaji" className={linkClass}>
+                💰 Penggajian
+              </NavLink>
               <NavLink to="/rekap-kebersihan" className={navFlex}>
                 <span>🧼 Rekap Kebersihan</span>
                 {kebersihanGagal
@@ -574,6 +577,13 @@ export function Layout() {
                       {kebersihanKotor}
                     </span>
                   ) : null}
+                </NavLink>
+              )}
+              {/* Penggajian — owner saja (admin tidak melihat angka gaji),
+                  Kantor saja seperti rekap absen. */}
+              {role === "owner" && penuh && (
+                <NavLink to="/gaji" className={linkClass}>
+                  💰 Penggajian
                 </NavLink>
               )}
               {/* Beranda ringkas peran TIM/KITCHEN/BAR (CK & toko): notifikasi + tugas hari ini */}
