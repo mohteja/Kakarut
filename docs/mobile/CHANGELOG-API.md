@@ -25,11 +25,84 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 Open bill memesan bahan: sisa porsi & gerbang stok dihitung dari stok bebas
+
+🟡 **PERLU DICEK** — bentuk kawat tak berubah, ARTI angkanya berubah.
+
+**Belum tayang.**
+
+- Permintaan pemilik: open bill langsung mengurangi stok saat disimpan.
+  Bahan untuk baris open bill yang masih berjalan (bukan `batal`, bill belum
+  ditutup) kini **dipesan**: dikurangkan dari saldo saat menghitung
+  `GET /menu/ketersediaan` (sisa porsi), `POST /penjualan/cek-stok`
+  (`kurang[].saldo` = sisa bebas), gerbang `POST /penjualan` tanpa
+  `open_bill_id`, dan gerbang `POST/PUT /open-bill`.
+- Saldo fisik `GET /stok` **tidak** berubah: barang baru tercatat keluar saat
+  bill dibayar. Bill dibayar/dibatalkan → pesanannya lepas otomatis.
+- Klien perlu menyegarkan sisa porsi sesudah bill disimpan/dihapus (dulu cukup
+  sesudah penjualan).
+
+---
+
+## 🟢 `jenis` makanan/minuman: kategori menu & sajian papan pesanan
+
+🟢 **BARU** — medan tambahan; klien lama yang tak membacanya tak terpengaruh.
+
+**Belum tayang.**
+
+- `GET/POST/PATCH /api/kategori` kini membawa `jenis: "makanan" | "minuman"`
+  (`KategoriMenuDto`). `POST` tanpa `jenis` → ditebak server dari nama
+  (`tebakJenisKategori`: minum/es/jus/kopi/teh/… = minuman). `PATCH` menerima
+  `jenis` saja. Kategori **bahan** (`/api/kategori-bahan`) tidak berubah.
+- `GET /api/pesanan` — tiap `items[]` membawa `jenis` (dari kategori menunya;
+  menu/kategori yang sudah tiada = `makanan`). Dipakai kotak papan grid untuk
+  hitungan "🍜 Makanan 2/3 dikirim · 🥤 Minuman 1/2" (`hitungKirimPerJenis`).
+- Migrasi 0114 menebak jenis kategori yang sudah ada dari namanya.
+
+---
+
+## 🟢 Penggajian (`/api/gaji/*`, owner & HRD) + slip gaji sendiri (`/api/profil/slip-gaji`)
+
+🟢 **BARU** — tak mengubah perilaku klien lama.
+
+**Belum tayang.**
+
+- Modul penggajian untuk owner & HRD: setelan perusahaan (tanggal mulai periode,
+  cuti dibayar), setelan per karyawan (bulanan/harian, jam kerja, toleransi telat,
+  potongan, lembur, tunjangan), kasbon, periode draft → final → dibayar, slip
+  per karyawan. Rincian rumus & rute: API-CONTRACT bagian `/api/gaji`.
+- Semua peran: `GET /api/profil/slip-gaji` (+ `/:id`) — slip milik sendiri,
+  periode final/dibayar saja.
+- Tipe baru di `types.ts`: `GajiRincian`, `GajiSlipRow`, `GajiSlipDetailDto`,
+  `GajiPeriodeRow`, `GajiPeriodeDetailDto`, `GajiKaryawanRow`,
+  `GajiSetelanKaryawanDto`, `GajiSetelanPerusahaanDto`, `KasbonRow`,
+  `SlipGajiSayaRow`. Layar ponsel menyusul (tahap 4); kuncinya dicatat di
+  `kunci-belum-dibaca.txt`.
+
+---
+
+## 🟡 Peran baru `hrd` (personalia) — `UserRole` bertambah, CHECK cabang dibalik
+
+🟡 **PERLU DICEK** — klien yang memetakan peran dengan `switch` tertutup.
+
+**Belum tayang.**
+
+- `UserRole` kini juga `"hrd"`. HRD **tanpa cabang** (`branch_id: null`), seperti admin.
+- HRD hanya boleh ke `/karyawan`, `/absensi`, `/pengajuan`, `/kebersihan`,
+  `/profil`, `/upload` + baca `/company` & `/cabang`. Selain itu **403**
+  `sebab: "hrd_tidak_berwenang"`.
+- Di modul itu HRD setara owner/admin: kelola karyawan (kecuali owner), rekap
+  absen, ACC/tolak cuti, rekap & area kebersihan.
+- `POST/PATCH /karyawan` & `POST /karyawan/undang` menerima `role: "hrd"`.
+- Ponsel: beranda & menu HRD (mohteja/kakarut-mobile, branch yang sama).
+
+---
+
 ## 🟡 Papan Pesanan Masuk: owner & admin LIHAT SAJA — `POST /api/pesanan/*` → 403
 
 🟡 **PERLU DICEK** — layar papan pesanan untuk owner/admin.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#245 (`d9a5ba7`, CI cabang #518 hijau); ponsel lewat mohteja/kakarut-mobile#23.
 
 - Owner & admin tetap boleh membaca semua `GET /api/pesanan…` (papan & riwayat).
 - Semua `POST /api/pesanan/…` (status & sajian, per baris maupun pintasan

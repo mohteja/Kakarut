@@ -23,6 +23,7 @@ export * from "./bon-tagihan";
 export * from "./refund";
 export * from "./satuan";
 export * from "./types";
+export * from "./gaji";
 export * from "./geo";
 export * from "./angka";
 export * from "./skala";

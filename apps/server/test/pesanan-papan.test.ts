@@ -13,6 +13,7 @@ function baris(p: Partial<PesananItemRow> & { id: string }): PesananItemRow {
     nama: `Menu ${p.id}`,
     qty: 1,
     qty_refund: 0,
+    jenis: "makanan",
     catatan: null,
     addons: [],
     is_dine_in: true,

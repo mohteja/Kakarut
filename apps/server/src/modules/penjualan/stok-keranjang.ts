@@ -1,5 +1,9 @@
 import type { BahanKurangDto, PilihanAddon } from "@kakarut/shared";
 import { formatAngkaId } from "@kakarut/shared";
+import { and, eq, isNull, ne } from "drizzle-orm";
+import type { Db, Tx } from "../../db/client";
+import { meja, openBillItems, openBills } from "../../db/schema";
+import { muatAddonBill } from "../menu/addon";
 import { snapDariPilihan, tambahKebutuhanBaris, type KatalogMenu } from "../menu/service";
 
 /**
@@ -108,4 +112,78 @@ export function gerbangBerlaku(p: {
   transaksiSusulan?: boolean;
 }): boolean {
   return p.blokirJualMinus && !p.openBillId && !p.transaksiSusulan;
+}
+
+/**
+ * BAHAN YANG SUDAH DIPESAN OPEN BILL — cadangan per bahan dari semua bill
+ * yang masih berjalan di cabang ini.
+ *
+ * Permintaan pemilik (2026-11-08): "open bill langsung kurangi stok saat
+ * disimpan". Saldo FISIK tak diubah — barangnya baru benar-benar tercatat
+ * keluar saat bill dibayar (`sale_consumptions`, lengkap dengan HPP-nya) —
+ * tapi bahan untuk pesanan yang sudah masuk dapur tak boleh lagi dijanjikan
+ * kepada pesanan lain. Karena itu cadangan ini dikurangkan dari saldo di
+ * gerbang "stok tak cukup", pracek kasir, dan sisa porsi menu.
+ *
+ * TURUNAN, bukan catatan: dihitung dari baris bill saat ini, jadi tak bisa
+ * basi. Bill yang dibayar atau dibatalkan (`closed_at` terisi) otomatis
+ * berhenti memesan — tanpa langkah "lepaskan cadangan" yang bisa terlupa,
+ * dan tanpa potongan ganda saat penjualannya menulis konsumsi sungguhan.
+ * Baris yang dibatalkan dapur/kasir (`batal`) tak memesan apa pun.
+ *
+ * Basis dine-in per baris sama dengan saat dibayar: penanda bawa pulang di
+ * papan (`sajian_takeaway`) atau pilihan per baris, lalu tipe meja bill.
+ *
+ * `kecualiBillId` — bill yang sedang dibayar/dipracek: bahannya untuk
+ * pesanan itu sendiri, jadi tak boleh menghalangi dirinya.
+ */
+export async function cadanganOpenBill(
+  exec: Db | Tx,
+  companyId: string,
+  branchId: string,
+  katalog: KatalogMenu,
+  kecualiBillId?: string | null,
+): Promise<Map<string, number>> {
+  const rows = await exec
+    .select({
+      id: openBillItems.id,
+      menuId: openBillItems.menuId,
+      qty: openBillItems.qty,
+      dineInOverride: openBillItems.dineInOverride,
+      sajianTakeaway: openBillItems.sajianTakeaway,
+      mejaTipe: meja.tipe,
+    })
+    .from(openBillItems)
+    .innerJoin(
+      openBills,
+      and(eq(openBills.id, openBillItems.billId), eq(openBills.companyId, companyId)),
+    )
+    .leftJoin(meja, and(eq(meja.id, openBills.mejaId), eq(meja.companyId, companyId)))
+    .where(
+      and(
+        eq(openBills.companyId, companyId),
+        eq(openBills.branchId, branchId),
+        isNull(openBills.closedAt),
+        ne(openBillItems.pesananStatus, "batal"),
+        ...(kecualiBillId ? [ne(openBills.id, kecualiBillId)] : []),
+      ),
+    );
+  if (rows.length === 0) return new Map();
+  const addonPerBaris = new Map<string, PilihanAddon[]>();
+  for (const a of await muatAddonBill(exec, companyId, rows.map((r) => r.id))) {
+    if (!a.addonId) continue;
+    const arr = addonPerBaris.get(a.openBillItemId) ?? [];
+    arr.push({ id: a.addonId, jumlah: a.jumlah });
+    addonPerBaris.set(a.openBillItemId, arr);
+  }
+  return kebutuhanKeranjang(
+    katalog,
+    rows.map((r) => ({
+      menu_id: r.menuId,
+      qty: r.qty,
+      is_dine_in: r.sajianTakeaway ? false : (r.dineInOverride ?? r.mejaTipe === "dine_in"),
+      addons: addonPerBaris.get(r.id),
+    })),
+    true,
+  );
 }

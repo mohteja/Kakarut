@@ -64,6 +64,16 @@ function berkasTs(dir: string): string[] {
  */
 const KOLOM: Record<string, string[]> = {
   BATAS_UANG: [
+    // penggajian (HRD, 2026-11-08) — semua numeric(14,2) dari medan permintaan
+    "gaji_setelan.nominal",
+    "gaji_setelan.potongan_alpa_per_hari",
+    "gaji_setelan.potongan_telat_per_kali",
+    "gaji_setelan.upah_lembur_per_jam",
+    "gaji_tunjangan.nominal",
+    "kasbon.nominal",
+    "kasbon.cicilan_per_periode",
+    "gaji_slip.bonus",
+    "gaji_slip.penyesuaian",
     "sales.total",
     "sales.subtotal",
     "sales.subtotal_asal",
@@ -136,6 +146,8 @@ const KOLOM: Record<string, string[]> = {
  *     koordinat, pengali) — dan literalnya tetap diperiksa lewat `PETA`.
  */
 const TAK_DIKLAIM: Record<string, string> = {
+  "gaji_slip.total": "hasil hitungSlip — dijaga luapan-turunan",
+  "kasbon_potongan.nominal": "salinan potongan slip (≤ kasbon.nominal)",
   "sales.diskon_persen": "diturunkan dari diskon & subtotal",
   "sale_items.line_total": "hasil hitungan",
   "open_bill_items.harga_satuan": "salinan harga menu saat itu",
@@ -163,6 +175,7 @@ const TAK_DIKLAIM: Record<string, string> = {
  * cuma bahwa daftarnya tak bertambah tanpa keputusan.
  */
 const BUKAN_KOLOM: Record<string, string> = {
+  toleransi_telat_menit: "kolom integer",
   sort_order: "kolom integer",
   urutan: "kolom integer",
   pos_x: "kolom integer",

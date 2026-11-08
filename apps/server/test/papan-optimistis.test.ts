@@ -126,7 +126,7 @@ describe("tanggal papan mengikuti jam dinding", () => {
 
   it("spanduknya muncul SEBELUM papan, bukan terkubur di bawah kartu", () => {
     const iSpanduk = tanpaKomentar.indexOf("{tanggal !== hariIni && (");
-    const iKolom = tanpaKomentar.indexOf("KOLOM.map");
+    const iKolom = tanpaKomentar.indexOf("tampilGrid.map");
     expect(iSpanduk).toBeGreaterThan(0);
     expect(iKolom).toBeGreaterThan(iSpanduk);
   });

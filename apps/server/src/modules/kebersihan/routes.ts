@@ -360,7 +360,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
   })
 
   /** Tambah area — owner/admin (gerbang inline, grup ini terbuka semua peran). */
-  .post("/area", requireRole("owner", "admin"), zValidator("json", AreaBody), async (c) => {
+  .post("/area", requireRole("owner", "admin", "hrd"), zValidator("json", AreaBody), async (c) => {
     const auth = c.get("auth");
     const b = c.req.valid("json");
     if (b.branch_id) await pastikanCabangMilik(b.branch_id, auth.company_id!);
@@ -377,7 +377,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
     return c.json({ id: baru.id }, 201);
   })
 
-  .patch("/area/:id", requireRole("owner", "admin"), zValidator("json", UbahAreaBody), async (c) => {
+  .patch("/area/:id", requireRole("owner", "admin", "hrd"), zValidator("json", UbahAreaBody), async (c) => {
     const auth = c.get("auth");
     const id = c.req.param("id");
     const b = c.req.valid("json");
@@ -404,7 +404,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
    * Hapus area. Aman terhadap riwayat: baris laporan lama menyimpan salinan
    * nama (`area_nama`), dan `area_id`-nya di-null-kan oleh FK.
    */
-  .delete("/area/:id", requireRole("owner", "admin"), async (c) => {
+  .delete("/area/:id", requireRole("owner", "admin", "hrd"), async (c) => {
     const auth = c.get("auth");
     const id = c.req.param("id");
     const [ada] = await db
@@ -423,7 +423,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
    * employee-major: di sini tanggal yang menjadi baris luar, sehingga owner
    * bisa membaca "hari ini siapa saja yang sudah melapor".
    */
-  .get("/rekap", requireRole("owner", "admin"), async (c) => {
+  .get("/rekap", requireRole("owner", "admin", "hrd"), async (c) => {
     const auth = c.get("auth");
     const tz = await timezoneOf(auth.company_id!);
     const hariIni = tanggalDi(tz);
@@ -512,7 +512,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
    * Ringkasan hari ini untuk badge sidebar — sengaja terpisah dari `/rekap`
    * yang memuat sebulan penuh, karena badge di-poll tiap menit.
    */
-  .get("/ringkas", requireRole("owner", "admin"), async (c) => {
+  .get("/ringkas", requireRole("owner", "admin", "hrd"), async (c) => {
     const auth = c.get("auth");
     const tz = await timezoneOf(auth.company_id!);
     const tanggal = tanggalDi(tz);
@@ -697,7 +697,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
    */
   .patch(
     "/:id/catatan",
-    requireRole("owner", "admin"),
+    requireRole("owner", "admin", "hrd"),
     zValidator("json", CatatanBody),
     async (c) => {
       const auth = c.get("auth");
@@ -733,7 +733,7 @@ export const kebersihanRoutes = new Hono<AppEnv>()
       .where(and(eq(cleaningReports.id, id), eq(cleaningReports.companyId, auth.company_id!)));
     if (!ada) throw new HTTPException(404, { message: "Laporan kebersihan tidak ditemukan" });
 
-    const manajemen = auth.role === "owner" || auth.role === "admin";
+    const manajemen = auth.role === "owner" || auth.role === "admin" || auth.role === "hrd";
     if (!manajemen) {
       if (ada.userId !== auth.sub) {
         throw new HTTPException(403, { message: "Hanya bisa menghapus laporan sendiri" });

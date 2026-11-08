@@ -144,6 +144,8 @@ function semuaBerkas(): Berkas[] {
  * alasan yang bisa diperiksa, bukan "belum sempat".
  */
 const DIKECUALIKAN = new Map<string, string>([
+  // bukan aritmetika: tanda minus di dalam literal TANGGAL "1900-01-01"
+  ["modules/gaji/routes.ts:karyawanPerusahaan", "literal tanggal '1900-01-01', bukan pengurangan"],
   // aritmetika JAM: bilangan bulat, tak berderau.
   ["index.ts:jadwalkanSapuUnggahan", "jam bulat: (BACKUP_HOUR + 1) % 24"],
   ["index.ts:jadwalkanPangkasToken", "jam bulat: (BACKUP_HOUR + 2) % 24"],

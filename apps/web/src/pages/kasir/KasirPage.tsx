@@ -988,6 +988,8 @@ export function KasirPage() {
       // open bill = pesanan yang belum dibayar → langsung tampil di papan dapur
       queryClient.invalidateQueries({ queryKey: ["pesanan"] });
       queryClient.invalidateQueries({ queryKey: ["meja-status"] });
+      // Bill memesan bahannya saat disimpan → sisa porsi menu ikut turun.
+      queryClient.invalidateQueries({ queryKey: ["menu-ketersediaan"] });
     },
   });
 

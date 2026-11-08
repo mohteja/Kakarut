@@ -81,6 +81,15 @@ const DIIZINKAN = new Map<string, { ekspresi: string[]; alasan: string }>([
     },
   ],
   [
+    "web/components/SlipGajiModal.tsx",
+    {
+      ekspresi: ['b.tebal ? "total" : ""', 'b.minus ? "minus" : ""', 'b.minus ? "− " : ""', "baris"],
+      alasan:
+        "PDF slip gaji. Tiga ternary yang KEDUA cabangnya literal, dan `baris` = potongan HTML " +
+        "yang dirakit beberapa baris di atasnya dengan label & rupiah yang sudah lewat lolosHtml.",
+    },
+  ],
+  [
     "web/pages/produksi/FakturDetailPage.tsx",
     {
       ekspresi: [

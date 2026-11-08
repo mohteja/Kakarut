@@ -29,6 +29,7 @@ const LABEL_ROLE: Record<UserRole, string> = {
   tim: "Tim",
   kitchen: "Kitchen",
   bar: "Bar",
+  hrd: "HRD",
 };
 
 /** Seberapa sering halaman tunggu menanyakan undangan baru ke server. */

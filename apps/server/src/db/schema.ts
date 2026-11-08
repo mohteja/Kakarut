@@ -24,7 +24,9 @@ import {
  * transaksi — tanpa kasir); kitchen = tim cabang STORE + produksi lokal
  * (hasil masuk stok cabangnya); bar = sama seperti kitchen tetapi DIVISI BAR —
  * hanya memproduksi resep ber-divisi_produksi "bar" (kitchen hanya "kitchen").
- * cashier, tim, kitchen & bar terikat ke satu cabang.
+ * cashier, tim, kitchen & bar terikat ke satu cabang. hrd = personalia
+ * (lintas cabang): karyawan, absen, cuti, kebersihan, penggajian — tanpa
+ * penjualan/stok/menu (dijaga `penjagaHrd` di app.ts).
  */
 export const userRoleEnum = pgEnum("user_role", [
   "owner",
@@ -33,8 +35,11 @@ export const userRoleEnum = pgEnum("user_role", [
   "tim",
   "kitchen",
   "bar",
+  "hrd",
 ]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
+/** jenis sajian kategori menu — hitungan Makanan/Minuman di papan pesanan */
+export const jenisMenuEnum = pgEnum("jenis_menu", ["makanan", "minuman"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
 /**
@@ -107,6 +112,8 @@ export const attendanceTipeEnum = pgEnum("attendance_tipe", ["masuk", "keluar"])
  * yang menurunkannya lewat `jenisKategori()` di @kakarut/shared) — klien tak
  * pernah mengirimnya, jadi mustahil ada "libur" berkategori "melahirkan".
  */
+export const gajiDasarEnum = pgEnum("gaji_dasar", ["bulanan", "harian"]);
+export const gajiPeriodeStatusEnum = pgEnum("gaji_periode_status", ["draft", "final", "dibayar"]);
 export const pengajuanJenisEnum = pgEnum("pengajuan_jenis", ["cuti", "libur"]);
 export const pengajuanKategoriEnum = pgEnum("pengajuan_kategori", [
   "tahunan",
@@ -192,6 +199,13 @@ export const companies = pgTable("companies", {
   foodCostMaks: numeric("food_cost_maks", { precision: 5, scale: 2, mode: "number" })
     .notNull()
     .default(40),
+  /** Periode gaji dimulai tanggal ini tiap bulan (1–28), mis. 25 → 25–24. */
+  gajiTanggalMulai: integer("gaji_tanggal_mulai").notNull().default(1),
+  /** Kategori cuti/libur disetujui yang DIBAYAR (`PengajuanKategori[]`). */
+  gajiCutiDibayar: jsonb("gaji_cuti_dibayar")
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'["tahunan","sakit","melahirkan","penting","mingguan","tukar_jadwal","tanggal_merah"]'::jsonb`),
   plan: text("plan").notNull().default("free"),
   planExpiresAt: timestamp("plan_expires_at", { withTimezone: true }),
   isActive: boolean("is_active").notNull().default(true),
@@ -313,10 +327,16 @@ export const memberships = pgTable(
   },
   (t) => [
     uniqueIndex("memberships_user_company_uq").on(t.userId, t.companyId),
-    // owner/admin boleh lintas cabang; peran lain (kasir, tim) wajib punya
-    // cabang. Ditulis tanpa literal 'tim' agar migrasi aman dijalankan satu
-    // transaksi dengan ALTER TYPE ADD VALUE (nilai enum baru belum bisa dipakai).
-    check("memberships_cashier_branch_ck", sql`${t.role} IN ('owner','admin') OR ${t.branchId} IS NOT NULL`),
+    // Peran LANTAI (kasir, tim, kitchen, bar — cermin `terikatCabang`) wajib
+    // punya cabang; owner/admin/hrd lintas cabang. Ditulis sebagai daftar peran
+    // yang TERIKAT, dibandingkan sebagai TEKS: migrasi berjalan satu
+    // transaksi dengan ALTER TYPE ADD VALUE, dan nilai enum yang belum
+    // ter-commit tak boleh dipakai — di DB segar itu termasuk 'tim', 'kitchen',
+    // dan 'bar' sendiri (ditambahkan migrasi lama di transaksi yang sama).
+    check(
+      "memberships_cashier_branch_ck",
+      sql`${t.role}::text NOT IN ('cashier','tim','kitchen','bar') OR ${t.branchId} IS NOT NULL`,
+    ),
     // kode karyawan unik per perusahaan (abaikan yang NULL)
     uniqueIndex("memberships_company_kode_uq")
       .on(t.companyId, t.employeeCode)
@@ -945,6 +965,12 @@ export const menuCategories = pgTable(
       .references(() => companies.id, { onDelete: "cascade" }),
     nama: text("nama").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Makanan / minuman — dasar hitungan kartu papan pesanan. Bawaan
+     * `makanan`; migrasi 0114 menebak kategori lama dari namanya, dan
+     * `POST /kategori` tanpa `jenis` menebak lewat `tebakJenisKategori`.
+     */
+    jenis: jenisMenuEnum("jenis").notNull().default("makanan"),
   },
   (t) => [uniqueIndex("menu_categories_company_nama_uq").on(t.companyId, t.nama)],
 );
@@ -1314,6 +1340,149 @@ export const leaveRequests = pgTable(
       t.tanggalMulai,
       t.tanggalSelesai,
     ),
+  ],
+);
+
+/**
+ * PENGGAJIAN (HRD, 2026-11-08). Rumusnya murni di `packages/shared/src/gaji.ts`;
+ * tabel ini menyimpan setelan, pinjaman, dan SLIP yang sudah dihitung.
+ *
+ * Setelan gaji per karyawan (satu per keanggotaan perusahaan).
+ */
+export const gajiSetelan = pgTable(
+  "gaji_setelan",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    dasar: gajiDasarEnum("dasar").notNull(),
+    nominal: numeric("nominal", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    /** "HH:MM"; null = tanpa jadwal (telat & lembur tak dihitung) */
+    jamMasuk: text("jam_masuk"),
+    jamPulang: text("jam_pulang"),
+    toleransiTelatMenit: integer("toleransi_telat_menit").notNull().default(0),
+    /** null = bawaan (bulanan: nominal ÷ 26; harian: 0) */
+    potonganAlpaPerHari: numeric("potongan_alpa_per_hari", { precision: 14, scale: 2, mode: "number" }),
+    potonganTelatPerKali: numeric("potongan_telat_per_kali", { precision: 14, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    upahLemburPerJam: numeric("upah_lembur_per_jam", { precision: 14, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    /** false = tak ikut dihitung di periode baru */
+    aktif: boolean("aktif").notNull().default(true),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("gaji_setelan_company_user_uq").on(t.companyId, t.userId)],
+);
+
+/** Tunjangan tetap per karyawan per periode (makan, transport, …). */
+export const gajiTunjangan = pgTable(
+  "gaji_tunjangan",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    nominal: numeric("nominal", { precision: 14, scale: 2, mode: "number" }).notNull(),
+  },
+  (t) => [index("gaji_tunjangan_company_user_idx").on(t.companyId, t.userId)],
+);
+
+/** Kasbon (pinjaman karyawan) — dipotong dari slip final sampai lunas. */
+export const kasbon = pgTable(
+  "kasbon",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tanggal: date("tanggal").notNull(),
+    nominal: numeric("nominal", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    cicilanPerPeriode: numeric("cicilan_per_periode", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    catatan: text("catatan"),
+    dibuatOlehUserId: uuid("dibuat_oleh_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("kasbon_company_user_idx").on(t.companyId, t.userId)],
+);
+
+/** Periode gaji: draft (bisa dihitung ulang) → final (terkunci) → dibayar. */
+export const gajiPeriode = pgTable(
+  "gaji_periode",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    mulai: date("mulai").notNull(),
+    selesai: date("selesai").notNull(),
+    status: gajiPeriodeStatusEnum("status").notNull().default("draft"),
+    difinalkanPada: timestamp("difinalkan_pada", { withTimezone: true }),
+    dibayarPada: timestamp("dibayar_pada", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("gaji_periode_company_mulai_uq").on(t.companyId, t.mulai)],
+);
+
+/**
+ * Slip gaji per periode × karyawan. `rincian` = `GajiRincian` lengkap (termasuk
+ * per hari) — potret saat dihitung, supaya slip final tak berubah walau absen
+ * atau setelan diedit sesudahnya.
+ */
+export const gajiSlip = pgTable(
+  "gaji_slip",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    periodeId: uuid("periode_id")
+      .notNull()
+      .references(() => gajiPeriode.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bonus: numeric("bonus", { precision: 14, scale: 2, mode: "number" }).notNull().default(0),
+    penyesuaian: numeric("penyesuaian", { precision: 14, scale: 2, mode: "number" }).notNull().default(0),
+    catatan: text("catatan"),
+    total: numeric("total", { precision: 14, scale: 2, mode: "number" }).notNull(),
+    rincian: jsonb("rincian").notNull(),
+    dihitungPada: timestamp("dihitung_pada", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("gaji_slip_periode_user_uq").on(t.periodeId, t.userId)],
+);
+
+/** Potongan kasbon yang TERCATAT — lahir saat periode difinalkan. */
+export const kasbonPotongan = pgTable(
+  "kasbon_potongan",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    kasbonId: uuid("kasbon_id")
+      .notNull()
+      .references(() => kasbon.id, { onDelete: "cascade" }),
+    slipId: uuid("slip_id")
+      .notNull()
+      .references(() => gajiSlip.id, { onDelete: "cascade" }),
+    nominal: numeric("nominal", { precision: 14, scale: 2, mode: "number" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("kasbon_potongan_kasbon_slip_uq").on(t.kasbonId, t.slipId),
+    index("kasbon_potongan_company_idx").on(t.companyId),
   ],
 );
 

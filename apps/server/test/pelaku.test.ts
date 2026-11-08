@@ -43,6 +43,18 @@ import { grafPanggilan, PELAKU } from "./util/panggilan";
  */
 const PELAKU_DIPILIH = new Map<string, string>([
   [
+    "modules/gaji/routes.ts:gajiSetelan.userId",
+    "SUBJEK gaji, bukan pelaku: HRD/owner mengatur gaji KARYAWAN yang dipilihnya; id divalidasi anggota perusahaan ini dan bukan owner (404/400)",
+  ],
+  [
+    "modules/gaji/routes.ts:gajiTunjangan.userId",
+    "SUBJEK tunjangan, bukan pelaku — divalidasi bersama setelan di pintu yang sama",
+  ],
+  [
+    "modules/gaji/routes.ts:kasbon.userId",
+    "PEMINJAM, bukan pelaku: divalidasi anggota perusahaan ini & bukan owner; pencatatnya `dibuatOlehUserId = auth.sub`",
+  ],
+  [
     "modules/penyimpanan/routes.ts:storageLocationPetugas.userId",
     "PUT /penyimpanan/:id/bahan menugaskan PETUGAS rak — daftar orangnya memang dipilih manajemen; tiap id divalidasi `memberships` seperusahaan & belum diarsip, dan jumlahnya wajib cocok (400 bila tidak)",
   ],
@@ -50,6 +62,10 @@ const PELAKU_DIPILIH = new Map<string, string>([
 
 /** Pembantu pembawa pelaku yang BELUM bisa dibuktikan mekanis, beralasan. */
 const BELUM_TERBUKTI = new Map<string, string>([
+  [
+    "hitungUlangPeriode",
+    "`hanyaUser` adalah SUBJEK slip yang dihitung ulang (pemilik slip yang bonusnya diubah), bukan pelaku — dipetik dari baris gaji_slip ber-company milik pemanggil",
+  ],
   [
     "catatAbsen",
     "absensi KIOS: pelakunya BUKAN pemegang token melainkan karyawan yang kode-nya diketik di perangkat bersama. `m.userId` lahir dari pencarian `memberships` ber-`auth.company_id` + belum diarsip, jadi ia terkurung — tapi ia memang bukan `auth.sub`, dan graf tak boleh dipaksa mengatakan sebaliknya",

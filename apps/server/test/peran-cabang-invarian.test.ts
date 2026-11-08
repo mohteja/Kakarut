@@ -23,7 +23,11 @@ import { userRoleEnum } from "../src/db/schema";
  * kitchen & bar TAK MUNGKIN punya `branch_id` kosong, sebab
  * `memberships_cashier_branch_ck` melarangnya:
  *
- *   role IN ('owner','admin') OR branch_id IS NOT NULL
+ *   role NOT IN ('cashier','tim','kitchen','bar') OR branch_id IS NOT NULL
+ *
+ * (Sejak peran `hrd`, 2026-11-08, CHECK menyebut peran yang TERIKAT, bukan
+ * yang bebas — nilai enum baru tak boleh dipakai di transaksi migrasi yang
+ * sama dengan ALTER TYPE ADD VALUE. Peran yang tak disebut = bebas cabang.)
  *
  * Yang membuat ini rapuh bukan kodenya, melainkan bahwa ketergantungannya tak
  * tertulis. Namanya menyebut `cashier` saja padahal ia menjaga empat peran, dan
@@ -45,15 +49,25 @@ const SCHEMA_SRC = readFileSync(
   "utf8",
 );
 
-/** Peran yang DIBEBASKAN CHECK dari kewajiban punya cabang, dibaca dari sumbernya. */
-function peranBebasCabang(): string[] {
-  const baris = SCHEMA_SRC.split("\n").find((b) =>
-    b.includes("memberships_cashier_branch_ck"),
-  );
-  if (!baris) return [];
-  const daftar = baris.match(/IN\s*\(([^)]*)\)/);
+/** Teks CHECK `memberships_cashier_branch_ck` — bisa ditulis beberapa baris. */
+function teksCheck(): string {
+  const i = SCHEMA_SRC.indexOf('"memberships_cashier_branch_ck"');
+  if (i < 0) return "";
+  return SCHEMA_SRC.slice(i, SCHEMA_SRC.indexOf("),", i));
+}
+
+/** Peran yang DIWAJIBKAN CHECK punya cabang (daftar `NOT IN (...)`). */
+function peranWajibCabangCheck(): string[] {
+  const daftar = teksCheck().match(/NOT IN\s*\(([^)]*)\)/);
   if (!daftar) return [];
   return [...daftar[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+}
+
+/** Peran yang DIBEBASKAN CHECK dari kewajiban punya cabang: enum − daftar wajib. */
+function peranBebasCabang(): string[] {
+  const wajib = new Set(peranWajibCabangCheck());
+  if (wajib.size === 0) return [];
+  return userRoleEnum.enumValues.filter((r) => !wajib.has(r));
 }
 
 describe("peran terikat cabang: invarian yang menopang gerbang gagal-terbuka", () => {
@@ -64,7 +78,8 @@ describe("peran terikat cabang: invarian yang menopang gerbang gagal-terbuka", (
     // kosong dan SELURUH uji di bawah hijau tanpa memeriksa apa pun.
     expect(SEMUA_PERAN.length).toBeGreaterThanOrEqual(4);
     expect(SCHEMA_SRC).toContain("memberships_cashier_branch_ck");
-    expect(peranBebasCabang()).toEqual(["owner", "admin"]);
+    expect(peranWajibCabangCheck()).toEqual(["cashier", "tim", "kitchen", "bar"]);
+    expect(peranBebasCabang()).toEqual(["owner", "admin", "hrd"]);
   });
 
   it("setiap peran terikat cabang WAJIB bercabang menurut CHECK", () => {

@@ -165,7 +165,7 @@ const KaryawanBody = z.object({
   nama: z.string().trim().min(1),
   email: z.string().trim().toLowerCase(),
   password: z.string().min(8, "password minimal 8 karakter"),
-  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar"]),
+  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar", "hrd"]),
   branch_id: z.string().uuid().nullish(),
 }).strict();
 
@@ -175,14 +175,14 @@ const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen", "bar"]);
 /** Undang karyawan via email (alur "menunggu diundang" — tanpa buat password). */
 const UndangBody = z.object({
   email: z.string().trim().toLowerCase().email("Email tidak valid"),
-  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar"]),
+  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar", "hrd"]),
   branch_id: z.string().uuid().nullish(),
 }).strict();
 
 const PatchKaryawanBody = z.object({
   nama: z.string().trim().min(1).optional(),
   email: z.string().trim().toLowerCase().email().optional(),
-  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar"]).optional(),
+  role: z.enum(["owner", "admin", "cashier", "tim", "kitchen", "bar", "hrd"]).optional(),
   branch_id: z.string().uuid().nullish().optional(),
   is_active: z.boolean().optional(),
   password: z.string().min(8).optional(),

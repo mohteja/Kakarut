@@ -71,6 +71,16 @@ function kolomTurunan(): string[] {
  *     melebihi notanya, selisih opname tak bisa melebihi saldo).
  */
 const PUTUSAN: Record<string, string> = {
+  // ── penggajian (2026-11-08) ─────────────────────────────────────────────
+  "gaji_slip.total": "DIJAGA pastikanMuat(rincian.total, BATAS_UANG) di hitungUlangPeriode",
+  "gaji_setelan.nominal": "medan permintaan apa adanya, zod .max(BATAS_UANG)",
+  "gaji_setelan.potongan_alpa_per_hari": "medan permintaan apa adanya, zod .max(BATAS_UANG)",
+  "gaji_setelan.potongan_telat_per_kali": "medan permintaan apa adanya, zod .max(BATAS_UANG)",
+  "gaji_setelan.upah_lembur_per_jam": "medan permintaan apa adanya, zod .max(BATAS_UANG)",
+  "gaji_tunjangan.nominal": "medan permintaan apa adanya, zod .max(BATAS_UANG)",
+  "kasbon.nominal": "medan permintaan apa adanya, zod .max(BATAS_UANG)",
+  "kasbon.cicilan_per_periode": "medan permintaan apa adanya, zod .max(BATAS_UANG)",
+  "kasbon_potongan.nominal": "≤ min(cicilan, sisa kasbon) — keduanya sudah dibatasi BATAS_UANG",
   // ── dijaga `pastikanMuat` di tempat angkanya lahir ──────────────────────
   "sale_items.line_total": "DIJAGA pastikanMuat(lineTotal, BATAS_UANG)",
   "sale_items.hpp_satuan":

@@ -18,7 +18,7 @@ import {
   PilihanAddonBody,
   snapDariBaris,
 } from "../menu/addon";
-import { kebutuhanKeranjang, pesanStokKurang } from "../penjualan/stok-keranjang";
+import { cadanganOpenBill, kebutuhanKeranjang, pesanStokKurang } from "../penjualan/stok-keranjang";
 import { bahanKurang } from "../stok/service";
 import {
   branches,
@@ -261,7 +261,11 @@ async function pastikanStokCukup(
     })),
     billDineIn,
   );
-  const kurang = await bahanKurang(db, companyId, branchId, butuh);
+  // Pesanan bill lain (dan baris lama bill INI saat diperbarui) sudah memesan
+  // bahannya — yang dicek hanya sisa yang masih bebas. `butuh` sendiri hanya
+  // memuat baris BARU, jadi baris lama tak terhitung dua kali.
+  const cadangan = await cadanganOpenBill(db, companyId, branchId, katalog);
+  const kurang = await bahanKurang(db, companyId, branchId, butuh, cadangan);
   if (kurang.length > 0) {
     throw new HTTPException(400, { message: pesanStokKurang(kurang) });
   }

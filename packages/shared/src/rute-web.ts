@@ -25,6 +25,7 @@ export const SEGMEN_RUTE_WEB: readonly string[] = [
   "bahan",
   "beranda",
   "dashboard",
+  "gaji",
   "kasir",
   "kebersihan",
   "laporan",

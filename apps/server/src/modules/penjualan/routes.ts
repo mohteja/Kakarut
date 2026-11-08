@@ -27,7 +27,7 @@ import {
 import { refundSajian } from "./refund";
 import { izinRefundKasir, POLA_PIN_REFUND } from "../../lib/pin-refund";
 import { strukPenjualan } from "./struk";
-import { gerbangBerlaku, kebutuhanKeranjang, pesanStokKurang } from "./stok-keranjang";
+import { cadanganOpenBill, gerbangBerlaku, kebutuhanKeranjang, pesanStokKurang } from "./stok-keranjang";
 import { loadKatalog } from "../menu/service";
 import { kelompokkanAddon, muatAddonPenjualan, PilihanAddonBody } from "../menu/addon";
 import { bahanKurang } from "../stok/service";
@@ -143,7 +143,10 @@ export const penjualanRoutes = new Hono<AppEnv>()
     // `db`, bukan `tx` — dan itu KONSEKUEN dengan sifatnya sebagai ramalan.
     // `bahanKurang` memakai `hitungSaldoCabang`, aturan saldo yang sama dengan
     // layar Stok dan dengan gerbangnya; yang berbeda hanya waktunya.
-    const kurang = await bahanKurang(db, auth.company_id!, branchId, butuh);
+    // Bahan yang sudah dipesan open bill lain tak boleh dijanjikan lagi; bill
+    // yang SEDANG dibayar dikecualikan — bahannya memang untuk dirinya.
+    const cadangan = await cadanganOpenBill(db, auth.company_id!, branchId, katalog, body.open_bill_id);
+    const kurang = await bahanKurang(db, auth.company_id!, branchId, butuh, cadangan);
     const akanDitolak =
       gerbangBerlaku({
         blokirJualMinus: company.blokirJualMinus,

@@ -305,7 +305,7 @@ export const pengajuanRoutes = new Hono<AppEnv>()
    * ACC / tolak — hanya owner & admin. Gerbang dipasang INLINE karena grup
    * `/pengajuan/*` sengaja terbuka untuk semua peran (semua boleh mengajukan).
    */
-  .patch("/:id", requireRole("owner", "admin"), zValidator("json", PutusBody), async (c) => {
+  .patch("/:id", requireRole("owner", "admin", "hrd"), zValidator("json", PutusBody), async (c) => {
     const auth = c.get("auth");
     const id = c.req.param("id");
     const b = c.req.valid("json");
@@ -373,7 +373,7 @@ export const pengajuanRoutes = new Hono<AppEnv>()
       .where(and(eq(leaveRequests.id, id), eq(leaveRequests.companyId, auth.company_id!)));
     if (!ada) throw new HTTPException(404, { message: "Pengajuan tidak ditemukan" });
 
-    const manajemen = auth.role === "owner" || auth.role === "admin";
+    const manajemen = auth.role === "owner" || auth.role === "admin" || auth.role === "hrd";
     if (!manajemen) {
       if (ada.userId !== auth.sub) {
         throw new HTTPException(403, { message: "Hanya bisa membatalkan pengajuan sendiri" });

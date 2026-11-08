@@ -66,8 +66,17 @@ set base URL ke `https://<host-produksi>` lalu tambahkan path (mis.
   secure storage aplikasi.
 
 ### Peran (`UserRole`)
-Enam peran: **`owner`**, **`admin`**, **`cashier`**, **`tim`**, **`kitchen`**,
-**`bar`**. Plus flag platform **`is_super_admin`** (terpisah dari peran).
+Tujuh peran: **`owner`**, **`admin`**, **`cashier`**, **`tim`**, **`kitchen`**,
+**`bar`**, **`hrd`**. Plus flag platform **`is_super_admin`** (terpisah dari peran).
+- **`hrd`** (sejak 2026-11-08) = personalia, **lintas cabang** (tanpa
+  `branch_id`, seperti admin). HANYA modul personalia: `/karyawan`, `/absensi`,
+  `/pengajuan`, `/kebersihan`, `/profil`, `/upload` (dan `/gaji`, menyusul),
+  plus **baca** `GET /company` & `GET /cabang`. Jalur lain apa pun → **403**
+  `{ error, sebab: "hrd_tidak_berwenang" }` (daftar izin `penjagaHrd`,
+  `lib/penjaga-hrd.ts`). Di dalam modulnya HRD setara owner/admin untuk: kelola
+  karyawan (kecuali menyentuh owner atau memberi peran owner → 403), `GET
+  /absensi/rekap`, ACC/tolak & hapus pengajuan, rekap/ringkas/catatan/area
+  kebersihan.
 Semantik dari middleware:
 - `requireRole(...peran)` → **403** jika `auth.role` di luar himpunan yang
   diizinkan.
@@ -75,7 +84,7 @@ Semantik dari middleware:
   perusahaan).
 - `requireSuperAdmin` → **403** kecuali `is_super_admin`.
 - `terikatCabang(role)` → true untuk **`cashier`**, **`tim`**, **`kitchen`**,
-  dan **`bar`** (peran terkunci cabang). `owner`/`admin` bebas lintas cabang.
+  dan **`bar`** (peran terkunci cabang). `owner`/`admin`/`hrd` bebas lintas cabang.
 - **`kitchen`** (BARU) = dapur cabang: semua akses `tim` di cabang store
   **plus** modul `/produksi` untuk produksi LOKAL cabangnya — hanya bahan yang
   di Resep ditandai `produksi_di: "cabang"`; hasil selesai langsung masuk stok
@@ -161,13 +170,15 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   (kitchen/bar: produksi lokal di cabang store-nya, resep divisinya saja)
 - `/pembelian/*` → **owner/admin, ATAU `tim` yang cabangnya
   `central_kitchen`** (`izinkanManajemenAtauKaryawanCk`; selain itu 403)
-- `/laporan/*`, `/rekomendasi/*`, `/sampah/*`, `/karyawan/*`, `/customer/*` →
+- `/laporan/*`, `/rekomendasi/*`, `/sampah/*`, `/customer/*` →
   `requireRole("owner","admin")`
+- `/karyawan/*` → `requireRole("owner","admin","hrd")`
 - `/open-bill/*` → `requireRole("cashier")`
 - `/shift/*` → `requireRole("owner","admin","cashier")` (BACA dibuka untuk
   owner/admin; **buka/tutup** digerbang `requireRole("cashier")` per-rute)
-- `/absensi/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar")`
-- `/pengajuan/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar")` (semua boleh mengajukan; ACC/tolak digerbang inline ke owner/admin)
+- `/absensi/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar","hrd")`
+- `/pengajuan/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar","hrd")` (semua boleh mengajukan; ACC/tolak digerbang inline ke owner/admin/hrd)
+- `/kebersihan/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar","hrd")` (rekap/area digerbang inline ke owner/admin/hrd)
 - Modul tenant lain → semua anggota perusahaan yang login (owner/admin/cashier/
   tim), dengan `requireRole(...)` per-rute & pemeriksaan kunci-cabang seperti
   dicatat.
@@ -336,9 +347,9 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## `/api/kategori` — Kategori menu (`modules/kategori/routes.ts`)
 
-- `GET /api/kategori` — [any] — res: `[{id,nama,sort_order}]`
-- `POST /api/kategori` — [owner/admin] — req: `{ nama: string, sort_order: int=0 }` — res: **201** `{id,nama,sort_order}` — error: **409** ada
-- `PATCH /api/kategori/:id` — [owner/admin] — req: `{ nama?, sort_order? }` — res: `{id,nama,sort_order}` — error: **404**
+- `GET /api/kategori` — [any] — res: `[{id,nama,sort_order,jenis}]` (`KategoriMenuDto`; `jenis`: `"makanan"|"minuman"`)
+- `POST /api/kategori` — [owner/admin] — req: `{ nama: string, sort_order: int=0, jenis?: "makanan"|"minuman" }` (tanpa `jenis` → ditebak dari nama, `tebakJenisKategori`) — res: **201** `{id,nama,sort_order,jenis}` — error: **409** ada
+- `PATCH /api/kategori/:id` — [owner/admin] — req: `{ nama?, sort_order?, jenis? }` — res: `{id,nama,sort_order,jenis}` — error: **404**
 - `DELETE /api/kategori/:id` — [owner/admin] — res: `{ ok: true }` — error: **404**, **409** masih dipakai N menu
 
 ## `/api/kategori-bahan` — Kategori bahan (`modules/kategori-bahan/routes.ts`)
@@ -359,7 +370,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 - `GET /api/menu/panduan-markup` — [any] — res: konstanta `PANDUAN_MARKUP`
 - `GET /api/menu` — [any] — query: `kategori_id?`, `semua=true` (termasuk nonaktif), `branch_id?` (owner/admin; cashier terkunci cabangnya) — res: `MenuDto[]`
-- `GET /api/menu/ketersediaan` — [any] — query: `branch_id?` — res: row sisa-porsi per menu
+- `GET /api/menu/ketersediaan` — [any] — query: `branch_id?` — res: row sisa-porsi per menu. **Sejak 2026-11-08 dihitung dari saldo yang masih BEBAS** = saldo fisik − bahan yang dipesan open bill berjalan di cabang itu (`cadanganOpenBill`; baris `batal` dan bill tertutup tak memesan). `pembatas.saldo` ikut bernilai sisa bebas itu. Saldo fisik di `GET /api/stok` tidak berubah sampai bill dibayar.
 - `GET /api/menu/analisis-harga` — **[owner/admin]** — query: `semua=true` (termasuk menu nonaktif) — res: `AnalisisHargaRow[]` (urut food cost menurun). Tiap baris = `MenuDto` + `menu_diperbarui` (`menus.updated_at`), `food_cost_maks` (ambang perusahaan) dan `penyumbang` (maks 5 bahan penyumbang HPP terbesar, masing-masing membawa `bahan_diperbarui` = `ingredients.updated_at` dan `harga_dilaporkan_pada` = `MAX(productions.laporan_harga_at)`). Dipakai menjawab "kenapa food cost naik padahal harga jual tak diubah": HPP tidak pernah disimpan, selalu dihitung ulang dari harga bahan terkini.
 - `POST /api/menu/terapkan-saran` — **[owner/admin]** — req: `{ ids: uuid[] (1..500) }` — res: `TerapkanSaranHasil` `{ diperbarui, dilewati, rincian: [{menu_id, nama, harga_lama, harga_baru, diperbarui}] }` — error: **404** bila tak satu pun id milik perusahaan. Menyetel `harga_jual = harga_jual_bulat` yang **dihitung ulang di server** (angka klien diabaikan); menu yang harganya sudah sama, atau yang saran-nya 0 (resep kosong), dilewati. Tiap perubahan menulis satu baris riwayat harga.
 - `GET /api/menu/:id` — [any] — res: `MenuDto` — error: **404**
@@ -462,7 +473,7 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 > `open_bill_item_id` terkirim.** Pastikan lewat pengujian di sisi klien, bukan
 > lewat respons server.
 - `GET /api/penjualan` — [any] — query: `branch_id?` (atau `all` untuk owner/admin), `tanggal?` (YYYY-MM-DD, default hari ini di TZ perusahaan) — res: array ringkasan sale — error: **400** format tanggal salah
-- `POST /api/penjualan/cek-stok` — **[cashier only]** — req `{ branch_id?: uuid, is_dine_in: bool=false, open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, addons?: [{id, jumlah}]}] (min 1, max 500) }` (`.strict()`; `addons` dipetakan tanpa diadili — id asing dilewati) — res: **`CekStokResult`** = `{ blokir_jual_minus, akan_ditolak, kurang: BahanKurangDto[], pesan: string|null }`. **PRACEK kecukupan stok SELURUH KERANJANG sebelum Bayar; tidak menulis apa pun.** Ada sejak 2026-09-06 karena `GET /api/menu/ketersediaan` menjawab pertanyaan yang BERBEDA — "menu ini bisa dibuat berapa porsi lagi", bukan "keranjang ini muat atau tidak" — dan keduanya menyimpang persis saat dua baris memperebutkan satu bahan. Terukur pada DB gerbang: **38 dari 57 menu** berbagi bahan pembatas dengan menu lain (12 kelompok); keranjang 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa porsi 40) membuat kedua klien DIAM sebelum `POST /api/penjualan` menolaknya. Dihitung `kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku` — fungsi yang SAMA dengan gerbangnya — dan `pesan` dirakit perakit yang sama dengan pesan penolakan, jadi ramalan dan vonis berbunyi identik (dijaga verify-api §300, dibandingkan byte per byte dari kawat). `akan_ditolak` MENCERMINKAN gerbangnya, bukan sekadar `kurang.length > 0`: ia `false` saat setelan `blokir_jual_minus` mati, dan `false` untuk `open_bill_id` (gerbangnya sengaja lewat di sana — barangnya sudah dimasak). `kurang` tetap dihitung dalam kedua keadaan itu. **RAMALAN, bukan janji** — dijalankan di luar transaksi, jadi stok bisa bergerak sebelum Bayar; gerbang sesungguhnya tetap di dalam transaksi `createSale` — error: **400** badan tak sah, **403** peran selain kasir / kasir di luar cabang, **404** perusahaan tak ada
+- `POST /api/penjualan/cek-stok` — **[cashier only]** — req `{ branch_id?: uuid, is_dine_in: bool=false, open_bill_id?: uuid, items: [{menu_id:uuid, qty:number(>0), is_dine_in?:bool, addons?: [{id, jumlah}]}] (min 1, max 500) }` (`.strict()`; `addons` dipetakan tanpa diadili — id asing dilewati) — res: **`CekStokResult`** = `{ blokir_jual_minus, akan_ditolak, kurang: BahanKurangDto[], pesan: string|null }`. **PRACEK kecukupan stok SELURUH KERANJANG sebelum Bayar; tidak menulis apa pun.** Ada sejak 2026-09-06 karena `GET /api/menu/ketersediaan` menjawab pertanyaan yang BERBEDA — "menu ini bisa dibuat berapa porsi lagi", bukan "keranjang ini muat atau tidak" — dan keduanya menyimpang persis saat dua baris memperebutkan satu bahan. Terukur pada DB gerbang: **38 dari 57 menu** berbagi bahan pembatas dengan menu lain (12 kelompok); keranjang 20 "Premium Basooopa B" (sisa porsi 26) + 20 "Favorit Set 1" (sisa porsi 40) membuat kedua klien DIAM sebelum `POST /api/penjualan` menolaknya. Dihitung `kebutuhanKeranjang` + `bahanKurang` + `gerbangBerlaku` — fungsi yang SAMA dengan gerbangnya — dan `pesan` dirakit perakit yang sama dengan pesan penolakan, jadi ramalan dan vonis berbunyi identik (dijaga verify-api §300, dibandingkan byte per byte dari kawat). `akan_ditolak` MENCERMINKAN gerbangnya, bukan sekadar `kurang.length > 0`: ia `false` saat setelan `blokir_jual_minus` mati, dan `false` untuk `open_bill_id` (gerbangnya sengaja lewat di sana — barangnya sudah dimasak). `kurang` tetap dihitung dalam kedua keadaan itu. **Sejak 2026-11-08** `kurang[].saldo` = sisa BEBAS (saldo − bahan yang dipesan open bill berjalan); bill `open_bill_id` sendiri dikecualikan dari cadangan. Gerbang `POST /api/penjualan` (tanpa `open_bill_id`) dan `POST/PUT /api/open-bill` (baris baru) memakai aturan yang sama. **RAMALAN, bukan janji** — dijalankan di luar transaksi, jadi stok bisa bergerak sebelum Bayar; gerbang sesungguhnya tetap di dalam transaksi `createSale` — error: **400** badan tak sah, **403** peran selain kasir / kasir di luar cabang, **404** perusahaan tak ada
 - `GET /api/penjualan/:id` — [any] — res: **`SaleResult`** — bentuk yang SAMA PERSIS dengan `POST /api/penjualan` (satu penulis, `strukPenjualan`; dijaga verify-api §298 dari kawat, dua arah). Biaya ditahan untuk non-manajemen, sama seperti di POST — error: **403** kasir luar cabang, **404**
 - `DELETE /api/penjualan/:id` — [owner/admin] — soft delete → Tempat Sampah — res: `{ ok, nomor }` — error: **404**
 - `POST /api/penjualan/:id/refund` — **[owner/admin/cashier]** — req: `{ alasan?: string|null, client_ref?: uuid, device_id?: string|null, pin_owner?: string (6 angka), items: [{ sale_item_id: uuid, qty: number(>0) }] (min 1) }` — res: `{ ok, nominal, total_lama, total_baru }` — error: **400** (sajian bukan milik transaksi ini / qty ≤ 0 / melebihi sisa porsi), **403** (KASIR saja, sejak 2026-10-31) `sebab`: `pin_refund_wajib` (tak mengirim `pin_owner`) · `pin_refund_belum_diatur` (belum ada owner/admin ber-PIN — minta owner mengatur di `PUT /api/profil/pin`) · `pin_refund_salah`; **429** sesudah 5 PIN salah dalam 15 menit; **404** (transaksi tak ada, sudah di Tempat Sampah, atau bukan cabang kasir ini). Owner/admin tak perlu PIN. Penyetujunya tercatat di `sale_refunds.disetujui_oleh`.
@@ -1122,7 +1133,7 @@ mereka; semua `POST` (status, sajian, per baris maupun pintasan kartu) dibalas
 **403** `{ error, sebab: "pesanan_lihat_saja" }` — penjaganya jalan sebelum
 kartu dicari. Yang menandai pesanan: cashier/tim/kitchen/bar.
 
-- `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]` — tiap `items[]` membawa `addons: AddonBarisDto[]` (snapshot add-on baris itu, untuk dapur)
+- `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]` — tiap `items[]` membawa `addons: AddonBarisDto[]` (snapshot add-on baris itu, untuk dapur) dan `jenis: "makanan"|"minuman"` (dari kategori menunya saat ini; menu/kategori yang sudah tiada = `makanan`) — dasar hitungan kotak papan grid (`hitungKirimPerJenis`)
 - `POST /api/pesanan/:jenis/:id/item/:itemId/status` — **tombol utama papan** — `:jenis` = `open_bill|penjualan`, `:itemId` = `PesananItemRow.id` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status, kartu_status }` (`kartu_status` = status kartu setelah diturunkan ulang) — error: **404** bukan cabangnya / kartu atau barisnya tak ada, **409** status baris baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
 - `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway, total_hpp }` (`total_hpp` = HPP transaksi SESUDAH hitung-ulang; `null` untuk open bill) — error: **404**, **409** bill sudah dibayar. ⚠️ **Menggeser biaya & stok** pada penjualan yang sudah dibayar — lihat blok `sajian_takeaway` di bawah.
 - `POST /api/pesanan/:jenis/:id/status` — **pintasan "semua baris"** — req: `{ status: … }` — res: `{ ok: true, status }` (status **kartu** hasil turunan) — error: sama seperti versi per baris, **tanpa** 409 balapan: perintahnya "jadikan semuanya X", jadi dua orang yang menekannya bersamaan sampai di hasil yang sama
@@ -1412,6 +1423,8 @@ Laporan:
 - `GET /api/profil` — res: `ProfilDto` `{ nama, email, role, cabang, employee_code, pin_refund_diatur }`
 - `PUT /api/profil/pin` — **[owner/admin]** — req: `{ pin: string (tepat 6 angka), password: string }` — atur/ganti PIN refund (kasir wajib mengetikkan PIN owner/admin saat refund) — res: `{ ok }` — error: **401** password salah, **403** bukan owner/admin atau akun tamu (`sebab: "akun_tamu"`)
 - `GET /api/profil/aktivitas` — res: `{ rows: [...] }` (log aktivitas faktur sendiri, maks 50)
+- `GET /api/profil/slip-gaji` — [any] res: `SlipGajiSayaRow[]` — slip MILIK SENDIRI, **hanya periode `final`/`dibayar`** (draft tak ditunjukkan), terbaru dulu
+- `GET /api/profil/slip-gaji/:id` — [any] res: `GajiSlipDetailDto` — **404** bila bukan milik pemegang token atau periodenya masih draft
 - `POST /api/profil/password` — req: `{ password_lama: string, password_baru: string (min 8) }` — res: **`{ ok: true, token, user, company, branch }`** (bentuk **sesi** yang sama seperti login) — error: **401** password lama salah. **PENTING:** ganti password menaikkan token_version → token LAMA (perangkat/tab lain) langsung jadi **401**. Endpoint ini **menerbitkan token baru** untuk tab/perangkat yang melakukan perubahan agar TIDAK ikut ter-logout — **klien WAJIB menyimpan `token` baru ini menggantikan yang lama**. Perusahaan aktif dipertahankan (penting untuk akun multi-perusahaan).
 
 ## `/api/stok` — Stok & opname (`modules/stok/routes.ts`)
@@ -1555,7 +1568,48 @@ Laporan:
 
 - `POST /api/upload` — query: `tujuan=logo|bukti|menu|resep` (default `menu`; `resep` = foto cara masak/bahan jadi/packing) — req: `multipart/form-data` field **`file`** (image/jpeg | image/png | image/webp, maks 5 MB) — res: **201** `{ url }` — error: **400** (file hilang / format salah / terlalu besar)
 
-## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin]**
+## `/api/gaji` — Penggajian (`modules/gaji/routes.ts`) — group guard **[owner/hrd]**
+
+Sejak 2026-11-08. Admin & peran lain **403**. Rumus murni di
+`packages/shared/src/gaji.ts` (`hitungSlip`); slip menyimpan `GajiRincian`
+lengkap (termasuk per hari) sebagai POTRET saat dihitung.
+
+**Aturan hitung:**
+- per hari (sama dengan Rekap Absen): ada cap absen → `hadir`; di luar masa kerja (sebelum
+  bergabung / sesudah diarsip) → `kosong`; cuti/libur disetujui → `cuti`/`libur`; hari yang
+  belum terjadi → `belum`; selain itu `alpa`.
+- **telat** = absen masuk pertama > `jam_masuk` + `toleransi_telat_menit` → `potongan_telat_per_kali`.
+- **lembur** = absen keluar terakhir − `jam_pulang`, dibulatkan ke bawah per 30 menit → `upah_lembur_per_jam`.
+  Jadwal lewat tengah malam didukung. Hadir tanpa absen pulang → `lupa_pulang`, lembur tak dihitung.
+- **bulanan**: `nominal × hari_aktif ÷ hari_periode` (prorata masuk/keluar) + tunjangan + lembur + bonus
+  + penyesuaian − (alpa + cuti tak dibayar) × `potongan_alpa_per_hari` (null = nominal ÷ 26) − telat.
+- **harian**: `nominal × (hadir + cuti dibayar)` + tunjangan + lembur + bonus + penyesuaian − telat.
+- cuti/libur **dibayar** menurut kategorinya (`GajiSetelanPerusahaanDto.cuti_dibayar`).
+- **kasbon**: tiap pinjaman dipotong min(cicilan, sisa), tak melebihi gaji tersedia — total tak pernah < 0
+  (`kurang` mencatat kekurangannya).
+
+**Rute:**
+- `GET /api/gaji/setelan` → `GajiSetelanPerusahaanDto`; `PUT` sama — req `{ tanggal_mulai: 1..28, cuti_dibayar: PengajuanKategori[] }`
+- `GET /api/gaji/karyawan` → `GajiKaryawanRow[]` (semua karyawan non-owner, termasuk yang diarsip, + setelan, tunjangan, `kasbon_sisa`)
+- `PUT /api/gaji/karyawan/:userId` — req `GajiSetelanKaryawanDto & { tunjangan: GajiTunjanganDto[] }` (tunjangan DIGANTI seluruhnya) — **400** owner, **404** bukan anggota
+- `GET /api/gaji/kasbon?user_id=` → `KasbonRow[]`; `POST` req `{ user_id, tanggal (≤ hari ini, ≤ 366 hari lalu), nominal, cicilan_per_periode, catatan? }` → 201 `{ id }`;
+  `PATCH /:id` req `{ cicilan_per_periode?, catatan? }`; `DELETE /:id` — **409** bila sudah pernah dipotong
+- `GET /api/gaji/periode` → `GajiPeriodeRow[]` (terbaru dulu)
+- `POST /api/gaji/periode` — req `{ mulai?, selesai? }` → 201 `GajiPeriodeDetailDto`. `mulai` kosong = sesudah periode terakhir
+  (atau periode bulanan yang memuat hari ini); `selesai` kosong = mulai + 1 bulan − 1 hari; diisi = **periode khusus** (≤ 62 hari).
+  Langsung menghitung slip semua karyawan bersetelan aktif. **400** periode belum dimulai, **409** bertindih.
+- `GET /api/gaji/periode/:id` → `GajiPeriodeDetailDto` (`tanpa_setelan` = karyawan aktif tanpa setelan, tak ikut dihitung)
+- `POST /api/gaji/periode/:id/hitung-ulang` — draft saja; bonus/penyesuaian/catatan dipertahankan, **id slip tetap**
+- `PATCH /api/gaji/slip/:id` — req `{ bonus? (≥0), penyesuaian? (±), catatan? }` → `GajiSlipDetailDto` — draft saja
+- `GET /api/gaji/slip/:id` → `GajiSlipDetailDto`
+- `POST /api/gaji/periode/:id/final` — draft → final: dihitung segar sekali lagi lalu dikunci; potongan kasbon TERCATAT
+  (sisa kasbon berkurang). **400** bila tanggal selesai belum lewat.
+- `POST /api/gaji/periode/:id/dibayar` — final → dibayar
+- `POST /api/gaji/periode/:id/buka` — final → draft, **owner saja** (403 HRD); potongan kasbon periode itu dibatalkan
+- `DELETE /api/gaji/periode/:id` — draft saja
+- Periode/slip yang tak lagi draft → **409** `sebab: "periode_terkunci"`.
+
+## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin/hrd]**
 
 - `GET /api/karyawan` — query: `arsip=true` (daftar arsip) — res: row karyawan
 - `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen"|"bar", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen/bar butuh cabang; mismatch peran/tipe cabang — kitchen/bar hanya cabang store), **403** hanya owner boleh buat owner, **409** email sudah karyawan aktif / sudah punya undangan pending — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)* **SEJAK 2026-10-26: email yang SUDAH punya akun tak lagi 409** — balasannya **200** `KaryawanDiundangResult` = `{ diundang: true, id, email, role }`: dibuat undangan pending (peran & cabang sama), `password` diabaikan, tanpa surel; orangnya menekan Terima di halaman welcome. Klien wajib membedakan 200 `diundang` dari 201 akun baru.
@@ -2543,6 +2597,18 @@ export interface KategoriDto {
   id: string;
   nama: string;
   sort_order: number;
+}
+
+/**
+ * Jenis sajian sebuah kategori MENU — dasar hitungan "🍜 Makanan / 🥤 Minuman"
+ * di papan pesanan (permintaan pemilik, 2026-11-08). Diatur per kategori;
+ * kategori baru ditebak dari namanya (`tebakJenisKategori`).
+ */
+export type JenisMenu = "makanan" | "minuman";
+
+/** `GET /kategori` (kategori MENU) — kategori bahan tetap `KategoriDto`. */
+export interface KategoriMenuDto extends KategoriDto {
+  jenis: JenisMenu;
 }
 
 /**
@@ -4662,6 +4728,11 @@ export interface PesananItemRow {
    * take away benar-benar terpakai dan stoknya berkurang.
    */
   sajian_takeaway: boolean;
+  /**
+   * Makanan atau minuman — dari kategori menunya SAAT INI (menu tanpa
+   * kategori / sudah terhapus = makanan). Dasar hitungan kartu papan.
+   */
+  jenis: JenisMenu;
   /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
   status_oleh: string | null;
   status_pada: string | null;
@@ -5315,6 +5386,196 @@ export interface RekapAbsenDto {
    */
   hari_terhitung: number;
   rows: RekapAbsenRow[];
+}
+
+/* ===== Penggajian (HRD, 2026-11-08) — rumus di `gaji.ts` ===== */
+
+export type GajiDasar = "bulanan" | "harian";
+export type GajiPeriodeStatus = "draft" | "final" | "dibayar";
+/**
+ * Status hari: dari rekap absen (`nilaiHariRekap`), plus `belum` = hari dalam
+ * masa kerja yang belum terjadi (periode dihitung di tengah jalan) — bukan
+ * alpa, tak dibayar harian, tapi tetap masa kerja untuk prorata bulanan.
+ */
+export type GajiHariStatus = "hadir" | "alpa" | "cuti" | "libur" | "kosong" | "belum";
+
+export interface GajiHariMasukan {
+  tanggal: string;
+  status: GajiHariStatus;
+  kategori: PengajuanKategori | null;
+  /** Menit sejak 00:00 tanggal itu (zona perusahaan) — absen masuk pertama. */
+  masuk_menit: number | null;
+  /** Menit sejak 00:00 tanggal itu; lewat tengah malam bisa > 1440. */
+  keluar_menit: number | null;
+}
+
+export interface GajiHariHasil extends GajiHariMasukan {
+  /** Hadir, atau cuti/libur berkategori dibayar. */
+  dibayar: boolean;
+  telat_menit: number;
+  lembur_menit: number;
+  /** Hadir tanpa absen pulang — lembur tak bisa dihitung. */
+  lupa_pulang: boolean;
+}
+
+export interface GajiTunjanganDto {
+  nama: string;
+  nominal: number;
+}
+
+/** Rincian satu slip — potret saat dihitung (`hitungSlip`). Uang dalam rupiah bulat. */
+export interface GajiRincian {
+  dasar: GajiDasar;
+  nominal: number;
+  hari_periode: number;
+  /** Hari dalam masa kerja (di luar sebelum bergabung / sesudah keluar). */
+  hari_aktif: number;
+  hadir: number;
+  alpa: number;
+  cuti_dibayar: number;
+  cuti_tak_dibayar: number;
+  telat_kali: number;
+  telat_menit: number;
+  lembur_menit: number;
+  lupa_pulang: number;
+  gaji_pokok: number;
+  tunjangan: GajiTunjanganDto[];
+  tunjangan_total: number;
+  upah_lembur: number;
+  potongan_alpa_per_hari: number;
+  potongan_alpa: number;
+  potongan_cuti_tak_dibayar: number;
+  potongan_telat: number;
+  bonus: number;
+  penyesuaian: number;
+  /** Sebelum kasbon. */
+  bruto: number;
+  kasbon: { id: string; nominal: number }[];
+  potongan_kasbon: number;
+  total: number;
+  /** Kekurangan yang tak bisa dipotong karena gaji sudah 0. */
+  kurang: number;
+  harian: GajiHariHasil[];
+}
+
+/** `GET/PUT /gaji/setelan` — pengaturan penggajian perusahaan. */
+export interface GajiSetelanPerusahaanDto {
+  /** 1–28: periode dimulai tanggal ini tiap bulan */
+  tanggal_mulai: number;
+  /** Kategori cuti/libur disetujui yang dibayar */
+  cuti_dibayar: PengajuanKategori[];
+}
+
+/** Setelan gaji satu karyawan (`PUT /gaji/karyawan/:userId`). */
+export interface GajiSetelanKaryawanDto {
+  dasar: GajiDasar;
+  nominal: number;
+  /** "HH:MM" atau null (tanpa jadwal: telat & lembur tak dihitung) */
+  jam_masuk: string | null;
+  jam_pulang: string | null;
+  toleransi_telat_menit: number;
+  /** null = bawaan (bulanan: nominal ÷ 26; harian: 0) */
+  potongan_alpa_per_hari: number | null;
+  potongan_telat_per_kali: number;
+  upah_lembur_per_jam: number;
+  aktif: boolean;
+}
+
+/** `GET /gaji/karyawan` — satu baris per karyawan (tanpa owner). */
+export interface GajiKaryawanRow {
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole;
+  cabang: string | null;
+  arsip_pada: string | null;
+  /** null = belum diatur (tak ikut dihitung) */
+  setelan: GajiSetelanKaryawanDto | null;
+  tunjangan: GajiTunjanganDto[];
+  /** Σ sisa kasbon yang belum lunas */
+  kasbon_sisa: number;
+}
+
+/** `GET /gaji/kasbon` */
+export interface KasbonRow {
+  id: string;
+  user_id: string;
+  nama: string;
+  tanggal: string;
+  nominal: number;
+  cicilan_per_periode: number;
+  catatan: string | null;
+  /** Σ potongan dari slip yang sudah final/dibayar */
+  terpotong: number;
+  sisa: number;
+  lunas: boolean;
+  created_at: string;
+}
+
+/** Ringkas satu periode (`GET /gaji/periode`). */
+export interface GajiPeriodeRow {
+  id: string;
+  mulai: string;
+  selesai: string;
+  status: GajiPeriodeStatus;
+  jumlah_slip: number;
+  total: number;
+  difinalkan_pada: string | null;
+  dibayar_pada: string | null;
+}
+
+/** Satu baris slip di tabel periode — angka ringkas dari `GajiRincian`. */
+export interface GajiSlipRow {
+  id: string;
+  periode_id: string;
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole | null;
+  cabang: string | null;
+  dasar: GajiDasar;
+  hadir: number;
+  alpa: number;
+  cuti_dibayar: number;
+  cuti_tak_dibayar: number;
+  telat_kali: number;
+  lembur_menit: number;
+  lupa_pulang: number;
+  gaji_pokok: number;
+  tunjangan_total: number;
+  upah_lembur: number;
+  bonus: number;
+  penyesuaian: number;
+  /** alpa + cuti tak dibayar + telat (tanpa kasbon) */
+  potongan: number;
+  potongan_kasbon: number;
+  total: number;
+  catatan: string | null;
+}
+
+/** `GET /gaji/periode/:id` */
+export interface GajiPeriodeDetailDto {
+  periode: GajiPeriodeRow;
+  slip: GajiSlipRow[];
+  /** Karyawan aktif yang belum punya setelan gaji — tak ikut dihitung */
+  tanpa_setelan: { user_id: string; nama: string }[];
+}
+
+/** `GET /gaji/slip/:id` & `GET /profil/slip-gaji/:id` */
+export interface GajiSlipDetailDto {
+  slip: GajiSlipRow;
+  periode: GajiPeriodeRow;
+  perusahaan: string;
+  rincian: GajiRincian;
+}
+
+/** `GET /profil/slip-gaji` — slip milik sendiri (periode final/dibayar saja). */
+export interface SlipGajiSayaRow {
+  id: string;
+  mulai: string;
+  selesai: string;
+  status: GajiPeriodeStatus;
+  total: number;
 }
 
 /* ===== Laporan kebersihan harian ===== */

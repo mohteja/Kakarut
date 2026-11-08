@@ -21,6 +21,8 @@ import { db, type Tx } from "../../db/client";
 import {
   companies,
   meja,
+  menuCategories,
+  menus,
   openBillItems,
   openBills,
   pesananLogs,
@@ -452,9 +454,24 @@ export const pesananRoutes = new Hono<AppEnv>()
             statusPada: openBillItems.pesananStatusAt,
             statusOleh: users.nama,
             masukPada: openBillItems.pesananMasukAt,
+            // Jenis dari kategori menu SAAT INI; menu/kategori yang sudah
+            // tiada → makanan (lihat `PesananItemRow.jenis`).
+            jenis: menuCategories.jenis,
           })
           .from(openBillItems)
           .leftJoin(users, eq(openBillItems.pesananStatusOleh, users.id))
+          // Terkurung perusahaan: menu & kategori milik tenant ini saja.
+          .leftJoin(
+            menus,
+            and(eq(menus.id, openBillItems.menuId), eq(menus.companyId, auth.company_id!)),
+          )
+          .leftJoin(
+            menuCategories,
+            and(
+              eq(menuCategories.id, menus.categoryId),
+              eq(menuCategories.companyId, auth.company_id!),
+            ),
+          )
           .where(inArray(openBillItems.billId, billIds));
         // Add-on: satu kueri untuk seluruh papan, terkurung perusahaan.
         const addonBill = kelompokkanAddon(
@@ -481,6 +498,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             is_dine_in: r.dineInOverride ?? true,
             status: r.status,
             sajian_takeaway: r.sajianTakeaway,
+            jenis: r.jenis ?? "makanan",
             status_oleh: r.statusOleh ?? null,
             status_pada: r.statusPada ? r.statusPada.toISOString() : null,
             masuk_pada: r.masukPada.toISOString(),
@@ -506,9 +524,24 @@ export const pesananRoutes = new Hono<AppEnv>()
             statusPada: saleItems.pesananStatusAt,
             statusOleh: users.nama,
             masukPada: saleItems.pesananMasukAt,
+            // Jenis dari kategori menu SAAT INI; menu/kategori yang sudah
+            // tiada → makanan (lihat `PesananItemRow.jenis`).
+            jenis: menuCategories.jenis,
           })
           .from(saleItems)
           .leftJoin(users, eq(saleItems.pesananStatusOleh, users.id))
+          // Terkurung perusahaan: menu & kategori milik tenant ini saja.
+          .leftJoin(
+            menus,
+            and(eq(menus.id, saleItems.menuId), eq(menus.companyId, auth.company_id!)),
+          )
+          .leftJoin(
+            menuCategories,
+            and(
+              eq(menuCategories.id, menus.categoryId),
+              eq(menuCategories.companyId, auth.company_id!),
+            ),
+          )
           .where(inArray(saleItems.saleId, saleIds));
         const addonSale = kelompokkanAddon(
           await muatAddonPenjualan(
@@ -534,6 +567,7 @@ export const pesananRoutes = new Hono<AppEnv>()
             is_dine_in: r.isDineIn,
             status: r.status,
             sajian_takeaway: r.sajianTakeaway,
+            jenis: r.jenis ?? "makanan",
             status_oleh: r.statusOleh ?? null,
             status_pada: r.statusPada ? r.statusPada.toISOString() : null,
             masuk_pada: r.masukPada.toISOString(),

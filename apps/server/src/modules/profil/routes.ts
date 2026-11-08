@@ -11,6 +11,9 @@ import { verifikasiPassword, type AppEnv } from "../../middleware/auth";
 import { buatSesi } from "../auth/session";
 import { HTTPException } from "hono/http-exception";
 import { POLA_PIN_REFUND } from "../../lib/pin-refund";
+import type { SlipGajiSayaRow } from "@kakarut/shared";
+import { daftarSlip } from "../gaji/service";
+import { slipDetail, slipMilikSendiri } from "../gaji/routes";
 
 const PinBody = z
   .object({
@@ -67,6 +70,28 @@ export const profilRoutes = new Hono<AppEnv>()
     } satisfies ProfilDto);
   })
   /** Riwayat kegiatan SENDIRI (log faktur yang dilakukan akun ini). */
+  /**
+   * Slip gaji MILIK SENDIRI — semua peran, hanya periode yang sudah final atau
+   * dibayar (draft masih bisa berubah, jadi belum ditunjukkan ke karyawannya).
+   */
+  .get("/slip-gaji", async (c) => {
+    const auth = c.get("auth");
+    if (!auth.company_id) return c.json([]);
+    const rows = await slipMilikSendiri(auth.company_id, auth.sub);
+    const out: SlipGajiSayaRow[] = rows.map((r) => ({ ...r }));
+    return c.json(out);
+  })
+  .get("/slip-gaji/:id", async (c) => {
+    const auth = c.get("auth");
+    if (!auth.company_id) throw new HTTPException(404, { message: "Slip tidak ditemukan" });
+    const milik = await slipMilikSendiri(auth.company_id, auth.sub);
+    if (!milik.some((m) => m.id === c.req.param("id"))) {
+      throw new HTTPException(404, { message: "Slip tidak ditemukan" });
+    }
+    const [s] = await daftarSlip(db, auth.company_id, { slipId: c.req.param("id"), userId: auth.sub });
+    if (!s) throw new HTTPException(404, { message: "Slip tidak ditemukan" });
+    return c.json(await slipDetail(auth.company_id, s));
+  })
   .get("/aktivitas", async (c) => {
     const auth = c.get("auth");
     if (!auth.company_id) return c.json({ rows: [] });

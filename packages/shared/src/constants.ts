@@ -200,7 +200,7 @@ export const PANDUAN_MARKUP: { kategori: string; persen: string; keterangan: str
 ];
 
 export type StokStatus = "habis" | "menipis" | "aman";
-export type UserRole = "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar";
+export type UserRole = "owner" | "admin" | "cashier" | "tim" | "kitchen" | "bar" | "hrd";
 
 /**
  * SIAPA BOLEH MELIHAT ANGKA BIAYA — HPP menu, harga beli bahan, biaya resep.

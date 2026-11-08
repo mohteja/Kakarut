@@ -3,10 +3,13 @@ import { createContext, useContext, useEffect, useState } from "react";
 import {
   durasiPesananDetik,
   dibatalkanDapur,
+  hitungKirimPerJenis,
   ringkasAddon,
   ringkasPesanan,
   sajianBedaDariNota,
   urutkanPesanan,
+  type HitungKirim,
+  type JenisMenu,
   type PesananItemRow,
   type PesananLogRow,
   type PesananRow,
@@ -25,11 +28,26 @@ import {
   hariIniWIB,
 } from "../../lib/format";
 
-const KOLOM: { status: PesananStatus; judul: string; warna: string }[] = [
-  { status: "dikerjakan", judul: "🔥 Dikerjakan", warna: "border-orange-300 bg-orange-50" },
-  { status: "selesai", judul: "✅ Selesai", warna: "border-green-300 bg-green-50" },
-  { status: "batal", judul: "✖ Batal", warna: "border-stone-300 bg-stone-100" },
+/**
+ * Saringan papan GRID (permintaan pemilik 2026-11-08: kanban tiga kolom
+ * diganti grid kotak 4 kolom — "sekarang harus lama scroll apabila banyak
+ * orderan"). Bawaannya yang masih dikerjakan: itulah yang dicari dapur.
+ */
+type Saringan = PesananStatus | "semua";
+const SARINGAN: { nilai: Saringan; judul: string }[] = [
+  { nilai: "dikerjakan", judul: "🔥 Dikerjakan" },
+  { nilai: "selesai", judul: "✅ Selesai" },
+  { nilai: "batal", judul: "✖ Batal" },
+  { nilai: "semua", judul: "Semua" },
 ];
+
+/** Lewat dari ini, kotak yang belum rampung bergaris merah. */
+const MENIT_LAMA = 15;
+
+const LABEL_JENIS: Record<JenisMenu, string> = {
+  makanan: "🍛 Makanan",
+  minuman: "🥤 Minuman",
+};
 
 const CHIP_BARIS: Record<PesananStatus, string> = {
   dikerjakan: "bg-orange-100 text-orange-800",
@@ -274,6 +292,111 @@ function BarisPesanan({
   );
 }
 
+/** Satu kotak hitungan jenis: "2/3 dikirim" + bilah kemajuan. */
+function HitungJenis({ jenis, h }: { jenis: JenisMenu; h: HitungKirim }) {
+  return (
+    <div className="rounded-lg bg-stone-50 px-2 py-1.5" data-testid={`hitung-${jenis}`}>
+      <div className="text-[11px] text-stone-500">{LABEL_JENIS[jenis]}</div>
+      {h.total === 0 ? (
+        <div className="text-sm font-bold text-stone-300">—</div>
+      ) : (
+        <>
+          <div className="text-sm font-bold text-stone-800">
+            {h.dikirim}
+            <span className="text-[11px] font-medium text-stone-500">/{h.total} dikirim</span>
+          </div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-stone-200">
+            <div
+              className="h-full bg-green-600"
+              style={{ width: `${Math.round((h.dikirim / h.total) * 100)}%` }}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * KOTAK GRID — ringkasan satu pesanan: siapa, sudah berapa lama, berapa
+ * makanan & minuman yang sudah dan belum dikirim, dan pratinjau tiga menu
+ * (yang belum dulu). Ketuk untuk membuka detail dengan tombol per sajian.
+ */
+function KotakPesanan({ p, onBuka }: { p: PesananRow; onBuka: () => void }) {
+  const judul = p.nomor ?? p.meja ?? "Pesanan";
+  const siapa = p.customer ?? (p.nomor ? p.meja : null);
+  const hitung = hitungKirimPerJenis(p.items);
+  const menit = Math.floor((Date.now() - new Date(p.waktu).getTime()) / 60000);
+  const batal = dibatalkanDapur(p.status);
+  const selesai = p.status === "selesai";
+  const lama = !selesai && !batal && menit > MENIT_LAMA;
+  const perluDitagih = !p.dibayar && !batal;
+  const hidup = p.items.filter((it) => !dibatalkanDapur(it.status));
+  // Pratinjau: yang BELUM dikirim dulu — itu yang perlu dikerjakan.
+  const urut = [
+    ...hidup.filter((it) => it.status !== "selesai"),
+    ...hidup.filter((it) => it.status === "selesai"),
+  ];
+  const tampil = urut.slice(0, 3);
+  const garis = batal
+    ? "border-l-stone-300 opacity-70"
+    : selesai
+      ? "border-l-green-600"
+      : lama
+        ? "border-l-red-600"
+        : "border-l-orange-500";
+  return (
+    <button
+      type="button"
+      onClick={onBuka}
+      data-testid="kotak-pesanan"
+      className={`flex min-h-[11rem] w-full flex-col gap-2 rounded-xl border border-l-4 bg-white p-3 text-left shadow-sm transition hover:shadow-md ${garis} ${
+        perluDitagih ? "border-amber-300" : "border-stone-200"
+      }`}
+    >
+      <div className="flex w-full items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="break-words font-bold leading-tight text-stone-800">{judul}</div>
+          {siapa && <div className="truncate text-xs font-medium text-orange-600">👤 {siapa}</div>}
+          <div className="text-[11px] text-stone-500">
+            {formatWaktu(p.waktu)}
+            {perluDitagih ? " · belum dibayar" : ""}
+          </div>
+        </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+            batal
+              ? "bg-stone-100 text-stone-500"
+              : selesai
+                ? "bg-green-50 text-green-700"
+                : lama
+                  ? "bg-red-50 text-red-700"
+                  : "bg-orange-50 text-orange-700"
+          }`}
+        >
+          {batal ? "✖ batal" : selesai ? "✅ selesai" : `⏱ ${lamaMenunggu(p.waktu)}`}
+        </span>
+      </div>
+      <div className="grid w-full grid-cols-2 gap-1.5">
+        <HitungJenis jenis="makanan" h={hitung.makanan} />
+        <HitungJenis jenis="minuman" h={hitung.minuman} />
+      </div>
+      <ul className="w-full space-y-0.5 text-xs">
+        {tampil.map((it) => (
+          <li
+            key={it.id}
+            className={`truncate ${it.status === "selesai" ? "text-stone-400 line-through" : "text-stone-700"}`}
+          >
+            {it.status === "selesai" ? "✓" : "⏳"} {it.qty}× {it.nama}
+          </li>
+        ))}
+        {urut.length > 3 && <li className="text-stone-400">+{urut.length - 3} menu lainnya</li>}
+        {hidup.length === 0 && <li className="text-stone-400">Tanpa sajian.</li>}
+      </ul>
+    </button>
+  );
+}
+
 function KartuPesanan({
   p,
   onStatusItem,
@@ -354,17 +477,35 @@ function KartuPesanan({
         )}
       </div>
 
-      <ul className="mt-2 space-y-1.5 border-t border-stone-100 pt-2">
-        {p.items.map((it) => (
-          <BarisPesanan
-            key={it.id}
-            it={it}
-            onStatus={(status) => onStatusItem(it.id, status)}
-            onSajian={(takeaway) => onSajianItem(it.id, takeaway)}
-          />
-        ))}
-        {p.items.length === 0 && <li className="text-xs text-stone-400">Tanpa item.</li>}
-      </ul>
+      {/* Dikelompokkan Makanan / Minuman — dapur dan bar mencari bagiannya
+          sendiri. Satu jenis saja → tanpa judul kelompok. */}
+      {(["makanan", "minuman"] as const).map((jenis) => {
+        const isi = p.items.filter((it) => it.jenis === jenis);
+        if (isi.length === 0) return null;
+        const duaJenis = p.items.some((it) => it.jenis !== jenis);
+        return (
+          <div key={jenis} className="mt-2 border-t border-stone-100 pt-2">
+            {duaJenis && (
+              <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-stone-400">
+                {LABEL_JENIS[jenis]}
+              </div>
+            )}
+            <ul className="space-y-1.5">
+              {isi.map((it) => (
+                <BarisPesanan
+                  key={it.id}
+                  it={it}
+                  onStatus={(status) => onStatusItem(it.id, status)}
+                  onSajian={(takeaway) => onSajianItem(it.id, takeaway)}
+                />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+      {p.items.length === 0 && (
+        <div className="mt-2 border-t border-stone-100 pt-2 text-xs text-stone-400">Tanpa item.</div>
+      )}
       {p.catatan && (
         <div className="mt-2 rounded-lg bg-orange-50 px-2 py-1 text-xs text-orange-800">
           📝 {p.catatan}
@@ -455,7 +596,9 @@ export function PesananPage() {
   }, []);
   const [tanggalPilihan, setTanggalPilihan] = useState<string | null>(null);
   const tanggal = tanggalPilihan ?? hariIni;
-  const [fokus, setFokus] = useState<PesananStatus>("dikerjakan");
+  const [saringan, setSaringan] = useState<Saringan>("dikerjakan");
+  /** kunci `jenis:id` pesanan yang detailnya sedang dibuka */
+  const [dibuka, setDibuka] = useState<string | null>(null);
   const [riwayat, setRiwayat] = useState<PesananRow | null>(null);
 
   const kunci = ["pesanan", branchQuery, tanggal];
@@ -628,7 +771,20 @@ export function PesananPage() {
   const galat = statusItem.error ?? sajianItem.error ?? pindahSelesai.error;
 
   const rows = data ?? [];
-  const perKolom = (s: PesananStatus) => rows.filter((r) => r.status === s);
+  const perSaringan = (s: Saringan) => (s === "semua" ? rows : rows.filter((r) => r.status === s));
+  /**
+   * Yang TAMPIL di grid. Saringan "Dikerjakan" diurutkan dari yang PALING LAMA
+   * menunggu (kiri atas) — antrean dapur dikerjakan dari yang masuk duluan.
+   * Saringan lain mengikuti urutan papan (yang terakhir disentuh di atas).
+   */
+  const tampilGrid =
+    saringan === "dikerjakan"
+      ? [...perSaringan(saringan)].sort((a, b) => a.waktu.localeCompare(b.waktu))
+      : perSaringan(saringan);
+  const kunciKartu = (p: PesananRow) => `${p.jenis}:${p.id}`;
+  // Detail selalu dibaca dari `rows` terbaru: kartu yang terbuka ikut bergerak
+  // saat sajiannya ditandai (optimistis maupun hasil polling).
+  const pesananDibuka = dibuka ? rows.find((r) => kunciKartu(r) === dibuka) : undefined;
   const sajianJalan = rows.reduce(
     (n, r) => n + r.items.filter((i) => i.status === "dikerjakan").length,
     0,
@@ -663,7 +819,7 @@ export function PesananPage() {
 
   return (
     <LihatSaja.Provider value={lihatSaja}>
-    <div className="max-w-6xl">
+    <div className="max-w-7xl">
       <PageTitle>Papan Pesanan Masuk</PageTitle>
       <CabangDataBar />
       {lihatSaja && (
@@ -744,21 +900,21 @@ export function PesananPage() {
         </div>
       )}
 
-      {/* Ponsel: satu kolom + chip pemilih; desktop: tiga kolom berdampingan */}
-      {/* Chip pemilih ikut menyembunyikan diri saat papan tak terbaca: "(0)"
-          pada ketiga chip adalah pernyataan yang sama, cuma lebih kecil. */}
-      <div className={`mb-3 gap-2 md:hidden ${gagalTotal ? "hidden" : "flex"}`}>
-        {KOLOM.map((k) => (
+      {/* Saringan + cacahnya. Ikut menyembunyikan diri saat papan tak terbaca:
+          "(0)" pada tiap chip adalah pernyataan "tak ada pesanan", cuma kecil. */}
+      <div className={`mb-3 flex-wrap gap-2 ${gagalTotal ? "hidden" : "flex"}`}>
+        {SARINGAN.map((k) => (
           <button
-            key={k.status}
-            onClick={() => setFokus(k.status)}
-            className={`flex-1 rounded-lg px-2 py-2 text-xs font-semibold ${
-              fokus === k.status
+            key={k.nilai}
+            onClick={() => setSaringan(k.nilai)}
+            data-testid={`saringan-${k.nilai}`}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+              saringan === k.nilai
                 ? "bg-orange-600 text-white"
                 : "bg-white text-stone-600 ring-1 ring-stone-200"
             }`}
           >
-            {k.judul} ({perKolom(k.status).length})
+            {k.judul} ({perSaringan(k.nilai).length})
           </button>
         ))}
       </div>
@@ -782,37 +938,40 @@ export function PesananPage() {
           </p>
         </Card>
       ) : (
-        <div className="grid gap-3 md:grid-cols-3">
-          {KOLOM.map((k) => {
-            const isi = perKolom(k.status);
-            return (
-              <section
-                key={k.status}
-                className={`${fokus === k.status ? "" : "hidden md:block"} rounded-xl border ${k.warna} p-2`}
-              >
-                <h2 className="mb-2 px-1 text-sm font-bold text-stone-700">
-                  {k.judul} <span className="text-stone-400">({isi.length})</span>
-                </h2>
-                <div className="space-y-2">
-                  {isi.map((p) => (
-                    <KartuPesanan
-                      key={`${p.jenis}:${p.id}`}
-                      p={p}
-                      onStatusItem={(itemId, status) => statusItem.mutate({ p, itemId, status })}
-                      onSajianItem={(itemId, takeaway) => sajianItem.mutate({ p, itemId, takeaway })}
-                      onPindahSelesai={() => pindahSelesai.mutate({ p })}
-                      onRiwayat={() => setRiwayat(p)}
-                    />
-                  ))}
-                  {isi.length === 0 && (
-                    <Card className="p-6 text-center text-xs text-stone-400">Kosong.</Card>
-                  )}
-                </div>
-              </section>
-            );
-          })}
-        </div>
+        <>
+          {/* Grid kotak: 4 kolom di layar lebar, menyusut ke 3/2 di layar
+              sempit. */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+            {tampilGrid.map((p) => (
+              <KotakPesanan key={kunciKartu(p)} p={p} onBuka={() => setDibuka(kunciKartu(p))} />
+            ))}
+          </div>
+          {tampilGrid.length === 0 && (
+            <Card className="p-6 text-center text-sm text-stone-400">Kosong.</Card>
+          )}
+        </>
       )}
+
+      {/* Detail: kartu lengkap — tombol per sajian, bawa pulang, pindahkan ke
+          selesai, riwayat. Pesanan yang hilang dari daftar menutup dirinya. */}
+      <Modal
+        open={pesananDibuka !== undefined}
+        onClose={() => setDibuka(null)}
+        title={pesananDibuka ? (pesananDibuka.nomor ?? pesananDibuka.meja ?? "Pesanan") : ""}
+        lebar="max-w-xl"
+      >
+        {pesananDibuka && (
+          <KartuPesanan
+            p={pesananDibuka}
+            onStatusItem={(itemId, status) => statusItem.mutate({ p: pesananDibuka, itemId, status })}
+            onSajianItem={(itemId, takeaway) =>
+              sajianItem.mutate({ p: pesananDibuka, itemId, takeaway })
+            }
+            onPindahSelesai={() => pindahSelesai.mutate({ p: pesananDibuka })}
+            onRiwayat={() => setRiwayat(pesananDibuka)}
+          />
+        )}
+      </Modal>
 
       {riwayat && (
         <RiwayatModal

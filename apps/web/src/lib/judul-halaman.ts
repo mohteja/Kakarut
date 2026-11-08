@@ -55,6 +55,12 @@ export const JUDUL_RUTE: Record<string, string> = {
   "/rekap-kebersihan": "Rekap Kebersihan",
   "/profil": "Profil Saya",
 
+  // Penggajian (owner & HRD)
+  "/gaji": "Penggajian",
+  "/gaji/periode/:id": "Periode Gaji",
+  "/gaji/karyawan": "Setelan Gaji",
+  "/gaji/kasbon": "Kasbon",
+
   // Kasir & pesanan
   "/kasir": "Kasir",
   "/kasir/riwayat": "Riwayat Transaksi",

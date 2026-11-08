@@ -44,9 +44,9 @@ describe("dua bentuk kegagalan dibedakan — dan itu intinya", () => {
 });
 
 describe("papan yang tak terbaca tidak menyatakan dirinya kosong", () => {
-  it("percabangan gagal MENDAHULUI tiga kolomnya", () => {
+  it("percabangan gagal MENDAHULUI grid kotaknya", () => {
     const iGagal = PAPAN.indexOf(") : gagalTotal ? (");
-    const iKolom = PAPAN.indexOf('<div className="grid gap-3 md:grid-cols-3">');
+    const iKolom = PAPAN.indexOf('<div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">');
     expect(iGagal, "percabangan gagal tak ditemukan").toBeGreaterThan(0);
     expect(iKolom).toBeGreaterThan(iGagal);
   });

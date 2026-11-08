@@ -1,3 +1,4 @@
+import { tebakJenisKategori } from "@kakarut/shared";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
@@ -264,7 +265,14 @@ export async function lengkapiDataDemo(companyId: string, ownerId: string, kasir
     // ── Kategori & menu baru ───────────────────────────────────────────────
     await tx
       .insert(menuCategories)
-      .values(["Makanan", "Minuman", "Paket"].map((nama, i) => ({ companyId, nama, sortOrder: i })))
+      .values(
+        ["Makanan", "Minuman", "Paket"].map((nama, i) => ({
+          companyId,
+          nama,
+          sortOrder: i,
+          jenis: tebakJenisKategori(nama),
+        })),
+      )
       .onConflictDoNothing();
     const kategori = await tx
       .select({ id: menuCategories.id, nama: menuCategories.nama })

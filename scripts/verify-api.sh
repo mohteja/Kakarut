@@ -17996,7 +17996,7 @@ cek "§301 karyawan baru muncul di daftar dengan bentuk yang sama" "V == 0" \
 # Peran yang dikirim harus ada di kosakata kontrak — union yang sejak putaran
 # ini dieja SATU kali (`UserRole` di constants.ts, terukur 3 ejaan → 1).
 PERAN301=$(awk '/^export type UserRole = /{gsub(/.*= /,"");gsub(/;$/,"");gsub(/ \| /,"\n");gsub(/"/,"");print}' packages/shared/src/constants.ts | sort -u)
-cek "§301 premis: kosakata UserRole terbaca dari shared (6 nilai)" "V == 6" \
+cek "§301 premis: kosakata UserRole terbaca dari shared (7 nilai, termasuk hrd)" "V == 7" \
   "$(echo "$PERAN301" | grep -c .)"
 cek "§301 tiap role yang dikirim ada di kosakata UserRole" "V == 0" \
   "$(comm -23 <(api "$OWNER" GET /karyawan | jq -r '[.[]|.role]|unique|.[]' | sort -u) <(printf '%s\n' "$PERAN301") | bocorkan)"
@@ -18018,6 +18018,11 @@ cek "§301 tiap role yang dikirim ada di kosakata UserRole" "V == 0" \
 K302=$(medan296 KategoriDto)
 cek "§302 premis: kontrak KategoriDto terbaca dari types.ts (3 medan)" "V == 3" \
   "$(echo "$K302" | grep -c .)"
+# Kategori MENU = KategoriDto + `jenis` (KategoriMenuDto, 2026-11-08) —
+# kategori BAHAN tetap tiga medan.
+cek "§302 premis: KategoriMenuDto menambah tepat \`jenis\`" "V == 1" \
+  "$(medan296 KategoriMenuDto | grep -cx jenis)"
+K302M=$(printf '%s\njenis\n' "$K302" | sort -u)
 K302S=$(medan296 SatuanDto)
 cek "§302 premis: kontrak SatuanDto terbaca (4 medan — `dipakai` yang keempat)" "V == 4" \
   "$(echo "$K302S" | grep -c .)"
@@ -18025,17 +18030,17 @@ cek "§302 premis: kontrak SatuanDto terbaca (4 medan — `dipakai` yang keempat
 # `KategoriDto` dikomentari "Kategori menu" sementara web memakainya untuk
 # `/kategori-bahan`; keduanya lolos hanya karena bentuknya identik. Kalau
 # kelak salah satu menyimpang, lengan inilah yang mengatakannya.
-cek "§302 GET /kategori == KategoriDto, dua arah" "V == 0" \
-  "$(selisih296 "$(api "$OWNER" GET /kategori | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
+cek "§302 GET /kategori == KategoriMenuDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /kategori | jq -r '[.[]|keys[]]|unique|.[]')" "$K302M")"
 cek "§302 GET /kategori-bahan == KategoriDto, dua arah" "V == 0" \
   "$(selisih296 "$(api "$OWNER" GET /kategori-bahan | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
 # Jalur TULIS kedua modul kategori memakai bentuk yang sama dengan bacanya.
 NK302=$(api "$OWNER" POST /kategori '{"nama":"Vena302"}')
-cek "§302 POST /kategori 201 == KategoriDto, dua arah" "V == 0" \
-  "$(selisih296 "$(echo "$NK302" | jq -r 'keys[]')" "$K302")"
+cek "§302 POST /kategori 201 == KategoriMenuDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$NK302" | jq -r 'keys[]')" "$K302M")"
 IK302=$(echo "$NK302" | jq -r .id)
-cek "§302 PATCH /kategori/:id == KategoriDto, dua arah" "V == 0" \
-  "$(selisih296 "$(api "$OWNER" PATCH "/kategori/$IK302" '{"sort_order":7}' | jq -r 'keys[]')" "$K302")"
+cek "§302 PATCH /kategori/:id == KategoriMenuDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" PATCH "/kategori/$IK302" '{"sort_order":7}' | jq -r 'keys[]')" "$K302M")"
 NB302=$(api "$OWNER" POST /kategori-bahan '{"nama":"Vena302B"}')
 cek "§302 POST /kategori-bahan 201 == KategoriDto, dua arah" "V == 0" \
   "$(selisih296 "$(echo "$NB302" | jq -r 'keys[]')" "$K302")"
@@ -18491,7 +18496,9 @@ cek "§309 premis: SELURUH rute detail terambil, kecuali yang daftarnya kosong" 
 # Daftar yang kosong = rute detail yang tak bisa diketuk sama sekali. Satu hari
 # ini (`/kebersihan/:id`, DB gerbang tak punya laporan kebersihan); ratchet
 # supaya yang kedua tak lahir diam-diam.
-cek "§309 premis: rute detail tanpa data ≤ 1" "V <= 1" "$(echo "$RINGKAS309" | awk '{print $10}')"
+# 1 → 2 (2026-11-08): `/gaji/periode/:id` — periode gaji pertama baru lahir di
+# §326 (sesudah seksi ini); bentuknya diadu sapuan menyeluruh §311 di akhir.
+cek "§309 premis: rute detail tanpa data ≤ 2" "V <= 2" "$(echo "$RINGKAS309" | awk '{print $10}')"
 cek "§309 premis: daftar rute detailnya ≥ 35" "V >= 35" "$(echo "$RINGKAS309" | awk '{print $9}')"
 cek "§309 premis: interface tersidik ≥ 130" "V >= 130" "$(echo "$RINGKAS309" | awk '{print $4}')"
 cek "§309 premis: objek yang diadu ≥ 4000" "V >= 4000" "$(echo "$RINGKAS309" | awk '{print $5}')"
@@ -19059,6 +19066,188 @@ cek "§324 admin menandai baris → 403" "V == 403" \
 cek "§324 admin boleh MELIHAT papan (200)" "V == 200" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pesanan" -H "Authorization: Bearer $TADM250")"
 cek "§324 kasir lolos penjaga (id palsu → 404, bukan 403)" "V == 404" \
   "$(status_code_body "$REISS105" POST "/pesanan/penjualan/$ID324/status" '{"status":"selesai"}')"
+
+echo "── §325 peran HRD: personalia lintas cabang, tertutup dari omzet & stok ──"
+# Permintaan pemilik 2026-11-08. HRD = karyawan, absen, cuti, kebersihan (dan
+# gaji, tahap berikutnya). Bebas cabang seperti admin; tak boleh menyentuh owner.
+cek "§325 owner buat HRD TANPA cabang → 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /karyawan '{"nama":"HRD 325","email":"hrd325@basooopa.id","password":"Hrd325Pass!","role":"hrd"}')"
+THRD=$(login hrd325@basooopa.id 'Hrd325Pass!')
+cek "§325 login HRD: role hrd, tanpa cabang" "V == 1" \
+  "$(api "$THRD" GET /auth/me | jq '((.user.role=="hrd") and (.user.branch_id==null))|if . then 1 else 0 end')"
+for p325 in /karyawan /absensi/rekap /kebersihan/rekap /pengajuan /profil /company /cabang; do
+  cek "§325 HRD GET $p325 → 200" "V == 200" "$(status_code "$THRD" GET "$p325")"
+done
+for p325 in /penjualan /stok /menu /bahan /laporan/ringkas /shift/aktif /customer; do
+  cek "§325 HRD GET $p325 → 403" "V == 403" "$(status_code "$THRD" GET "$p325")"
+done
+cek "§325 HRD ditolak ber-sebab hrd_tidak_berwenang" "V == 1" \
+  "$(api "$THRD" GET /menu | jq '(.sebab=="hrd_tidak_berwenang")|if . then 1 else 0 end')"
+cek "§325 HRD tak bisa ubah pengaturan perusahaan (PATCH /company → 403)" "V == 403" \
+  "$(status_code_body "$THRD" PATCH /company '{"nama":"Diubah HRD"}')"
+# Hierarki: semua kecuali owner.
+cek "§325 HRD tak bisa menambah owner → 403" "V == 403" \
+  "$(status_code_body "$THRD" POST /karyawan '{"nama":"O325","email":"owner325@basooopa.id","password":"Owner325Pass!","role":"owner"}')"
+cek "§325 HRD tak bisa mengubah akun owner → 403" "V == 403" \
+  "$(status_code_body "$THRD" PATCH "/karyawan/$OWNER_UID" '{"nama":"Diubah HRD"}')"
+cek "§325 HRD menambah admin → 201" "V == 201" \
+  "$(status_code_body "$THRD" POST /karyawan '{"nama":"Admin 325","email":"admin325@basooopa.id","password":"Admin325Pass!","role":"admin"}')"
+ADM325=$(api "$THRD" GET /karyawan | jq -r '[.[]|select(.email=="admin325@basooopa.id")][0].user_id')
+cek "§325 HRD mengubah nama admin → 200" "V == 200" \
+  "$(status_code_body "$THRD" PATCH "/karyawan/$ADM325" '{"nama":"Admin 325 Baru"}')"
+cek "§325 HRD tak bisa menjadikan admin owner → 403" "V == 403" \
+  "$(status_code_body "$THRD" PATCH "/karyawan/$ADM325" '{"role":"owner"}')"
+# Cuti: HRD melihat pengajuan seluruh perusahaan & memutuskannya.
+M325=$(python3 -c "import datetime;print((datetime.date.today()+datetime.timedelta(days=200)).isoformat())")
+PID325=$(api "$REISS105" POST /pengajuan "{\"kategori\":\"izin\",\"tanggal_mulai\":\"$M325\",\"tanggal_selesai\":\"$M325\",\"alasan\":\"urusan keluarga\"}" | jq -r '.id // ""')
+cek "§325 pengajuan kasir terlihat di daftar HRD" "V == 1" \
+  "$(api "$THRD" GET "/pengajuan?dari=$M325&sampai=$M325" | jq --arg i "$PID325" '[.[]|select(.id==$i)]|length')"
+cek "§325 HRD menyetujui cuti → 200" "V == 200" \
+  "$(status_code_body "$THRD" PATCH "/pengajuan/$PID325" '{"status":"disetujui"}')"
+cek "§325 HRD ikut terhitung di rekap absen (bukan owner)" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?branch_id=all" | jq '[.rows[]|select(.role=="hrd")]|length >= 1|if . then 1 else 0 end')"
+
+echo "── §326 penggajian: setelan, kasbon, periode, final, dibayar, slip sendiri ──"
+# Owner & HRD saja. Karyawan uji bergabung HARI INI, jadi dipakai PERIODE KHUSUS
+# satu hari (mulai = selesai = hari ini) — sudah boleh difinalkan, dan hari itu
+# (tanpa absen) adalah alpa: angkanya bisa dihitung di kepala.
+#   bulanan 2.600.000 → potongan alpa bawaan 2.600.000 ÷ 26 = 100.000
+#   bruto = 2.600.000 + tunjangan 300.000 − 100.000 = 2.800.000
+#   kasbon 200.000 cicilan 50.000 → total 2.750.000
+H326=$(TZ=Asia/Jakarta date +%F)
+cek "§326 admin ditolak dari penggajian (403)" "V == 403" "$(status_code "$TADM250" GET /gaji/periode)"
+cek "§326 kasir ditolak dari penggajian (403)" "V == 403" "$(status_code "$REISS105" GET /gaji/karyawan)"
+cek "§326 HRD membaca setelan gaji (200)" "V == 200" "$(status_code "$THRD" GET /gaji/setelan)"
+cek "§326 bawaan: periode tgl 1, sakit dibayar, izin tidak" "V == 1" \
+  "$(api "$THRD" GET /gaji/setelan | jq '((.tanggal_mulai==1) and (.cuti_dibayar|index("sakit")!=null) and (.cuti_dibayar|index("izin")==null))|if . then 1 else 0 end')"
+cek "§326 tanggal mulai 29 ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" PUT /gaji/setelan '{"tanggal_mulai":29,"cuti_dibayar":[]}')"
+cek "§326 HRD menyimpan setelan perusahaan (200)" "V == 200" \
+  "$(status_code_body "$THRD" PUT /gaji/setelan '{"tanggal_mulai":1,"cuti_dibayar":["tahunan","sakit","melahirkan","penting","mingguan","tukar_jadwal","tanggal_merah"]}')"
+api "$OWNER" POST /karyawan "{\"nama\":\"Gaji 326\",\"email\":\"gaji326@basooopa.id\",\"password\":\"Gaji326Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB301\"}" > /dev/null
+U326=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="gaji326@basooopa.id")][0].user_id')
+T326=$(login gaji326@basooopa.id 'Gaji326Pass!')
+SET326='{"dasar":"bulanan","nominal":2600000,"jam_masuk":"08:00","jam_pulang":"16:00","toleransi_telat_menit":10,"potongan_alpa_per_hari":null,"potongan_telat_per_kali":10000,"upah_lembur_per_jam":20000,"aktif":true,"tunjangan":[{"nama":"Makan","nominal":300000}]}'
+cek "§326 jam tak sah ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" PUT "/gaji/karyawan/$U326" "$(echo "$SET326" | jq -c '.jam_masuk="8 pagi"')")"
+cek "§326 setelan untuk owner ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" PUT "/gaji/karyawan/$OWNER_UID" "$SET326")"
+cek "§326 HRD mengatur gaji karyawan (200)" "V == 200" \
+  "$(status_code_body "$THRD" PUT "/gaji/karyawan/$U326" "$SET326")"
+cek "§326 setelan & tunjangan terbaca di daftar" "V == 1" \
+  "$(api "$THRD" GET /gaji/karyawan | jq --arg u "$U326" '[.[]|select(.user_id==$u and .setelan.dasar=="bulanan" and .setelan.nominal==2600000 and (.tunjangan|length)==1)]|length')"
+KB326=$(api "$THRD" POST /gaji/kasbon "{\"user_id\":\"$U326\",\"tanggal\":\"$H326\",\"nominal\":200000,\"cicilan_per_periode\":50000,\"catatan\":\"uji 326\"}" | jq -r '.id // ""')
+cek "§326 kasbon tercatat, sisa penuh" "V == 1" \
+  "$(api "$THRD" GET "/gaji/kasbon?user_id=$U326" | jq --arg k "$KB326" '[.[]|select(.id==$k and .sisa==200000 and (.lunas|not))]|length')"
+cek "§326 kasbon tanggal 2099 ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" POST /gaji/kasbon "{\"user_id\":\"$U326\",\"tanggal\":\"2099-01-01\",\"nominal\":1000,\"cicilan_per_periode\":1000}")"
+cek "§326 periode belum dimulai ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" POST /gaji/periode "{\"mulai\":\"$(TZ=Asia/Jakarta date -d tomorrow +%F)\"}")"
+P326=$(api "$THRD" POST /gaji/periode "{\"mulai\":\"$H326\",\"selesai\":\"$H326\"}")
+PID326=$(echo "$P326" | jq -r '.periode.id // ""')
+cek "§326 periode khusus 1 hari dibuat, status draft" "V == 1" \
+  "$(echo "$P326" | jq '((.periode.status=="draft") and (.periode.mulai==.periode.selesai))|if . then 1 else 0 end')"
+SL326=$(echo "$P326" | jq -r --arg u "$U326" '[.slip[]|select(.user_id==$u)][0].id // ""')
+cek "§326 slip: alpa 1, potongan 100.000, kasbon 50.000, total 2.750.000" "V == 1" \
+  "$(echo "$P326" | jq --arg u "$U326" '[.slip[]|select(.user_id==$u and .alpa==1 and .potongan==100000 and .potongan_kasbon==50000 and .total==2750000)]|length')"
+cek "§326 karyawan tanpa setelan terdaftar (tak ikut dihitung)" "V == 1" \
+  "$(echo "$P326" | jq '(.tanpa_setelan|length) >= 1|if . then 1 else 0 end')"
+cek "§326 periode bertindih ditolak (409)" "V == 409" \
+  "$(status_code_body "$THRD" POST /gaji/periode "{\"mulai\":\"$H326\",\"selesai\":\"$H326\"}")"
+cek "§326 bonus 100.000 → total 2.850.000" "V == 2850000" \
+  "$(api "$THRD" PATCH "/gaji/slip/$SL326" '{"bonus":100000,"catatan":"lembur event"}' | jq '.slip.total')"
+cek "§326 rincian slip: per hari & kasbon tercatat" "V == 1" \
+  "$(api "$THRD" GET "/gaji/slip/$SL326" | jq '((.rincian.harian|length)==1 and .rincian.harian[0].status=="alpa" and .rincian.kasbon[0].nominal==50000 and .slip.catatan=="lembur event")|if . then 1 else 0 end')"
+cek "§326 draft belum terlihat karyawannya" "V == 0" \
+  "$(api "$T326" GET /profil/slip-gaji | jq 'length')"
+cek "§326 finalkan (200)" "V == 200" "$(status_code_body "$THRD" POST "/gaji/periode/$PID326/final" '{}')"
+cek "§326 sesudah final: sisa kasbon 150.000" "V == 150000" \
+  "$(api "$THRD" GET "/gaji/kasbon?user_id=$U326" | jq --arg k "$KB326" '[.[]|select(.id==$k)][0].sisa')"
+cek "§326 slip final terkunci (409 periode_terkunci)" "V == 1" \
+  "$(api "$THRD" PATCH "/gaji/slip/$SL326" '{"bonus":1}' | jq '(.sebab=="periode_terkunci")|if . then 1 else 0 end')"
+cek "§326 kasbon yang sudah dipotong tak bisa dihapus (409)" "V == 409" "$(status_code "$THRD" DELETE "/gaji/kasbon/$KB326")"
+cek "§326 HRD tak boleh membuka periode final (403)" "V == 403" "$(status_code_body "$THRD" POST "/gaji/periode/$PID326/buka" '{}')"
+cek "§326 owner membuka lagi → draft, potongan kasbon dibatalkan" "V == 200000" \
+  "$(api "$OWNER" POST "/gaji/periode/$PID326/buka" '{}' > /dev/null; api "$THRD" GET "/gaji/kasbon?user_id=$U326" | jq --arg k "$KB326" '[.[]|select(.id==$k)][0].sisa')"
+cek "§326 hitung ulang draft (200) — bonus tetap" "V == 2850000" \
+  "$(api "$THRD" POST "/gaji/periode/$PID326/hitung-ulang" '{}' | jq --arg u "$U326" '[.slip[]|select(.user_id==$u)][0].total')"
+api "$THRD" POST "/gaji/periode/$PID326/final" '{}' > /dev/null
+cek "§326 tandai dibayar" "V == 1" \
+  "$(api "$THRD" POST "/gaji/periode/$PID326/dibayar" '{}' | jq '(.periode.status=="dibayar" and .periode.dibayar_pada!=null)|if . then 1 else 0 end')"
+cek "§326 periode dibayar tak bisa dihapus (409)" "V == 409" "$(status_code "$THRD" DELETE "/gaji/periode/$PID326")"
+SL326B=$(api "$THRD" GET "/gaji/periode/$PID326" | jq -r --arg u "$U326" '[.slip[]|select(.user_id==$u)][0].id')
+cek "§326 karyawan melihat slipnya sendiri" "V == 1" \
+  "$(api "$T326" GET /profil/slip-gaji | jq --arg s "$SL326B" '[.[]|select(.id==$s and .total==2850000 and .status=="dibayar")]|length')"
+cek "§326 detail slip sendiri (200) dengan rincian" "V == 1" \
+  "$(api "$T326" GET "/profil/slip-gaji/$SL326B" | jq '(.rincian.gaji_pokok==2600000 and .perusahaan!=null)|if . then 1 else 0 end')"
+cek "§326 slip orang lain → 404" "V == 404" "$(status_code "$REISS105" GET "/profil/slip-gaji/$SL326B")"
+cek "§326 /company tak membuka aturan gaji ke kasir" "V == 0" \
+  "$(api "$REISS105" GET /company | jq '[has("gajiTanggalMulai"), has("gajiCutiDibayar")]|map(select(.))|length')"
+
+echo "── §327 jenis makanan/minuman: kategori menu & papan pesanan grid ──"
+# Permintaan pemilik (2026-11-08): papan Pesanan Masuk jadi grid kotak, tiap
+# kotak menghitung makanan & minuman yang sudah/belum dikirim. Jenisnya diatur
+# per kategori menu; kategori baru tanpa `jenis` ditebak dari namanya.
+K327A=$(api "$OWNER" POST /kategori '{"nama":"Es Kopi Uji 327","sort_order":90}')
+K327B=$(api "$OWNER" POST /kategori '{"nama":"Nasi Uji 327","sort_order":91}')
+K327C=$(api "$OWNER" POST /kategori '{"nama":"Spesial Uji 327","sort_order":92,"jenis":"minuman"}')
+cek "§327 kategori baru ditebak dari nama: Es Kopi → minuman" "V == 1" \
+  "$(echo "$K327A" | jq '(.jenis=="minuman")|if . then 1 else 0 end')"
+cek "§327 kategori baru ditebak dari nama: Nasi → makanan" "V == 1" \
+  "$(echo "$K327B" | jq '(.jenis=="makanan")|if . then 1 else 0 end')"
+cek "§327 jenis eksplisit mengalahkan tebakan" "V == 1" \
+  "$(echo "$K327C" | jq '(.jenis=="minuman")|if . then 1 else 0 end')"
+cek "§327 PATCH jenis saja (200, berubah)" "V == 1" \
+  "$(api "$OWNER" PATCH "/kategori/$(echo "$K327B" | jq -r .id)" '{"jenis":"minuman"}' | jq '(.jenis=="minuman" and .nama=="Nasi Uji 327")|if . then 1 else 0 end')"
+cek "§327 jenis tak dikenal ditolak (400)" "V == 400" \
+  "$(status_code_body "$OWNER" PATCH "/kategori/$(echo "$K327B" | jq -r .id)" '{"jenis":"snack"}')"
+cek "§327 GET /kategori: tiap baris berjenis makanan|minuman" "V == 0" \
+  "$(api "$OWNER" GET /kategori | jq '[.[]|select((.jenis=="makanan" or .jenis=="minuman")|not)]|length')"
+cek "§327 kategori BAHAN tak ikut berjenis" "V == 0" \
+  "$(api "$OWNER" GET /kategori-bahan | jq '[.[]|select(has("jenis"))]|length')"
+P327=$(api "$REISS105" GET "/pesanan?branch_id=$BR&tanggal=$(TZ=Asia/Jakarta date +%F)")
+cek "§327 premis: papan hari ini berisi sajian" "V >= 1" \
+  "$(echo "$P327" | jq '[.[].items[]]|length')"
+cek "§327 tiap sajian papan membawa jenis makanan|minuman" "V == 0" \
+  "$(echo "$P327" | jq '[.[].items[]|select((.jenis=="makanan" or .jenis=="minuman")|not)]|length')"
+for K in "$K327A" "$K327B" "$K327C"; do api "$OWNER" DELETE "/kategori/$(echo "$K" | jq -r .id)" >/dev/null; done
+
+echo "── §328 open bill memesan bahan: sisa porsi & gerbang stok langsung berkurang ──"
+# Permintaan pemilik (2026-11-08): "open bill langsung kurangi stok saat
+# disimpan". Saldo FISIK tetap (barang baru tercatat keluar saat dibayar),
+# tapi bahan pesanan yang sudah masuk dapur tak boleh dijanjikan ke pesanan
+# lain: sisa porsi semua menu yang berbagi bahan itu turun, pracek & gerbang
+# "stok tak cukup" menghitung dari sisa yang bebas. Bill batal → lepas.
+api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
+KAT328=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+BH328=$(api "$OWNER" POST /bahan '{"nama":"Pentol 328","harga_beli":1,"isi":1,"satuan":"butir"}' | jq -r '.id // ""')
+MA328=$(api "$OWNER" POST /menu "{\"nama\":\"Bakso 328\",\"category_id\":\"$KAT328\",\"harga_jual\":1000,\"mult\":1,\"komponen\":[{\"ingredient_id\":\"$BH328\",\"qty\":3}]}" | jq -r '.id // ""')
+MB328=$(api "$OWNER" POST /menu "{\"nama\":\"Mie 328\",\"category_id\":\"$KAT328\",\"harga_jual\":1000,\"mult\":1,\"komponen\":[{\"ingredient_id\":\"$BH328\",\"qty\":2}]}" | jq -r '.id // ""')
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$BH328\",\"qty\":10}]}" > /dev/null
+porsi328() { api "$REISS105" GET /menu/ketersediaan | jq --arg m "$1" '[.[]|select(.menu_id==$m)][0].porsi'; }
+cek "§328 premis: sebelum bill, Bakso 3 porsi (10 ÷ 3)" "V == 3" "$(porsi328 "$MA328")"
+cek "§328 premis: sebelum bill, Mie 5 porsi (10 ÷ 2)" "V == 5" "$(porsi328 "$MB328")"
+OB328=$(api "$REISS105" POST /open-bill "{\"items\":[{\"menu_id\":\"$MA328\",\"qty\":2}]}" | jq -r '.id // ""')
+cek "§328 premis: open bill 2× Bakso tersimpan" "V == 1" "$([ -n "$OB328" ] && echo 1 || echo 0)"
+cek "§328 sisa Bakso turun jadi 1 (10 − 6 dipesan = 4 ÷ 3)" "V == 1" "$(porsi328 "$MA328")"
+cek "§328 sisa Mie IKUT turun jadi 2 (bahan sama, 4 ÷ 2)" "V == 2" "$(porsi328 "$MB328")"
+cek "§328 saldo FISIK di halaman Stok tetap 10 (belum dibayar)" "abs(V - 10) < 0.0001" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$BH328" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "§328 pracek 3× Mie (butuh 6, bebas 4) → kurang, sisa 4" "V == 1" \
+  "$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MB328\",\"qty\":3}]}" | jq '(.akan_ditolak==true and .kurang[0].saldo==4)|if . then 1 else 0 end')"
+cek "§328 pracek bill ITU sendiri tak terhalang cadangannya" "V == 0" \
+  "$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":true,\"open_bill_id\":\"$OB328\",\"items\":[{\"menu_id\":\"$MA328\",\"qty\":2}]}" | jq '.kurang|length')"
+cek "§328 jual langsung 3× Mie ditolak (400, bahan dipesan bill)" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MB328\",\"qty\":3}]}" | jq '((.error // "") | test("Stok tidak cukup: Pentol 328 \\(sisa 4")) | if . then 1 else 0 end')"
+cek "§328 bill kedua 2× Bakso ditolak (butuh 6, bebas 4)" "V == 400" \
+  "$(status_code_body "$REISS105" POST /open-bill "{\"items\":[{\"menu_id\":\"$MA328\",\"qty\":2}]}")"
+cek "§328 jual langsung 2× Mie (butuh 4, bebas 4) → lolos" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MB328\",\"qty\":2}]}" | jq '(.sale.id != null)|if . then 1 else 0 end')"
+cek "§328 sesudah itu Bakso 0 porsi (6 − 6 dipesan)" "V == 0" "$(porsi328 "$MA328")"
+cek "§328 bill dibatalkan (200)" "V == 200" "$(status_code "$REISS105" DELETE "/open-bill/$OB328")"
+cek "§328 cadangan lepas: Bakso kembali 2 porsi (6 ÷ 3)" "V == 2" "$(porsi328 "$MA328")"
+cek "§328 cadangan lepas: Mie kembali 3 porsi (6 ÷ 2)" "V == 3" "$(porsi328 "$MB328")"
+api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

@@ -1,3 +1,4 @@
+import { tebakJenisKategori } from "@kakarut/shared";
 import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
 import { db, type Db, type Tx } from "../db/client";
@@ -135,7 +136,10 @@ export async function provisionGuest(dbc: Db = db): Promise<boolean> {
     // Kategori menu
     const catId = new Map<string, string>();
     for (const [i, nama] of ["Makanan", "Minuman"].entries()) {
-      const [c] = await tx.insert(menuCategories).values({ companyId: company.id, nama, sortOrder: i }).returning();
+      const [c] = await tx
+        .insert(menuCategories)
+        .values({ companyId: company.id, nama, sortOrder: i, jenis: tebakJenisKategori(nama) })
+        .returning();
       catId.set(nama, c.id);
     }
     // Bahan baku

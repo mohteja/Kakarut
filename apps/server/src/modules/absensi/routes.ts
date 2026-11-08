@@ -604,7 +604,7 @@ export const absensiRoutes = new Hono<AppEnv>()
    * Jendela hitung per karyawan dipotong tanggal bergabung & tanggal diarsipkan
    * supaya karyawan baru/keluar tak terlihat alpa sebulan penuh.
    */
-  .get("/rekap", requireRole("owner", "admin"), async (c) => {
+  .get("/rekap", requireRole("owner", "admin", "hrd"), async (c) => {
     const auth = c.get("auth");
     const tz = await timezoneOf(auth.company_id!);
     const hariIni = tanggalDi(tz);

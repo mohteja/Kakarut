@@ -58,6 +58,10 @@ const MILIK_PERUSAHAAN = new Map<string, string>([
     "yang dialamati `menus` (milik perusahaan); `menuBranches` satelit ketersediaan per cabang — dan klien memang butuh peta lengkapnya untuk menandai 'kosong di cabang ini'",
   ],
   [
+    "GET /profil/slip-gaji/:id",
+    "slip gaji MILIK SENDIRI: `slipMilikSendiri(company, auth.sub)` menyaring per orang (404 bila bukan miliknya), jadi cabang tak relevan — `memberships` hanya satelit nama cabang di slip",
+  ],
+  [
     "POST /profil/password",
     "ganti password AKUN SENDIRI; `memberships` tersentuh lewat penerbitan ulang sesi, bukan lewat baris cabang mana pun",
   ],

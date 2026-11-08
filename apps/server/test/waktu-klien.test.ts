@@ -37,6 +37,10 @@ import {
  */
 const TERDAFTAR = new Map<string, string>([
   [
+    "modules/gaji/routes.ts:tanggal_mulai",
+    "bukan tanggal: NOMOR HARI mulainya periode gaji, z.number().int().min(1).max(BATAS_TANGGAL_MULAI_GAJI = 28)",
+  ],
+  [
     "modules/pesanan/routes.ts:tanggal",
     "SARINGAN papan pesanan, bukan nilai yang disimpan: melihat papan kemarin itu wajar, jadi yang dituntut BENTUKNYA saja. Sebelumnya `z.string()` telanjang dan terukur 500",
   ],
