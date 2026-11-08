@@ -19212,6 +19212,43 @@ cek "§327 tiap sajian papan membawa jenis makanan|minuman" "V == 0" \
   "$(echo "$P327" | jq '[.[].items[]|select((.jenis=="makanan" or .jenis=="minuman")|not)]|length')"
 for K in "$K327A" "$K327B" "$K327C"; do api "$OWNER" DELETE "/kategori/$(echo "$K" | jq -r .id)" >/dev/null; done
 
+echo "── §328 open bill memesan bahan: sisa porsi & gerbang stok langsung berkurang ──"
+# Permintaan pemilik (2026-11-08): "open bill langsung kurangi stok saat
+# disimpan". Saldo FISIK tetap (barang baru tercatat keluar saat dibayar),
+# tapi bahan pesanan yang sudah masuk dapur tak boleh dijanjikan ke pesanan
+# lain: sisa porsi semua menu yang berbagi bahan itu turun, pracek & gerbang
+# "stok tak cukup" menghitung dari sisa yang bebas. Bill batal → lepas.
+api "$OWNER" PATCH /company '{"blokir_jual_minus":true}' > /dev/null
+KAT328=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+BH328=$(api "$OWNER" POST /bahan '{"nama":"Pentol 328","harga_beli":1,"isi":1,"satuan":"butir"}' | jq -r '.id // ""')
+MA328=$(api "$OWNER" POST /menu "{\"nama\":\"Bakso 328\",\"category_id\":\"$KAT328\",\"harga_jual\":1000,\"mult\":1,\"komponen\":[{\"ingredient_id\":\"$BH328\",\"qty\":3}]}" | jq -r '.id // ""')
+MB328=$(api "$OWNER" POST /menu "{\"nama\":\"Mie 328\",\"category_id\":\"$KAT328\",\"harga_jual\":1000,\"mult\":1,\"komponen\":[{\"ingredient_id\":\"$BH328\",\"qty\":2}]}" | jq -r '.id // ""')
+api "$OWNER" POST /stok/awal "{\"items\":[{\"ingredient_id\":\"$BH328\",\"qty\":10}]}" > /dev/null
+porsi328() { api "$REISS105" GET /menu/ketersediaan | jq --arg m "$1" '[.[]|select(.menu_id==$m)][0].porsi'; }
+cek "§328 premis: sebelum bill, Bakso 3 porsi (10 ÷ 3)" "V == 3" "$(porsi328 "$MA328")"
+cek "§328 premis: sebelum bill, Mie 5 porsi (10 ÷ 2)" "V == 5" "$(porsi328 "$MB328")"
+OB328=$(api "$REISS105" POST /open-bill "{\"items\":[{\"menu_id\":\"$MA328\",\"qty\":2}]}" | jq -r '.id // ""')
+cek "§328 premis: open bill 2× Bakso tersimpan" "V == 1" "$([ -n "$OB328" ] && echo 1 || echo 0)"
+cek "§328 sisa Bakso turun jadi 1 (10 − 6 dipesan = 4 ÷ 3)" "V == 1" "$(porsi328 "$MA328")"
+cek "§328 sisa Mie IKUT turun jadi 2 (bahan sama, 4 ÷ 2)" "V == 2" "$(porsi328 "$MB328")"
+cek "§328 saldo FISIK di halaman Stok tetap 10 (belum dibayar)" "abs(V - 10) < 0.0001" \
+  "$(api "$OWNER" GET /stok | jq --arg i "$BH328" '[.[]|select(.ingredient_id==$i)][0].saldo')"
+cek "§328 pracek 3× Mie (butuh 6, bebas 4) → kurang, sisa 4" "V == 1" \
+  "$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MB328\",\"qty\":3}]}" | jq '(.akan_ditolak==true and .kurang[0].saldo==4)|if . then 1 else 0 end')"
+cek "§328 pracek bill ITU sendiri tak terhalang cadangannya" "V == 0" \
+  "$(api "$REISS105" POST /penjualan/cek-stok "{\"is_dine_in\":true,\"open_bill_id\":\"$OB328\",\"items\":[{\"menu_id\":\"$MA328\",\"qty\":2}]}" | jq '.kurang|length')"
+cek "§328 jual langsung 3× Mie ditolak (400, bahan dipesan bill)" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MB328\",\"qty\":3}]}" | jq '((.error // "") | test("Stok tidak cukup: Pentol 328 \\(sisa 4")) | if . then 1 else 0 end')"
+cek "§328 bill kedua 2× Bakso ditolak (butuh 6, bebas 4)" "V == 400" \
+  "$(status_code_body "$REISS105" POST /open-bill "{\"items\":[{\"menu_id\":\"$MA328\",\"qty\":2}]}")"
+cek "§328 jual langsung 2× Mie (butuh 4, bebas 4) → lolos" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"items\":[{\"menu_id\":\"$MB328\",\"qty\":2}]}" | jq '(.sale.id != null)|if . then 1 else 0 end')"
+cek "§328 sesudah itu Bakso 0 porsi (6 − 6 dipesan)" "V == 0" "$(porsi328 "$MA328")"
+cek "§328 bill dibatalkan (200)" "V == 200" "$(status_code "$REISS105" DELETE "/open-bill/$OB328")"
+cek "§328 cadangan lepas: Bakso kembali 2 porsi (6 ÷ 3)" "V == 2" "$(porsi328 "$MA328")"
+cek "§328 cadangan lepas: Mie kembali 3 porsi (6 ÷ 2)" "V == 3" "$(porsi328 "$MB328")"
+api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
+
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════

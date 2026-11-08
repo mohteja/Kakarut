@@ -135,7 +135,7 @@ describe("saldo dibaca di dalam transaksi penulisan", () => {
       'exec: Pick<typeof db, "select" | "execute"> = db,',
     );
     expect(baca("modules/penjualan/service.ts")).toContain(
-      "bahanKurang(tx, params.companyId, params.branchId, konsumsi)",
+      "bahanKurang(tx, params.companyId, params.branchId, konsumsi, cadangan)",
     );
   });
 

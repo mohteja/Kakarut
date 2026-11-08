@@ -110,6 +110,7 @@ const BELUM_TAYANG = new Set([
   // BELUM DI-MERGE (2026-11-08): penggajian tahap 2 (server), branch yang sama.
   "## 🟢 Penggajian (`/api/gaji/*`, owner & HRD) + slip gaji sendiri (`/api/profil/slip-gaji`)",
   "## 🟢 `jenis` makanan/minuman: kategori menu & sajian papan pesanan",
+  "## 🟡 Open bill memesan bahan: sisa porsi & gerbang stok dihitung dari stok bebas",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

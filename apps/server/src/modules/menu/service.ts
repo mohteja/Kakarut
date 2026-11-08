@@ -28,7 +28,8 @@ import {
   menus,
 } from "../../db/schema";
 import { kunciBackfillKode } from "../../lib/kunci";
-import { hitungSaldoCabang } from "../stok/service";
+import { hitungSaldoCabang, saldoBebas } from "../stok/service";
+import { cadanganOpenBill } from "../penjualan/stok-keranjang";
 
 type MenuRow = typeof menus.$inferSelect;
 
@@ -686,8 +687,12 @@ export async function ketersediaanMenu(
     loadKatalog(db, companyId),
     hitungSaldoCabang(companyId, branchId),
   ]);
-  const saldoByIngredient = new Map(saldoRows.map((r) => [r.ingredient_id, r.saldo]));
-  const bahanById = new Map(saldoRows.map((r) => [r.ingredient_id, r]));
+  // Sisa porsi dihitung dari yang masih BEBAS: bahan yang sudah dipesan open
+  // bill berjalan dikurangkan (permintaan pemilik 2026-11-08) — begitu bill
+  // disimpan, sisa porsi semua menu yang berbagi bahan itu ikut turun.
+  const cadangan = await cadanganOpenBill(db, companyId, branchId, katalog);
+  const saldoByIngredient = new Map(saldoRows.map((r) => [r.ingredient_id, saldoBebas(r, cadangan)]));
+  const bahanById = new Map(saldoRows.map((r) => [r.ingredient_id, { ...r, saldo: saldoBebas(r, cadangan) }]));
 
   return katalog.rows
     .filter((menu) => tampilDiCabang(katalog, menu.id, branchId))

@@ -308,21 +308,42 @@ export async function hitungSaldoCabang(
  *
  * `exec` WAJIB diisi `tx` oleh pemanggil yang menulis sesudahnya.
  */
+/**
+ * SALDO BEBAS satu bahan = saldo fisik − yang sudah dipesan open bill
+ * berjalan (`cadanganOpenBill`). Satu rumah untuk gerbang stok (`bahanKurang`)
+ * dan sisa porsi menu (`ketersediaanMenu`) — dua salinan rumus ini akan
+ * membuat pracek dan sisa porsi berbeda pendapat tentang bahan yang sama.
+ */
+export function saldoBebas(
+  r: { ingredient_id: string; saldo: number },
+  cadangan?: Map<string, number>,
+): number {
+  return keSkalaKolom(r.saldo - (cadangan?.get(r.ingredient_id) ?? 0), SKALA_QTY_STOK_KOLOM);
+}
+
 export async function bahanKurang(
   exec: Pick<typeof db, "select" | "execute">,
   companyId: string,
   branchId: string,
   butuh: Map<string, number>,
+  /**
+   * Bahan yang sudah DIPESAN open bill berjalan (`cadanganOpenBill`) — tak
+   * boleh dijanjikan lagi. Saldo yang dilaporkan di kalimat penolakan adalah
+   * yang masih TERSEDIA (saldo − cadangan).
+   */
+  cadangan?: Map<string, number>,
 ): Promise<{ ingredient_id: string; nama: string; satuan: string; saldo: number; butuh: number }[]> {
   if (butuh.size === 0) return [];
   const saldo = await hitungSaldoCabang(companyId, branchId, exec);
   const byId = new Map(saldo.map((r) => [r.ingredient_id, r]));
   const kurang: { ingredient_id: string; nama: string; satuan: string; saldo: number; butuh: number }[] = [];
   for (const [ingredientId, perlu] of butuh) {
-    const r = byId.get(ingredientId);
+    const fisik = byId.get(ingredientId);
     // Bahan yang tak ada di daftar saldo = tak melacak stok / tak aktif.
     // Menganggapnya kurang akan menolak menu yang memang tak dibatasi bahan.
-    if (!r) continue;
+    if (!fisik) continue;
+    // Yang dibandingkan adalah saldo BEBAS (fisik − dipesan open bill).
+    const r = { ...fisik, saldo: saldoBebas(fisik, cadangan) };
     // Toleransi DITURUNKAN dari skala kolom + lantai derau float pada
     // besaran itu (lihat `toleransiBanding`), bukan angka firasat: `1e-9`
     // yang dulu di sini LEBIH KECIL daripada ULP double begitu besarannya

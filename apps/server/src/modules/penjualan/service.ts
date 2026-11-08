@@ -9,7 +9,7 @@ import {
   type SaleItemInput,
   type SebabPenjualanGagal,
 } from "@kakarut/shared";
-import { gerbangBerlaku, pesanStokKurang } from "./stok-keranjang";
+import { cadanganOpenBill, gerbangBerlaku, pesanStokKurang } from "./stok-keranjang";
 import { db } from "../../db/client";
 import {
   branches,
@@ -614,7 +614,11 @@ export async function createSale(params: CreateSaleParams) {
         transaksiSusulan: params.transaksiSusulan,
       })
     ) {
-      const kurang = await bahanKurang(tx, params.companyId, params.branchId, konsumsi);
+      // Bahan yang sudah dipesan open bill berjalan tak boleh terjual ke
+      // pesanan lain (permintaan pemilik 2026-11-08). Gerbang ini memang tak
+      // berlaku saat membayar bill, jadi tak ada bill yang perlu dikecualikan.
+      const cadangan = await cadanganOpenBill(tx, params.companyId, params.branchId, katalog);
+      const kurang = await bahanKurang(tx, params.companyId, params.branchId, konsumsi, cadangan);
       if (kurang.length > 0) {
         // Ditulis untuk KASIR yang sedang berdiri di depan tamu: sebut
         // bahannya, sisanya, dan berapa yang kurang — bukan "stok tidak
