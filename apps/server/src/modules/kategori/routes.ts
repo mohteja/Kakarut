@@ -1,4 +1,5 @@
 import { zValidator } from "../../lib/validator";
+import { tebakJenisKategori, type KategoriMenuDto } from "@kakarut/shared";
 import { barisMaster } from "../../lib/baris-master";
 import { BATAS_URUTAN } from "../../lib/batas-angka";
 import { and, asc, count, eq } from "drizzle-orm";
@@ -10,15 +11,30 @@ import { menuCategories, menus } from "../../db/schema";
 import { requireRole, type AppEnv } from "../../middleware/auth";
 import { tanpaBentrok } from "../../lib/pg-galat";
 
+const JenisMenu = z.enum(["makanan", "minuman"]);
+
 const KategoriBody = z.object({
   nama: z.string().trim().min(1),
   sort_order: z.number().int().max(BATAS_URUTAN).default(0),
+  /** tanpa `jenis` → ditebak dari nama (`tebakJenisKategori`) */
+  jenis: JenisMenu.optional(),
 }).strict();
+
+/** Baris kategori MENU — `KategoriDto` + `jenis` (makanan/minuman). */
+function barisKategoriMenu(row: {
+  id: string;
+  nama: string;
+  sortOrder: number;
+  jenis: "makanan" | "minuman";
+}): KategoriMenuDto {
+  return { ...barisMaster(row), jenis: row.jenis };
+}
 
 // PATCH parsial tanpa .default() — lihat catatan BahanPatchBody (zod v4).
 const KategoriPatchBody = z.object({
   nama: z.string().trim().min(1).optional(),
   sort_order: z.number().int().max(BATAS_URUTAN).optional(),
+  jenis: JenisMenu.optional(),
 }).strict();
 
 export const kategoriRoutes = new Hono<AppEnv>()
@@ -36,7 +52,7 @@ export const kategoriRoutes = new Hono<AppEnv>()
         asc(menuCategories.id),
       );
     return c.json(
-      rows.map(barisMaster),
+      rows.map(barisKategoriMenu),
     );
   })
   .post(
@@ -52,12 +68,13 @@ export const kategoriRoutes = new Hono<AppEnv>()
           companyId: auth.company_id!,
           nama: body.nama,
           sortOrder: body.sort_order,
+          jenis: body.jenis ?? tebakJenisKategori(body.nama),
         })
         .onConflictDoNothing()
         .returning();
       if (!row) throw new HTTPException(409, { message: "Kategori sudah ada" });
       return c.json(
-        barisMaster(row),
+        barisKategoriMenu(row),
         201,
       );
     },
@@ -77,6 +94,7 @@ export const kategoriRoutes = new Hono<AppEnv>()
             ...(body.sort_order !== undefined && {
               sortOrder: body.sort_order,
             }),
+            ...(body.jenis !== undefined && { jenis: body.jenis }),
           })
           .where(
             and(
@@ -88,7 +106,7 @@ export const kategoriRoutes = new Hono<AppEnv>()
       );
       if (!row)
         throw new HTTPException(404, { message: "Kategori tidak ditemukan" });
-      return c.json(barisMaster(row));
+      return c.json(barisKategoriMenu(row));
     },
   )
   .delete("/:id", requireRole("owner", "admin"), async (c) => {

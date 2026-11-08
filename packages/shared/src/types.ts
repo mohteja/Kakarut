@@ -884,6 +884,18 @@ export interface KategoriDto {
 }
 
 /**
+ * Jenis sajian sebuah kategori MENU — dasar hitungan "🍜 Makanan / 🥤 Minuman"
+ * di papan pesanan (permintaan pemilik, 2026-11-08). Diatur per kategori;
+ * kategori baru ditebak dari namanya (`tebakJenisKategori`).
+ */
+export type JenisMenu = "makanan" | "minuman";
+
+/** `GET /kategori` (kategori MENU) — kategori bahan tetap `KategoriDto`. */
+export interface KategoriMenuDto extends KategoriDto {
+  jenis: JenisMenu;
+}
+
+/**
  * Satuan bahan (master data) — sumber pilihan dropdown satuan.
  *
  * `dipakai` kini dikirim oleh KETIGA metode (`GET`, `POST` 201, `PATCH`).
@@ -3000,6 +3012,11 @@ export interface PesananItemRow {
    * take away benar-benar terpakai dan stoknya berkurang.
    */
   sajian_takeaway: boolean;
+  /**
+   * Makanan atau minuman — dari kategori menunya SAAT INI (menu tanpa
+   * kategori / sudah terhapus = makanan). Dasar hitungan kartu papan.
+   */
+  jenis: JenisMenu;
   /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
   status_oleh: string | null;
   status_pada: string | null;

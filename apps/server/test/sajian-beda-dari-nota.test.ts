@@ -58,6 +58,7 @@ function baris(p: {
     nama: "Nasi Goreng",
     qty: 1,
     qty_refund: 0,
+    jenis: "makanan",
     catatan: null,
     addons: [],
     is_dine_in: p.isDineIn,

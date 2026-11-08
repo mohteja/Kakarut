@@ -347,9 +347,9 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 
 ## `/api/kategori` — Kategori menu (`modules/kategori/routes.ts`)
 
-- `GET /api/kategori` — [any] — res: `[{id,nama,sort_order}]`
-- `POST /api/kategori` — [owner/admin] — req: `{ nama: string, sort_order: int=0 }` — res: **201** `{id,nama,sort_order}` — error: **409** ada
-- `PATCH /api/kategori/:id` — [owner/admin] — req: `{ nama?, sort_order? }` — res: `{id,nama,sort_order}` — error: **404**
+- `GET /api/kategori` — [any] — res: `[{id,nama,sort_order,jenis}]` (`KategoriMenuDto`; `jenis`: `"makanan"|"minuman"`)
+- `POST /api/kategori` — [owner/admin] — req: `{ nama: string, sort_order: int=0, jenis?: "makanan"|"minuman" }` (tanpa `jenis` → ditebak dari nama, `tebakJenisKategori`) — res: **201** `{id,nama,sort_order,jenis}` — error: **409** ada
+- `PATCH /api/kategori/:id` — [owner/admin] — req: `{ nama?, sort_order?, jenis? }` — res: `{id,nama,sort_order,jenis}` — error: **404**
 - `DELETE /api/kategori/:id` — [owner/admin] — res: `{ ok: true }` — error: **404**, **409** masih dipakai N menu
 
 ## `/api/kategori-bahan` — Kategori bahan (`modules/kategori-bahan/routes.ts`)
@@ -1133,7 +1133,7 @@ mereka; semua `POST` (status, sajian, per baris maupun pintasan kartu) dibalas
 **403** `{ error, sebab: "pesanan_lihat_saja" }` — penjaganya jalan sebelum
 kartu dicari. Yang menandai pesanan: cashier/tim/kitchen/bar.
 
-- `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]` — tiap `items[]` membawa `addons: AddonBarisDto[]` (snapshot add-on baris itu, untuk dapur)
+- `GET /api/pesanan` — query: `branch_id?`, `tanggal?` (YYYY-MM-DD, default hari ini TZ perusahaan), `status?` (`dikerjakan|selesai|batal`) — res: `PesananRow[]` — tiap `items[]` membawa `addons: AddonBarisDto[]` (snapshot add-on baris itu, untuk dapur) dan `jenis: "makanan"|"minuman"` (dari kategori menunya saat ini; menu/kategori yang sudah tiada = `makanan`) — dasar hitungan kotak papan grid (`hitungKirimPerJenis`)
 - `POST /api/pesanan/:jenis/:id/item/:itemId/status` — **tombol utama papan** — `:jenis` = `open_bill|penjualan`, `:itemId` = `PesananItemRow.id` — req: `{ status: "dikerjakan"|"selesai"|"batal" }` — res: `{ ok: true, status, kartu_status }` (`kartu_status` = status kartu setelah diturunkan ulang) — error: **404** bukan cabangnya / kartu atau barisnya tak ada, **409** status baris baru saja diubah orang lain, **409** bill sudah dibayar (ubah lewat kartu penjualannya)
 - `POST /api/pesanan/:jenis/:id/item/:itemId/sajian` — req: `{ takeaway: boolean }` — res: `{ ok: true, sajian_takeaway, total_hpp }` (`total_hpp` = HPP transaksi SESUDAH hitung-ulang; `null` untuk open bill) — error: **404**, **409** bill sudah dibayar. ⚠️ **Menggeser biaya & stok** pada penjualan yang sudah dibayar — lihat blok `sajian_takeaway` di bawah.
 - `POST /api/pesanan/:jenis/:id/status` — **pintasan "semua baris"** — req: `{ status: … }` — res: `{ ok: true, status }` (status **kartu** hasil turunan) — error: sama seperti versi per baris, **tanpa** 409 balapan: perintahnya "jadikan semuanya X", jadi dua orang yang menekannya bersamaan sampai di hasil yang sama
@@ -2597,6 +2597,18 @@ export interface KategoriDto {
   id: string;
   nama: string;
   sort_order: number;
+}
+
+/**
+ * Jenis sajian sebuah kategori MENU — dasar hitungan "🍜 Makanan / 🥤 Minuman"
+ * di papan pesanan (permintaan pemilik, 2026-11-08). Diatur per kategori;
+ * kategori baru ditebak dari namanya (`tebakJenisKategori`).
+ */
+export type JenisMenu = "makanan" | "minuman";
+
+/** `GET /kategori` (kategori MENU) — kategori bahan tetap `KategoriDto`. */
+export interface KategoriMenuDto extends KategoriDto {
+  jenis: JenisMenu;
 }
 
 /**
@@ -4716,6 +4728,11 @@ export interface PesananItemRow {
    * take away benar-benar terpakai dan stoknya berkurang.
    */
   sajian_takeaway: boolean;
+  /**
+   * Makanan atau minuman — dari kategori menunya SAAT INI (menu tanpa
+   * kategori / sudah terhapus = makanan). Dasar hitungan kartu papan.
+   */
+  jenis: JenisMenu;
   /** siapa & kapan status baris ini terakhir diubah; null = belum disentuh */
   status_oleh: string | null;
   status_pada: string | null;

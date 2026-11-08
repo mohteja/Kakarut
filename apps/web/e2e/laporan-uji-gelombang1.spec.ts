@@ -151,9 +151,52 @@ test("papan Pesanan Masuk: owner lihat saja, tanpa tombol tanda", async ({ page,
   await expect(page.getByRole("link", { name: /Pesanan Masuk/ })).toBeVisible();
   await page.goto("/pesanan");
   await expect(page.getByTestId("pesanan-lihat-saja")).toBeVisible();
+  // Tombol tanda kini hidup di DETAIL (ketuk kotak grid) — periksa di sana.
+  await page.getByTestId("saringan-semua").click();
+  await page.getByTestId("kotak-pesanan").first().click();
+  await expect(page.getByRole("button", { name: "Riwayat" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Pindahkan ke Selesai/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /✅ Selesai/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "✅ Selesai", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Kembalikan/ })).toHaveCount(0);
+});
+
+/**
+ * PAPAN GRID (permintaan pemilik 2026-11-08): kanban diganti grid kotak 4
+ * kolom. Tiap kotak menghitung makanan & minuman yang sudah/belum dikirim dan
+ * memperlihatkan pratinjau menu; ketuk → detail per sajian.
+ */
+test("papan Pesanan Masuk: grid kotak berhitungan makanan/minuman, ketuk membuka detail", async ({
+  page,
+  request,
+}) => {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const papan = (await (
+    await request.get(`${BASE}/api/pesanan`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json()) as { items: { jenis: string }[] }[];
+  expect(papan.length, "PREMIS: papan hari ini berisi pesanan (dibuat verify-api)").toBeGreaterThan(0);
+  expect(papan.flatMap((p) => p.items).every((it) => it.jenis === "makanan" || it.jenis === "minuman")).toBe(true);
+
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/pesanan");
+  await page.getByTestId("saringan-semua").click();
+  const kotak = page.getByTestId("kotak-pesanan");
+  await expect(kotak.first()).toBeVisible();
+  // Empat kotak sebaris di layar lebar (bila pesanannya cukup).
+  if ((await kotak.count()) >= 4) {
+    const y = await Promise.all([0, 1, 2, 3].map(async (i) => (await kotak.nth(i).boundingBox())!.y));
+    expect(new Set(y.map((v) => Math.round(v))).size).toBe(1);
+  }
+  await expect(kotak.first().getByTestId("hitung-makanan")).toBeVisible();
+  await expect(kotak.first().getByTestId("hitung-minuman")).toBeVisible();
+
+  await kotak.first().click();
+  const detail = page.getByRole("button", { name: "Riwayat" });
+  await expect(detail).toBeVisible();
+  // Owner tetap mode pantau di dalam detail.
+  await expect(page.getByRole("button", { name: /Pindahkan ke Selesai/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Tutup" }).click();
+  await expect(detail).toHaveCount(0);
 });
 
 /**

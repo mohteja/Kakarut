@@ -813,7 +813,8 @@ export function MenuFormPage() {
         endpoint="/kategori"
         queryKey="kategori"
         judul="Kategori Menu"
-        deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus."
+        deskripsi="Kategori untuk mengelompokkan menu. Kategori yang masih dipakai menu tidak bisa dihapus. Tandai tiap kategori Makanan atau Minuman untuk hitungan di papan Pesanan Masuk."
+        pakaiJenis
       />
 
       {/*

@@ -18018,6 +18018,11 @@ cek "§301 tiap role yang dikirim ada di kosakata UserRole" "V == 0" \
 K302=$(medan296 KategoriDto)
 cek "§302 premis: kontrak KategoriDto terbaca dari types.ts (3 medan)" "V == 3" \
   "$(echo "$K302" | grep -c .)"
+# Kategori MENU = KategoriDto + `jenis` (KategoriMenuDto, 2026-11-08) —
+# kategori BAHAN tetap tiga medan.
+cek "§302 premis: KategoriMenuDto menambah tepat \`jenis\`" "V == 1" \
+  "$(medan296 KategoriMenuDto | grep -cx jenis)"
+K302M=$(printf '%s\njenis\n' "$K302" | sort -u)
 K302S=$(medan296 SatuanDto)
 cek "§302 premis: kontrak SatuanDto terbaca (4 medan — `dipakai` yang keempat)" "V == 4" \
   "$(echo "$K302S" | grep -c .)"
@@ -18025,17 +18030,17 @@ cek "§302 premis: kontrak SatuanDto terbaca (4 medan — `dipakai` yang keempat
 # `KategoriDto` dikomentari "Kategori menu" sementara web memakainya untuk
 # `/kategori-bahan`; keduanya lolos hanya karena bentuknya identik. Kalau
 # kelak salah satu menyimpang, lengan inilah yang mengatakannya.
-cek "§302 GET /kategori == KategoriDto, dua arah" "V == 0" \
-  "$(selisih296 "$(api "$OWNER" GET /kategori | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
+cek "§302 GET /kategori == KategoriMenuDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" GET /kategori | jq -r '[.[]|keys[]]|unique|.[]')" "$K302M")"
 cek "§302 GET /kategori-bahan == KategoriDto, dua arah" "V == 0" \
   "$(selisih296 "$(api "$OWNER" GET /kategori-bahan | jq -r '[.[]|keys[]]|unique|.[]')" "$K302")"
 # Jalur TULIS kedua modul kategori memakai bentuk yang sama dengan bacanya.
 NK302=$(api "$OWNER" POST /kategori '{"nama":"Vena302"}')
-cek "§302 POST /kategori 201 == KategoriDto, dua arah" "V == 0" \
-  "$(selisih296 "$(echo "$NK302" | jq -r 'keys[]')" "$K302")"
+cek "§302 POST /kategori 201 == KategoriMenuDto, dua arah" "V == 0" \
+  "$(selisih296 "$(echo "$NK302" | jq -r 'keys[]')" "$K302M")"
 IK302=$(echo "$NK302" | jq -r .id)
-cek "§302 PATCH /kategori/:id == KategoriDto, dua arah" "V == 0" \
-  "$(selisih296 "$(api "$OWNER" PATCH "/kategori/$IK302" '{"sort_order":7}' | jq -r 'keys[]')" "$K302")"
+cek "§302 PATCH /kategori/:id == KategoriMenuDto, dua arah" "V == 0" \
+  "$(selisih296 "$(api "$OWNER" PATCH "/kategori/$IK302" '{"sort_order":7}' | jq -r 'keys[]')" "$K302M")"
 NB302=$(api "$OWNER" POST /kategori-bahan '{"nama":"Vena302B"}')
 cek "§302 POST /kategori-bahan 201 == KategoriDto, dua arah" "V == 0" \
   "$(selisih296 "$(echo "$NB302" | jq -r 'keys[]')" "$K302")"
@@ -19178,6 +19183,34 @@ cek "§326 detail slip sendiri (200) dengan rincian" "V == 1" \
 cek "§326 slip orang lain → 404" "V == 404" "$(status_code "$REISS105" GET "/profil/slip-gaji/$SL326B")"
 cek "§326 /company tak membuka aturan gaji ke kasir" "V == 0" \
   "$(api "$REISS105" GET /company | jq '[has("gajiTanggalMulai"), has("gajiCutiDibayar")]|map(select(.))|length')"
+
+echo "── §327 jenis makanan/minuman: kategori menu & papan pesanan grid ──"
+# Permintaan pemilik (2026-11-08): papan Pesanan Masuk jadi grid kotak, tiap
+# kotak menghitung makanan & minuman yang sudah/belum dikirim. Jenisnya diatur
+# per kategori menu; kategori baru tanpa `jenis` ditebak dari namanya.
+K327A=$(api "$OWNER" POST /kategori '{"nama":"Es Kopi Uji 327","sort_order":90}')
+K327B=$(api "$OWNER" POST /kategori '{"nama":"Nasi Uji 327","sort_order":91}')
+K327C=$(api "$OWNER" POST /kategori '{"nama":"Spesial Uji 327","sort_order":92,"jenis":"minuman"}')
+cek "§327 kategori baru ditebak dari nama: Es Kopi → minuman" "V == 1" \
+  "$(echo "$K327A" | jq '(.jenis=="minuman")|if . then 1 else 0 end')"
+cek "§327 kategori baru ditebak dari nama: Nasi → makanan" "V == 1" \
+  "$(echo "$K327B" | jq '(.jenis=="makanan")|if . then 1 else 0 end')"
+cek "§327 jenis eksplisit mengalahkan tebakan" "V == 1" \
+  "$(echo "$K327C" | jq '(.jenis=="minuman")|if . then 1 else 0 end')"
+cek "§327 PATCH jenis saja (200, berubah)" "V == 1" \
+  "$(api "$OWNER" PATCH "/kategori/$(echo "$K327B" | jq -r .id)" '{"jenis":"minuman"}' | jq '(.jenis=="minuman" and .nama=="Nasi Uji 327")|if . then 1 else 0 end')"
+cek "§327 jenis tak dikenal ditolak (400)" "V == 400" \
+  "$(status_code_body "$OWNER" PATCH "/kategori/$(echo "$K327B" | jq -r .id)" '{"jenis":"snack"}')"
+cek "§327 GET /kategori: tiap baris berjenis makanan|minuman" "V == 0" \
+  "$(api "$OWNER" GET /kategori | jq '[.[]|select((.jenis=="makanan" or .jenis=="minuman")|not)]|length')"
+cek "§327 kategori BAHAN tak ikut berjenis" "V == 0" \
+  "$(api "$OWNER" GET /kategori-bahan | jq '[.[]|select(has("jenis"))]|length')"
+P327=$(api "$REISS105" GET "/pesanan?branch_id=$BR&tanggal=$(TZ=Asia/Jakarta date +%F)")
+cek "§327 premis: papan hari ini berisi sajian" "V >= 1" \
+  "$(echo "$P327" | jq '[.[].items[]]|length')"
+cek "§327 tiap sajian papan membawa jenis makanan|minuman" "V == 0" \
+  "$(echo "$P327" | jq '[.[].items[]|select((.jenis=="makanan" or .jenis=="minuman")|not)]|length')"
+for K in "$K327A" "$K327B" "$K327C"; do api "$OWNER" DELETE "/kategori/$(echo "$K" | jq -r .id)" >/dev/null; done
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

@@ -6,6 +6,7 @@
  * Di akhir, HPP semua menu dihitung ulang dari DB dan dibandingkan dengan
  * nilai referensi `hpp_wb` dari Excel; seed GAGAL bila selisih > Rp1.
  */
+import { tebakJenisKategori } from "@kakarut/shared";
 import bcrypt from "bcryptjs";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
@@ -342,7 +343,7 @@ async function main() {
     for (const [i, nama] of data.catOrder.entries()) {
       const [cat] = await tx
         .insert(menuCategories)
-        .values({ companyId: company.id, nama, sortOrder: i })
+        .values({ companyId: company.id, nama, sortOrder: i, jenis: tebakJenisKategori(nama) })
         .onConflictDoUpdate({
           target: [menuCategories.companyId, menuCategories.nama],
           set: { sortOrder: i },

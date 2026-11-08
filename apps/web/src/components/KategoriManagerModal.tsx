@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import type { KategoriDto } from "@kakarut/shared";
+import { tebakJenisKategori, type JenisMenu, type KategoriDto } from "@kakarut/shared";
 import { ErrorText, Modal, btnPrimary, btnSecondary, inputClass } from "./ui";
 import { api } from "../lib/api";
 
@@ -8,7 +8,12 @@ interface FormState {
   id?: string;
   nama: string;
   sort_order: string;
+  /** hanya kategori MENU (`pakaiJenis`) */
+  jenis?: JenisMenu;
 }
+
+/** Baris `/kategori` membawa `jenis`; `/kategori-bahan` tidak. */
+type BarisKategori = KategoriDto & { jenis?: JenisMenu };
 
 /**
  * Modal CRUD kategori generik — dipakai untuk kategori MENU (`/kategori`) dan
@@ -22,6 +27,7 @@ export function KategoriManagerModal({
   queryKey,
   judul,
   deskripsi,
+  pakaiJenis = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,19 +35,28 @@ export function KategoriManagerModal({
   queryKey: string;
   judul: string;
   deskripsi: string;
+  /**
+   * Kategori MENU: tampilkan pilihan 🍛 Makanan / 🥤 Minuman — dasar hitungan
+   * kotak di papan Pesanan Masuk.
+   */
+  pakaiJenis?: boolean;
 }) {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: [queryKey] });
   const { data: rows, error: gagalMuat } = useQuery({
     queryKey: [queryKey],
-    queryFn: () => api<KategoriDto[]>(endpoint),
+    queryFn: () => api<BarisKategori[]>(endpoint),
     enabled: open,
   });
   const [form, setForm] = useState<FormState | null>(null);
 
   const simpan = useMutation({
     mutationFn: (f: FormState) => {
-      const body = { nama: f.nama, sort_order: Number(f.sort_order) || 0 };
+      const body = {
+        nama: f.nama,
+        sort_order: Number(f.sort_order) || 0,
+        ...(pakaiJenis && f.jenis ? { jenis: f.jenis } : {}),
+      };
       return f.id
         ? api(`${endpoint}/${f.id}`, { method: "PATCH", body })
         : api(endpoint, { method: "POST", body });
@@ -50,6 +65,12 @@ export function KategoriManagerModal({
       setForm(null);
       invalidate();
     },
+  });
+  // Ganti jenis langsung dari daftar — satu ketukan, tanpa membuka form.
+  const gantiJenis = useMutation({
+    mutationFn: (v: { id: string; jenis: JenisMenu }) =>
+      api(`${endpoint}/${v.id}`, { method: "PATCH", body: { jenis: v.jenis } }),
+    onSuccess: invalidate,
   });
   const hapus = useMutation({
     mutationFn: (k: KategoriDto) => api(`${endpoint}/${k.id}`, { method: "DELETE" }),
@@ -67,16 +88,34 @@ export function KategoriManagerModal({
   return (
     <Modal open={open} onClose={onClose} title={judul}>
       <div className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">{deskripsi}</div>
-      <ErrorText error={hapus.error} />
+      <ErrorText error={hapus.error ?? gantiJenis.error} />
 
       <div className="mb-3 divide-y divide-stone-100 rounded-lg border border-stone-200">
         {(rows ?? []).map((k) => (
           <div key={k.id} className="flex items-center gap-2 px-3 py-2">
             <span className="flex-1 text-sm font-medium text-stone-800">{k.nama}</span>
+            {pakaiJenis && k.jenis && (
+              <button
+                type="button"
+                disabled={gantiJenis.isPending}
+                onClick={() =>
+                  gantiJenis.mutate({ id: k.id, jenis: k.jenis === "minuman" ? "makanan" : "minuman" })
+                }
+                title="Ketuk untuk mengganti — dipakai menghitung Makanan/Minuman di papan Pesanan Masuk"
+                data-testid={`jenis-kategori-${k.nama}`}
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  k.jenis === "minuman" ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"
+                }`}
+              >
+                {k.jenis === "minuman" ? "🥤 Minuman" : "🍛 Makanan"}
+              </button>
+            )}
             <span className="w-10 text-right text-xs text-stone-400">{k.sort_order}</span>
             <button
               type="button"
-              onClick={() => setForm({ id: k.id, nama: k.nama, sort_order: String(k.sort_order) })}
+              onClick={() =>
+                setForm({ id: k.id, nama: k.nama, sort_order: String(k.sort_order), jenis: k.jenis })
+              }
               className="text-sm font-medium text-orange-600 hover:underline"
             >
               Ubah
@@ -139,6 +178,31 @@ export function KategoriManagerModal({
               />
             </div>
           </div>
+          {pakaiJenis && (
+            <div>
+              <label className="mb-1 block text-xs font-medium">Jenis</label>
+              <div className="flex gap-2">
+                {(["makanan", "minuman"] as const).map((j) => {
+                  const aktif = (form.jenis ?? tebakJenisKategori(form.nama)) === j;
+                  return (
+                    <button
+                      key={j}
+                      type="button"
+                      onClick={() => setForm({ ...form, jenis: j })}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                        aktif ? "bg-orange-600 text-white" : "bg-white text-stone-600 ring-1 ring-stone-200"
+                      }`}
+                    >
+                      {j === "minuman" ? "🥤 Minuman" : "🍛 Makanan"}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-xs text-stone-500">
+                Dipakai menghitung makanan & minuman di papan Pesanan Masuk.
+              </p>
+            </div>
+          )}
           <ErrorText error={simpan.error} />
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setForm(null)} className={btnSecondary}>

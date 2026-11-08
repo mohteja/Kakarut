@@ -1,4 +1,4 @@
-import type { PesananItemRow, PesananRow, PesananStatus } from "./types";
+import type { JenisMenu, PesananItemRow, PesananRow, PesananStatus } from "./types";
 
 /**
  * SATU-SATUNYA definisi "status ini adalah BATAL".
@@ -277,4 +277,45 @@ export function urutkanPesanan<
 export function lewatTargetDurasi(medianDetik: number, targetDetik: number | null): boolean {
   if (targetDetik == null || targetDetik <= 0) return false;
   return medianDetik > targetDetik;
+}
+
+/**
+ * Tebakan jenis dari NAMA kategori — dipakai saat kategori dibuat tanpa
+ * menyebut jenisnya, dan oleh migrasi untuk kategori yang sudah ada. Pemilik
+ * tinggal mengoreksi yang salah di pengaturan Kategori Menu. Ponsel tidak
+ * menebak: ia membaca `jenis` dari server. (Migrasi 0114 memakai pola yang
+ * sama dalam regex Postgres.)
+ */
+const POLA_MINUMAN =
+  /\b(minum\w*|es|ice|iced|jus|juice|kopi|coffee|teh|tea|drink\w*|susu|milk|boba|soda|sirup|wedang|lemon\w*)\b/i;
+export function tebakJenisKategori(nama: string): JenisMenu {
+  return POLA_MINUMAN.test(nama) ? "minuman" : "makanan";
+}
+
+/** Porsi sudah dikirim (selesai) dari total porsi yang masih harus dibuat. */
+export interface HitungKirim {
+  dikirim: number;
+  total: number;
+}
+
+/**
+ * Isi kartu papan grid: berapa porsi MAKANAN dan MINUMAN yang sudah dikirim
+ * dari total. Satuan porsi (`qty`), bukan baris — "2× Es Teh" itu dua gelas
+ * yang diantar. Baris batal tak dihitung: tak ada yang perlu diantar.
+ * Ponsel mencerminkannya di `pesanan_models.dart`.
+ */
+export function hitungKirimPerJenis(
+  items: readonly Pick<PesananItemRow, "qty" | "status" | "jenis">[],
+): Record<JenisMenu, HitungKirim> {
+  const hasil: Record<JenisMenu, HitungKirim> = {
+    makanan: { dikirim: 0, total: 0 },
+    minuman: { dikirim: 0, total: 0 },
+  };
+  for (const it of items) {
+    if (dibatalkanDapur(it.status)) continue;
+    const h = hasil[it.jenis];
+    h.total += it.qty;
+    if (it.status === "selesai") h.dikirim += it.qty;
+  }
+  return hasil;
 }

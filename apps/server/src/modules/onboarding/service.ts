@@ -72,7 +72,7 @@ export async function buatPerusahaanUntuk(
     .insert(menuCategories)
     .values([
       { companyId: company.id, nama: "Makanan", sortOrder: 1 },
-      { companyId: company.id, nama: "Minuman", sortOrder: 2 },
+      { companyId: company.id, nama: "Minuman", sortOrder: 2, jenis: "minuman" },
     ])
     .onConflictDoNothing();
   // Owner langsung dapat KODE KARYAWAN (barcode/QR absen) — sama seperti

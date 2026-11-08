@@ -25,6 +25,23 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 `jenis` makanan/minuman: kategori menu & sajian papan pesanan
+
+🟢 **BARU** — medan tambahan; klien lama yang tak membacanya tak terpengaruh.
+
+**Belum tayang.**
+
+- `GET/POST/PATCH /api/kategori` kini membawa `jenis: "makanan" | "minuman"`
+  (`KategoriMenuDto`). `POST` tanpa `jenis` → ditebak server dari nama
+  (`tebakJenisKategori`: minum/es/jus/kopi/teh/… = minuman). `PATCH` menerima
+  `jenis` saja. Kategori **bahan** (`/api/kategori-bahan`) tidak berubah.
+- `GET /api/pesanan` — tiap `items[]` membawa `jenis` (dari kategori menunya;
+  menu/kategori yang sudah tiada = `makanan`). Dipakai kotak papan grid untuk
+  hitungan "🍜 Makanan 2/3 dikirim · 🥤 Minuman 1/2" (`hitungKirimPerJenis`).
+- Migrasi 0114 menebak jenis kategori yang sudah ada dari namanya.
+
+---
+
 ## 🟢 Penggajian (`/api/gaji/*`, owner & HRD) + slip gaji sendiri (`/api/profil/slip-gaji`)
 
 🟢 **BARU** — tak mengubah perilaku klien lama.

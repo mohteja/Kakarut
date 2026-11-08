@@ -38,6 +38,8 @@ export const userRoleEnum = pgEnum("user_role", [
   "hrd",
 ]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
+/** jenis sajian kategori menu — hitungan Makanan/Minuman di papan pesanan */
+export const jenisMenuEnum = pgEnum("jenis_menu", ["makanan", "minuman"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
 export const pengadaanEnum = pgEnum("pengadaan", ["produksi", "beli"]);
 /**
@@ -963,6 +965,12 @@ export const menuCategories = pgTable(
       .references(() => companies.id, { onDelete: "cascade" }),
     nama: text("nama").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Makanan / minuman — dasar hitungan kartu papan pesanan. Bawaan
+     * `makanan`; migrasi 0114 menebak kategori lama dari namanya, dan
+     * `POST /kategori` tanpa `jenis` menebak lewat `tebakJenisKategori`.
+     */
+    jenis: jenisMenuEnum("jenis").notNull().default("makanan"),
   },
   (t) => [uniqueIndex("menu_categories_company_nama_uq").on(t.companyId, t.nama)],
 );
