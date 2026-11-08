@@ -155,3 +155,33 @@ test("papan Pesanan Masuk: owner lihat saja, tanpa tombol tanda", async ({ page,
   await expect(page.getByRole("button", { name: /✅ Selesai/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Kembalikan/ })).toHaveCount(0);
 });
+
+/**
+ * PERAN HRD (2026-11-08): personalia — menu Rekap Absen, Karyawan, Rekap
+ * Kebersihan, Absen, Profil; tanpa omzet/stok/menu. Halaman di luar itu
+ * dialihkan ke Rekap Absen (dulu peran tak dikenal berputar ke /kasir).
+ */
+test("HRD: menu personalia, halaman lain dialihkan, tak bisa memberi peran owner", async ({ page, request }) => {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const email = `hrd.e2e.${Date.now() % 1000000}@basooopa.id`;
+  const dibuat = await request.post(`${BASE}/api/karyawan`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { nama: "HRD E2E", email, password: "HrdE2ePass!", role: "hrd" },
+  });
+  expect(dibuat.status(), "POST /karyawan role hrd").toBe(201);
+
+  await masukLewatSesi(page, request, email, "HrdE2ePass!");
+  await page.goto("/kasir");
+  await expect(page).toHaveURL(/\/rekap-absen$/);
+  const nav = page.locator("aside nav");
+  for (const t of ["Rekap Absen", "Karyawan", "Rekap Kebersihan", "Absen", "Profil Saya"]) {
+    await expect(nav.getByRole("link", { name: new RegExp(t) }).first()).toBeVisible();
+  }
+  for (const t of ["Laporan", "Stok", "Menu & HPP", "Riwayat Transaksi"]) {
+    await expect(nav.getByRole("link", { name: new RegExp(`^\\S+ ${t}$`) })).toHaveCount(0);
+  }
+
+  await page.goto("/pengaturan/karyawan");
+  await expect(page).toHaveURL(/\/pengaturan\/karyawan$/);
+  await expect(page.locator('option[value="owner"]')).toHaveCount(0);
+});

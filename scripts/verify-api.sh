@@ -17996,7 +17996,7 @@ cek "§301 karyawan baru muncul di daftar dengan bentuk yang sama" "V == 0" \
 # Peran yang dikirim harus ada di kosakata kontrak — union yang sejak putaran
 # ini dieja SATU kali (`UserRole` di constants.ts, terukur 3 ejaan → 1).
 PERAN301=$(awk '/^export type UserRole = /{gsub(/.*= /,"");gsub(/;$/,"");gsub(/ \| /,"\n");gsub(/"/,"");print}' packages/shared/src/constants.ts | sort -u)
-cek "§301 premis: kosakata UserRole terbaca dari shared (6 nilai)" "V == 6" \
+cek "§301 premis: kosakata UserRole terbaca dari shared (7 nilai, termasuk hrd)" "V == 7" \
   "$(echo "$PERAN301" | grep -c .)"
 cek "§301 tiap role yang dikirim ada di kosakata UserRole" "V == 0" \
   "$(comm -23 <(api "$OWNER" GET /karyawan | jq -r '[.[]|.role]|unique|.[]' | sort -u) <(printf '%s\n' "$PERAN301") | bocorkan)"
@@ -19059,6 +19059,46 @@ cek "§324 admin menandai baris → 403" "V == 403" \
 cek "§324 admin boleh MELIHAT papan (200)" "V == 200" "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/pesanan" -H "Authorization: Bearer $TADM250")"
 cek "§324 kasir lolos penjaga (id palsu → 404, bukan 403)" "V == 404" \
   "$(status_code_body "$REISS105" POST "/pesanan/penjualan/$ID324/status" '{"status":"selesai"}')"
+
+echo "── §325 peran HRD: personalia lintas cabang, tertutup dari omzet & stok ──"
+# Permintaan pemilik 2026-11-08. HRD = karyawan, absen, cuti, kebersihan (dan
+# gaji, tahap berikutnya). Bebas cabang seperti admin; tak boleh menyentuh owner.
+cek "§325 owner buat HRD TANPA cabang → 201" "V == 201" \
+  "$(status_code_body "$OWNER" POST /karyawan '{"nama":"HRD 325","email":"hrd325@basooopa.id","password":"Hrd325Pass!","role":"hrd"}')"
+THRD=$(login hrd325@basooopa.id 'Hrd325Pass!')
+cek "§325 login HRD: role hrd, tanpa cabang" "V == 1" \
+  "$(api "$THRD" GET /auth/me | jq '((.user.role=="hrd") and (.user.branch_id==null))|if . then 1 else 0 end')"
+for p325 in /karyawan /absensi/rekap /kebersihan/rekap /pengajuan /profil /company /cabang; do
+  cek "§325 HRD GET $p325 → 200" "V == 200" "$(status_code "$THRD" GET "$p325")"
+done
+for p325 in /penjualan /stok /menu /bahan /laporan/ringkas /shift/aktif /customer; do
+  cek "§325 HRD GET $p325 → 403" "V == 403" "$(status_code "$THRD" GET "$p325")"
+done
+cek "§325 HRD ditolak ber-sebab hrd_tidak_berwenang" "V == 1" \
+  "$(api "$THRD" GET /menu | jq '(.sebab=="hrd_tidak_berwenang")|if . then 1 else 0 end')"
+cek "§325 HRD tak bisa ubah pengaturan perusahaan (PATCH /company → 403)" "V == 403" \
+  "$(status_code_body "$THRD" PATCH /company '{"nama":"Diubah HRD"}')"
+# Hierarki: semua kecuali owner.
+cek "§325 HRD tak bisa menambah owner → 403" "V == 403" \
+  "$(status_code_body "$THRD" POST /karyawan '{"nama":"O325","email":"owner325@basooopa.id","password":"Owner325Pass!","role":"owner"}')"
+cek "§325 HRD tak bisa mengubah akun owner → 403" "V == 403" \
+  "$(status_code_body "$THRD" PATCH "/karyawan/$OWNER_UID" '{"nama":"Diubah HRD"}')"
+cek "§325 HRD menambah admin → 201" "V == 201" \
+  "$(status_code_body "$THRD" POST /karyawan '{"nama":"Admin 325","email":"admin325@basooopa.id","password":"Admin325Pass!","role":"admin"}')"
+ADM325=$(api "$THRD" GET /karyawan | jq -r '[.[]|select(.email=="admin325@basooopa.id")][0].user_id')
+cek "§325 HRD mengubah nama admin → 200" "V == 200" \
+  "$(status_code_body "$THRD" PATCH "/karyawan/$ADM325" '{"nama":"Admin 325 Baru"}')"
+cek "§325 HRD tak bisa menjadikan admin owner → 403" "V == 403" \
+  "$(status_code_body "$THRD" PATCH "/karyawan/$ADM325" '{"role":"owner"}')"
+# Cuti: HRD melihat pengajuan seluruh perusahaan & memutuskannya.
+M325=$(python3 -c "import datetime;print((datetime.date.today()+datetime.timedelta(days=200)).isoformat())")
+PID325=$(api "$REISS105" POST /pengajuan "{\"kategori\":\"izin\",\"tanggal_mulai\":\"$M325\",\"tanggal_selesai\":\"$M325\",\"alasan\":\"urusan keluarga\"}" | jq -r '.id // ""')
+cek "§325 pengajuan kasir terlihat di daftar HRD" "V == 1" \
+  "$(api "$THRD" GET "/pengajuan?dari=$M325&sampai=$M325" | jq --arg i "$PID325" '[.[]|select(.id==$i)]|length')"
+cek "§325 HRD menyetujui cuti → 200" "V == 200" \
+  "$(status_code_body "$THRD" PATCH "/pengajuan/$PID325" '{"status":"disetujui"}')"
+cek "§325 HRD ikut terhitung di rekap absen (bukan owner)" "V == 1" \
+  "$(api "$OWNER" GET "/absensi/rekap?branch_id=all" | jq '[.rows[]|select(.role=="hrd")]|length >= 1|if . then 1 else 0 end')"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

@@ -155,6 +155,33 @@ export default function App() {
   const isBar = auth.user.role === "bar";
   // Transaksi POS (Kasir + Tutup Kasir) HANYA peran kasir.
   const isKasir = auth.user.role === "cashier";
+
+  // HRD (personalia): rutenya sendiri, cermin daftar izin `penjagaHrd` di
+  // server — tak satu pun halaman omzet/stok/menu. Berandanya Rekap Absen;
+  // jatuh ke "/kasir" seperti peran tak dikenal membuat pengalihan berputar.
+  if (auth.user.role === "hrd") {
+    return (
+      <BranchProvider>
+        <PrinterProvider>
+          <Suspense fallback={<PageLoading />}>
+            <Routes>
+              <Route path="/login" element={<Navigate to="/rekap-absen" replace />} />
+              <Route element={<Layout />}>
+                <Route path="/rekap-absen" element={<RekapAbsenPage />} />
+                <Route path="/pengaturan/karyawan" element={<KaryawanPage />} />
+                <Route path="/rekap-kebersihan" element={<RekapKebersihanPage />} />
+                <Route path="/absen" element={<AbsenPage />} />
+                <Route path="/kebersihan" element={<LaporanKebersihanPage />} />
+                <Route path="/profil" element={<ProfilPage />} />
+                <Route path="*" element={<Navigate to="/rekap-absen" replace />} />
+              </Route>
+            </Routes>
+          </Suspense>
+        </PrinterProvider>
+      </BranchProvider>
+    );
+  }
+
   const beranda = isSuperAdmin
     ? "/superadmin"
     : isManajemen

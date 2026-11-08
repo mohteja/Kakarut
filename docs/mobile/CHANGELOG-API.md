@@ -25,11 +25,28 @@ tanpa akses repo server.
 
 ---
 
+## 🟡 Peran baru `hrd` (personalia) — `UserRole` bertambah, CHECK cabang dibalik
+
+🟡 **PERLU DICEK** — klien yang memetakan peran dengan `switch` tertutup.
+
+**Belum tayang.**
+
+- `UserRole` kini juga `"hrd"`. HRD **tanpa cabang** (`branch_id: null`), seperti admin.
+- HRD hanya boleh ke `/karyawan`, `/absensi`, `/pengajuan`, `/kebersihan`,
+  `/profil`, `/upload` + baca `/company` & `/cabang`. Selain itu **403**
+  `sebab: "hrd_tidak_berwenang"`.
+- Di modul itu HRD setara owner/admin: kelola karyawan (kecuali owner), rekap
+  absen, ACC/tolak cuti, rekap & area kebersihan.
+- `POST/PATCH /karyawan` & `POST /karyawan/undang` menerima `role: "hrd"`.
+- Ponsel: beranda & menu HRD (mohteja/kakarut-mobile, branch yang sama).
+
+---
+
 ## 🟡 Papan Pesanan Masuk: owner & admin LIHAT SAJA — `POST /api/pesanan/*` → 403
 
 🟡 **PERLU DICEK** — layar papan pesanan untuk owner/admin.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#245 (`d9a5ba7`, CI cabang #518 hijau); ponsel lewat mohteja/kakarut-mobile#23.
 
 - Owner & admin tetap boleh membaca semua `GET /api/pesanan…` (papan & riwayat).
 - Semua `POST /api/pesanan/…` (status & sajian, per baris maupun pintasan

@@ -66,8 +66,17 @@ set base URL ke `https://<host-produksi>` lalu tambahkan path (mis.
   secure storage aplikasi.
 
 ### Peran (`UserRole`)
-Enam peran: **`owner`**, **`admin`**, **`cashier`**, **`tim`**, **`kitchen`**,
-**`bar`**. Plus flag platform **`is_super_admin`** (terpisah dari peran).
+Tujuh peran: **`owner`**, **`admin`**, **`cashier`**, **`tim`**, **`kitchen`**,
+**`bar`**, **`hrd`**. Plus flag platform **`is_super_admin`** (terpisah dari peran).
+- **`hrd`** (sejak 2026-11-08) = personalia, **lintas cabang** (tanpa
+  `branch_id`, seperti admin). HANYA modul personalia: `/karyawan`, `/absensi`,
+  `/pengajuan`, `/kebersihan`, `/profil`, `/upload` (dan `/gaji`, menyusul),
+  plus **baca** `GET /company` & `GET /cabang`. Jalur lain apa pun → **403**
+  `{ error, sebab: "hrd_tidak_berwenang" }` (daftar izin `penjagaHrd`,
+  `lib/penjaga-hrd.ts`). Di dalam modulnya HRD setara owner/admin untuk: kelola
+  karyawan (kecuali menyentuh owner atau memberi peran owner → 403), `GET
+  /absensi/rekap`, ACC/tolak & hapus pengajuan, rekap/ringkas/catatan/area
+  kebersihan.
 Semantik dari middleware:
 - `requireRole(...peran)` → **403** jika `auth.role` di luar himpunan yang
   diizinkan.
@@ -75,7 +84,7 @@ Semantik dari middleware:
   perusahaan).
 - `requireSuperAdmin` → **403** kecuali `is_super_admin`.
 - `terikatCabang(role)` → true untuk **`cashier`**, **`tim`**, **`kitchen`**,
-  dan **`bar`** (peran terkunci cabang). `owner`/`admin` bebas lintas cabang.
+  dan **`bar`** (peran terkunci cabang). `owner`/`admin`/`hrd` bebas lintas cabang.
 - **`kitchen`** (BARU) = dapur cabang: semua akses `tim` di cabang store
   **plus** modul `/produksi` untuk produksi LOKAL cabangnya — hanya bahan yang
   di Resep ditandai `produksi_di: "cabang"`; hasil selesai langsung masuk stok
@@ -161,13 +170,15 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
   (kitchen/bar: produksi lokal di cabang store-nya, resep divisinya saja)
 - `/pembelian/*` → **owner/admin, ATAU `tim` yang cabangnya
   `central_kitchen`** (`izinkanManajemenAtauKaryawanCk`; selain itu 403)
-- `/laporan/*`, `/rekomendasi/*`, `/sampah/*`, `/karyawan/*`, `/customer/*` →
+- `/laporan/*`, `/rekomendasi/*`, `/sampah/*`, `/customer/*` →
   `requireRole("owner","admin")`
+- `/karyawan/*` → `requireRole("owner","admin","hrd")`
 - `/open-bill/*` → `requireRole("cashier")`
 - `/shift/*` → `requireRole("owner","admin","cashier")` (BACA dibuka untuk
   owner/admin; **buka/tutup** digerbang `requireRole("cashier")` per-rute)
-- `/absensi/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar")`
-- `/pengajuan/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar")` (semua boleh mengajukan; ACC/tolak digerbang inline ke owner/admin)
+- `/absensi/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar","hrd")`
+- `/pengajuan/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar","hrd")` (semua boleh mengajukan; ACC/tolak digerbang inline ke owner/admin/hrd)
+- `/kebersihan/*` → `requireRole("owner","admin","cashier","tim","kitchen","bar","hrd")` (rekap/area digerbang inline ke owner/admin/hrd)
 - Modul tenant lain → semua anggota perusahaan yang login (owner/admin/cashier/
   tim), dengan `requireRole(...)` per-rute & pemeriksaan kunci-cabang seperti
   dicatat.

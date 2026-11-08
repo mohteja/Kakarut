@@ -40,6 +40,7 @@ import { menuRoutes } from "./modules/menu/routes";
 import { onboardingRoutes } from "./modules/onboarding/routes";
 import { openBillRoutes } from "./modules/open-bill/routes";
 import { pesananRoutes } from "./modules/pesanan/routes";
+import { penjagaHrd } from "./lib/penjaga-hrd";
 import { penjualanRoutes } from "./modules/penjualan/routes";
 import { setSyncApp, syncRoutes } from "./modules/sync/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
@@ -152,7 +153,8 @@ export function createApp() {
     .route("/admin/error-log", adminErrorLogRoutes);
 
   // Rute internal perusahaan (butuh membership)
-  const tenant = new Hono<AppEnv>().use("*", requireAuth, requireCompany);
+  // `penjagaHrd`: peran HRD hanya ke modul personalia (lib/penjaga-hrd.ts).
+  const tenant = new Hono<AppEnv>().use("*", requireAuth, requireCompany, penjagaHrd);
   // Gerbang peran owner/admin — HARUS didaftarkan sebelum route agar middleware
   // dijalankan lebih dulu. Kasir hanya butuh kasir/stok/opname/penyesuaian.
   // Produksi & pembelian: manajemen ATAU karyawan (tim) yang lokasi kerjanya
@@ -192,7 +194,8 @@ export function createApp() {
   tenant.use("/laporan/*", requireRole("owner", "admin"));
   tenant.use("/rekomendasi/*", requireRole("owner", "admin"));
   tenant.use("/sampah/*", requireRole("owner", "admin"));
-  tenant.use("/karyawan/*", requireRole("owner", "admin"));
+  // HRD ikut mengelola karyawan; batas "tak menyentuh owner" di modulnya.
+  tenant.use("/karyawan/*", requireRole("owner", "admin", "hrd"));
   tenant.use("/customer/*", requireRole("owner", "admin"));
   // Transaksi POS (jual, open bill) HANYA peran kasir.
   // Owner/admin memantau lewat Riwayat/Laporan, tak meng-input transaksi.
@@ -213,21 +216,21 @@ export function createApp() {
   // sendiri.
   tenant.use(
     "/absensi/*",
-    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar", "hrd"),
   );
   // Pengajuan cuti/libur: SEMUA peran boleh mengajukan (gerbang sama dengan
-  // absensi). Yang boleh MEMUTUSKAN (ACC/tolak) hanya owner/admin — digerbang
+  // absensi). Yang boleh MEMUTUSKAN (ACC/tolak) hanya owner/admin/hrd — digerbang
   // inline pada PATCH di modulnya, bukan di sini.
   tenant.use(
     "/pengajuan/*",
-    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar", "hrd"),
   );
   // Laporan kebersihan harian: SEMUA peran membuat laporannya masing-masing.
-  // Yang boleh membaca REKAP dan mengatur master area hanya owner/admin —
+  // Yang boleh membaca REKAP dan mengatur master area hanya owner/admin/hrd —
   // digerbang inline pada rute terkait di modulnya, bukan di sini.
   tenant.use(
     "/kebersihan/*",
-    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar", "hrd"),
   );
   // TRANSFER STOK: yang MENGIRIM hanya Central Kitchen — ditegakkan di modulnya
   // pada cabang ASAL (403 bila bukan CK), jadi bukan urusan gerbang peran ini.

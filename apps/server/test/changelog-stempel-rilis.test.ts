@@ -101,8 +101,12 @@ const BELUM_TAYANG = new Set([
   // PARUH "belum di-merge" KOSONG LAGI sejak 2026-11-03 — entri `POST /print/lan`
   // tayang lewat merge PR #243; stempelnya dipasang pada commit yang SAMA.
   //
-  // BELUM DI-MERGE (2026-11-03): papan pesanan lihat-saja untuk owner/admin.
-  "## 🟡 Papan Pesanan Masuk: owner & admin LIHAT SAJA — `POST /api/pesanan/*` → 403",
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-11-08 — papan pesanan
+  // lihat-saja tayang lewat merge PR #245; stempelnya dipasang pada commit
+  // yang SAMA.
+  //
+  // BELUM DI-MERGE (2026-11-08): peran HRD.
+  "## 🟡 Peran baru `hrd` (personalia) — `UserRole` bertambah, CHECK cabang dibalik",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

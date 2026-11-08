@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
  * baris USULAN — sebelum `ON CONFLICT` sempat mengalihkannya ke UPDATE. Dan
  * `memberships_cashier_branch_ck` berbunyi:
  *
- *   role IN ('owner','admin') OR branch_id IS NOT NULL
+ *   role NOT IN ('cashier','tim','kitchen','bar') OR branch_id IS NOT NULL
  *
  * Jadi menyusun kandidat ber-`branch_id` NULL meledakkan SELURUH provisi tamu,
  * walau barisnya sudah ada dan cabangnya sudah benar:
@@ -45,7 +45,7 @@ describe("provisi tamu: keanggotaan kasir tak boleh lewat upsert", () => {
     // Kalau CHECK-nya dihapus kelak, seluruh alasan uji ini gugur dan ia harus
     // ikut dibuang, bukan dibiarkan menjaga aturan yang tak lagi berlaku.
     expect(SCHEMA).toContain("memberships_cashier_branch_ck");
-    expect(SCHEMA).toContain("IN ('owner','admin') OR");
+    expect(SCHEMA).toContain("NOT IN ('cashier','tim','kitchen','bar') OR");
   });
 
   it("tak ada lagi kandidat kasir ber-branchId opsional", () => {

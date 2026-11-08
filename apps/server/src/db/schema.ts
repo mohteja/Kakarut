@@ -24,7 +24,9 @@ import {
  * transaksi — tanpa kasir); kitchen = tim cabang STORE + produksi lokal
  * (hasil masuk stok cabangnya); bar = sama seperti kitchen tetapi DIVISI BAR —
  * hanya memproduksi resep ber-divisi_produksi "bar" (kitchen hanya "kitchen").
- * cashier, tim, kitchen & bar terikat ke satu cabang.
+ * cashier, tim, kitchen & bar terikat ke satu cabang. hrd = personalia
+ * (lintas cabang): karyawan, absen, cuti, kebersihan, penggajian — tanpa
+ * penjualan/stok/menu (dijaga `penjagaHrd` di app.ts).
  */
 export const userRoleEnum = pgEnum("user_role", [
   "owner",
@@ -33,6 +35,7 @@ export const userRoleEnum = pgEnum("user_role", [
   "tim",
   "kitchen",
   "bar",
+  "hrd",
 ]);
 export const menuTipeEnum = pgEnum("menu_tipe", ["regular", "paket"]);
 /** jalur pengadaan bahan: diproduksi sendiri vs dibeli jadi */
@@ -313,10 +316,16 @@ export const memberships = pgTable(
   },
   (t) => [
     uniqueIndex("memberships_user_company_uq").on(t.userId, t.companyId),
-    // owner/admin boleh lintas cabang; peran lain (kasir, tim) wajib punya
-    // cabang. Ditulis tanpa literal 'tim' agar migrasi aman dijalankan satu
-    // transaksi dengan ALTER TYPE ADD VALUE (nilai enum baru belum bisa dipakai).
-    check("memberships_cashier_branch_ck", sql`${t.role} IN ('owner','admin') OR ${t.branchId} IS NOT NULL`),
+    // Peran LANTAI (kasir, tim, kitchen, bar — cermin `terikatCabang`) wajib
+    // punya cabang; owner/admin/hrd lintas cabang. Ditulis sebagai daftar peran
+    // yang TERIKAT, dibandingkan sebagai TEKS: migrasi berjalan satu
+    // transaksi dengan ALTER TYPE ADD VALUE, dan nilai enum yang belum
+    // ter-commit tak boleh dipakai — di DB segar itu termasuk 'tim', 'kitchen',
+    // dan 'bar' sendiri (ditambahkan migrasi lama di transaksi yang sama).
+    check(
+      "memberships_cashier_branch_ck",
+      sql`${t.role}::text NOT IN ('cashier','tim','kitchen','bar') OR ${t.branchId} IS NOT NULL`,
+    ),
     // kode karyawan unik per perusahaan (abaikan yang NULL)
     uniqueIndex("memberships_company_kode_uq")
       .on(t.companyId, t.employeeCode)

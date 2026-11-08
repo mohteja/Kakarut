@@ -77,6 +77,9 @@ export function Layout() {
 
   const roleGuard = auth?.user.role;
   const manajemenGuard = roleGuard === "owner" || roleGuard === "admin";
+  // HRD = personalia: server menolaknya di luar karyawan/absen/cuti/kebersihan
+  // (`penjagaHrd`), jadi lencana stok/penerimaan/pesanan tak ditembakkan.
+  const hrdGuard = roleGuard === "hrd";
   // Divisi store/CK membatasi halaman: tautan lama/bookmark di luar divisi
   // dialihkan ke beranda divisinya (store → Beranda, CK → Produksi).
   useEffect(() => {
@@ -97,7 +100,7 @@ export function Layout() {
   const { data: pen, error: penGagal } = useQuery({
     queryKey: ["penerimaan", dataQuery],
     queryFn: () => api<{ rows: { status: string }[] }>(`/penerimaan${dataQuery}`),
-    enabled: !!auth && !auth.user.is_super_admin,
+    enabled: !!auth && !auth.user.is_super_admin && !hrdGuard,
     refetchInterval: 60_000,
   });
   const kirimanMenunggu = pen?.rows.filter((r) => r.status === "menunggu").length ?? 0;
@@ -108,7 +111,7 @@ export function Layout() {
   const { data: stok, error: stokGagal } = useQuery({
     queryKey: ["stok", dataQuery],
     queryFn: () => api<StokRowDto[]>(`/stok${dataQuery}`),
-    enabled: !!auth && !auth.user.is_super_admin,
+    enabled: !!auth && !auth.user.is_super_admin && !hrdGuard,
     refetchInterval: 120_000,
   });
   const stokKritis = stok?.filter((r) => r.status !== "aman").length ?? 0;
@@ -210,7 +213,7 @@ export function Layout() {
   const { data: pengajuanNav, error: pengajuanGagal } = useQuery({
     queryKey: ["pengajuan", "menunggu"],
     queryFn: () => api<PengajuanRow[]>("/pengajuan?status=menunggu"),
-    enabled: !!auth && !auth.user.is_super_admin && manajemenGuard,
+    enabled: !!auth && !auth.user.is_super_admin && (manajemenGuard || hrdGuard),
     refetchInterval: 60_000,
   });
   const pengajuanMenunggu = (pengajuanNav ?? []).length;
@@ -220,7 +223,7 @@ export function Layout() {
   const { data: kebersihanNav, error: kebersihanGagal } = useQuery({
     queryKey: ["kebersihan-ringkas"],
     queryFn: () => api<{ tanggal: string; total: number; kotor: number }>("/kebersihan/ringkas"),
-    enabled: !!auth && !auth.user.is_super_admin && manajemenGuard,
+    enabled: !!auth && !auth.user.is_super_admin && (manajemenGuard || hrdGuard),
     refetchInterval: 60_000,
   });
   const kebersihanKotor = kebersihanNav?.kotor ?? 0;
@@ -234,6 +237,7 @@ export function Layout() {
   const lihatPesanan =
     !!auth &&
     !auth.user.is_super_admin &&
+    !hrdGuard &&
     divisi !== "central_kitchen" &&
     !(roleGuard === "tim" &&
       cabang.find((b) => b.id === auth.user.branch_id)?.tipe === "central_kitchen");
@@ -321,7 +325,9 @@ export function Layout() {
                 ? "Kitchen"
                 : role === "bar"
                   ? "Bar"
-                  : "Kasir"
+                  : role === "hrd"
+                    ? "HRD"
+                    : "Kasir"
       }`;
   // tutup drawer setelah navigasi/aksi di layar mobile
   const tutup = () => setMenuOpen(false);
@@ -489,6 +495,33 @@ export function Layout() {
                 className={({ isActive }) => `${linkClass({ isActive })} ml-4 text-sm`}
               >
                 ↳ Riwayat kirim email
+              </NavLink>
+            </>
+          ) : role === "hrd" ? (
+            <>
+              {/* HRD (personalia): karyawan, absen, cuti, kebersihan — tanpa
+                  omzet/stok/menu. Cermin daftar izin `penjagaHrd` di server. */}
+              <NavLink to="/rekap-absen" className={navFlex}>
+                <span>🗓 Rekap Absen &amp; Cuti</span>
+                {badgeOranye(pengajuanMenunggu, pengajuanGagal, "nav-lencana-pengajuan")}
+              </NavLink>
+              <NavLink to="/pengaturan/karyawan" className={linkClass}>
+                👥 Karyawan
+              </NavLink>
+              <NavLink to="/rekap-kebersihan" className={navFlex}>
+                <span>🧼 Rekap Kebersihan</span>
+                {kebersihanGagal
+                  ? badgeOranye(0, kebersihanGagal, "nav-lencana-kebersihan")
+                  : badgeOranye(kebersihanKotor, null, "nav-lencana-kebersihan")}
+              </NavLink>
+              <NavLink to="/absen" className={linkClass}>
+                🖐 Absen
+              </NavLink>
+              <NavLink to="/kebersihan" className={linkClass}>
+                🧹 Laporan Kebersihan
+              </NavLink>
+              <NavLink to="/profil" className={linkClass}>
+                👤 Profil Saya
               </NavLink>
             </>
           ) : (

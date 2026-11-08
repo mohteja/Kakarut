@@ -171,8 +171,8 @@ describe("penjagaan tetangga tetap utuh", () => {
     expect(RUMAH).toMatch(/\/\^\\d\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$\//);
   });
 
-  it("rekap tetap owner/admin saja walau grupnya terbuka", () => {
-    expect(ABSENSI_KODE).toMatch(/\.get\("\/rekap", requireRole\("owner", "admin"\)/);
+  it("rekap tetap owner/admin/hrd saja walau grupnya terbuka", () => {
+    expect(ABSENSI_KODE).toMatch(/\.get\("\/rekap", requireRole\("owner", "admin", "hrd"\)/);
   });
 
   it("hanya pengajuan DISETUJUI yang mengubah alpa jadi cuti/libur", () => {

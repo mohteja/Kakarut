@@ -47,7 +47,10 @@ const labelRole = {
   tim: "Tim",
   kitchen: "Kitchen",
   bar: "Bar",
+  hrd: "HRD",
 } as const;
+/** Lintas cabang seperti admin: lokasinya Kantor, bukan cabang toko. */
+const lintasCabang = (r: string) => r === "admin" || r === "hrd";
 /** kasir, tim, kitchen & bar terikat ke satu cabang — lokasi kerja wajib */
 const WAJIB_CABANG = new Set(["cashier", "tim", "kitchen", "bar"]);
 
@@ -219,7 +222,9 @@ function TempatSOModal({ karyawan, onClose }: { karyawan: KaryawanRow; onClose: 
 
 export function KaryawanPage() {
   // Akun demo: tambah/undang/ubah karyawan ditolak server (`akun_tamu`).
-  const tamu = useAuth().auth?.user.is_tamu === true;
+  const { auth } = useAuth();
+  const tamu = auth?.user.is_tamu === true;
+  const bukanOwner = auth?.user.role !== "owner";
   const { cabang } = useBranch();
   const { isPro } = useCompanyMode();
   // Admin selalu berlokasi di Kantor (pusat) — lokasi kerjanya dikunci ke sini.
@@ -525,7 +530,7 @@ export function KaryawanPage() {
                             role: k.role,
                             // Admin selalu dikunci ke Kantor (pusat) bila ada.
                             branch_id:
-                              k.role === "admin" && kantorId ? kantorId : (k.branch_id ?? ""),
+                              lintasCabang(k.role) && kantorId ? kantorId : (k.branch_id ?? ""),
                           }),
                       },
                       {
@@ -638,7 +643,7 @@ export function KaryawanPage() {
                       ...undangForm,
                       role: r,
                       branch_id:
-                        r === "admin" && kantorId
+                        lintasCabang(r) && kantorId
                           ? kantorId
                           : r === "kitchen" || r === "bar"
                             ? (lokasiStore?.id ?? storeDefault)
@@ -652,10 +657,12 @@ export function KaryawanPage() {
                   <option value="kitchen">Kitchen</option>
                   <option value="bar">Bar</option>
                   <option value="admin">Admin</option>
-                  <option value="owner">Owner</option>
+                  <option value="hrd">HRD</option>
+                  {/* Hanya owner yang boleh memberi peran owner (server: 403). */}
+                  {!bukanOwner && <option value="owner">Owner</option>}
                 </select>
               </div>
-              {isPro && undangForm.role !== "admin" && (
+              {isPro && !lintasCabang(undangForm.role) && (
                 <div>
                   <label className="mb-1 block text-sm font-medium">
                     Lokasi kerja {WAJIB_CABANG.has(undangForm.role) ? "(wajib)" : "(opsional)"}
@@ -751,7 +758,7 @@ export function KaryawanPage() {
                 {/* Central Kitchen hanya punya SATU peran lapangan: Karyawan (tim) */}
                 {cabang.find((b) => b.id === form.branch_id)?.tipe === "central_kitchen" &&
                 form.role !== "owner" &&
-                form.role !== "admin" ? (
+                !lintasCabang(form.role) ? (
                   <>
                     <select
                       value="tim"
@@ -776,7 +783,7 @@ export function KaryawanPage() {
                       // Kitchen/Bar wajib cabang STORE — lokasi non-store dialihkan.
                       const lokasi = cabang.find((x) => x.id === form.branch_id);
                       const branchPatch =
-                        r === "admin" && kantorId
+                        lintasCabang(r) && kantorId
                           ? { branch_id: kantorId }
                           : (r === "kitchen" || r === "bar") && lokasi?.tipe !== "store"
                             ? { branch_id: storeDefault }
@@ -792,7 +799,8 @@ export function KaryawanPage() {
                     <option value="kitchen">Kitchen</option>
                     <option value="bar">Bar</option>
                     <option value="admin">Admin</option>
-                    <option value="owner">Owner</option>
+                    <option value="hrd">HRD</option>
+                    {!bukanOwner && <option value="owner">Owner</option>}
                   </select>
                 )}
               </div>
@@ -801,13 +809,13 @@ export function KaryawanPage() {
                 <div>
                   <label className="mb-1 block text-sm font-medium">
                     Lokasi kerja{" "}
-                    {form.role === "admin" && kantorId
+                    {lintasCabang(form.role) && kantorId
                       ? "(Kantor)"
                       : WAJIB_CABANG.has(form.role)
                         ? "(wajib)"
                         : "(opsional)"}
                   </label>
-                  {form.role === "admin" && kantorId ? (
+                  {lintasCabang(form.role) && kantorId ? (
                     // Admin selalu di Kantor — lokasi terkunci, bukan dropdown.
                     <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-700">
                       🏢 Kantor
