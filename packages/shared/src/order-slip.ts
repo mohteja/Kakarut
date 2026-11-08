@@ -52,7 +52,26 @@ export interface OrderSlipData {
   /** catatan pesanan (bukan catatan baris) */
   catatan?: string | null;
   kasir?: string | null;
+  /** cetakan KEDUA dst. dari pesanan yang sama — lihat `cetakTandaSalinan` */
+  salinan?: boolean;
 }
+
+/**
+ * Tanda CETAK ULANG di kepala & kaki kertas.
+ *
+ * Permintaan pemilik: nota yang dicetak kedua kalinya harus kelihatan salinan,
+ * "biar tidak disangka orderan baru". Di dapur, dua kertas berisi pesanan yang
+ * sama tanpa tanda apa pun dibaca sebagai dua pesanan — dan dimasak dua kali.
+ * Dicetak di ATAS (yang pertama dibaca) dan di BAWAH (yang tersisa saat kertas
+ * disobek di tengah). Ponsel mencerminkannya di `receipt_builder.dart`.
+ */
+export const TEKS_SALINAN = "** SALINAN **";
+export function cetakTandaSalinan(b: EscPosBuilder, keterangan: string): void {
+  b.align("center").bold(true).size("tall").text(TEKS_SALINAN).size("normal");
+  b.text(keterangan).bold(false).align("left");
+}
+export const KETERANGAN_SALINAN_STRUK = "CETAK ULANG / COPY";
+export const KETERANGAN_SALINAN_PESANAN = "BUKAN PESANAN BARU";
 
 /**
  * Baris cabang di kepala kertas & struk layar: "Cabang <nama>" — kecuali
@@ -103,6 +122,7 @@ export function buildOrderSlipBytes(data: OrderSlipData, opts: ReceiptOptions): 
   // Judul lebih dulu, sebelum apa pun. Kertas ini beredar di dapur dan di meja
   // tamu berdampingan dengan struk sungguhan; yang pertama harus dijawab
   // olehnya adalah "ini bukan bukti bayar".
+  if (data.salinan) cetakTandaSalinan(b, KETERANGAN_SALINAN_PESANAN);
   b.align("center").bold(true).size("tall").text("PESANAN").size("normal");
   b.text(data.companyNama).bold(false);
   b.text(labelCabangKertas(data.branchNama));
@@ -157,6 +177,7 @@ export function buildOrderSlipBytes(data: OrderSlipData, opts: ReceiptOptions): 
 
   if (data.catatan?.trim()) b.divider().text(`Catatan: ${data.catatan.trim()}`);
   if (data.kasir) b.text(`Kasir: ${data.kasir}`);
+  if (data.salinan) cetakTandaSalinan(b.divider(), KETERANGAN_SALINAN_PESANAN);
 
   b.feed(opts.feedLines);
   if (opts.cut) b.cut();

@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { labelCabangKertas, qtyDitagih, tarifPb1Struk, teksAddonKertas } from "@kakarut/shared";
+import { KETERANGAN_SALINAN_STRUK, TEKS_SALINAN } from "@kakarut/shared";
 import type {
   CabangDto,
   CompanyRow,
@@ -65,6 +66,20 @@ type CabangStruk = Pick<
   "id" | "alamat" | "telepon" | "receipt_footer" | "receipt_show_alamat"
 >;
 
+/**
+ * Berapa kali struk / slip pesanan sebuah nota sudah dicetak dari tab INI.
+ * Cetakan kedua dst. bertanda SALINAN — permintaan pemilik: "biar tidak
+ * disangka orderan baru". Di luar komponen supaya bertahan saat modal ditutup
+ * lalu dibuka lagi dari Riwayat. Kuncinya `struk:<id>` / `slip:<id>`.
+ */
+const kaliCetak = new Map<string, number>();
+function sudahDicetak(kunci: string): boolean {
+  return (kaliCetak.get(kunci) ?? 0) > 0;
+}
+function tandaiCetak(kunci: string): void {
+  kaliCetak.set(kunci, (kaliCetak.get(kunci) ?? 0) + 1);
+}
+
 export function ReceiptModal({
   data,
   onClose,
@@ -103,6 +118,16 @@ export function ReceiptModal({
   const [modeHapus, setModeHapus] = useState(false);
   const [modeRefund, setModeRefund] = useState(false);
   const autoPrintedFor = useRef<string | null>(null);
+  // Memicu render ulang sesudah mencetak, supaya tanda SALINAN di pratinjau ikut.
+  const [, setCetakKe] = useState(0);
+  const kunciStruk = `struk:${data.sale.id}`;
+  const kunciSlip = `slip:${data.sale.id}`;
+  // Dibuka dari Riwayat = struknya sudah pernah keluar saat transaksi dibayar.
+  const strukSalinan = !autoPrintOnOpen || sudahDicetak(kunciStruk);
+  function catatCetak(kunci: string) {
+    tandaiCetak(kunci);
+    setCetakKe((n) => n + 1);
+  }
 
   // SOFT-DELETE ke Tempat Sampah (cukup konfirmasi — bisa dipulihkan)
   const hapus = useMutation({
@@ -172,7 +197,8 @@ export function ReceiptModal({
     setPrintError(null);
     setPrinting(true);
     try {
-      await printReceipt(toReceiptData());
+      await printReceipt({ ...toReceiptData(), salinan: strukSalinan });
+      catatCetak(kunciStruk);
     } catch (e) {
       setPrintError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -216,7 +242,11 @@ export function ReceiptModal({
     setPrintError(null);
     setPrinting(true);
     try {
-      await printOrderSlip(toOrderSlipData());
+      // Slip pesanan hanya SALINAN bila sudah pernah dicetak dari sini: slip
+      // yang belum pernah sampai ke dapur yang ditandai "salinan" bisa
+      // diabaikan dapur — pesanan yang tak dimasak lebih mahal dari dobel.
+      await printOrderSlip({ ...toOrderSlipData(), salinan: sudahDicetak(kunciSlip) });
+      catatCetak(kunciSlip);
     } catch (e) {
       setPrintError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -242,6 +272,12 @@ export function ReceiptModal({
    */
   const isiStruk = (
     <>
+            {strukSalinan && (
+              <div className="mb-1 text-center font-bold" data-testid="tanda-salinan">
+                <div className="text-base">{TEKS_SALINAN}</div>
+                <div>{KETERANGAN_SALINAN_STRUK}</div>
+              </div>
+            )}
             <div className="text-center">
               <div className="text-base font-bold">
                 {company?.nama ?? auth?.company?.nama ?? "Terakasir"}
@@ -410,7 +446,13 @@ export function ReceiptModal({
               {printing ? "Mencetak…" : "🍽 Cetak Pesanan"}
             </button>
           )}
-          <button onClick={() => window.print()} className={`${btnSecondary} flex-1`}>
+          <button
+            onClick={() => {
+              window.print();
+              catatCetak(kunciStruk);
+            }}
+            className={`${btnSecondary} flex-1`}
+          >
             🖨 Cetak Browser
           </button>
           <button

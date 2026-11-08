@@ -4,7 +4,7 @@
  */
 import { teksAddon } from "./addon";
 import { EscPosBuilder } from "./escpos";
-import { labelCabangKertas } from "./order-slip";
+import { KETERANGAN_SALINAN_STRUK, cetakTandaSalinan, labelCabangKertas } from "./order-slip";
 import type { MetodeBayar } from "./types";
 
 const METODE_LABEL: Record<MetodeBayar, string> = {
@@ -89,6 +89,8 @@ export interface ReceiptData {
   kasir?: string | null;
   /** teks footer dari pengaturan perusahaan */
   footer?: string | null;
+  /** cetakan KEDUA dst. dari nota yang sama — kepala & kaki bertanda SALINAN */
+  salinan?: boolean;
 }
 
 export interface ReceiptOptions {
@@ -112,6 +114,7 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
   const b = new EscPosBuilder(opts.charsPerLine);
   b.init();
   if (opts.drawerKick) b.drawerKick();
+  if (data.salinan) cetakTandaSalinan(b, KETERANGAN_SALINAN_STRUK);
 
   // Header
   b.align("center").bold(true).size("tall").text(data.companyNama).size("normal").bold(false);
@@ -182,6 +185,7 @@ export function buildReceiptBytes(data: ReceiptData, opts: ReceiptOptions): Uint
 
   // Footer
   b.align("center").text(data.footer?.trim() ? data.footer : "Terima kasih!");
+  if (data.salinan) cetakTandaSalinan(b.divider(), KETERANGAN_SALINAN_STRUK);
 
   b.feed(opts.feedLines);
   if (opts.cut) b.cut();
