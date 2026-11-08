@@ -25,6 +25,26 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Penggajian (`/api/gaji/*`, owner & HRD) + slip gaji sendiri (`/api/profil/slip-gaji`)
+
+🟢 **BARU** — tak mengubah perilaku klien lama.
+
+**Belum tayang.**
+
+- Modul penggajian untuk owner & HRD: setelan perusahaan (tanggal mulai periode,
+  cuti dibayar), setelan per karyawan (bulanan/harian, jam kerja, toleransi telat,
+  potongan, lembur, tunjangan), kasbon, periode draft → final → dibayar, slip
+  per karyawan. Rincian rumus & rute: API-CONTRACT bagian `/api/gaji`.
+- Semua peran: `GET /api/profil/slip-gaji` (+ `/:id`) — slip milik sendiri,
+  periode final/dibayar saja.
+- Tipe baru di `types.ts`: `GajiRincian`, `GajiSlipRow`, `GajiSlipDetailDto`,
+  `GajiPeriodeRow`, `GajiPeriodeDetailDto`, `GajiKaryawanRow`,
+  `GajiSetelanKaryawanDto`, `GajiSetelanPerusahaanDto`, `KasbonRow`,
+  `SlipGajiSayaRow`. Layar ponsel menyusul (tahap 4); kuncinya dicatat di
+  `kunci-belum-dibaca.txt`.
+
+---
+
 ## 🟡 Peran baru `hrd` (personalia) — `UserRole` bertambah, CHECK cabang dibalik
 
 🟡 **PERLU DICEK** — klien yang memetakan peran dengan `switch` tertutup.

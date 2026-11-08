@@ -1423,6 +1423,8 @@ Laporan:
 - `GET /api/profil` — res: `ProfilDto` `{ nama, email, role, cabang, employee_code, pin_refund_diatur }`
 - `PUT /api/profil/pin` — **[owner/admin]** — req: `{ pin: string (tepat 6 angka), password: string }` — atur/ganti PIN refund (kasir wajib mengetikkan PIN owner/admin saat refund) — res: `{ ok }` — error: **401** password salah, **403** bukan owner/admin atau akun tamu (`sebab: "akun_tamu"`)
 - `GET /api/profil/aktivitas` — res: `{ rows: [...] }` (log aktivitas faktur sendiri, maks 50)
+- `GET /api/profil/slip-gaji` — [any] res: `SlipGajiSayaRow[]` — slip MILIK SENDIRI, **hanya periode `final`/`dibayar`** (draft tak ditunjukkan), terbaru dulu
+- `GET /api/profil/slip-gaji/:id` — [any] res: `GajiSlipDetailDto` — **404** bila bukan milik pemegang token atau periodenya masih draft
 - `POST /api/profil/password` — req: `{ password_lama: string, password_baru: string (min 8) }` — res: **`{ ok: true, token, user, company, branch }`** (bentuk **sesi** yang sama seperti login) — error: **401** password lama salah. **PENTING:** ganti password menaikkan token_version → token LAMA (perangkat/tab lain) langsung jadi **401**. Endpoint ini **menerbitkan token baru** untuk tab/perangkat yang melakukan perubahan agar TIDAK ikut ter-logout — **klien WAJIB menyimpan `token` baru ini menggantikan yang lama**. Perusahaan aktif dipertahankan (penting untuk akun multi-perusahaan).
 
 ## `/api/stok` — Stok & opname (`modules/stok/routes.ts`)
@@ -1566,7 +1568,48 @@ Laporan:
 
 - `POST /api/upload` — query: `tujuan=logo|bukti|menu|resep` (default `menu`; `resep` = foto cara masak/bahan jadi/packing) — req: `multipart/form-data` field **`file`** (image/jpeg | image/png | image/webp, maks 5 MB) — res: **201** `{ url }` — error: **400** (file hilang / format salah / terlalu besar)
 
-## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin]**
+## `/api/gaji` — Penggajian (`modules/gaji/routes.ts`) — group guard **[owner/hrd]**
+
+Sejak 2026-11-08. Admin & peran lain **403**. Rumus murni di
+`packages/shared/src/gaji.ts` (`hitungSlip`); slip menyimpan `GajiRincian`
+lengkap (termasuk per hari) sebagai POTRET saat dihitung.
+
+**Aturan hitung:**
+- per hari (sama dengan Rekap Absen): ada cap absen → `hadir`; di luar masa kerja (sebelum
+  bergabung / sesudah diarsip) → `kosong`; cuti/libur disetujui → `cuti`/`libur`; hari yang
+  belum terjadi → `belum`; selain itu `alpa`.
+- **telat** = absen masuk pertama > `jam_masuk` + `toleransi_telat_menit` → `potongan_telat_per_kali`.
+- **lembur** = absen keluar terakhir − `jam_pulang`, dibulatkan ke bawah per 30 menit → `upah_lembur_per_jam`.
+  Jadwal lewat tengah malam didukung. Hadir tanpa absen pulang → `lupa_pulang`, lembur tak dihitung.
+- **bulanan**: `nominal × hari_aktif ÷ hari_periode` (prorata masuk/keluar) + tunjangan + lembur + bonus
+  + penyesuaian − (alpa + cuti tak dibayar) × `potongan_alpa_per_hari` (null = nominal ÷ 26) − telat.
+- **harian**: `nominal × (hadir + cuti dibayar)` + tunjangan + lembur + bonus + penyesuaian − telat.
+- cuti/libur **dibayar** menurut kategorinya (`GajiSetelanPerusahaanDto.cuti_dibayar`).
+- **kasbon**: tiap pinjaman dipotong min(cicilan, sisa), tak melebihi gaji tersedia — total tak pernah < 0
+  (`kurang` mencatat kekurangannya).
+
+**Rute:**
+- `GET /api/gaji/setelan` → `GajiSetelanPerusahaanDto`; `PUT` sama — req `{ tanggal_mulai: 1..28, cuti_dibayar: PengajuanKategori[] }`
+- `GET /api/gaji/karyawan` → `GajiKaryawanRow[]` (semua karyawan non-owner, termasuk yang diarsip, + setelan, tunjangan, `kasbon_sisa`)
+- `PUT /api/gaji/karyawan/:userId` — req `GajiSetelanKaryawanDto & { tunjangan: GajiTunjanganDto[] }` (tunjangan DIGANTI seluruhnya) — **400** owner, **404** bukan anggota
+- `GET /api/gaji/kasbon?user_id=` → `KasbonRow[]`; `POST` req `{ user_id, tanggal (≤ hari ini, ≤ 366 hari lalu), nominal, cicilan_per_periode, catatan? }` → 201 `{ id }`;
+  `PATCH /:id` req `{ cicilan_per_periode?, catatan? }`; `DELETE /:id` — **409** bila sudah pernah dipotong
+- `GET /api/gaji/periode` → `GajiPeriodeRow[]` (terbaru dulu)
+- `POST /api/gaji/periode` — req `{ mulai?, selesai? }` → 201 `GajiPeriodeDetailDto`. `mulai` kosong = sesudah periode terakhir
+  (atau periode bulanan yang memuat hari ini); `selesai` kosong = mulai + 1 bulan − 1 hari; diisi = **periode khusus** (≤ 62 hari).
+  Langsung menghitung slip semua karyawan bersetelan aktif. **400** periode belum dimulai, **409** bertindih.
+- `GET /api/gaji/periode/:id` → `GajiPeriodeDetailDto` (`tanpa_setelan` = karyawan aktif tanpa setelan, tak ikut dihitung)
+- `POST /api/gaji/periode/:id/hitung-ulang` — draft saja; bonus/penyesuaian/catatan dipertahankan, **id slip tetap**
+- `PATCH /api/gaji/slip/:id` — req `{ bonus? (≥0), penyesuaian? (±), catatan? }` → `GajiSlipDetailDto` — draft saja
+- `GET /api/gaji/slip/:id` → `GajiSlipDetailDto`
+- `POST /api/gaji/periode/:id/final` — draft → final: dihitung segar sekali lagi lalu dikunci; potongan kasbon TERCATAT
+  (sisa kasbon berkurang). **400** bila tanggal selesai belum lewat.
+- `POST /api/gaji/periode/:id/dibayar` — final → dibayar
+- `POST /api/gaji/periode/:id/buka` — final → draft, **owner saja** (403 HRD); potongan kasbon periode itu dibatalkan
+- `DELETE /api/gaji/periode/:id` — draft saja
+- Periode/slip yang tak lagi draft → **409** `sebab: "periode_terkunci"`.
+
+## `/api/karyawan` — Karyawan (`modules/users/routes.ts`) — group guard **[owner/admin/hrd]**
 
 - `GET /api/karyawan` — query: `arsip=true` (daftar arsip) — res: row karyawan
 - `POST /api/karyawan` — req `KaryawanBody`: `{ nama: string, email: string (lowercase), password: string (min 8), role: "owner"|"admin"|"cashier"|"tim"|"kitchen"|"bar", branch_id?: uuid|null }` — res: **201** `{ user_id, email, nama, role, employee_code }` — error: **400** (cashier/tim/kitchen/bar butuh cabang; mismatch peran/tipe cabang — kitchen/bar hanya cabang store), **403** hanya owner boleh buat owner, **409** email sudah karyawan aktif / sudah punya undangan pending — *(buat akun langsung + password. Untuk alur "menunggu diundang", pakai `/undang` di bawah.)* **SEJAK 2026-10-26: email yang SUDAH punya akun tak lagi 409** — balasannya **200** `KaryawanDiundangResult` = `{ diundang: true, id, email, role }`: dibuat undangan pending (peran & cabang sama), `password` diabaikan, tanpa surel; orangnya menekan Terima di halaman welcome. Klien wajib membedakan 200 `diundang` dari 201 akun baru.
@@ -5326,6 +5369,196 @@ export interface RekapAbsenDto {
    */
   hari_terhitung: number;
   rows: RekapAbsenRow[];
+}
+
+/* ===== Penggajian (HRD, 2026-11-08) — rumus di `gaji.ts` ===== */
+
+export type GajiDasar = "bulanan" | "harian";
+export type GajiPeriodeStatus = "draft" | "final" | "dibayar";
+/**
+ * Status hari: dari rekap absen (`nilaiHariRekap`), plus `belum` = hari dalam
+ * masa kerja yang belum terjadi (periode dihitung di tengah jalan) — bukan
+ * alpa, tak dibayar harian, tapi tetap masa kerja untuk prorata bulanan.
+ */
+export type GajiHariStatus = "hadir" | "alpa" | "cuti" | "libur" | "kosong" | "belum";
+
+export interface GajiHariMasukan {
+  tanggal: string;
+  status: GajiHariStatus;
+  kategori: PengajuanKategori | null;
+  /** Menit sejak 00:00 tanggal itu (zona perusahaan) — absen masuk pertama. */
+  masuk_menit: number | null;
+  /** Menit sejak 00:00 tanggal itu; lewat tengah malam bisa > 1440. */
+  keluar_menit: number | null;
+}
+
+export interface GajiHariHasil extends GajiHariMasukan {
+  /** Hadir, atau cuti/libur berkategori dibayar. */
+  dibayar: boolean;
+  telat_menit: number;
+  lembur_menit: number;
+  /** Hadir tanpa absen pulang — lembur tak bisa dihitung. */
+  lupa_pulang: boolean;
+}
+
+export interface GajiTunjanganDto {
+  nama: string;
+  nominal: number;
+}
+
+/** Rincian satu slip — potret saat dihitung (`hitungSlip`). Uang dalam rupiah bulat. */
+export interface GajiRincian {
+  dasar: GajiDasar;
+  nominal: number;
+  hari_periode: number;
+  /** Hari dalam masa kerja (di luar sebelum bergabung / sesudah keluar). */
+  hari_aktif: number;
+  hadir: number;
+  alpa: number;
+  cuti_dibayar: number;
+  cuti_tak_dibayar: number;
+  telat_kali: number;
+  telat_menit: number;
+  lembur_menit: number;
+  lupa_pulang: number;
+  gaji_pokok: number;
+  tunjangan: GajiTunjanganDto[];
+  tunjangan_total: number;
+  upah_lembur: number;
+  potongan_alpa_per_hari: number;
+  potongan_alpa: number;
+  potongan_cuti_tak_dibayar: number;
+  potongan_telat: number;
+  bonus: number;
+  penyesuaian: number;
+  /** Sebelum kasbon. */
+  bruto: number;
+  kasbon: { id: string; nominal: number }[];
+  potongan_kasbon: number;
+  total: number;
+  /** Kekurangan yang tak bisa dipotong karena gaji sudah 0. */
+  kurang: number;
+  harian: GajiHariHasil[];
+}
+
+/** `GET/PUT /gaji/setelan` — pengaturan penggajian perusahaan. */
+export interface GajiSetelanPerusahaanDto {
+  /** 1–28: periode dimulai tanggal ini tiap bulan */
+  tanggal_mulai: number;
+  /** Kategori cuti/libur disetujui yang dibayar */
+  cuti_dibayar: PengajuanKategori[];
+}
+
+/** Setelan gaji satu karyawan (`PUT /gaji/karyawan/:userId`). */
+export interface GajiSetelanKaryawanDto {
+  dasar: GajiDasar;
+  nominal: number;
+  /** "HH:MM" atau null (tanpa jadwal: telat & lembur tak dihitung) */
+  jam_masuk: string | null;
+  jam_pulang: string | null;
+  toleransi_telat_menit: number;
+  /** null = bawaan (bulanan: nominal ÷ 26; harian: 0) */
+  potongan_alpa_per_hari: number | null;
+  potongan_telat_per_kali: number;
+  upah_lembur_per_jam: number;
+  aktif: boolean;
+}
+
+/** `GET /gaji/karyawan` — satu baris per karyawan (tanpa owner). */
+export interface GajiKaryawanRow {
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole;
+  cabang: string | null;
+  arsip_pada: string | null;
+  /** null = belum diatur (tak ikut dihitung) */
+  setelan: GajiSetelanKaryawanDto | null;
+  tunjangan: GajiTunjanganDto[];
+  /** Σ sisa kasbon yang belum lunas */
+  kasbon_sisa: number;
+}
+
+/** `GET /gaji/kasbon` */
+export interface KasbonRow {
+  id: string;
+  user_id: string;
+  nama: string;
+  tanggal: string;
+  nominal: number;
+  cicilan_per_periode: number;
+  catatan: string | null;
+  /** Σ potongan dari slip yang sudah final/dibayar */
+  terpotong: number;
+  sisa: number;
+  lunas: boolean;
+  created_at: string;
+}
+
+/** Ringkas satu periode (`GET /gaji/periode`). */
+export interface GajiPeriodeRow {
+  id: string;
+  mulai: string;
+  selesai: string;
+  status: GajiPeriodeStatus;
+  jumlah_slip: number;
+  total: number;
+  difinalkan_pada: string | null;
+  dibayar_pada: string | null;
+}
+
+/** Satu baris slip di tabel periode — angka ringkas dari `GajiRincian`. */
+export interface GajiSlipRow {
+  id: string;
+  periode_id: string;
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole | null;
+  cabang: string | null;
+  dasar: GajiDasar;
+  hadir: number;
+  alpa: number;
+  cuti_dibayar: number;
+  cuti_tak_dibayar: number;
+  telat_kali: number;
+  lembur_menit: number;
+  lupa_pulang: number;
+  gaji_pokok: number;
+  tunjangan_total: number;
+  upah_lembur: number;
+  bonus: number;
+  penyesuaian: number;
+  /** alpa + cuti tak dibayar + telat (tanpa kasbon) */
+  potongan: number;
+  potongan_kasbon: number;
+  total: number;
+  catatan: string | null;
+}
+
+/** `GET /gaji/periode/:id` */
+export interface GajiPeriodeDetailDto {
+  periode: GajiPeriodeRow;
+  slip: GajiSlipRow[];
+  /** Karyawan aktif yang belum punya setelan gaji — tak ikut dihitung */
+  tanpa_setelan: { user_id: string; nama: string }[];
+}
+
+/** `GET /gaji/slip/:id` & `GET /profil/slip-gaji/:id` */
+export interface GajiSlipDetailDto {
+  slip: GajiSlipRow;
+  periode: GajiPeriodeRow;
+  perusahaan: string;
+  rincian: GajiRincian;
+}
+
+/** `GET /profil/slip-gaji` — slip milik sendiri (periode final/dibayar saja). */
+export interface SlipGajiSayaRow {
+  id: string;
+  mulai: string;
+  selesai: string;
+  status: GajiPeriodeStatus;
+  total: number;
 }
 
 /* ===== Laporan kebersihan harian ===== */

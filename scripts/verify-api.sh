@@ -18491,7 +18491,9 @@ cek "§309 premis: SELURUH rute detail terambil, kecuali yang daftarnya kosong" 
 # Daftar yang kosong = rute detail yang tak bisa diketuk sama sekali. Satu hari
 # ini (`/kebersihan/:id`, DB gerbang tak punya laporan kebersihan); ratchet
 # supaya yang kedua tak lahir diam-diam.
-cek "§309 premis: rute detail tanpa data ≤ 1" "V <= 1" "$(echo "$RINGKAS309" | awk '{print $10}')"
+# 1 → 2 (2026-11-08): `/gaji/periode/:id` — periode gaji pertama baru lahir di
+# §326 (sesudah seksi ini); bentuknya diadu sapuan menyeluruh §311 di akhir.
+cek "§309 premis: rute detail tanpa data ≤ 2" "V <= 2" "$(echo "$RINGKAS309" | awk '{print $10}')"
 cek "§309 premis: daftar rute detailnya ≥ 35" "V >= 35" "$(echo "$RINGKAS309" | awk '{print $9}')"
 cek "§309 premis: interface tersidik ≥ 130" "V >= 130" "$(echo "$RINGKAS309" | awk '{print $4}')"
 cek "§309 premis: objek yang diadu ≥ 4000" "V >= 4000" "$(echo "$RINGKAS309" | awk '{print $5}')"
@@ -19099,6 +19101,83 @@ cek "§325 HRD menyetujui cuti → 200" "V == 200" \
   "$(status_code_body "$THRD" PATCH "/pengajuan/$PID325" '{"status":"disetujui"}')"
 cek "§325 HRD ikut terhitung di rekap absen (bukan owner)" "V == 1" \
   "$(api "$OWNER" GET "/absensi/rekap?branch_id=all" | jq '[.rows[]|select(.role=="hrd")]|length >= 1|if . then 1 else 0 end')"
+
+echo "── §326 penggajian: setelan, kasbon, periode, final, dibayar, slip sendiri ──"
+# Owner & HRD saja. Karyawan uji bergabung HARI INI, jadi dipakai PERIODE KHUSUS
+# satu hari (mulai = selesai = hari ini) — sudah boleh difinalkan, dan hari itu
+# (tanpa absen) adalah alpa: angkanya bisa dihitung di kepala.
+#   bulanan 2.600.000 → potongan alpa bawaan 2.600.000 ÷ 26 = 100.000
+#   bruto = 2.600.000 + tunjangan 300.000 − 100.000 = 2.800.000
+#   kasbon 200.000 cicilan 50.000 → total 2.750.000
+H326=$(TZ=Asia/Jakarta date +%F)
+cek "§326 admin ditolak dari penggajian (403)" "V == 403" "$(status_code "$TADM250" GET /gaji/periode)"
+cek "§326 kasir ditolak dari penggajian (403)" "V == 403" "$(status_code "$REISS105" GET /gaji/karyawan)"
+cek "§326 HRD membaca setelan gaji (200)" "V == 200" "$(status_code "$THRD" GET /gaji/setelan)"
+cek "§326 bawaan: periode tgl 1, sakit dibayar, izin tidak" "V == 1" \
+  "$(api "$THRD" GET /gaji/setelan | jq '((.tanggal_mulai==1) and (.cuti_dibayar|index("sakit")!=null) and (.cuti_dibayar|index("izin")==null))|if . then 1 else 0 end')"
+cek "§326 tanggal mulai 29 ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" PUT /gaji/setelan '{"tanggal_mulai":29,"cuti_dibayar":[]}')"
+cek "§326 HRD menyimpan setelan perusahaan (200)" "V == 200" \
+  "$(status_code_body "$THRD" PUT /gaji/setelan '{"tanggal_mulai":1,"cuti_dibayar":["tahunan","sakit","melahirkan","penting","mingguan","tukar_jadwal","tanggal_merah"]}')"
+api "$OWNER" POST /karyawan "{\"nama\":\"Gaji 326\",\"email\":\"gaji326@basooopa.id\",\"password\":\"Gaji326Pass!\",\"role\":\"cashier\",\"branch_id\":\"$CB301\"}" > /dev/null
+U326=$(api "$OWNER" GET /karyawan | jq -r '[.[]|select(.email=="gaji326@basooopa.id")][0].user_id')
+T326=$(login gaji326@basooopa.id 'Gaji326Pass!')
+SET326='{"dasar":"bulanan","nominal":2600000,"jam_masuk":"08:00","jam_pulang":"16:00","toleransi_telat_menit":10,"potongan_alpa_per_hari":null,"potongan_telat_per_kali":10000,"upah_lembur_per_jam":20000,"aktif":true,"tunjangan":[{"nama":"Makan","nominal":300000}]}'
+cek "§326 jam tak sah ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" PUT "/gaji/karyawan/$U326" "$(echo "$SET326" | jq -c '.jam_masuk="8 pagi"')")"
+cek "§326 setelan untuk owner ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" PUT "/gaji/karyawan/$OWNER_UID" "$SET326")"
+cek "§326 HRD mengatur gaji karyawan (200)" "V == 200" \
+  "$(status_code_body "$THRD" PUT "/gaji/karyawan/$U326" "$SET326")"
+cek "§326 setelan & tunjangan terbaca di daftar" "V == 1" \
+  "$(api "$THRD" GET /gaji/karyawan | jq --arg u "$U326" '[.[]|select(.user_id==$u and .setelan.dasar=="bulanan" and .setelan.nominal==2600000 and (.tunjangan|length)==1)]|length')"
+KB326=$(api "$THRD" POST /gaji/kasbon "{\"user_id\":\"$U326\",\"tanggal\":\"$H326\",\"nominal\":200000,\"cicilan_per_periode\":50000,\"catatan\":\"uji 326\"}" | jq -r '.id // ""')
+cek "§326 kasbon tercatat, sisa penuh" "V == 1" \
+  "$(api "$THRD" GET "/gaji/kasbon?user_id=$U326" | jq --arg k "$KB326" '[.[]|select(.id==$k and .sisa==200000 and (.lunas|not))]|length')"
+cek "§326 kasbon tanggal 2099 ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" POST /gaji/kasbon "{\"user_id\":\"$U326\",\"tanggal\":\"2099-01-01\",\"nominal\":1000,\"cicilan_per_periode\":1000}")"
+cek "§326 periode belum dimulai ditolak (400)" "V == 400" \
+  "$(status_code_body "$THRD" POST /gaji/periode "{\"mulai\":\"$(TZ=Asia/Jakarta date -d tomorrow +%F)\"}")"
+P326=$(api "$THRD" POST /gaji/periode "{\"mulai\":\"$H326\",\"selesai\":\"$H326\"}")
+PID326=$(echo "$P326" | jq -r '.periode.id // ""')
+cek "§326 periode khusus 1 hari dibuat, status draft" "V == 1" \
+  "$(echo "$P326" | jq '((.periode.status=="draft") and (.periode.mulai==.periode.selesai))|if . then 1 else 0 end')"
+SL326=$(echo "$P326" | jq -r --arg u "$U326" '[.slip[]|select(.user_id==$u)][0].id // ""')
+cek "§326 slip: alpa 1, potongan 100.000, kasbon 50.000, total 2.750.000" "V == 1" \
+  "$(echo "$P326" | jq --arg u "$U326" '[.slip[]|select(.user_id==$u and .alpa==1 and .potongan==100000 and .potongan_kasbon==50000 and .total==2750000)]|length')"
+cek "§326 karyawan tanpa setelan terdaftar (tak ikut dihitung)" "V == 1" \
+  "$(echo "$P326" | jq '(.tanpa_setelan|length) >= 1|if . then 1 else 0 end')"
+cek "§326 periode bertindih ditolak (409)" "V == 409" \
+  "$(status_code_body "$THRD" POST /gaji/periode "{\"mulai\":\"$H326\",\"selesai\":\"$H326\"}")"
+cek "§326 bonus 100.000 → total 2.850.000" "V == 2850000" \
+  "$(api "$THRD" PATCH "/gaji/slip/$SL326" '{"bonus":100000,"catatan":"lembur event"}' | jq '.slip.total')"
+cek "§326 rincian slip: per hari & kasbon tercatat" "V == 1" \
+  "$(api "$THRD" GET "/gaji/slip/$SL326" | jq '((.rincian.harian|length)==1 and .rincian.harian[0].status=="alpa" and .rincian.kasbon[0].nominal==50000 and .slip.catatan=="lembur event")|if . then 1 else 0 end')"
+cek "§326 draft belum terlihat karyawannya" "V == 0" \
+  "$(api "$T326" GET /profil/slip-gaji | jq 'length')"
+cek "§326 finalkan (200)" "V == 200" "$(status_code_body "$THRD" POST "/gaji/periode/$PID326/final" '{}')"
+cek "§326 sesudah final: sisa kasbon 150.000" "V == 150000" \
+  "$(api "$THRD" GET "/gaji/kasbon?user_id=$U326" | jq --arg k "$KB326" '[.[]|select(.id==$k)][0].sisa')"
+cek "§326 slip final terkunci (409 periode_terkunci)" "V == 1" \
+  "$(api "$THRD" PATCH "/gaji/slip/$SL326" '{"bonus":1}' | jq '(.sebab=="periode_terkunci")|if . then 1 else 0 end')"
+cek "§326 kasbon yang sudah dipotong tak bisa dihapus (409)" "V == 409" "$(status_code "$THRD" DELETE "/gaji/kasbon/$KB326")"
+cek "§326 HRD tak boleh membuka periode final (403)" "V == 403" "$(status_code_body "$THRD" POST "/gaji/periode/$PID326/buka" '{}')"
+cek "§326 owner membuka lagi → draft, potongan kasbon dibatalkan" "V == 200000" \
+  "$(api "$OWNER" POST "/gaji/periode/$PID326/buka" '{}' > /dev/null; api "$THRD" GET "/gaji/kasbon?user_id=$U326" | jq --arg k "$KB326" '[.[]|select(.id==$k)][0].sisa')"
+cek "§326 hitung ulang draft (200) — bonus tetap" "V == 2850000" \
+  "$(api "$THRD" POST "/gaji/periode/$PID326/hitung-ulang" '{}' | jq --arg u "$U326" '[.slip[]|select(.user_id==$u)][0].total')"
+api "$THRD" POST "/gaji/periode/$PID326/final" '{}' > /dev/null
+cek "§326 tandai dibayar" "V == 1" \
+  "$(api "$THRD" POST "/gaji/periode/$PID326/dibayar" '{}' | jq '(.periode.status=="dibayar" and .periode.dibayar_pada!=null)|if . then 1 else 0 end')"
+cek "§326 periode dibayar tak bisa dihapus (409)" "V == 409" "$(status_code "$THRD" DELETE "/gaji/periode/$PID326")"
+SL326B=$(api "$THRD" GET "/gaji/periode/$PID326" | jq -r --arg u "$U326" '[.slip[]|select(.user_id==$u)][0].id')
+cek "§326 karyawan melihat slipnya sendiri" "V == 1" \
+  "$(api "$T326" GET /profil/slip-gaji | jq --arg s "$SL326B" '[.[]|select(.id==$s and .total==2850000 and .status=="dibayar")]|length')"
+cek "§326 detail slip sendiri (200) dengan rincian" "V == 1" \
+  "$(api "$T326" GET "/profil/slip-gaji/$SL326B" | jq '(.rincian.gaji_pokok==2600000 and .perusahaan!=null)|if . then 1 else 0 end')"
+cek "§326 slip orang lain → 404" "V == 404" "$(status_code "$REISS105" GET "/profil/slip-gaji/$SL326B")"
+cek "§326 /company tak membuka aturan gaji ke kasir" "V == 0" \
+  "$(api "$REISS105" GET /company | jq '[has("gajiTanggalMulai"), has("gajiCutiDibayar")]|map(select(.))|length')"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

@@ -49,6 +49,8 @@ export function kapasitasKolom(): Map<string, { p: number; s: number; maks: numb
  * tidak, uji KELENGKAPAN di bawah yang menagihnya.
  */
 export const PETA: Record<string, string> = {
+  "modules/gaji/routes.ts|bonus": "gaji_slip.bonus",
+  "modules/gaji/routes.ts|penyesuaian": "gaji_slip.penyesuaian",
   "modules/bahan/routes.ts|harga_beli": "ingredients.harga_beli",
   "modules/bahan/routes.ts|isi": "ingredients.isi",
   "modules/bahan/routes.ts|min_beli": "ingredients.min_beli",

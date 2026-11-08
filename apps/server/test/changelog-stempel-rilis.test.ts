@@ -107,6 +107,8 @@ const BELUM_TAYANG = new Set([
   //
   // BELUM DI-MERGE (2026-11-08): peran HRD.
   "## 🟡 Peran baru `hrd` (personalia) — `UserRole` bertambah, CHECK cabang dibalik",
+  // BELUM DI-MERGE (2026-11-08): penggajian tahap 2 (server), branch yang sama.
+  "## 🟢 Penggajian (`/api/gaji/*`, owner & HRD) + slip gaji sendiri (`/api/profil/slip-gaji`)",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

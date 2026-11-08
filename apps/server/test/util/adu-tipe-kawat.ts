@@ -238,6 +238,7 @@ export const RUTE: { peran: "owner" | "sa" | "kasir"; jalur: string }[] = [
     "/shift/selisih/ringkas", "/stok", "/stok/nilai", "/stok/exp", "/stok/awal",
     "/stok/penyesuaian", "/stok/opname/riwayat", "/stok/opname", "/supplier",
     "/transfer-stok/saldo", "/transfer-stok", "/karyawan", "/karyawan/undangan",
+    "/gaji/setelan", "/gaji/karyawan", "/gaji/kasbon", "/gaji/periode", "/profil/slip-gaji",
   ].map((jalur) => ({ peran: "owner" as const, jalur })),
   ...["/admin/error-log", "/admin/sistem", "/admin/sistem/backup", "/admin/sistem/smtp", "/admin/tenants"].map(
     (jalur) => ({ peran: "sa" as const, jalur }),
@@ -273,11 +274,16 @@ export interface RuteDetail {
  * cakupan: rute baru tak bisa lolos hanya karena tak ditulis di mana pun.
  */
 export const KECUALI: Record<string, string> = {
+  "/gaji/slip/:id":
+    "id slip tak ada di rute DAFTAR mana pun (hanya di dalam detail periode) — bentuk GajiSlipDetailDto diadu verify-api §326",
+  "/profil/slip-gaji/:id":
+    "owner tak digaji, jadi sapuan bertoken owner tak punya slip — bentuknya diadu verify-api §326 dengan token karyawan",
   "/admin/sistem/backup/:id/unduh":
     "aliran BERKAS cadangan (octet-stream), bukan JSON — tak ada bentuk untuk diadu",
 };
 
 export const DETAIL: RuteDetail[] = [
+  { jalur: "/gaji/periode/:id", peran: "owner", dari: "/gaji/periode", sel: "[].id" },
   { jalur: "/admin/error-log/:sidik", peran: "sa", dari: "/admin/error-log", sel: "rows[].sidik" },
   { jalur: "/admin/tenants/:id", peran: "sa", dari: "/admin/tenants", sel: "[].id" },
   { jalur: "/bahan/:id/detail", peran: "owner", dari: "/bahan", sel: "[].id" },

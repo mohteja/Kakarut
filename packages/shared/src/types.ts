@@ -3655,6 +3655,196 @@ export interface RekapAbsenDto {
   rows: RekapAbsenRow[];
 }
 
+/* ===== Penggajian (HRD, 2026-11-08) — rumus di `gaji.ts` ===== */
+
+export type GajiDasar = "bulanan" | "harian";
+export type GajiPeriodeStatus = "draft" | "final" | "dibayar";
+/**
+ * Status hari: dari rekap absen (`nilaiHariRekap`), plus `belum` = hari dalam
+ * masa kerja yang belum terjadi (periode dihitung di tengah jalan) — bukan
+ * alpa, tak dibayar harian, tapi tetap masa kerja untuk prorata bulanan.
+ */
+export type GajiHariStatus = "hadir" | "alpa" | "cuti" | "libur" | "kosong" | "belum";
+
+export interface GajiHariMasukan {
+  tanggal: string;
+  status: GajiHariStatus;
+  kategori: PengajuanKategori | null;
+  /** Menit sejak 00:00 tanggal itu (zona perusahaan) — absen masuk pertama. */
+  masuk_menit: number | null;
+  /** Menit sejak 00:00 tanggal itu; lewat tengah malam bisa > 1440. */
+  keluar_menit: number | null;
+}
+
+export interface GajiHariHasil extends GajiHariMasukan {
+  /** Hadir, atau cuti/libur berkategori dibayar. */
+  dibayar: boolean;
+  telat_menit: number;
+  lembur_menit: number;
+  /** Hadir tanpa absen pulang — lembur tak bisa dihitung. */
+  lupa_pulang: boolean;
+}
+
+export interface GajiTunjanganDto {
+  nama: string;
+  nominal: number;
+}
+
+/** Rincian satu slip — potret saat dihitung (`hitungSlip`). Uang dalam rupiah bulat. */
+export interface GajiRincian {
+  dasar: GajiDasar;
+  nominal: number;
+  hari_periode: number;
+  /** Hari dalam masa kerja (di luar sebelum bergabung / sesudah keluar). */
+  hari_aktif: number;
+  hadir: number;
+  alpa: number;
+  cuti_dibayar: number;
+  cuti_tak_dibayar: number;
+  telat_kali: number;
+  telat_menit: number;
+  lembur_menit: number;
+  lupa_pulang: number;
+  gaji_pokok: number;
+  tunjangan: GajiTunjanganDto[];
+  tunjangan_total: number;
+  upah_lembur: number;
+  potongan_alpa_per_hari: number;
+  potongan_alpa: number;
+  potongan_cuti_tak_dibayar: number;
+  potongan_telat: number;
+  bonus: number;
+  penyesuaian: number;
+  /** Sebelum kasbon. */
+  bruto: number;
+  kasbon: { id: string; nominal: number }[];
+  potongan_kasbon: number;
+  total: number;
+  /** Kekurangan yang tak bisa dipotong karena gaji sudah 0. */
+  kurang: number;
+  harian: GajiHariHasil[];
+}
+
+/** `GET/PUT /gaji/setelan` — pengaturan penggajian perusahaan. */
+export interface GajiSetelanPerusahaanDto {
+  /** 1–28: periode dimulai tanggal ini tiap bulan */
+  tanggal_mulai: number;
+  /** Kategori cuti/libur disetujui yang dibayar */
+  cuti_dibayar: PengajuanKategori[];
+}
+
+/** Setelan gaji satu karyawan (`PUT /gaji/karyawan/:userId`). */
+export interface GajiSetelanKaryawanDto {
+  dasar: GajiDasar;
+  nominal: number;
+  /** "HH:MM" atau null (tanpa jadwal: telat & lembur tak dihitung) */
+  jam_masuk: string | null;
+  jam_pulang: string | null;
+  toleransi_telat_menit: number;
+  /** null = bawaan (bulanan: nominal ÷ 26; harian: 0) */
+  potongan_alpa_per_hari: number | null;
+  potongan_telat_per_kali: number;
+  upah_lembur_per_jam: number;
+  aktif: boolean;
+}
+
+/** `GET /gaji/karyawan` — satu baris per karyawan (tanpa owner). */
+export interface GajiKaryawanRow {
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole;
+  cabang: string | null;
+  arsip_pada: string | null;
+  /** null = belum diatur (tak ikut dihitung) */
+  setelan: GajiSetelanKaryawanDto | null;
+  tunjangan: GajiTunjanganDto[];
+  /** Σ sisa kasbon yang belum lunas */
+  kasbon_sisa: number;
+}
+
+/** `GET /gaji/kasbon` */
+export interface KasbonRow {
+  id: string;
+  user_id: string;
+  nama: string;
+  tanggal: string;
+  nominal: number;
+  cicilan_per_periode: number;
+  catatan: string | null;
+  /** Σ potongan dari slip yang sudah final/dibayar */
+  terpotong: number;
+  sisa: number;
+  lunas: boolean;
+  created_at: string;
+}
+
+/** Ringkas satu periode (`GET /gaji/periode`). */
+export interface GajiPeriodeRow {
+  id: string;
+  mulai: string;
+  selesai: string;
+  status: GajiPeriodeStatus;
+  jumlah_slip: number;
+  total: number;
+  difinalkan_pada: string | null;
+  dibayar_pada: string | null;
+}
+
+/** Satu baris slip di tabel periode — angka ringkas dari `GajiRincian`. */
+export interface GajiSlipRow {
+  id: string;
+  periode_id: string;
+  user_id: string;
+  nama: string;
+  employee_code: string | null;
+  role: UserRole | null;
+  cabang: string | null;
+  dasar: GajiDasar;
+  hadir: number;
+  alpa: number;
+  cuti_dibayar: number;
+  cuti_tak_dibayar: number;
+  telat_kali: number;
+  lembur_menit: number;
+  lupa_pulang: number;
+  gaji_pokok: number;
+  tunjangan_total: number;
+  upah_lembur: number;
+  bonus: number;
+  penyesuaian: number;
+  /** alpa + cuti tak dibayar + telat (tanpa kasbon) */
+  potongan: number;
+  potongan_kasbon: number;
+  total: number;
+  catatan: string | null;
+}
+
+/** `GET /gaji/periode/:id` */
+export interface GajiPeriodeDetailDto {
+  periode: GajiPeriodeRow;
+  slip: GajiSlipRow[];
+  /** Karyawan aktif yang belum punya setelan gaji — tak ikut dihitung */
+  tanpa_setelan: { user_id: string; nama: string }[];
+}
+
+/** `GET /gaji/slip/:id` & `GET /profil/slip-gaji/:id` */
+export interface GajiSlipDetailDto {
+  slip: GajiSlipRow;
+  periode: GajiPeriodeRow;
+  perusahaan: string;
+  rincian: GajiRincian;
+}
+
+/** `GET /profil/slip-gaji` — slip milik sendiri (periode final/dibayar saja). */
+export interface SlipGajiSayaRow {
+  id: string;
+  mulai: string;
+  selesai: string;
+  status: GajiPeriodeStatus;
+  total: number;
+}
+
 /* ===== Laporan kebersihan harian ===== */
 
 /**

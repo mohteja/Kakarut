@@ -15,7 +15,9 @@ import { requireRole, type AppEnv } from "../../middleware/auth";
 import { seedMejaDefault } from "../meja/defaults";
 
 /** Baris `companies` sebagaimana dipilih `KOLOM_COMPANY` (superset aman). */
-type BarisCompany = typeof companies.$inferSelect;
+// Pengaturan penggajian SENGAJA tak ikut: rute ini dibaca kasir untuk struk;
+// angka & aturan gaji hanya lewat `/gaji/setelan` (owner/HRD).
+type BarisCompany = Omit<typeof companies.$inferSelect, "gajiTanggalMulai" | "gajiCutiDibayar">;
 
 /**
  * SATU-SATUNYA PENULIS bentuk `GET /company`.

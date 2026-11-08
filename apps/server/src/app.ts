@@ -41,6 +41,7 @@ import { onboardingRoutes } from "./modules/onboarding/routes";
 import { openBillRoutes } from "./modules/open-bill/routes";
 import { pesananRoutes } from "./modules/pesanan/routes";
 import { penjagaHrd } from "./lib/penjaga-hrd";
+import { gajiRoutes } from "./modules/gaji/routes";
 import { penjualanRoutes } from "./modules/penjualan/routes";
 import { setSyncApp, syncRoutes } from "./modules/sync/routes";
 import { penyimpananRoutes } from "./modules/penyimpanan/routes";
@@ -197,6 +198,8 @@ export function createApp() {
   // HRD ikut mengelola karyawan; batas "tak menyentuh owner" di modulnya.
   tenant.use("/karyawan/*", requireRole("owner", "admin", "hrd"));
   tenant.use("/customer/*", requireRole("owner", "admin"));
+  // Penggajian: owner & HRD saja — admin tidak.
+  tenant.use("/gaji/*", requireRole("owner", "hrd"));
   // Transaksi POS (jual, open bill) HANYA peran kasir.
   // Owner/admin memantau lewat Riwayat/Laporan, tak meng-input transaksi.
   tenant.use("/open-bill/*", requireRole("cashier"));
@@ -283,7 +286,8 @@ export function createApp() {
     .route("/rekomendasi", rekomendasiRoutes)
     .route("/sampah", sampahRoutes)
     .route("/upload", uploadRoutes)
-    .route("/karyawan", karyawanRoutes);
+    .route("/karyawan", karyawanRoutes)
+    .route("/gaji", gajiRoutes);
 
   api.route("/", tenant);
 

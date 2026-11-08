@@ -40,6 +40,25 @@ import { SRC, berkasTs } from "./util/sql-mentah";
  */
 const DIPILAH_TANGAN = new Map<string, { situs: number; alasan: string }>([
   [
+    "modules/gaji/routes.ts",
+    {
+      situs: 2,
+      alasan:
+        "PENGGAJIAN: setelan & kasbon karyawan yang SUDAH KELUAR tetap harus terbaca — gaji " +
+        "periode terakhirnya dan sisa kasbonnya masih urusan HRD (PUT setelan, POST kasbon " +
+        "menolak owner, bukan yang diarsipkan)",
+    },
+  ],
+  [
+    "modules/gaji/service.ts",
+    {
+      situs: 1,
+      alasan:
+        "karyawanPerusahaan: yang keluar di TENGAH periode digaji sampai tanggal keluarnya — " +
+        "masa kerja dijendelai di memori (bergabung/arsip, zona perusahaan), persis Rekap Absen",
+    },
+  ],
+  [
     "modules/absensi/routes.ts",
     {
       situs: 1,

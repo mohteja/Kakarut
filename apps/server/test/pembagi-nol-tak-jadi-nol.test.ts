@@ -48,6 +48,17 @@ type Kelas = "CHECK" | "PENJAGA_AWAL" | "BENAR";
 
 const DIPILAH_TANGAN = new Map<string, { situs: number; kelas: Kelas; alasan: string }>([
   [
+    "shared/gaji.ts",
+    {
+      situs: 2,
+      kelas: "PENJAGA_AWAL",
+      alasan:
+        "nominal ÷ PEMBAGI_POTONGAN_ALPA (konstanta 26, tak pernah 0) dan prorata " +
+        "nominal × hari_aktif ÷ hari_periode yang DIJAGA `hariPeriode > 0 ? … : 0` — " +
+        "periode tanpa hari memang bergaji pokok 0",
+    },
+  ],
+  [
     "shared/hpp.ts",
     {
       situs: 1,

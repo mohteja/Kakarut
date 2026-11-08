@@ -121,7 +121,12 @@ const AGREGAT = /\b(count|sum|avg)\s*\(/i;
  * permintaan menampilkan kartu berisi separuh bagian, dan tak ada penanda apa
  * pun yang menyebutkannya.
  */
-const DASAR = 65;
+/*
+ * 65 → 66 pada 2026-11-08, SADAR: `harianKaryawan` (gaji/service.ts) menarik
+ * cap absen satu PERIODE gaji — rentangnya ≤ 31 hari × karyawan perusahaan,
+ * dibatasi `gte/lte attend_date`, jadi tak tumbuh bersama umur warung.
+ */
+const DASAR = 66;
 /*
  * 63 → 64 pada 2026-09-03, dan naiknya sadar.
  *
