@@ -187,13 +187,11 @@ test("papan Pesanan Masuk: lewat 10 menit → kotak merah berkedip + spanduk ala
   await expect(page.locator('[data-terlambat="ya"]').first()).toBeVisible();
   await expect(page.locator('[data-terlambat="ya"]').first()).toHaveClass(/kedip-alarm/);
   await expect(page.getByTestId("spanduk-terlambat")).toContainText("lewat 10 menit");
-  // Tombol suara bisa dimatikan & dinyalakan lagi.
-  const tombol = page.getByTestId("tombol-suara-alarm");
-  await expect(tombol).toContainText("nyala");
-  await tombol.click();
-  await expect(tombol).toContainText("mati");
-  await tombol.click();
-  await expect(tombol).toContainText("nyala");
+  // Suara SELALU aktif: tak ada tombol mati — hanya pembuka kunci peramban.
+  await expect(page.getByText("Suara alarm mati")).toHaveCount(0);
+  const aktifkan = page.getByTestId("tombol-aktifkan-suara");
+  if (await aktifkan.isVisible()) await aktifkan.click();
+  await expect(page.getByTestId("suara-alarm-aktif")).toBeVisible();
 });
 
 /**

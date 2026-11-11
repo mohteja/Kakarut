@@ -905,19 +905,27 @@ export function PesananPage() {
         </div>
       </div>
 
-      {/* ALARM TENGGAT: pesanan yang sajiannya menunggu ≥ 10 menit. Tombol 🔔
-          menyalakan/mematikan suara di perangkat ini saja. */}
+      {/* ALARM TENGGAT: pesanan yang sajiannya menunggu ≥ 10 menit. Suaranya
+          SELALU aktif — tak ada tombol mati (permintaan pemilik 2026-11-11).
+          Yang tersisa hanya membuka kunci suara peramban sesudah halaman dimuat. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={alarm.ubah}
-          data-testid="tombol-suara-alarm"
-          className={`rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ${
-            alarm.aktif ? "bg-stone-800 text-white ring-stone-800" : "bg-white text-stone-600 ring-stone-300"
-          }`}
-        >
-          {alarm.aktif ? "🔔 Suara alarm nyala" : "🔕 Suara alarm mati"}
-        </button>
+        {alarm.terkunci ? (
+          <button
+            type="button"
+            onClick={alarm.bukaKunci}
+            data-testid="tombol-aktifkan-suara"
+            className="rounded-full bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white"
+          >
+            🔔 Ketuk untuk mengaktifkan suara alarm
+          </button>
+        ) : (
+          <span
+            data-testid="suara-alarm-aktif"
+            className="rounded-full bg-stone-800 px-3 py-1.5 text-xs font-semibold text-white"
+          >
+            🔔 Suara alarm selalu aktif
+          </span>
+        )}
         <span className="text-xs text-stone-500">
           Kotak berkedip merah & berbunyi bila pesanan belum selesai dalam {TENGGAT_PESANAN_MENIT} menit.
         </span>
@@ -929,7 +937,7 @@ export function PesananPage() {
         >
           🚨 {terlambat.length} pesanan lewat {TENGGAT_PESANAN_MENIT} menit — segera selesaikan:{" "}
           {terlambat.map((r) => r.customer ?? r.meja ?? r.nomor ?? "Pesanan").join(", ")}
-          {alarm.aktif && alarm.terkunci && (
+          {alarm.terkunci && (
             <span className="ml-1 font-normal">
               (suara belum bisa berbunyi — ketuk di mana saja pada halaman ini untuk menyalakannya)
             </span>

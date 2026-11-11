@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { bacaLokal, tulisLokal } from "./simpanan";
 
 /**
  * SUARA ALARM TENGGAT PESANAN — permintaan pemilik (2026-11-11): pesanan yang
@@ -11,14 +10,13 @@ import { bacaLokal, tulisLokal } from "./simpanan";
  * PERAMBAN MELARANG SUARA SEBELUM ADA KETUKAN. `AudioContext` lahir dalam
  * keadaan `suspended` sampai pemakai berinteraksi dengan halaman — jadi papan
  * yang dibuka lalu dibiarkan tak akan pernah berbunyi. Karena itu:
- *   - tombol 🔔 menyalakan suaranya (ketukan itu sekaligus membuka kunci);
- *   - pilihan Nyala disimpan, dan ketukan PERTAMA di mana pun di halaman
- *     sesudah dimuat ulang membuka kuncinya lagi;
+ *   - SUARANYA SELALU AKTIF dan tak bisa dimatikan (permintaan pemilik
+ *     2026-11-11, "buat selalu on jangan bisa di off");
+ *   - ketukan PERTAMA di mana pun di halaman membuka kunci peramban;
  *   - selama kuncinya belum terbuka, papan MENGATAKANNYA (`terkunci`), bukan
  *     diam — alarm yang tak berbunyi tanpa penjelasan lebih buruk daripada
  *     tak ada alarm.
  */
-const KUNCI_SIMPAN = "kakarut.alarmPesanan";
 /** Jeda antar-bunyi selama masih ada pesanan terlambat. */
 const JEDA_BUNYI_MS = 3000;
 
@@ -57,12 +55,12 @@ export function bunyikanAlarm(): void {
 }
 
 /**
- * Keadaan suara alarm + loop bunyinya. `berbunyi` = ada pesanan terlambat.
- * Mengembalikan `aktif` (pilihan pemakai), `terkunci` (peramban belum
- * mengizinkan suara), dan `ubah` untuk tombol 🔔.
+ * Loop bunyi alarm — SELALU aktif. `berbunyi` = ada pesanan terlambat.
+ * Mengembalikan `terkunci` (peramban belum mengizinkan suara) dan `bukaKunci`
+ * untuk tombol "aktifkan suara" — tombol itu hanya MEMBUKA kunci peramban,
+ * tak bisa mematikan alarm.
  */
 export function useAlarmPesanan(berbunyi: boolean) {
-  const [aktif, setAktif] = useState(() => bacaLokal(KUNCI_SIMPAN) !== "mati");
   const [terkunci, setTerkunci] = useState(() => ambilKonteks()?.state !== "running");
 
   // Ketukan pertama di mana pun membuka kunci suara (aturan autoplay).
@@ -82,24 +80,20 @@ export function useAlarmPesanan(berbunyi: boolean) {
   }, [terkunci]);
 
   useEffect(() => {
-    if (!berbunyi || !aktif || terkunci) return;
+    if (!berbunyi || terkunci) return;
     bunyikanAlarm();
     const t = setInterval(bunyikanAlarm, JEDA_BUNYI_MS);
     return () => clearInterval(t);
-  }, [berbunyi, aktif, terkunci]);
+  }, [berbunyi, terkunci]);
 
-  function ubah() {
-    const baru = !aktif;
-    setAktif(baru);
-    tulisLokal(KUNCI_SIMPAN, baru ? "nyala" : "mati");
+  function bukaKunci() {
     const ctx = ambilKonteks();
-    if (baru && ctx) {
-      void ctx.resume().then(() => {
-        setTerkunci(ctx.state !== "running");
-        bunyikanAlarm(); // contoh bunyi: pemakai tahu volumenya
-      });
-    }
+    if (!ctx) return;
+    void ctx.resume().then(() => {
+      setTerkunci(ctx.state !== "running");
+      bunyikanAlarm(); // contoh bunyi: orang tahu volumenya
+    });
   }
 
-  return { aktif, terkunci, ubah };
+  return { terkunci, bukaKunci };
 }

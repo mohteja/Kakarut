@@ -29,7 +29,7 @@ tanpa akses repo server.
 
 🟢 **BARU** — tak mengubah perilaku klien lama.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#249 (`c3f0794`, CI production #530 hijau); ponsel lewat mohteja/kakarut-mobile#25.
 
 - `POST /stok/cek-harian` — tiap bahan `sesuai: true|false`, tanpa jumlah.
   Bahan tidak sesuai dihitung dulu lewat `POST /stok/opname` (jalur lama), lalu
