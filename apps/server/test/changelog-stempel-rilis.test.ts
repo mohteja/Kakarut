@@ -113,6 +113,7 @@ const BELUM_TAYANG = new Set([
   // dipasang pada commit yang SAMA.
   //
   // BELUM DI-MERGE (2026-11-11): ruangan denah meja.
+  "## 🟢 Kunci perangkat — masuk lagi tanpa password (`/api/auth/perangkat`)",
   "## 🟢 Kasir & Take Away wajib + nomor antrean take away + papan denah",
   "## 🟢 Ruangan di denah meja (`/api/meja/ruangan`) + `MejaDto.ruangan_id`",
 ]);

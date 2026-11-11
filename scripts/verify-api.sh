@@ -19356,6 +19356,36 @@ cek "§331 bill take away dipindah ke meja dine-in → nomornya dilepas" "V == 1
   "$(api "$REISS105" PUT "/open-bill/$OB331B" "{\"meja_id\":\"$DI331\",\"items\":[{\"menu_id\":\"$MN331\",\"qty\":1}]}" >/dev/null; api "$REISS105" GET "/open-bill/$OB331B" | jq '(.nomor_antrean == null)|if . then 1 else 0 end')"
 api "$REISS105" DELETE "/open-bill/$OB331B" >/dev/null
 
+echo "── §332 kunci perangkat: HP masuk lagi tanpa password (dibuka Face ID / sandi HP) ──"
+# Permintaan pemilik (2026-11-11): aplikasi HP sering logout tiap token 12 jam
+# habis. Perangkat menyimpan kunci berumur panjang (diputar tiap dipakai) untuk
+# menukar sesi baru; password diganti / akun nonaktif / dicabut → mati.
+KP332=$(api "$REISS105" POST /auth/perangkat '{"nama":"HP uji 332"}')
+K332A=$(echo "$KP332" | jq -r '.kunci_perangkat // ""')
+cek "§332 kunci perangkat terbit (≥ 40 karakter + kedaluwarsa)" "V == 1" \
+  "$(echo "$KP332" | jq '((.kunci_perangkat|length) >= 40 and (.kedaluwarsa_pada|type)=="string")|if . then 1 else 0 end')"
+M332=$(api "" POST /auth/perangkat/masuk "{\"kunci_perangkat\":\"$K332A\"}")
+K332B=$(echo "$M332" | jq -r '.kunci_perangkat // ""')
+T332=$(echo "$M332" | jq -r '.token // ""')
+cek "§332 tukar kunci → sesi baru (token + user) + kunci DIPUTAR" "V == 1" \
+  "$(echo "$M332" | jq --arg a "$K332A" '((.token|length) > 20 and .user.sub != null and .kunci_perangkat != $a)|if . then 1 else 0 end')"
+cek "§332 token hasil tukar dipakai (GET /auth/me 200)" "V == 200" "$(status_code "$T332" GET /auth/me)"
+cek "§332 kunci LAMA (sudah diputar) ditolak 401" "V == 401" \
+  "$(status_code_body "" POST /auth/perangkat/masuk "{\"kunci_perangkat\":\"$K332A\"}")"
+cek "§332 penolakan bersebab kunci_perangkat_tidak_berlaku" "V == 1" \
+  "$(api "" POST /auth/perangkat/masuk "{\"kunci_perangkat\":\"$K332A\"}" | jq '(.sebab=="kunci_perangkat_tidak_berlaku")|if . then 1 else 0 end')"
+cek "§332 kunci karangan ditolak 401" "V == 401" \
+  "$(status_code_body "" POST /auth/perangkat/masuk '{"kunci_perangkat":"bukan-kunci-yang-pernah-diterbitkan-xxxxxxxx"}')"
+cek "§332 tanpa token tak bisa menerbitkan kunci (401)" "V == 401" \
+  "$(status_code_body "" POST /auth/perangkat '{}')"
+TTAMU332=$(curl -s -X POST "$BASE/api/auth/guest" -H 'Content-Type: application/json' -d '{"peran":"kasir"}' | jq -r '.token // ""')
+cek "§332 akun demo tak mendapat kunci perangkat (403)" "V == 403" \
+  "$(status_code_body "$TTAMU332" POST /auth/perangkat '{}')"
+cek "§332 cabut kunci (200)" "V == 200" \
+  "$(status_code_body "" POST /auth/perangkat/cabut "{\"kunci_perangkat\":\"$K332B\"}")"
+cek "§332 kunci yang dicabut tak bisa dipakai (401)" "V == 401" \
+  "$(status_code_body "" POST /auth/perangkat/masuk "{\"kunci_perangkat\":\"$K332B\"}")"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════

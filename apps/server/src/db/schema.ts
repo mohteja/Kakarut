@@ -2924,6 +2924,33 @@ export const tokenDicabut = pgTable("token_dicabut", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * KUNCI PERANGKAT (permintaan pemilik 2026-11-11): aplikasi HP tak lagi
+ * meminta login ulang tiap token 12 jam habis — perangkat yang sudah login
+ * menyimpan kunci acak (Keychain/Keystore) yang dibuka dengan Face ID / sidik
+ * jari / sandi HP, lalu ditukar dengan sesi baru. Yang disimpan di sini hanya
+ * HASH-nya. Diputar tiap dipakai; berlaku 60 hari sejak terakhir dipakai;
+ * mati bila password diganti (`tv` ≠ `users.token_version`), akun
+ * dinonaktifkan/dihapus, atau dicabut saat keluar.
+ */
+export const kunciPerangkat = pgTable(
+  "kunci_perangkat",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    hash: text("hash").notNull(),
+    nama: text("nama"),
+    tv: integer("tv").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    terakhirDipakai: timestamp("terakhir_dipakai", { withTimezone: true }),
+    kedaluwarsaPada: timestamp("kedaluwarsa_pada", { withTimezone: true }).notNull(),
+    dicabutPada: timestamp("dicabut_pada", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("kunci_perangkat_hash_uq").on(t.hash)],
+);
+
 export const bootFlags = pgTable("boot_flags", {
   key: text("key").primaryKey(),
   selesaiAt: timestamp("selesai_at", { withTimezone: true }).notNull().defaultNow(),

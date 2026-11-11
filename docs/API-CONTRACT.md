@@ -218,6 +218,9 @@ jalan untuk root koleksi `/prefix`, jadi mencakup **semua** endpoint di modul):
 - `POST /api/auth/reset-password/cek` — [public] — req: `{ token }` — res: `{ ok }` — error: **400** `"Tautan reset tidak valid atau sudah kedaluwarsa"` (kalimat sama dengan `/reset-password`). Untuk memeriksa tautan sebelum formulir diisi; tak mengubah apa pun.
 - `POST /api/auth/reset-password` — [public] — req: `{ token, password (min 8) }` — res: **200** `{ ok }` (tanpa sesi — pengguna login ulang dengan password baru) — error: **400** token tidak valid/kedaluwarsa/terpakai. **Sejak 2026-09-02: sekaligus menandai email TERVERIFIKASI** bila belum (tautan reset hanya pernah dikirim ke alamat yang tercatat, jadi memegangnya = bukti kepemilikan inbox, standar yang sama dengan kode verifikasi); akun yang sudah terverifikasi tak berubah. Klien: sesudah reset sukses, login langsung bisa — jangan lagi mengarahkan ke layar verifikasi. Token berasal dari tautan email `APP_BASE_URL/reset-password?token=…` (halaman WEB); email reset juga menampilkan **kode yang mudah disalin** (identik dengan parameter `token`) untuk klien tempel-manual. **Efek samping:** menaikkan token_version user → semua token lama user itu jadi **401** (lihat bagian Autentikasi).
 - `POST /api/auth/logout` — [any authenticated] — mencabut token YANG DIPAKAI (klaim `jti`) sampai kedaluwarsanya; perangkat lain akun yang sama tetap masuk — res: `{ ok }`. Token lama tanpa `jti` dijawab ok tapi tak bisa dicabut (mati sendiri ≤ 12 jam). Klien memanggilnya saat Keluar sukarela, best-effort.
+- `POST /api/auth/perangkat` — [any authenticated, bukan akun demo] — req `{ nama?: string ≤ 60 }` — res **201** `KunciPerangkatDto` `{kunci_perangkat, kedaluwarsa_pada}`. Kunci acak berumur 60 hari (sejak terakhir dipakai) untuk aplikasi HP masuk lagi tanpa password (dibuka Face ID / sidik jari / sandi HP di perangkat); server menyimpan hash-nya saja. Akun demo → **403**. **Baru 2026-11-11.**
+- `POST /api/auth/perangkat/masuk` — [publik, batas laju 30/5 mnt per IP] — req `{ kunci_perangkat }` — res `SesiPerangkat` (= `SesiLogin` + `kunci_perangkat` BARU + `kedaluwarsa_pada`). Kunci lama langsung mati (diputar). **401** `sebab: "kunci_perangkat_tidak_berlaku"` bila kunci tak dikenal/dicabut/kedaluwarsa, password sudah diganti (`token_version` naik), atau akun nonaktif/dihapus → klien kembali ke login password.
+- `POST /api/auth/perangkat/cabut` — [publik; memegang kunci = berhak mencabut] — req `{ kunci_perangkat }` — res `{ ok }` (kunci tak dikenal tetap ok).
 - `GET /api/auth/me` — [any authenticated, incl. super-admin] (`requireAuth` inline) — res: **`SesiDto`** = `{ user: AuthUser, company: CompanyDto | null, branch: BranchRingkas | null }` (sesi tanpa `token`; `company` dirakit SATU penulis, `companyDto`, sama dengan login) — error: **401**
   > **Ini sumber kebenaran peran & cabang, bukan isi token.** `requireAuth`
   > membaca ulang keanggotaan dari database pada **setiap** request, jadi
@@ -1879,6 +1882,20 @@ export interface SesiDto {
 export interface SesiLogin extends SesiDto {
   token: string;
 }
+
+/**
+ * `POST /auth/perangkat` — kunci perangkat untuk masuk lagi tanpa password
+ * (dibuka Face ID / sidik jari / sandi HP di aplikasi). Nilai mentahnya hanya
+ * dikirim sekali; server menyimpan hash-nya.
+ */
+export interface KunciPerangkatDto {
+  kunci_perangkat: string;
+  /** ISO — 60 hari sejak terakhir dipakai */
+  kedaluwarsa_pada: string;
+}
+
+/** `POST /auth/perangkat/masuk` — sesi baru + kunci perangkat yang DIPUTAR. */
+export interface SesiPerangkat extends SesiLogin, KunciPerangkatDto {}
 
 /**
  * Satu baris `GET /cabang` — cabang milik perusahaan, semua peran.

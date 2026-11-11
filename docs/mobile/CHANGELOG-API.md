@@ -25,6 +25,20 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Kunci perangkat — masuk lagi tanpa password (`/api/auth/perangkat`)
+
+🟢 **BARU** — rute tambahan; token akses tetap 12 jam, klien lama tak terpengaruh.
+
+**Belum tayang.**
+
+- `POST /auth/perangkat` (bertoken) → `{kunci_perangkat, kedaluwarsa_pada}`.
+- `POST /auth/perangkat/masuk` `{kunci_perangkat}` → sesi baru + kunci baru
+  (yang lama mati). 401 `kunci_perangkat_tidak_berlaku` → login password.
+- `POST /auth/perangkat/cabut` `{kunci_perangkat}` — saat keluar.
+- Simpan kunci di Keychain/Keystore dan buka dengan biometrik / sandi HP.
+
+---
+
 ## 🟢 Kasir & Take Away wajib + nomor antrean take away + papan denah
 
 🟢 **BARU** — medan tambahan; klien lama tak terpengaruh (nomor tak tampil saja).

@@ -179,6 +179,9 @@ POST /api/auth/forgot-password
 POST /api/auth/guest
 POST /api/auth/login
 POST /api/auth/logout
+POST /api/auth/perangkat
+POST /api/auth/perangkat/cabut
+POST /api/auth/perangkat/masuk
 POST /api/auth/register
 POST /api/auth/resend-verification
 POST /api/auth/reset-password

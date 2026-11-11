@@ -156,6 +156,20 @@ export interface SesiLogin extends SesiDto {
 }
 
 /**
+ * `POST /auth/perangkat` — kunci perangkat untuk masuk lagi tanpa password
+ * (dibuka Face ID / sidik jari / sandi HP di aplikasi). Nilai mentahnya hanya
+ * dikirim sekali; server menyimpan hash-nya.
+ */
+export interface KunciPerangkatDto {
+  kunci_perangkat: string;
+  /** ISO — 60 hari sejak terakhir dipakai */
+  kedaluwarsa_pada: string;
+}
+
+/** `POST /auth/perangkat/masuk` — sesi baru + kunci perangkat yang DIPUTAR. */
+export interface SesiPerangkat extends SesiLogin, KunciPerangkatDto {}
+
+/**
  * Satu baris `GET /cabang` — cabang milik perusahaan, semua peran.
  * Sampai 2026-09-05 dideklarasikan lokal di web (`Cabang` di BranchContext)
  * dan diurai ponsel (`BranchDto`) tanpa tipe bersama: 14 medan dikirim, nol

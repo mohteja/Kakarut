@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import type { DaftarResult } from "@kakarut/shared";
+import type { DaftarResult, KunciPerangkatDto, SesiPerangkat } from "@kakarut/shared";
+import { adalahTamu, PESAN_TAMU } from "../../lib/tamu";
 import { zValidator } from "../../lib/validator";
 import bcrypt from "bcryptjs";
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
@@ -16,6 +17,7 @@ import {
   branches,
   companies,
   emailVerificationTokens,
+  kunciPerangkat,
   passwordResetTokens,
   tokenDicabut,
   users,
@@ -93,6 +95,29 @@ const batasLogin = rl(
     message: "Terlalu banyak percobaan masuk — coba lagi beberapa menit lagi.",
   }),
 );
+
+/** Masuk dengan kunci perangkat: batasi per IP → cegah tebak kunci. */
+const batasPerangkat = rl(
+  rateLimit({
+    windowMs: 5 * 60_000,
+    max: 30,
+    key: (c) => `perangkat:${ipKlien(c)}`,
+    message: "Terlalu banyak percobaan masuk — coba lagi beberapa menit lagi.",
+  }),
+);
+
+/** Kunci perangkat berlaku 60 hari sejak TERAKHIR dipakai (diperpanjang tiap masuk). */
+const UMUR_KUNCI_PERANGKAT_MS = 60 * 24 * 60 * 60_000;
+const kunciBaru = () => randomBytes(32).toString("base64url");
+
+class KunciPerangkatDitolak extends HTTPException {
+  readonly sebab = "kunci_perangkat_tidak_berlaku";
+  constructor() {
+    super(401, { message: "Kunci perangkat tidak berlaku lagi — masuk dengan password." });
+  }
+}
+
+const KunciPerangkatBody = z.object({ kunci_perangkat: z.string().min(20).max(200) }).strict();
 
 /** Daftar akun: batasi per IP (bcrypt + tulis DB → mahal bila di-spam). */
 const batasRegister = rl(
@@ -457,6 +482,90 @@ export const authRoutes = new Hono<AppEnv>()
         .values({ jti: klaim.jti, kedaluwarsa: new Date(klaim.exp * 1000) })
         .onConflictDoNothing();
     }
+    return c.json({ ok: true });
+  })
+  /*
+   * KUNCI PERANGKAT (permintaan pemilik 2026-11-11): "di HP aplikasi sering
+   * logout dan harus login kembali — padahal bisa minta verifikasi pakai sandi
+   * HP atau Face ID". Token akses tetap 12 jam; yang baru adalah kunci
+   * berumur panjang yang HANYA dipegang perangkat itu (Keychain/Keystore,
+   * dibuka biometrik/sandi HP di aplikasi) untuk menukar sesi baru.
+   */
+  .post(
+    "/perangkat",
+    requireAuth,
+    zValidator("json", z.object({ nama: z.string().trim().max(60).optional() }).strict()),
+    async (c) => {
+      const auth = c.get("auth");
+      const [user] = await db.select().from(users).where(eq(users.id, auth.sub));
+      if (!user || user.deletedAt || !user.isActive) {
+        throw new HTTPException(401, { message: "Sesi tidak berlaku" });
+      }
+      // Akun demo dipakai bersama: kunci berumur panjang untuknya tak berarti apa-apa.
+      if (adalahTamu(user.email)) throw new HTTPException(403, { message: PESAN_TAMU });
+      const kunci = kunciBaru();
+      const kedaluwarsa = new Date(Date.now() + UMUR_KUNCI_PERANGKAT_MS);
+      await db.insert(kunciPerangkat).values({
+        userId: user.id,
+        hash: hashToken(kunci),
+        nama: c.req.valid("json").nama || null,
+        tv: user.tokenVersion,
+        kedaluwarsaPada: kedaluwarsa,
+      });
+      const dto: KunciPerangkatDto = { kunci_perangkat: kunci, kedaluwarsa_pada: kedaluwarsa.toISOString() };
+      return c.json(dto, 201);
+    },
+  )
+  /*
+   * Tukar kunci perangkat → sesi baru. Kuncinya DIPUTAR (yang lama mati) dan
+   * umurnya diperpanjang. Ditolak 401 `kunci_perangkat_tidak_berlaku` bila
+   * kunci tak dikenal/dicabut/kedaluwarsa, password sudah diganti
+   * (`token_version` naik), atau akunnya dinonaktifkan/dihapus — klien lalu
+   * jatuh ke layar login biasa.
+   */
+  .post("/perangkat/masuk", batasPerangkat, zValidator("json", KunciPerangkatBody), async (c) => {
+    const hash = hashToken(c.req.valid("json").kunci_perangkat);
+    const hasil = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(kunciPerangkat)
+        .where(
+          and(
+            eq(kunciPerangkat.hash, hash),
+            isNull(kunciPerangkat.dicabutPada),
+            gt(kunciPerangkat.kedaluwarsaPada, new Date()),
+          ),
+        )
+        .for("update");
+      if (!row) return null;
+      const [user] = await tx.select().from(users).where(eq(users.id, row.userId));
+      if (!user || user.deletedAt || !user.isActive || user.tokenVersion !== row.tv) {
+        await tx.update(kunciPerangkat).set({ dicabutPada: new Date() }).where(eq(kunciPerangkat.id, row.id));
+        return null;
+      }
+      const kunci = kunciBaru();
+      const kedaluwarsa = new Date(Date.now() + UMUR_KUNCI_PERANGKAT_MS);
+      await tx
+        .update(kunciPerangkat)
+        .set({ hash: hashToken(kunci), terakhirDipakai: new Date(), kedaluwarsaPada: kedaluwarsa })
+        .where(eq(kunciPerangkat.id, row.id));
+      return { user, kunci, kedaluwarsa };
+    });
+    if (!hasil) throw new KunciPerangkatDitolak();
+    const dto: SesiPerangkat = {
+      ...(await buatSesi(hasil.user)),
+      kunci_perangkat: hasil.kunci,
+      kedaluwarsa_pada: hasil.kedaluwarsa.toISOString(),
+    };
+    return c.json(dto);
+  })
+  // Cabut kunci perangkat (keluar / matikan "masuk dengan Face ID"). Memegang
+  // kuncinya = berhak mencabutnya; kunci tak dikenal tetap dijawab ok.
+  .post("/perangkat/cabut", batasPerangkat, zValidator("json", KunciPerangkatBody), async (c) => {
+    await db
+      .update(kunciPerangkat)
+      .set({ dicabutPada: new Date() })
+      .where(and(eq(kunciPerangkat.hash, hashToken(c.req.valid("json").kunci_perangkat)), isNull(kunciPerangkat.dicabutPada)));
     return c.json({ ok: true });
   })
   // Masuk sebagai TAMU (guest mode) — akun bersama untuk mencoba aplikasi,
