@@ -91,6 +91,7 @@ const DetailPeriodeGajiPage = lazy(() =>
 );
 const SetelanGajiPage = lazy(() => import("./pages/gaji/SetelanGajiPage").then((m) => ({ default: m.SetelanGajiPage })));
 const KasbonPage = lazy(() => import("./pages/gaji/KasbonPage").then((m) => ({ default: m.KasbonPage })));
+const CekHarianPage = lazy(() => import("./pages/stok/CekHarianPage").then((m) => ({ default: m.CekHarianPage })));
 const TempatSampahPage = lazy(() => import("./pages/TempatSampahPage").then((m) => ({ default: m.TempatSampahPage })));
 
 /** Fallback saat chunk halaman sedang dimuat (lazy). */
@@ -236,6 +237,9 @@ export default function App() {
               <Route path="/pesanan" element={<PesananPage />} />
               <Route path="/menu/lihat" element={<LihatMenuPage />} />
               <Route path="/stok" element={<StokPage />} />
+              {/* Cek stok harian (sesuai/tidak sesuai) — semua peran cabang +
+                  manajemen, sama dengan opname. */}
+              <Route path="/stok/cek-harian" element={<CekHarianPage />} />
               <Route path="/penerimaan" element={<PenerimaanPage />} />
               <Route path="/stok/kartu/:ingredientId" element={<KartuStokPage />} />
               {/* Absen: semua peran (tim absen sendiri; admin/kasir + stasiun pindai) */}

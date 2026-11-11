@@ -191,6 +191,11 @@ export function StokPage() {
               )}
               {/* DUA jalur opname terpisah — bahan baku vs perlengkapan; keduanya
                   dilakukan staf cabang & CK dari halaman Stok ini */}
+              {tab === "bahan" && (
+                <Link to="/stok/cek-harian" className={btnSecondary}>
+                  ✅ Cek Harian
+                </Link>
+              )}
               <Link
                 to="/stok/opname"
                 className={tab === "bahan" ? btnPrimary : btnSecondary}

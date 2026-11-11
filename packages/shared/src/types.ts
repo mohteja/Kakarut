@@ -2210,12 +2210,52 @@ export interface PenyesuaianRow {
   disetujui_oleh: string | null;
 }
 
+/**
+ * CEK STOK HARIAN — permintaan pemilik (2026-11-11): saat closing petugas
+ * cukup menandai tiap bahan SESUAI / TIDAK SESUAI dengan catatan sistem,
+ * tanpa menyebut jumlah, supaya cepat dan bisa langsung pulang. Bahan yang
+ * TIDAK SESUAI langsung dihitung lewat opname biasa (`POST /stok/opname`) dan
+ * sesinya ditautkan di sini. Opname JUMLAH lengkap dikerjakan mingguan.
+ */
+export interface CekHarianRiwayatRow {
+  sesi_id: string;
+  /** ISO — waktu cek dicatat */
+  waktu: string;
+  oleh: string | null;
+  sesuai: number;
+  tidak_sesuai: number;
+  /** sesi opname yang menghitung bahan tidak sesuai; null = semua sesuai */
+  opname_session_id: string | null;
+}
+
+/** `GET /stok/cek-harian` — status cabang + riwayat 14 cek terakhir. */
+export interface CekHarianStatusDto {
+  /** hari ini (YYYY-MM-DD) di zona perusahaan */
+  tanggal: string;
+  sudah_cek_hari_ini: boolean;
+  /** tanggal opname JUMLAH terakhir (bukan cek harian, bukan catat waste) */
+  opname_jumlah_terakhir: string | null;
+  hari_sejak_opname_jumlah: number | null;
+  /** belum pernah, atau ≥ OPNAME_JUMLAH_TIAP_HARI hari sejak yang terakhir */
+  opname_jumlah_jatuh_tempo: boolean;
+  riwayat: CekHarianRiwayatRow[];
+}
+
 export interface OpnameRingkasan {
   dihitung: number;
   cocok: number;
   lebih: number;
   kurang: number;
   total_selisih: number;
+}
+
+/** Balasan `POST /stok/opname` (201). */
+export interface OpnameSimpanHasil {
+  ok: boolean;
+  jumlah: number;
+  session_id: string;
+  nomor: string | null;
+  ringkasan: OpnameRingkasan;
 }
 
 export interface OpnameSesiRow {

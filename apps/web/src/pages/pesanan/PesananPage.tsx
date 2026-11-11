@@ -4,6 +4,9 @@ import {
   durasiPesananDetik,
   dibatalkanDapur,
   hitungKirimPerJenis,
+  menitMenungguTertua,
+  pesananTerlambat,
+  TENGGAT_PESANAN_MENIT,
   ringkasAddon,
   ringkasPesanan,
   sajianBedaDariNota,
@@ -19,6 +22,7 @@ import { CabangDataBar } from "../../components/CabangDataBar";
 import { Card, ErrorText, Modal, PageTitle, Spinner } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
+import { useAlarmPesanan } from "../../lib/alarmPesanan";
 import { api } from "../../lib/api";
 import {
   formatDurasi,
@@ -41,8 +45,6 @@ const SARINGAN: { nilai: Saringan; judul: string }[] = [
   { nilai: "semua", judul: "Semua" },
 ];
 
-/** Lewat dari ini, kotak yang belum rampung bergaris merah. */
-const MENIT_LAMA = 15;
 
 const LABEL_JENIS: Record<JenisMenu, string> = {
   makanan: "🍛 Makanan",
@@ -322,14 +324,26 @@ function HitungJenis({ jenis, h }: { jenis: JenisMenu; h: HitungKirim }) {
  * makanan & minuman yang sudah dan belum dikirim, dan pratinjau tiga menu
  * (yang belum dulu). Ketuk untuk membuka detail dengan tombol per sajian.
  */
-function KotakPesanan({ p, onBuka }: { p: PesananRow; onBuka: () => void }) {
+function KotakPesanan({
+  p,
+  onBuka,
+  sekarang,
+}: {
+  p: PesananRow;
+  onBuka: () => void;
+  /** jam dinding papan (ms) — berdetak, supaya kotak berubah merah tepat waktu */
+  sekarang: number;
+}) {
   const judul = p.nomor ?? p.meja ?? "Pesanan";
   const siapa = p.customer ?? (p.nomor ? p.meja : null);
   const hitung = hitungKirimPerJenis(p.items);
-  const menit = Math.floor((Date.now() - new Date(p.waktu).getTime()) / 60000);
   const batal = dibatalkanDapur(p.status);
   const selesai = p.status === "selesai";
-  const lama = !selesai && !batal && menit > MENIT_LAMA;
+  // TENGGAT 10 MENIT (permintaan pemilik 2026-11-11), dari sajian tertua yang
+  // belum dikirim — bukan dari jam kartu: ronde tambahan pada bill yang sudah
+  // lama dibuka tak langsung terbaca terlambat.
+  const menitTunggu = menitMenungguTertua(p.items, sekarang);
+  const lama = !selesai && !batal && pesananTerlambat(p.items, sekarang);
   const perluDitagih = !p.dibayar && !batal;
   const hidup = p.items.filter((it) => !dibatalkanDapur(it.status));
   // Pratinjau: yang BELUM dikirim dulu — itu yang perlu dikerjakan.
@@ -350,8 +364,9 @@ function KotakPesanan({ p, onBuka }: { p: PesananRow; onBuka: () => void }) {
       type="button"
       onClick={onBuka}
       data-testid="kotak-pesanan"
-      className={`flex min-h-[11rem] w-full flex-col gap-2 rounded-xl border border-l-4 bg-white p-3 text-left shadow-sm transition hover:shadow-md ${garis} ${
-        perluDitagih ? "border-amber-300" : "border-stone-200"
+      data-terlambat={lama ? "ya" : undefined}
+      className={`flex min-h-[11rem] w-full flex-col gap-2 rounded-xl border border-l-4 p-3 text-left shadow-sm transition hover:shadow-md ${garis} ${
+        lama ? "kedip-alarm border-2" : perluDitagih ? "border-amber-300 bg-white" : "border-stone-200 bg-white"
       }`}
     >
       <div className="flex w-full items-start justify-between gap-2">
@@ -374,7 +389,13 @@ function KotakPesanan({ p, onBuka }: { p: PesananRow; onBuka: () => void }) {
                   : "bg-orange-50 text-orange-700"
           }`}
         >
-          {batal ? "✖ batal" : selesai ? "✅ selesai" : `⏱ ${lamaMenunggu(p.waktu)}`}
+          {batal
+            ? "✖ batal"
+            : selesai
+              ? "✅ selesai"
+              : lama
+                ? `🚨 ${menitTunggu} mnt`
+                : `⏱ ${menitTunggu ?? 0} mnt`}
         </span>
       </div>
       <div className="grid w-full grid-cols-2 gap-1.5">
@@ -594,6 +615,16 @@ export function PesananPage() {
     const t = setInterval(() => setHariIni(hariIniWIB()), 60_000);
     return () => clearInterval(t);
   }, []);
+  /**
+   * Jam dinding untuk ALARM TENGGAT: berdetak tiap 5 detik supaya kotak
+   * berubah merah (dan mulai berbunyi) tepat saat menit ke-10 lewat — bukan
+   * menunggu polling 15 detik berikutnya atau ketukan orang.
+   */
+  const [sekarang, setSekarang] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setSekarang(Date.now()), 5_000);
+    return () => clearInterval(t);
+  }, []);
   const [tanggalPilihan, setTanggalPilihan] = useState<string | null>(null);
   const tanggal = tanggalPilihan ?? hariIni;
   const [saringan, setSaringan] = useState<Saringan>("dikerjakan");
@@ -777,6 +808,12 @@ export function PesananPage() {
    * menunggu (kiri atas) — antrean dapur dikerjakan dari yang masuk duluan.
    * Saringan lain mengikuti urutan papan (yang terakhir disentuh di atas).
    */
+  // Pesanan TERLAMBAT di SELURUH papan (bukan cuma yang tersaring): alarm
+  // tetap berbunyi walau kasir sedang membuka tab Selesai.
+  const terlambat = rows.filter(
+    (r) => !dibatalkanDapur(r.status) && r.status !== "selesai" && pesananTerlambat(r.items, sekarang),
+  );
+  const alarm = useAlarmPesanan(terlambat.length > 0);
   const tampilGrid =
     saringan === "dikerjakan"
       ? [...perSaringan(saringan)].sort((a, b) => a.waktu.localeCompare(b.waktu))
@@ -868,6 +905,38 @@ export function PesananPage() {
         </div>
       </div>
 
+      {/* ALARM TENGGAT: pesanan yang sajiannya menunggu ≥ 10 menit. Tombol 🔔
+          menyalakan/mematikan suara di perangkat ini saja. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={alarm.ubah}
+          data-testid="tombol-suara-alarm"
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ${
+            alarm.aktif ? "bg-stone-800 text-white ring-stone-800" : "bg-white text-stone-600 ring-stone-300"
+          }`}
+        >
+          {alarm.aktif ? "🔔 Suara alarm nyala" : "🔕 Suara alarm mati"}
+        </button>
+        <span className="text-xs text-stone-500">
+          Kotak berkedip merah & berbunyi bila pesanan belum selesai dalam {TENGGAT_PESANAN_MENIT} menit.
+        </span>
+      </div>
+      {terlambat.length > 0 && (
+        <div
+          className="kedip-alarm mb-3 rounded-lg border-2 px-3 py-2 text-sm font-semibold text-red-800"
+          data-testid="spanduk-terlambat"
+        >
+          🚨 {terlambat.length} pesanan lewat {TENGGAT_PESANAN_MENIT} menit — segera selesaikan:{" "}
+          {terlambat.map((r) => r.customer ?? r.meja ?? r.nomor ?? "Pesanan").join(", ")}
+          {alarm.aktif && alarm.terkunci && (
+            <span className="ml-1 font-normal">
+              (suara belum bisa berbunyi — ketuk di mana saja pada halaman ini untuk menyalakannya)
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Papan yang tidak menampilkan hari ini WAJIB mengatakannya. Kotak
           tanggal terbaca seperti penyaring biasa, dan dapur tak punya cara lain
           tahu bahwa pesanan baru tidak akan pernah muncul di layar ini. */}
@@ -943,7 +1012,12 @@ export function PesananPage() {
               sempit. */}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
             {tampilGrid.map((p) => (
-              <KotakPesanan key={kunciKartu(p)} p={p} onBuka={() => setDibuka(kunciKartu(p))} />
+              <KotakPesanan
+                key={kunciKartu(p)}
+                p={p}
+                sekarang={sekarang}
+                onBuka={() => setDibuka(kunciKartu(p))}
+              />
             ))}
           </div>
           {tampilGrid.length === 0 && (

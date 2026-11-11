@@ -15,14 +15,19 @@ import {
   deviceIdField,
 } from "../sync/idempoten";
 import { z } from "zod";
+import { OPNAME_JUMLAH_TIAP_HARI } from "@kakarut/shared";
 import type {
+  CekHarianRiwayatRow,
+  CekHarianStatusDto,
   OpnameRingkasan,
+  OpnameSimpanHasil,
   OpnameSesiStatus,
   StokAwalItem,
   StokAwalTersimpan,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
 import {
+  cekStokHarian,
   companies,
   ingredients,
   memberships,
@@ -58,6 +63,23 @@ const BATAS_PENYESUAIAN = 300;
 const BATAS_EXP = 300;
 const BATAS_OPNAME_SESI = 200;
 const BATAS_OPNAME_BARIS = 200;
+
+/**
+ * CEK STOK HARIAN (2026-11-11): tanpa jumlah — tiap bahan SESUAI / TIDAK
+ * SESUAI dengan catatan sistem. Yang tidak sesuai WAJIB sudah dihitung lewat
+ * `POST /stok/opname` (jalur selisih, bukti, & ACC yang sama), dan sesinya
+ * dikirim di `opname_session_id`.
+ */
+const CekHarianBody = z.object({
+  branch_id: z.string().uuid().optional(),
+  /** dibuat perangkat — kirim ulang dengan sesi yang sama tak menggandakan */
+  sesi_id: z.string().uuid(),
+  opname_session_id: z.string().uuid().nullish(),
+  items: z
+    .array(z.object({ ingredient_id: z.string().uuid(), sesuai: z.boolean() }).strict())
+    .min(1)
+    .max(1000),
+}).strict();
 
 const OpnameBody = z.object({
   branch_id: z.string().uuid().optional(),
@@ -150,6 +172,58 @@ function statusSesi(r: {
   if (r.n_disetujui > 0) return "disetujui";
   if (r.n_ditolak > 0) return "ditolak";
   return "cocok";
+}
+
+/**
+ * Batasan petugas: peran terikat cabang (kasir/tim) hanya boleh opname — dan
+ * cek harian — bahan di tempat yang terbuka (belum ada petugas) atau tempat
+ * yang ditugaskan padanya. Bahan tanpa tempat boleh siapa saja. Owner/admin
+ * selalu boleh. HANYA petugas yang masih ANGGOTA AKTIF yang dihitung —
+ * penugasan basi tidak boleh mengunci rak diam-diam untuk semua orang.
+ */
+async function pastikanPetugasBahan(
+  auth: { role: string | null; sub: string; company_id: string | null },
+  ids: string[],
+  infoById: Map<string, { tempat_id: string | null; tempat: string | null; nama: string }>,
+): Promise<void> {
+  if (terikatCabang(auth.role)) {
+    const petugasRows = await db
+      .select({
+        locId: storageLocationPetugas.storageLocationId,
+        userId: storageLocationPetugas.userId,
+      })
+      .from(storageLocationPetugas)
+      .innerJoin(
+        users,
+        and(
+          eq(storageLocationPetugas.userId, users.id),
+          eq(users.isActive, true),
+          isNull(users.deletedAt),
+        ),
+      )
+      .innerJoin(
+        memberships,
+        and(
+          eq(memberships.userId, users.id),
+          eq(memberships.companyId, auth.company_id!),
+          isNull(memberships.archivedAt),
+        ),
+      )
+      .where(eq(storageLocationPetugas.companyId, auth.company_id!));
+    const lockedSet = new Set(petugasRows.map((r) => r.locId));
+    const mineSet = new Set(
+      petugasRows.filter((r) => r.userId === auth.sub).map((r) => r.locId),
+    );
+    for (const ingredientId of ids) {
+      const info = infoById.get(ingredientId);
+      const tempatId = info?.tempat_id ?? null;
+      if (tempatId && lockedSet.has(tempatId) && !mineSet.has(tempatId)) {
+        throw new HTTPException(403, {
+          message: `Anda bukan petugas opname tempat "${info?.tempat ?? "?"}" (bahan ${info?.nama ?? ""})`,
+        });
+      }
+    }
+  }
 }
 
 export const stokRoutes = new Hono<AppEnv>()
@@ -548,44 +622,7 @@ export const stokRoutes = new Hono<AppEnv>()
         // selalu boleh. HANYA petugas yang masih ANGGOTA AKTIF yang dihitung —
         // penugasan basi (akun dihapus/nonaktif/diarsip/dibuat ulang) tidak boleh
         // mengunci rak diam-diam untuk semua orang.
-        if (terikatCabang(auth.role)) {
-          const petugasRows = await db
-            .select({
-              locId: storageLocationPetugas.storageLocationId,
-              userId: storageLocationPetugas.userId,
-            })
-            .from(storageLocationPetugas)
-            .innerJoin(
-              users,
-              and(
-                eq(storageLocationPetugas.userId, users.id),
-                eq(users.isActive, true),
-                isNull(users.deletedAt),
-              ),
-            )
-            .innerJoin(
-              memberships,
-              and(
-                eq(memberships.userId, users.id),
-                eq(memberships.companyId, auth.company_id!),
-                isNull(memberships.archivedAt),
-              ),
-            )
-            .where(eq(storageLocationPetugas.companyId, auth.company_id!));
-          const lockedSet = new Set(petugasRows.map((r) => r.locId));
-          const mineSet = new Set(
-            petugasRows.filter((r) => r.userId === auth.sub).map((r) => r.locId),
-          );
-          for (const ingredientId of ids) {
-            const info = infoById.get(ingredientId);
-            const tempatId = info?.tempat_id ?? null;
-            if (tempatId && lockedSet.has(tempatId) && !mineSet.has(tempatId)) {
-              throw new HTTPException(403, {
-                message: `Anda bukan petugas opname tempat "${info?.tempat ?? "?"}" (bahan ${info?.nama ?? ""})`,
-              });
-            }
-          }
-        }
+        await pastikanPetugasBahan(auth, ids, infoById);
 
         const sessionId = randomUUID();
         const ringkasan: OpnameRingkasan = {
@@ -637,10 +674,169 @@ export const stokRoutes = new Hono<AppEnv>()
           return { rows: inserted, nomor: nomorTeks };
         });
         const hasil = { ok: true, jumlah: rows.length, session_id: sessionId, nomor, ringkasan };
+        hasil satisfies OpnameSimpanHasil;
         return hasil;
       },
     );
     return c.json(data, 201);
+  })
+  /**
+   * CEK STOK HARIAN — simpan tanda sesuai/tidak sesuai per bahan. Tak
+   * mengubah saldo. Peran sama dengan opname, batasan petugas tempat sama.
+   */
+  .post(
+    "/cek-harian",
+    requireRole("owner", "admin", "cashier", "tim", "kitchen", "bar"),
+    zValidator("json", CekHarianBody),
+    async (c) => {
+      const auth = c.get("auth");
+      const body = c.req.valid("json");
+      const branchId = await branchUntukTulis(c, body.branch_id, "Anda hanya boleh cek stok di cabang Anda");
+      const sesuaiById = new Map<string, boolean>();
+      for (const it of body.items) sesuaiById.set(it.ingredient_id, it.sesuai);
+      const ids = [...sesuaiById.keys()];
+      const valid = await db
+        .select({ id: ingredients.id })
+        .from(ingredients)
+        .where(
+          and(
+            eq(ingredients.companyId, auth.company_id!),
+            eq(ingredients.trackStok, true),
+            inArray(ingredients.id, ids),
+          ),
+        );
+      if (valid.length !== ids.length) {
+        throw new HTTPException(400, { message: "Ada bahan yang tidak valid atau stoknya tidak dilacak" });
+      }
+      const saldoRows = await hitungSaldoCabang(auth.company_id!, branchId);
+      await pastikanPetugasBahan(auth, ids, new Map(saldoRows.map((r) => [r.ingredient_id, r])));
+
+      // Yang TIDAK SESUAI harus sudah dihitung di sesi opname cabang ini.
+      const tidakSesuai = ids.filter((id) => sesuaiById.get(id) === false);
+      const jumlahSesuai = ids.filter((id) => sesuaiById.get(id) === true).length;
+      if (tidakSesuai.length > 0) {
+        if (!body.opname_session_id) {
+          throw new HTTPException(400, {
+            message: "Bahan yang tidak sesuai wajib dihitung jumlahnya dulu",
+          });
+        }
+        const dihitung = await db
+          .select({ ingredientId: stockOpnames.ingredientId })
+          .from(stockOpnames)
+          .where(
+            and(
+              eq(stockOpnames.companyId, auth.company_id!),
+              eq(stockOpnames.branchId, branchId),
+              eq(stockOpnames.sessionId, body.opname_session_id),
+            ),
+          );
+        const ada = new Set(dihitung.map((d) => d.ingredientId));
+        const belum = tidakSesuai.filter((id) => !ada.has(id));
+        if (belum.length > 0) {
+          const nama = new Map(saldoRows.map((r) => [r.ingredient_id, r.nama]));
+          throw new HTTPException(400, {
+            message: `Belum dihitung di sesi opname: ${belum.map((id) => nama.get(id) ?? id).join(", ")}`,
+          });
+        }
+      }
+
+      const [company] = await db
+        .select({ timezone: companies.timezone })
+        .from(companies)
+        .where(eq(companies.id, auth.company_id!));
+      const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+      await db
+        .insert(cekStokHarian)
+        .values(
+          ids.map((ingredientId) => ({
+            companyId: auth.company_id!,
+            branchId,
+            sesiId: body.sesi_id,
+            tanggal: today,
+            ingredientId,
+            sesuai: sesuaiById.get(ingredientId) === true,
+            opnameSessionId: tidakSesuai.length > 0 ? (body.opname_session_id ?? null) : null,
+            userId: auth.sub,
+          })),
+        )
+        .onConflictDoNothing();
+      return c.json(
+        {
+          ok: true,
+          sesi_id: body.sesi_id,
+          sesuai: jumlahSesuai,
+          tidak_sesuai: tidakSesuai.length,
+        },
+        201,
+      );
+    },
+  )
+  /**
+   * Status cek harian cabang: sudah cek hari ini?, opname JUMLAH terakhir &
+   * jatuh tempo mingguan, riwayat 14 cek terakhir.
+   */
+  .get("/cek-harian", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const [company] = await db
+      .select({ timezone: companies.timezone })
+      .from(companies)
+      .where(eq(companies.id, auth.company_id!));
+    const today = tanggalDi(company?.timezone ?? "Asia/Jakarta");
+    const riwayatRes = await db.execute(sql`
+      SELECT ch.sesi_id,
+             MIN(ch.created_at) AS waktu,
+             MIN(u.nama) AS oleh,
+             SUM(CASE WHEN ch.sesuai THEN 1 ELSE 0 END)::int AS sesuai,
+             SUM(CASE WHEN ch.sesuai THEN 0 ELSE 1 END)::int AS tidak_sesuai,
+             MIN(ch.opname_session_id::text) AS opname_session_id,
+             MIN(ch.tanggal::text) AS tanggal
+      FROM cek_stok_harian ch
+      LEFT JOIN users u ON u.id = ch.user_id
+      WHERE ch.company_id = ${auth.company_id!} AND ch.branch_id = ${branchId}
+      GROUP BY ch.sesi_id
+      ORDER BY MIN(ch.created_at) DESC, ch.sesi_id DESC
+      LIMIT 14
+    `);
+    const riwayat: CekHarianRiwayatRow[] = riwayatRes.rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        sesi_id: String(row.sesi_id),
+        waktu: new Date(row.waktu as string).toISOString(),
+        oleh: (row.oleh as string | null) ?? null,
+        sesuai: Number(row.sesuai),
+        tidak_sesuai: Number(row.tidak_sesuai),
+        opname_session_id: (row.opname_session_id as string | null) ?? null,
+      };
+    });
+    const sudah = riwayatRes.rows.some((r) => (r as Record<string, unknown>).tanggal === today);
+    // Opname JUMLAH = sesi opname fisik yang BUKAN hitungan cek harian dan
+    // bukan "Catat waste" (keduanya juga menulis baris stock_opnames).
+    const [terakhir] = (
+      await db.execute(sql`
+        SELECT MAX(so.opname_date)::text AS tgl,
+               (${today}::date - MAX(so.opname_date))::int AS hari
+        FROM stock_opnames so
+        WHERE so.company_id = ${auth.company_id!} AND so.branch_id = ${branchId}
+          AND so.session_id IS NOT NULL
+          AND so.catatan IS DISTINCT FROM 'Catat waste'
+          AND NOT EXISTS (
+            SELECT 1 FROM cek_stok_harian ch
+            WHERE ch.company_id = so.company_id AND ch.opname_session_id = so.session_id
+          )
+      `)
+    ).rows as { tgl: string | null; hari: number | null }[];
+    // Selisih hari dihitung Postgres atas dua DATE — tanpa jembatan ke instant.
+    const tgl = terakhir?.tgl ?? null;
+    const hari = tgl ? Number(terakhir?.hari) : null;
+    return c.json({
+      tanggal: today,
+      sudah_cek_hari_ini: sudah,
+      opname_jumlah_terakhir: tgl,
+      hari_sejak_opname_jumlah: hari,
+      opname_jumlah_jatuh_tempo: hari === null || hari >= OPNAME_JUMLAH_TIAP_HARI,
+      riwayat,
+    } satisfies CekHarianStatusDto);
   })
   /**
    * Nilai Stok Awal (saldo pembuka) yang tersimpan per bahan + tanggalnya —

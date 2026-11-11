@@ -25,11 +25,26 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Cek stok harian (`/api/stok/cek-harian`) — sesuai/tidak sesuai tanpa jumlah
+
+🟢 **BARU** — tak mengubah perilaku klien lama.
+
+**Belum tayang.**
+
+- `POST /stok/cek-harian` — tiap bahan `sesuai: true|false`, tanpa jumlah.
+  Bahan tidak sesuai dihitung dulu lewat `POST /stok/opname` (jalur lama), lalu
+  `opname_session_id`-nya dikirim di sini.
+- `GET /stok/cek-harian` — `CekHarianStatusDto`: sudah cek hari ini, opname
+  jumlah terakhir & jatuh tempo mingguan (`OPNAME_JUMLAH_TIAP_HARI` = 7),
+  riwayat 14 cek terakhir.
+
+---
+
 ## 🟡 Open bill memesan bahan: sisa porsi & gerbang stok dihitung dari stok bebas
 
 🟡 **PERLU DICEK** — bentuk kawat tak berubah, ARTI angkanya berubah.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#248 (`0222e56`, CI production #527 hijau); ponsel lewat mohteja/kakarut-mobile#24.
 
 - Permintaan pemilik: open bill langsung mengurangi stok saat disimpan.
   Bahan untuk baris open bill yang masih berjalan (bukan `batal`, bill belum
@@ -48,7 +63,7 @@ tanpa akses repo server.
 
 🟢 **BARU** — medan tambahan; klien lama yang tak membacanya tak terpengaruh.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#248 (`0222e56`, CI production #527 hijau); ponsel lewat mohteja/kakarut-mobile#24.
 
 - `GET/POST/PATCH /api/kategori` kini membawa `jenis: "makanan" | "minuman"`
   (`KategoriMenuDto`). `POST` tanpa `jenis` → ditebak server dari nama
@@ -65,7 +80,7 @@ tanpa akses repo server.
 
 🟢 **BARU** — tak mengubah perilaku klien lama.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#248 (`0222e56`, CI production #527 hijau); ponsel lewat mohteja/kakarut-mobile#24.
 
 - Modul penggajian untuk owner & HRD: setelan perusahaan (tanggal mulai periode,
   cuti dibayar), setelan per karyawan (bulanan/harian, jam kerja, toleransi telat,
@@ -85,7 +100,7 @@ tanpa akses repo server.
 
 🟡 **PERLU DICEK** — klien yang memetakan peran dengan `switch` tertutup.
 
-**Belum tayang.**
+**Sudah di-merge ke production.** Tayang lewat merge PR mohteja/Kakarut#248 (`0222e56`, CI production #527 hijau); ponsel lewat mohteja/kakarut-mobile#24.
 
 - `UserRole` kini juga `"hrd"`. HRD **tanpa cabang** (`branch_id: null`), seperti admin.
 - HRD hanya boleh ke `/karyawan`, `/absensi`, `/pengajuan`, `/kebersihan`,

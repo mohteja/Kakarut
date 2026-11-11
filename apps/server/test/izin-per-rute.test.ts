@@ -77,6 +77,7 @@ const TERBUKA_SENGAJA_BACA = new Map<string, string>([
   ["/auth/me", "identitas pemegang token itu sendiri"],
   ["/profil", "profil milik sendiri"],
   ["/profil/aktivitas", "jejak aktivitas milik sendiri"],
+  ["/stok/cek-harian", "status cek stok harian cabang (sudah cek?, opname jumlah terakhir, riwayat nama & cacah sesuai/tidak) — tanpa angka biaya; peran yang mengerjakannya memang keenamnya"],
   ["/profil/slip-gaji", "slip gaji MILIK SENDIRI (auth.sub), periode final/dibayar saja"],
   ["/profil/slip-gaji/:id", "satu slip milik sendiri — 404 bila bukan milik pemegang token"],
   ["/onboarding/status", "status undangan pemegang token"],

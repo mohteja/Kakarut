@@ -236,7 +236,7 @@ export const RUTE: { peran: "owner" | "sa" | "kasir"; jalur: string }[] = [
     "/profil", "/profil/aktivitas", "/rekomendasi/beli", "/rekomendasi/permintaan",
     "/sampah", "/satuan", "/shift/pantau", "/shift", "/shift/selisih",
     "/shift/selisih/ringkas", "/stok", "/stok/nilai", "/stok/exp", "/stok/awal",
-    "/stok/penyesuaian", "/stok/opname/riwayat", "/stok/opname", "/supplier",
+    "/stok/penyesuaian", "/stok/opname/riwayat", "/stok/opname", "/stok/cek-harian", "/supplier",
     "/transfer-stok/saldo", "/transfer-stok", "/karyawan", "/karyawan/undangan",
     "/gaji/setelan", "/gaji/karyawan", "/gaji/kasbon", "/gaji/periode", "/profil/slip-gaji",
   ].map((jalur) => ({ peran: "owner" as const, jalur })),

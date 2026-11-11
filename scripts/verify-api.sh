@@ -19249,6 +19249,33 @@ cek "§328 cadangan lepas: Bakso kembali 2 porsi (6 ÷ 3)" "V == 2" "$(porsi328 
 cek "§328 cadangan lepas: Mie kembali 3 porsi (6 ÷ 2)" "V == 3" "$(porsi328 "$MB328")"
 api "$OWNER" PATCH /company '{"blokir_jual_minus":false}' > /dev/null
 
+echo "── §329 cek stok harian: sesuai/tidak sesuai tanpa jumlah, opname jumlah mingguan ──"
+# Permintaan pemilik (2026-11-11): closing cukup tandai sesuai / tidak sesuai;
+# yang tidak sesuai langsung dihitung lewat opname biasa dan sesinya ditautkan.
+ST329=$(api "$REISS105" GET /stok/cek-harian)
+cek "§329 status terbaca: tanggal, jatuh tempo, riwayat larik" "V == 1" \
+  "$(echo "$ST329" | jq '((.tanggal|type)=="string" and (.opname_jumlah_jatuh_tempo|type)=="boolean" and (.riwayat|type)=="array")|if . then 1 else 0 end')"
+S329A=$(python3 -c 'import uuid;print(uuid.uuid4())')
+cek "§329 tidak sesuai TANPA dihitung ditolak (400)" "V == 400" \
+  "$(status_code_body "$REISS105" POST /stok/cek-harian "{\"sesi_id\":\"$S329A\",\"items\":[{\"ingredient_id\":\"$BH328\",\"sesuai\":false}]}")"
+OP329=$(api "$REISS105" POST /stok/opname "{\"client_ref\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"catatan\":\"Cek harian — bahan tidak sesuai\",\"items\":[{\"ingredient_id\":\"$BH328\",\"qty\":5}]}" | jq -r '.session_id // ""')
+cek "§329 premis: opname bahan tidak sesuai tersimpan" "V == 1" "$([ -n "$OP329" ] && echo 1 || echo 0)"
+cek "§329 sesi opname yang tak memuat bahannya ditolak (400)" "V == 400" \
+  "$(status_code_body "$REISS105" POST /stok/cek-harian "{\"sesi_id\":\"$S329A\",\"opname_session_id\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"items\":[{\"ingredient_id\":\"$BH328\",\"sesuai\":false}]}")"
+CH329=$(api "$REISS105" POST /stok/cek-harian "{\"sesi_id\":\"$S329A\",\"opname_session_id\":\"$OP329\",\"items\":[{\"ingredient_id\":\"$BH328\",\"sesuai\":false},{\"ingredient_id\":\"$BH255\",\"sesuai\":true}]}")
+cek "§329 cek harian tersimpan: 1 sesuai, 1 tidak sesuai" "V == 1" \
+  "$(echo "$CH329" | jq '(.sesuai==1 and .tidak_sesuai==1)|if . then 1 else 0 end')"
+cek "§329 kirim ulang sesi yang sama → 201, tak menggandakan" "V == 201" \
+  "$(status_code_body "$REISS105" POST /stok/cek-harian "{\"sesi_id\":\"$S329A\",\"opname_session_id\":\"$OP329\",\"items\":[{\"ingredient_id\":\"$BH328\",\"sesuai\":false},{\"ingredient_id\":\"$BH255\",\"sesuai\":true}]}")"
+ST329B=$(api "$REISS105" GET /stok/cek-harian)
+cek "§329 sesudahnya: hari ini sudah dicek" "V == 1" "$(echo "$ST329B" | jq '(.sudah_cek_hari_ini==true)|if . then 1 else 0 end')"
+cek "§329 riwayat: sesi itu SATU baris (1 sesuai, 1 tidak sesuai, tertaut opname)" "V == 1" \
+  "$(echo "$ST329B" | jq --arg s "$S329A" --arg o "$OP329" '[.riwayat[]|select(.sesi_id==$s and .sesuai==1 and .tidak_sesuai==1 and .opname_session_id==$o)]|length')"
+cek "§329 semua sesuai → tanpa opname (201)" "V == 201" \
+  "$(status_code_body "$REISS105" POST /stok/cek-harian "{\"sesi_id\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"items\":[{\"ingredient_id\":\"$BH255\",\"sesuai\":true}]}")"
+cek "§329 HRD tak boleh cek stok (403)" "V == 403" \
+  "$(status_code_body "$THRD" POST /stok/cek-harian "{\"sesi_id\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"items\":[{\"ingredient_id\":\"$BH255\",\"sesuai\":true}]}")"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════

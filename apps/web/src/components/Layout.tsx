@@ -706,6 +706,11 @@ export function Layout() {
                 </NavLink>
               ) : (
                 <>
+                  {/* Cek harian (sesuai/tidak, tanpa jumlah) — dikerjakan saat
+                      closing; opname jumlah di bawahnya mingguan. */}
+                  <NavLink to="/stok/cek-harian" className={linkClass}>
+                    ✅ Cek Stok Harian
+                  </NavLink>
                   <NavLink to="/stok/opname" className={linkClass}>
                     📋 SO Bahan Baku
                   </NavLink>
