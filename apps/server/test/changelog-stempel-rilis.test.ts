@@ -105,12 +105,9 @@ const BELUM_TAYANG = new Set([
   // lihat-saja tayang lewat merge PR #245; stempelnya dipasang pada commit
   // yang SAMA.
   //
-  // BELUM DI-MERGE (2026-11-08): peran HRD.
-  "## 🟡 Peran baru `hrd` (personalia) — `UserRole` bertambah, CHECK cabang dibalik",
-  // BELUM DI-MERGE (2026-11-08): penggajian tahap 2 (server), branch yang sama.
-  "## 🟢 Penggajian (`/api/gaji/*`, owner & HRD) + slip gaji sendiri (`/api/profil/slip-gaji`)",
-  "## 🟢 `jenis` makanan/minuman: kategori menu & sajian papan pesanan",
-  "## 🟡 Open bill memesan bahan: sisa porsi & gerbang stok dihitung dari stok bebas",
+  // PARUH "belum di-merge" KOSONG LAGI sejak 2026-11-11 — HRD, penggajian,
+  // jenis makanan/minuman, dan open bill memesan bahan tayang lewat merge
+  // PR #248 (`0222e56`); stempelnya dipasang pada commit yang SAMA.
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

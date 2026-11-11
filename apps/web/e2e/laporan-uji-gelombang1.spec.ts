@@ -161,6 +161,42 @@ test("papan Pesanan Masuk: owner lihat saja, tanpa tombol tanda", async ({ page,
 });
 
 /**
+ * ALARM TENGGAT (permintaan pemilik 2026-11-11): pesanan yang belum selesai
+ * dalam 10 menit → kotaknya merah berkedip + spanduk + suara. Jam peramban
+ * dimajukan 11 menit (`clock.setFixedTime`) supaya sajian yang baru dibuat
+ * verify-api terbaca sudah menunggu lewat tenggat.
+ */
+test("papan Pesanan Masuk: lewat 10 menit → kotak merah berkedip + spanduk alarm", async ({ page, request }) => {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const papan = (await (
+    await request.get(`${BASE}/api/pesanan`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json()) as { items: { status: string }[] }[];
+  expect(
+    papan.some((p) => p.items.some((it) => it.status === "dikerjakan")),
+    "PREMIS: ada sajian yang masih dikerjakan hari ini",
+  ).toBe(true);
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/pesanan");
+  // Sebelum tenggat: tak ada kotak terlambat.
+  await expect(page.getByTestId("kotak-pesanan").first()).toBeVisible();
+  await expect(page.locator('[data-terlambat="ya"]')).toHaveCount(0);
+
+  await page.clock.setFixedTime(Date.now() + 11 * 60_000);
+  await page.reload();
+  await expect(page.locator('[data-terlambat="ya"]').first()).toBeVisible();
+  await expect(page.locator('[data-terlambat="ya"]').first()).toHaveClass(/kedip-alarm/);
+  await expect(page.getByTestId("spanduk-terlambat")).toContainText("lewat 10 menit");
+  // Tombol suara bisa dimatikan & dinyalakan lagi.
+  const tombol = page.getByTestId("tombol-suara-alarm");
+  await expect(tombol).toContainText("nyala");
+  await tombol.click();
+  await expect(tombol).toContainText("mati");
+  await tombol.click();
+  await expect(tombol).toContainText("nyala");
+});
+
+/**
  * PAPAN GRID (permintaan pemilik 2026-11-08): kanban diganti grid kotak 4
  * kolom. Tiap kotak menghitung makanan & minuman yang sudah/belum dikirim dan
  * memperlihatkan pratinjau menu; ketuk → detail per sajian.

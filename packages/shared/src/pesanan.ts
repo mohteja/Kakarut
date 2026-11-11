@@ -319,3 +319,41 @@ export function hitungKirimPerJenis(
   }
   return hasil;
 }
+
+/**
+ * TENGGAT PESANAN — permintaan pemilik (2026-11-11): tiap orderan harus
+ * selesai dalam 10 menit; lewat dari itu kotaknya di papan berubah merah,
+ * berkedip, dan berbunyi sampai diselesaikan.
+ */
+export const TENGGAT_PESANAN_MENIT = 10;
+
+/**
+ * Sudah berapa MENIT sajian tertua yang BELUM dikirim menunggu — dihitung dari
+ * `masuk_pada` per baris, bukan waktu kartu: satu bill bisa menerima pesanan
+ * tambahan berjam-jam kemudian, dan ronde baru tak boleh langsung terbaca
+ * terlambat hanya karena bill-nya dibuka sejak sore. `null` = tak ada sajian
+ * yang masih dikerjakan (pesanan selesai/batal → tak ada yang ditunggu).
+ * Ponsel mencerminkannya di `pesanan_models.dart`.
+ */
+export function menitMenungguTertua(
+  items: readonly Pick<PesananItemRow, "status" | "masuk_pada">[],
+  sekarangMs: number,
+): number | null {
+  let tertua: number | null = null;
+  for (const it of items) {
+    if (it.status !== "dikerjakan") continue;
+    const t = Date.parse(it.masuk_pada);
+    if (!Number.isFinite(t)) continue;
+    if (tertua === null || t < tertua) tertua = t;
+  }
+  return tertua === null ? null : Math.max(0, Math.floor((sekarangMs - tertua) / 60000));
+}
+
+/** Pesanan ini sudah melewati tenggat (ada sajian dikerjakan ≥ 10 menit). */
+export function pesananTerlambat(
+  items: readonly Pick<PesananItemRow, "status" | "masuk_pada">[],
+  sekarangMs: number,
+): boolean {
+  const m = menitMenungguTertua(items, sekarangMs);
+  return m !== null && m >= TENGGAT_PESANAN_MENIT;
+}
