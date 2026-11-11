@@ -843,6 +843,8 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 - `PATCH /api/meja/ruangan/:id` — [owner/admin/cashier] — req `{ nama }` — res `RuanganDto` — error **404**, **409**.
 - `DELETE /api/meja/ruangan/:id` — [owner/admin/cashier] — res `{ ok: true }`; mejanya tidak terhapus (`ruangan_id` → null) — error **404**.
 - `PUT /api/meja/tata-letak` kini juga menerima `ruangan?: [{id, pos_x, pos_y, lebar, tinggi}]`; sesudah menyimpan, `ruangan_id` TIAP meja cabang dihitung ulang dari posisinya (`ruanganUntukTitik`: ruangan terkecil yang memuat titik meja). `MejaDto` membawa `ruangan_id: string|null`.
+- **Kasir & Take Away (2026-11-11):** meja bertipe `takeaway` TEPAT satu per cabang (dibuat otomatis, nama "Kasir & Take Away"). `POST /api/meja` dengan `tipe:"takeaway"` saat sudah ada → **409**; `PATCH /api/meja/:id` `is_active:false` pada meja take away → **400**; `DELETE` → **400** (seperti sebelumnya).
+- **Nomor antrean take away:** `OpenBillRow` / `OpenBillDetail` / `PesananRow` membawa `nomor_antrean: number|null` dan `SaleRow.nomorAntrean` — urut per cabang per hari bisnis (TA-1, TA-2, …). Diberikan saat bill disimpan (POST) di meja take away atau dipindah ke sana (PUT); dilepas (null) saat dipindah ke dine-in; penjualan dari bill mewarisinya; penjualan langsung di meja take away mengambil nomor baru. `PesananRow.meja_id: string|null` menunjuk meja asal (papan denah).
 - `PATCH /api/meja/:id` — **[owner/admin/cashier]** — req: parsial `{ nama?, tipe?, is_active?, branch_id? }` — res: `MejaDto` — error: **403**, **404**, **409** meja masih terisi (khusus `is_active:false`)
 - `DELETE /api/meja/:id` — **[owner/admin/cashier]** — res: `{ ok: true }` — error: **400** (takeaway "Ruang Tunggu" tak bisa dihapus), **403**, **404**, **409** meja masih terisi
 
@@ -4307,6 +4309,8 @@ export interface SaleRow {
   saleDate: string;
   shiftId: string | null;
   asalOpenBillId: string | null;
+  /** nomor antrean take away (tampil "TA-3", lihat `labelAntrean`); null = dine-in */
+  nomorAntrean: number | null;
   deletedAt: string | null;
   deletedBy: string | null;
 }
@@ -4732,6 +4736,11 @@ export interface OpenBillRow {
    */
   meja_id: string | null;
   meja_label: string | null;
+  /**
+   * Nomor antrean take away per cabang per hari (tampil "TA-3"); null =
+   * dine-in. Banyak bill take away berjalan bersamaan dibedakan oleh ini.
+   */
+  nomor_antrean: number | null;
   customer_nama: string | null;
   jumlah_item: number;
   /** waktu terakhir diperbarui (ISO) */
@@ -4743,6 +4752,8 @@ export interface OpenBillDetail {
   id: string;
   meja_id: string | null;
   meja_label: string | null;
+  /** lihat `OpenBillRow.nomor_antrean` */
+  nomor_antrean: number | null;
   customer_nama: string | null;
   customer_wa: string | null;
   catatan: string | null;
@@ -4830,6 +4841,13 @@ export interface PesananRow {
   /** nomor struk; null selama masih open bill (belum ada transaksi) */
   nomor: string | null;
   meja: string | null;
+  /**
+   * Meja asal pesanan — papan denah menaruh kartunya di meja ini. null =
+   * tanpa meja / mejanya sudah dihapus.
+   */
+  meja_id: string | null;
+  /** nomor antrean take away (tampil "TA-3"); null = dine-in */
+  nomor_antrean: number | null;
   customer: string | null;
   /** waktu pesanan masuk (ISO) */
   waktu: string;

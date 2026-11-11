@@ -89,6 +89,7 @@ export function contohStruk(opts: OpsiContohStruk): SaleResult {
       saleDate: (opts.waktu ?? new Date().toISOString()).slice(0, 10),
       shiftId: null,
       asalOpenBillId: null,
+      nomorAntrean: null,
       deletedAt: null,
       deletedBy: null,
     },

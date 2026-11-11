@@ -77,6 +77,7 @@ export function strukPenjualan(
     saleDate: sale.saleDate,
     shiftId: sale.shiftId,
     asalOpenBillId: sale.asalOpenBillId,
+    nomorAntrean: sale.nomorAntrean,
     deletedAt: sale.deletedAt === null ? null : iso(sale.deletedAt),
     deletedBy: sale.deletedBy,
   };

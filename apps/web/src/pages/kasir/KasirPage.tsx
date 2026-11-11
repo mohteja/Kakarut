@@ -20,6 +20,7 @@ import type {
   StatusHadirDto,
 } from "@kakarut/shared";
 import { angkaDari, dibatalkanDapur, hargaAddon, hitungPb1, ringkasAddon, tandaAddon } from "@kakarut/shared";
+import { labelAntrean, labelMejaPesanan } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -295,6 +296,15 @@ export function KasirPage() {
    * yang sudah ada.
    */
   const [billGandaOpen, setBillGandaOpen] = useState(false);
+  /** daftar pesanan take away berjalan (dibuka saat memilih Kasir & Take Away) */
+  const [takeAwayOpen, setTakeAwayOpen] = useState(false);
+  /** "TA-3 tersimpan" — nomor yang disebutkan ke pembeli sesudah bill disimpan */
+  const [antreanBaru, setAntreanBaru] = useState<string | null>(null);
+  useEffect(() => {
+    if (!antreanBaru) return;
+    const t = setTimeout(() => setAntreanBaru(null), 15_000);
+    return () => clearTimeout(t);
+  }, [antreanBaru]);
   /**
    * Meja SUDAH DIBAYAR tapi belum dibereskan, lalu dipilih lagi.
    *
@@ -408,7 +418,7 @@ export function KasirPage() {
   const pindahMeja =
     billDibuka && mejaId && billDibuka.meja_id !== mejaId ? billDibuka : undefined;
   // Meja menentukan mode transaksi: meja bernomor = dine-in (default), meja
-  // Ruang Tunggu = bawa pulang. Sebelum meja dipilih, tampilan default dine-in.
+  // Kasir & Take Away = bawa pulang. Sebelum meja dipilih, tampilan default dine-in.
   const dineIn = mejaTerpilih ? mejaTerpilih.tipe === "dine_in" : true;
   // Pencarian meja: cocok sebagian (mis. ketik "8" → "Meja 8"), tak harus persis.
   const mejaCocok = useMemo(() => {
@@ -460,11 +470,22 @@ export function KasirPage() {
      * dan baru ditolak 409 di tombol Simpan, harus mundur lagi. Pesanan yang
      * sedang berjalan di meja itu memang yang paling ingin ia lihat.
      *
-     * Ruang Tunggu DIKECUALIKAN: ia sengaja boleh menampung banyak bill bawa
+     * Kasir & Take Away DIKECUALIKAN: ia sengaja boleh menampung banyak bill bawa
      * pulang sekaligus (tak kena aturan satu-meja-satu-bill), jadi memuat
      * salah satunya justru menebak yang salah.
      */
     const m = mejaAktif.find((x) => x.id === id);
+    /*
+     * KASIR & TAKE AWAY menampung BANYAK pesanan sekaligus (permintaan
+     * pemilik 2026-11-11), masing-masing bernomor antrean TA-n. Memilihnya
+     * menawarkan daftar pesanan take away yang masih berjalan + pesanan baru —
+     * bukan menebak salah satunya. Hanya saat memulai transaksi, bukan saat
+     * memindahkan bill yang sedang dibuka.
+     */
+    if (m?.tipe === "takeaway") {
+      if (!editingBillId && openBills.some((b) => b.meja_id === id)) setTakeAwayOpen(true);
+      return;
+    }
     if (m?.tipe !== "dine_in") return;
     const billDiSitu = openBills.filter((b) => b.meja_id === id);
     if (billDiSitu.length === 0) return;
@@ -867,7 +888,7 @@ export function KasirPage() {
         nomor: null,
         waktu: waktuKertasWIB(new Date()),
         isDineIn: dineIn,
-        mejaLabel: mejaTerpilih?.nama ?? null,
+        mejaLabel: labelMejaPesanan(mejaTerpilih?.nama ?? null, billDibuka?.nomor_antrean),
         customerNama: konsumenNama.trim() || null,
         items: cart.map((l) => ({
           nama: l.menu.nama,
@@ -918,7 +939,7 @@ export function KasirPage() {
         branchNama: cabangIni?.nama ?? "",
         waktu: waktuKertasWIB(new Date()),
         isDineIn: dineIn,
-        mejaLabel: mejaTerpilih?.nama ?? null,
+        mejaLabel: labelMejaPesanan(mejaTerpilih?.nama ?? null, billDibuka?.nomor_antrean),
         customerNama: konsumenNama.trim() || null,
         items: cartTagih.map((l) => ({
           nama: l.menu.nama,
@@ -979,11 +1000,13 @@ export function KasirPage() {
         })),
       };
       return editingBillId
-        ? api(`/open-bill/${editingBillId}`, { method: "PUT", body })
-        : api("/open-bill", { method: "POST", body });
+        ? api<OpenBillDetail>(`/open-bill/${editingBillId}`, { method: "PUT", body })
+        : api<OpenBillDetail>("/open-bill", { method: "POST", body });
     },
-    onSuccess: () => {
+    onSuccess: (bill) => {
       resetTransaksi();
+      const ta = labelAntrean(bill?.nomor_antrean);
+      if (ta) setAntreanBaru(`${ta}${bill.customer_nama ? ` · ${bill.customer_nama}` : ""}`);
       queryClient.invalidateQueries({ queryKey: ["open-bill"] });
       // open bill = pesanan yang belum dibayar → langsung tampil di papan dapur
       queryClient.invalidateQueries({ queryKey: ["pesanan"] });
@@ -1145,7 +1168,7 @@ export function KasirPage() {
             <div className="text-base font-bold text-stone-700">Pilih meja dulu</div>
             <p className="max-w-xs text-sm text-stone-500">
               Menu terbuka setelah mejanya dipilih. Untuk pesanan bawa pulang, pilih{" "}
-              <b>Ruang Tunggu</b>.
+              <b>Kasir &amp; Take Away</b>.
             </p>
             <button onClick={() => setMejaModalOpen(true)} className={`${btnPrimary} mt-1`}>
               🍽 Pilih meja
@@ -1224,6 +1247,19 @@ export function KasirPage() {
           </Link>
         </div>
 
+        {antreanBaru && (
+          <div
+            data-testid="antrean-tersimpan"
+            className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800"
+          >
+            <span>
+              🥡 Take away <b>{antreanBaru}</b> tersimpan — sebutkan nomor ini ke pembeli.
+            </span>
+            <button type="button" onClick={() => setAntreanBaru(null)} className="text-green-700" aria-label="Tutup">
+              ✕
+            </button>
+          </div>
+        )}
         {/* Pemilih Open Bill (di atas) — pesanan tersimpan yang belum dibayar */}
         {openBills.length > 0 && (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2">
@@ -1241,7 +1277,11 @@ export function KasirPage() {
                       : "border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
                   }`}
                 >
-                  <span className="font-semibold">{b.meja_label || b.customer_nama || "Bill"}</span>
+                  <span className="font-semibold">
+                    {b.nomor_antrean != null
+                      ? `🥡 ${labelAntrean(b.nomor_antrean)}${b.customer_nama ? ` · ${b.customer_nama}` : ""}`
+                      : b.meja_label || b.customer_nama || "Bill"}
+                  </span>
                   <span className="ml-1 opacity-80">· {b.jumlah_item} item</span>
                 </button>
               ))}
@@ -2070,7 +2110,7 @@ export function KasirPage() {
               </button>
             </div>
             <p className="mb-4 text-sm text-stone-500">
-              Pilih meja untuk memulai transaksi. Meja bernomor = dine-in; <b>Ruang Tunggu</b> =
+              Pilih meja untuk memulai transaksi. Meja bernomor = dine-in; <b>Kasir &amp; Take Away</b> =
               bawa pulang (take away).
             </p>
 
@@ -2381,6 +2421,49 @@ export function KasirPage() {
           selisih muncul di tutup kasir. Server juga menolaknya (409
           `meja_sudah_ada_bill`); modal ini cuma mendahului supaya kasir tak
           perlu menabrak galat dulu. */}
+      {takeAwayOpen && (
+        <Modal open onClose={() => setTakeAwayOpen(false)} title="🧾 Kasir & Take Away">
+          <p className="text-sm text-stone-600">
+            Pesanan take away yang masih berjalan — pilih untuk menambah atau membayar, atau
+            mulai pesanan take away baru (nomor antrean baru diberikan saat disimpan).
+          </p>
+          <button
+            type="button"
+            data-testid="take-away-baru"
+            onClick={() => setTakeAwayOpen(false)}
+            className={`${btnPrimary} mt-3 w-full`}
+          >
+            + Pesanan take away baru
+          </button>
+          <div className="mt-3 space-y-1.5" data-testid="daftar-take-away">
+            {openBills
+              .filter((b) => b.meja_id === mejaId)
+              .sort((a, b) => (a.nomor_antrean ?? 0) - (b.nomor_antrean ?? 0))
+              .map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => {
+                    setTakeAwayOpen(false);
+                    void bukaBill(b.id);
+                  }}
+                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-100"
+                >
+                  <span className="truncate">
+                    🥡 {labelAntrean(b.nomor_antrean) ?? "Take away"}
+                    {b.customer_nama ? ` · ${b.customer_nama}` : ""}
+                    <span className="ml-1 font-normal opacity-70">· {b.jumlah_item} item</span>
+                  </span>
+                  <span className="shrink-0 text-xs font-medium">Buka →</span>
+                </button>
+              ))}
+          </div>
+          {cart.length > 0 && (
+            <p className="mt-3 text-xs text-stone-500">
+              Membuka pesanan yang ada akan <b>menimpa keranjang</b> yang sekarang.
+            </p>
+          )}
+        </Modal>
+      )}
       {billGandaOpen && (
         <Modal
           open

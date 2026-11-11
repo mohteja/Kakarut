@@ -1,3 +1,4 @@
+import { ambilNomorAntrean } from "../meja/antrean";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import {
@@ -261,6 +262,8 @@ export async function createSale(params: CreateSaleParams) {
     // sama) dan divalidasi milik bill, perusahaan, dan cabang yang benar —
     // tanpa itu kasir bisa menunjuk baris bill mana pun untuk menekan harga.
     const hargaBill = new Map<string, number>();
+    /** nomor antrean take away bill yang dibayar — diwarisi transaksinya */
+    let antreanBill: number | null = null;
     /** snapshot add-on baris bill — ikut terkunci bersama harganya */
     const addonBill = new Map<string, AddonSnapBaris[]>();
     /**
@@ -288,6 +291,7 @@ export async function createSale(params: CreateSaleParams) {
           closedAt: openBills.closedAt,
           saleId: openBills.saleId,
           pernahJadiPenjualan: openBills.pernahJadiPenjualan,
+          nomorAntrean: openBills.nomorAntrean,
         })
         .from(openBills)
         .where(
@@ -318,6 +322,7 @@ export async function createSale(params: CreateSaleParams) {
          */
         .for("update");
       if (!bill) throw new HTTPException(404, { message: "Open bill tidak ditemukan" });
+      antreanBill = bill.nomorAntrean;
       // Bill yang sudah ditutup tak boleh dibayar lagi — tanpa penjaga ini satu
       // bill bisa jadi dua transaksi bila tombol bayar tertekan dua kali atau
       // antrean offline mengirim ulang.
@@ -705,6 +710,11 @@ export async function createSale(params: CreateSaleParams) {
       .limit(1);
     const seq = (last?.seq ?? 0) + 1;
     const nomor = `${kodeCabang(branch.nama)}-${saleDate.replaceAll("-", "")}-${String(seq).padStart(4, "0")}`;
+    // Antrean take away: bill yang dibayar membawa nomornya sendiri (yang
+    // sudah tercetak di slip dapur); penjualan langsung di meja take away
+    // mengambil nomor baru. Dine-in tak bernomor.
+    const nomorAntrean =
+      mejaId && !isDineIn ? (antreanBill ?? (await ambilNomorAntrean(tx, branch.id, saleDate))) : null;
 
     // Member/pelanggan: bila WA diisi → cari-atau-buat member (dedup per WA) &
     // link ke sale. Nama disnapshot (juga saat tanpa WA) agar riwayat tetap benar.
@@ -737,6 +747,7 @@ export async function createSale(params: CreateSaleParams) {
         saleDate,
         shiftId,
         asalOpenBillId: params.openBillId ?? null,
+        nomorAntrean,
         ...(params.waktu ? { waktu: params.waktu } : {}),
       })
       .returning();

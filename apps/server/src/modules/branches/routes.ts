@@ -223,7 +223,7 @@ export const cabangRoutes = new Hono<AppEnv>()
           throw new HTTPException(409, {
             message: `Cabang "${body.nama}" sudah ada`,
           });
-        // Meja bawaan (Ruang Tunggu + Meja 1) supaya usaha take away langsung bisa jualan.
+        // Meja bawaan (Kasir & Take Away + Meja 1) supaya usaha take away langsung bisa jualan.
         await seedMejaDefault(tx, auth.company_id!, b.id);
         return b;
       });

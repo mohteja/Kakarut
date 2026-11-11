@@ -2584,6 +2584,8 @@ export interface SaleRow {
   saleDate: string;
   shiftId: string | null;
   asalOpenBillId: string | null;
+  /** nomor antrean take away (tampil "TA-3", lihat `labelAntrean`); null = dine-in */
+  nomorAntrean: number | null;
   deletedAt: string | null;
   deletedBy: string | null;
 }
@@ -3009,6 +3011,11 @@ export interface OpenBillRow {
    */
   meja_id: string | null;
   meja_label: string | null;
+  /**
+   * Nomor antrean take away per cabang per hari (tampil "TA-3"); null =
+   * dine-in. Banyak bill take away berjalan bersamaan dibedakan oleh ini.
+   */
+  nomor_antrean: number | null;
   customer_nama: string | null;
   jumlah_item: number;
   /** waktu terakhir diperbarui (ISO) */
@@ -3020,6 +3027,8 @@ export interface OpenBillDetail {
   id: string;
   meja_id: string | null;
   meja_label: string | null;
+  /** lihat `OpenBillRow.nomor_antrean` */
+  nomor_antrean: number | null;
   customer_nama: string | null;
   customer_wa: string | null;
   catatan: string | null;
@@ -3107,6 +3116,13 @@ export interface PesananRow {
   /** nomor struk; null selama masih open bill (belum ada transaksi) */
   nomor: string | null;
   meja: string | null;
+  /**
+   * Meja asal pesanan — papan denah menaruh kartunya di meja ini. null =
+   * tanpa meja / mejanya sudah dihapus.
+   */
+  meja_id: string | null;
+  /** nomor antrean take away (tampil "TA-3"); null = dine-in */
+  nomor_antrean: number | null;
   customer: string | null;
   /** waktu pesanan masuk (ISO) */
   waktu: string;

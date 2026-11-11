@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { labelCabangKertas, qtyDitagih, tarifPb1Struk, teksAddonKertas } from "@kakarut/shared";
 import { KETERANGAN_SALINAN_STRUK, TEKS_SALINAN } from "@kakarut/shared";
+import { labelMejaPesanan } from "@kakarut/shared";
 import type {
   CabangDto,
   CompanyRow,
@@ -156,7 +157,7 @@ export function ReceiptModal({
       nomor: data.sale.nomor,
       waktu: waktuStr,
       isDineIn: data.sale.isDineIn,
-      mejaLabel: data.sale.mejaLabel,
+      mejaLabel: labelMejaPesanan(data.sale.mejaLabel, data.sale.nomorAntrean),
       customerNama: data.sale.customerNama,
       customerWa: data.sale.customerWa,
       // Porsi yang DITAGIH, bukan yang dipesan: sajian yang uangnya sudah
@@ -221,7 +222,7 @@ export function ReceiptModal({
       nomor: data.sale.nomor,
       waktu: waktuStr,
       isDineIn: data.sale.isDineIn,
-      mejaLabel: data.sale.mejaLabel,
+      mejaLabel: labelMejaPesanan(data.sale.mejaLabel, data.sale.nomorAntrean),
       customerNama: data.sale.customerNama,
       items: data.items.map((it) => ({
         nama: it.menuNama,
@@ -293,9 +294,13 @@ export function ReceiptModal({
               </div>
               {antrian != null && <div className="mt-1 text-xl font-bold">Antrian {antrian}</div>}
               {(data.sale.customerNama || data.sale.mejaLabel) && (
-                <div className="font-bold">{data.sale.customerNama || data.sale.mejaLabel}</div>
+                <div className="font-bold">
+                  {data.sale.customerNama || labelMejaPesanan(data.sale.mejaLabel, data.sale.nomorAntrean)}
+                </div>
               )}
-              {data.sale.customerNama && data.sale.mejaLabel && <div>Meja: {data.sale.mejaLabel}</div>}
+              {data.sale.customerNama && data.sale.mejaLabel && (
+                <div>Meja: {labelMejaPesanan(data.sale.mejaLabel, data.sale.nomorAntrean)}</div>
+              )}
             </div>
             <hr className="my-2 border-dashed border-stone-400" />
             {data.items.map((it) => {

@@ -89,6 +89,7 @@ export const KOLOM_SALE = {
   saleDate: sales.saleDate,
   shiftId: sales.shiftId,
   asalOpenBillId: sales.asalOpenBillId,
+  nomorAntrean: sales.nomorAntrean,
   deletedAt: sales.deletedAt,
   deletedBy: sales.deletedBy,
 } as const;

@@ -6,7 +6,8 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { OpenBillDetail, OpenBillRow, PilihanAddon } from "@kakarut/shared";
 import { db, type Tx } from "../../db/client";
-import { barisDitagih, hargaAddon, hitungPb1, tandaAddon, waktuKertas } from "@kakarut/shared";
+import { barisDitagih, hargaAddon, hitungPb1, labelMejaPesanan, tandaAddon, waktuKertas } from "@kakarut/shared";
+import { ambilNomorAntreanHariIni } from "../meja/antrean";
 import { opsiKertasDariQuery, responsBon, responsSlip } from "../print/kertas";
 import { loadKatalog, type AddonSnapBaris, type KatalogMenu } from "../menu/service";
 import {
@@ -177,6 +178,7 @@ async function loadDetail(
     id: bill.id,
     meja_id: bill.mejaId,
     meja_label: bill.mejaLabel,
+    nomor_antrean: bill.nomorAntrean,
     customer_nama: bill.customerNama,
     customer_wa: bill.customerWa,
     catatan: bill.catatan,
@@ -367,6 +369,7 @@ export const openBillRoutes = new Hono<AppEnv>()
         // ganda). Klien mencocokkan lewat id.
         meja_id: openBills.mejaId,
         meja_label: openBills.mejaLabel,
+        nomor_antrean: openBills.nomorAntrean,
         customer_nama: openBills.customerNama,
         waktu: openBills.updatedAt,
         jumlah_item: sql<number>`COUNT(${openBillItems.id})::int`,
@@ -387,6 +390,7 @@ export const openBillRoutes = new Hono<AppEnv>()
       id: r.id,
       meja_id: r.meja_id,
       meja_label: r.meja_label,
+      nomor_antrean: r.nomor_antrean,
       customer_nama: r.customer_nama,
       jumlah_item: r.jumlah_item,
       waktu: (r.waktu as Date).toISOString(),
@@ -440,7 +444,7 @@ export const openBillRoutes = new Hono<AppEnv>()
           nomor: null,
           waktu: waktuKertas(new Date(), comp?.timezone ?? "Asia/Jakarta"),
           isDineIn: dineIn,
-          mejaLabel: detail.meja_label,
+          mejaLabel: labelMejaPesanan(detail.meja_label, detail.nomor_antrean),
           customerNama: detail.customer_nama,
           /*
            * Baris yang DIBATALKAN dapur tidak ikut. Slip ini perintah memasak,
@@ -551,7 +555,7 @@ export const openBillRoutes = new Hono<AppEnv>()
           branchNama: branch?.nama ?? "",
           waktu: waktuKertas(new Date(), comp?.timezone ?? "Asia/Jakarta"),
           isDineIn: dineIn,
-          mejaLabel: detail.meja_label,
+          mejaLabel: labelMejaPesanan(detail.meja_label, detail.nomor_antrean),
           customerNama: detail.customer_nama,
           items,
           subtotal,
@@ -640,6 +644,12 @@ export const openBillRoutes = new Hono<AppEnv>()
           branchId,
           mejaId,
           mejaLabel,
+          // Take away: nomor antrean baru (TA-1, TA-2, …) — banyak bill bawa
+          // pulang berjalan bersamaan di satu meja "Kasir & Take Away".
+          nomorAntrean:
+            tipe === "takeaway"
+              ? await ambilNomorAntreanHariIni(tx, auth.company_id!, branchId)
+              : null,
           customerNama: body.customer_nama?.trim() || null,
           customerWa: body.customer_wa?.trim() || null,
           catatan: body.catatan?.trim() || null,
@@ -921,10 +931,21 @@ export const openBillRoutes = new Hono<AppEnv>()
        * mengirimkan undefined. Jadi menghapus nama tamu tetap bisa; yang
        * hilang hanyalah penghapusan yang tak pernah diminta siapa pun.
        */
+      // Pindah ke take away → nomor antrean baru bila belum punya; pindah ke
+      // dine-in → nomornya dilepas (meja itulah identitasnya). Meja tak
+      // dikirim → nomor tak disentuh.
+      const antreanBaru =
+        body.meja_id === undefined
+          ? undefined
+          : tipe === "takeaway"
+            ? (existing.nomorAntrean ??
+              (await ambilNomorAntreanHariIni(tx, auth.company_id!, existing.branchId)))
+            : null;
       await tx
         .update(openBills)
         .set({
           ...(body.meja_id !== undefined && { mejaId, mejaLabel }),
+          ...(antreanBaru !== undefined && { nomorAntrean: antreanBaru }),
           ...(body.customer_nama !== undefined && {
             customerNama: body.customer_nama?.trim() || null,
           }),

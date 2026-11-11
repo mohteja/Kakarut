@@ -146,7 +146,7 @@ export const adminTenantsRoutes = new Hono<AppEnv>()
         .insert(branches)
         .values({ companyId: company.id, nama: body.cabang_nama })
         .returning();
-      // Meja bawaan (Ruang Tunggu + Meja 1) supaya usaha take away langsung bisa jualan.
+      // Meja bawaan (Kasir & Take Away + Meja 1) supaya usaha take away langsung bisa jualan.
       await seedMejaDefault(tx, company.id, branch.id);
       // Master satuan + kategori bahan bawaan untuk dropdown Bahan Baku.
       await seedUnitsPerusahaan(tx, company.id);

@@ -325,12 +325,12 @@ async function main() {
       .values({ companyId: company.id, branchId: branch.id, nama: "Gudang Utama" })
       .onConflictDoNothing();
 
-    // 3c. Meja default cabang Pusat: Ruang Tunggu (take away) + 4 meja makan,
+    // 3c. Meja default cabang Pusat: Kasir & Take Away (take away) + 4 meja makan,
     // ditata grid awal (persen 0..100) supaya denah tidak menumpuk di 1 titik.
     await tx
       .insert(meja)
       .values([
-        { companyId: company.id, branchId: branch.id, nama: "Ruang Tunggu", tipe: "takeaway", posX: 15, posY: 15 },
+        { companyId: company.id, branchId: branch.id, nama: "Kasir & Take Away", tipe: "takeaway", posX: 15, posY: 15 },
         { companyId: company.id, branchId: branch.id, nama: "Meja 1", tipe: "dine_in", posX: 40, posY: 30 },
         { companyId: company.id, branchId: branch.id, nama: "Meja 2", tipe: "dine_in", posX: 65, posY: 30 },
         { companyId: company.id, branchId: branch.id, nama: "Meja 3", tipe: "dine_in", posX: 40, posY: 60 },

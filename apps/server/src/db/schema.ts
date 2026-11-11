@@ -710,7 +710,9 @@ export const storageLocationIngredients = pgTable(
 /**
  * Master meja (per cabang) — dipilih kasir saat memulai transaksi. Posisi
  * posX/posY disimpan dalam persen (0..100) agar tata letak denah bebas resolusi.
- * Selalu ada minimal satu meja bertipe "takeaway" (Ruang Tunggu) per cabang.
+ * Selalu ada TEPAT satu meja bertipe "takeaway" per cabang — "Kasir & Take
+ * Away" (dulu "Ruang Tunggu"; permintaan pemilik 2026-11-11): tak bisa dihapus,
+ * dinonaktifkan, atau dibuat kedua. Migrasi 0117 melengkapi cabang lama.
  */
 /**
  * RUANGAN di denah meja per cabang (permintaan pemilik 2026-11-11). Kotak
@@ -734,6 +736,22 @@ export const ruanganMeja = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("ruangan_meja_cabang_nama_uq").on(t.branchId, t.nama)],
+);
+
+/**
+ * Penghitung nomor antrean take away per cabang per hari bisnis (zona
+ * perusahaan). Satu UPSERT … RETURNING = nomor berikutnya, atomik tanpa kunci.
+ */
+export const antreanTakeAway = pgTable(
+  "antrean_take_away",
+  {
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+    tanggal: date("tanggal").notNull(),
+    terakhir: integer("terakhir").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.branchId, t.tanggal] })],
 );
 
 export const meja = pgTable(
@@ -1727,6 +1745,12 @@ export const sales = pgTable(
      * bill bisa dibatalkan/dihapus permanen, dan jejak asalnya tetap berguna.
      */
     asalOpenBillId: uuid("asal_open_bill_id"),
+    /**
+     * Nomor antrean take away (TA-1, TA-2, …) — diwarisi dari open bill-nya,
+     * atau diambil baru saat penjualan langsung di meja take away. null =
+     * dine-in. Lihat `ambilNomorAntrean` (modules/meja/antrean.ts).
+     */
+    nomorAntrean: integer("nomor_antrean"),
     // soft-delete (Tempat Sampah): baris tetap disimpan sebagai catatan siapa yang menghapus
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by").references(() => users.id),
@@ -1972,6 +1996,12 @@ export const openBills = pgTable(
      * jejak asal pesanan.
      */
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    /**
+     * Nomor antrean take away per cabang per hari (TA-1, TA-2, …) — diambil
+     * saat bill disimpan di meja take away, supaya banyak pesanan bawa pulang
+     * yang berjalan bersamaan bisa dibedakan. null = dine-in.
+     */
+    nomorAntrean: integer("nomor_antrean"),
     /**
      * BILL INI PERNAH JADI PENJUALAN — fakta, bukan penunjuk.
      *

@@ -25,6 +25,26 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Kasir & Take Away wajib + nomor antrean take away + papan denah
+
+🟢 **BARU** — medan tambahan; klien lama tak terpengaruh (nomor tak tampil saja).
+
+**Belum tayang.**
+
+- Meja take away kini **tepat satu per cabang**, bernama "Kasir & Take Away"
+  (migrasi 0117 mengganti nama "Ruang Tunggu" & melengkapi cabang yang belum
+  punya). `POST /meja` take away kedua → **409**; `PATCH /meja/:id`
+  `is_active:false` pada take away → **400**.
+- `nomor_antrean: number|null` (TA-n per cabang per hari) di `OpenBillRow`,
+  `OpenBillDetail`, `PesananRow`; `SaleRow.nomorAntrean`. Diambil saat bill
+  disimpan di meja take away; penjualan dari bill mewarisinya; jual langsung
+  di take away mengambil nomor baru; pindah ke dine-in melepasnya.
+- `PesananRow.meja_id` — papan denah menaruh pesanan di mejanya.
+- Slip dapur & bon bill take away mencetak "Take Away TA-n"
+  (`labelMejaPesanan`).
+
+---
+
 ## 🟢 Ruangan di denah meja (`/api/meja/ruangan`) + `MejaDto.ruangan_id`
 
 🟢 **BARU** — medan & rute tambahan; klien lama tak terpengaruh.

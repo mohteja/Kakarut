@@ -360,8 +360,8 @@ cek "tenant baru punya 0 bahan (isolasi)" "V == 0" "$(api "$UJI" GET /bahan | jq
 # Meja bawaan: cabang tenant baru langsung punya Ruang Tunggu + Meja 1
 UJI_MEJA=$(api "$UJI" GET /meja)
 cek "tenant baru: 2 meja bawaan" "V == 2" "$(echo "$UJI_MEJA" | jq 'length')"
-cek "tenant baru: ada Ruang Tunggu (takeaway) bawaan" "V == 1" \
-  "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="takeaway" and .nama=="Ruang Tunggu")] | length == 1) | if . then 1 else 0 end')"
+cek "tenant baru: ada Kasir & Take Away (takeaway) bawaan" "V == 1" \
+  "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="takeaway" and .nama=="Kasir & Take Away")] | length == 1) | if . then 1 else 0 end')"
 cek "tenant baru: ada Meja 1 (dine_in) bawaan" "V == 1" \
   "$(echo "$UJI_MEJA" | jq '([.[] | select(.tipe=="dine_in" and .nama=="Meja 1")] | length == 1) | if . then 1 else 0 end')"
 # Mode Lite (bawaan tenant baru) membatasi 1 cabang → cabang kedua ditolak.
@@ -17754,7 +17754,7 @@ R298=$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"items\":[{\"menu
 ID298=$(jq -r '.sale.id // ""' <<<"$R298")
 G298K=$(api "$REISS105" GET "/penjualan/$ID298")
 G298O=$(api "$OWNER" GET "/penjualan/$ID298")
-cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 31 + SaleItemRow 17 + SaleResult 4)" "V == 52" \
+cek "§298 premis: kontrak terbaca dari types.ts (SaleRow 32 + SaleItemRow 17 + SaleResult 4)" "V == 53" \
   "$(printf '%s\n%s\n%s\n' "$K298_SALE" "$K298_ITEM" "$K298_ATAS" | grep -c .)"
 cek "§298 premis: kasir berhasil membuat transaksi (ada sale.id & satu baris)" "V == 1" \
   "$([ -n "$ID298" ] && [ "$(jq '.items|length' <<<"$R298")" -ge 1 ] && echo 1 || echo 0)"
@@ -19308,6 +19308,53 @@ cek "§330 hapus ruangan (200) — mejanya tetap ada, keluar dari ruangan" "V ==
 cek "§330 meja tetap ada dengan ruangan_id null" "V == 1" \
   "$(api "$OWNER" GET "/meja?branch_id=$BR" | jq --arg m "$M330" '[.[]|select(.id==$m and .ruangan_id==null)]|length')"
 api "$OWNER" DELETE "/meja/$M330?branch_id=$BR" >/dev/null
+
+echo "── §331 Kasir & Take Away wajib satu per cabang + nomor antrean take away ──"
+# Permintaan pemilik (2026-11-11): meja take away wajib ada di semua
+# perusahaan, digabung dengan posisi kasir; banyak pesanan take away berjalan
+# bersamaan dibedakan nomor antrean TA-1, TA-2, … per cabang per hari.
+MJ331=$(api "$REISS105" GET /meja)
+TA331=$(echo "$MJ331" | jq -r '[.[]|select(.tipe=="takeaway")][0].id // ""')
+DI331=$(echo "$MJ331" | jq -r '[.[]|select(.tipe=="dine_in" and .is_active)][0].id // ""')
+cek "§331 cabang punya TEPAT satu meja take away" "V == 1" \
+  "$(echo "$MJ331" | jq '[.[]|select(.tipe=="takeaway")]|length')"
+cek "§331 namanya Kasir & Take Away (Ruang Tunggu lama diganti)" "V == 1" \
+  "$(echo "$MJ331" | jq '[.[]|select(.tipe=="takeaway" and .nama=="Kasir & Take Away")]|length')"
+cek "§331 meja take away KEDUA ditolak (409)" "V == 409" \
+  "$(status_code_body "$OWNER" POST /meja "{\"branch_id\":\"$BR\",\"nama\":\"TA Kedua 331\",\"tipe\":\"takeaway\"}")"
+cek "§331 Kasir & Take Away tak bisa dinonaktifkan (400)" "V == 400" \
+  "$(status_code_body "$OWNER" PATCH "/meja/$TA331" '{"is_active":false}')"
+KAT331=$(api "$OWNER" GET /kategori | jq -r '.[0].id')
+MN331=$(api "$OWNER" POST /menu "{\"nama\":\"Teh 331\",\"category_id\":\"$KAT331\",\"harga_jual\":5000,\"mult\":1}" | jq -r '.id // ""')
+OB331A=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$TA331\",\"customer_nama\":\"Ani\",\"items\":[{\"menu_id\":\"$MN331\",\"qty\":1}]}" | jq -r '.id // ""')
+OB331B=$(api "$REISS105" POST /open-bill "{\"meja_id\":\"$TA331\",\"customer_nama\":\"Budi\",\"items\":[{\"menu_id\":\"$MN331\",\"qty\":1}]}" | jq -r '.id // ""')
+DOB331=$(api "$REISS105" GET /open-bill)
+NA331=$(echo "$DOB331" | jq --arg b "$OB331A" '[.[]|select(.id==$b)][0].nomor_antrean // 0')
+NB331=$(echo "$DOB331" | jq --arg b "$OB331B" '[.[]|select(.id==$b)][0].nomor_antrean // 0')
+cek "§331 dua bill take away berjalan bersamaan (keduanya tersimpan)" "V == 1" \
+  "$([ -n "$OB331A" ] && [ -n "$OB331B" ] && echo 1 || echo 0)"
+cek "§331 bill take away bernomor antrean (≥ 1)" "V >= 1" "$NA331"
+cek "§331 bill take away berikutnya nomor +1" "V == 1" "$(( NB331 - NA331 ))"
+cek "§331 tiap baris daftar open bill membawa nomor_antrean" "V == 0" \
+  "$(echo "$DOB331" | jq '[.[]|select(has("nomor_antrean")|not)]|length')"
+cek "§331 detail bill membawa nomor_antrean yang sama" "V == $NA331" \
+  "$(api "$REISS105" GET "/open-bill/$OB331A" | jq '.nomor_antrean // 0')"
+PS331=$(api "$REISS105" GET /pesanan)
+cek "§331 papan: kartu take away membawa meja_id & nomor_antrean" "V == 1" \
+  "$(echo "$PS331" | jq --arg b "$OB331A" --arg m "$TA331" --argjson n "$NA331" '[.[]|select(.id==$b and .meja_id==$m and .nomor_antrean==$n)]|length')"
+cek "§331 papan: tiap kartu membawa meja_id & nomor_antrean" "V == 0" \
+  "$(echo "$PS331" | jq '[.[]|select((has("meja_id") and has("nomor_antrean"))|not)]|length')"
+cek "§331 slip dapur bill take away mencetak TA-nomornya" "V == 1" \
+  "$(api "$REISS105" GET "/open-bill/$OB331A/slip?paper=58" | jq --arg t "TA-$NA331" '((.teks // "") | contains($t)) | if . then 1 else 0 end')"
+cek "§331 dibayar → transaksinya mewarisi nomor antrean bill" "V == $NA331" \
+  "$(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"meja_id\":\"$TA331\",\"open_bill_id\":\"$OB331A\",\"metode_bayar\":\"tunai\",\"uang_diterima\":20000,\"items\":[{\"menu_id\":\"$MN331\",\"qty\":1}]}" | jq '.sale.nomorAntrean // 0')"
+cek "§331 jual langsung di take away → nomor antrean baru (sesudah B)" "V == 1" \
+  "$(( $(api "$REISS105" POST /penjualan "{\"is_dine_in\":false,\"meja_id\":\"$TA331\",\"metode_bayar\":\"tunai\",\"uang_diterima\":20000,\"items\":[{\"menu_id\":\"$MN331\",\"qty\":1}]}" | jq '.sale.nomorAntrean // 0') - NB331 ))"
+cek "§331 jual dine-in tak bernomor antrean" "V == 1" \
+  "$(api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":20000,\"items\":[{\"menu_id\":\"$MN331\",\"qty\":1}]}" | jq '(.sale.nomorAntrean == null)|if . then 1 else 0 end')"
+cek "§331 bill take away dipindah ke meja dine-in → nomornya dilepas" "V == 1" \
+  "$(api "$REISS105" PUT "/open-bill/$OB331B" "{\"meja_id\":\"$DI331\",\"items\":[{\"menu_id\":\"$MN331\",\"qty\":1}]}" >/dev/null; api "$REISS105" GET "/open-bill/$OB331B" | jq '(.nomor_antrean == null)|if . then 1 else 0 end')"
+api "$REISS105" DELETE "/open-bill/$OB331B" >/dev/null
 
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu

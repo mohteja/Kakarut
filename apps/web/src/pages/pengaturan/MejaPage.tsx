@@ -434,7 +434,8 @@ export function MejaPage() {
           <b className="text-green-700">Hijau</b> = siap ditempati ·{" "}
           <b className="text-stone-600">Abu-abu</b> = statusnya belum diketahui (bukan kosong).
           Meja tetap terisi setelah dibayar — tekan <b>Kosongkan</b> saat tamunya benar-benar
-          pergi. Meja <b>Ruang Tunggu</b> untuk bawa pulang, jadi tidak punya status.
+          pergi. Meja <b>Kasir &amp; Take Away</b> (wajib satu, letakkan di posisi kasir) menampung
+          semua pesanan bawa pulang, jadi tidak punya status.
         </div>
       )}
 
@@ -627,7 +628,7 @@ export function MejaPage() {
                           : "bg-blue-100 text-blue-700"
                       }`}
                     >
-                      {m.tipe === "takeaway" ? "Take away" : "Dine-in"}
+                      {m.tipe === "takeaway" ? "🧾 Kasir & take away" : "Dine-in"}
                     </span>
                     {!m.is_active && (
                       <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
@@ -667,13 +668,16 @@ export function MejaPage() {
                     >
                       Ubah
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => toggle.mutate(m)}
-                      className="font-medium text-stone-500 hover:underline"
-                    >
-                      {m.is_active ? "Nonaktifkan" : "Aktifkan"}
-                    </button>
+                    {/* Kasir & Take Away WAJIB ada: tak bisa dinonaktifkan/dihapus. */}
+                    {(m.tipe !== "takeaway" || !m.is_active) && (
+                      <button
+                        type="button"
+                        onClick={() => toggle.mutate(m)}
+                        className="font-medium text-stone-500 hover:underline"
+                      >
+                        {m.is_active ? "Nonaktifkan" : "Aktifkan"}
+                      </button>
+                    )}
                     {m.tipe !== "takeaway" && (
                       <button
                         type="button"
@@ -717,38 +721,11 @@ export function MejaPage() {
                 value={form.nama}
                 onChange={(e) => setForm({ ...form, nama: e.target.value })}
                 className={inputClass}
-                placeholder="mis. Meja 1, VIP 2, Ruang Tunggu"
+                placeholder="mis. Meja 1, VIP 2, Teras 3"
               />
             </div>
-            {!form.id && (
-              <div>
-                <label className="mb-1 block text-sm font-medium">Jenis</label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, tipe: "dine_in" })}
-                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
-                      form.tipe === "dine_in"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-stone-300 text-stone-600"
-                    }`}
-                  >
-                    Meja makan (Dine-in)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, tipe: "takeaway" })}
-                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
-                      form.tipe === "takeaway"
-                        ? "border-amber-500 bg-amber-50 text-amber-700"
-                        : "border-stone-300 text-stone-600"
-                    }`}
-                  >
-                    Ruang Tunggu (Take away)
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* Jenis tak lagi dipilih: meja baru selalu dine-in — "Kasir & Take
+                Away" sudah dibuat otomatis dan wajib tepat satu per cabang. */}
             <ErrorText error={simpan.error} />
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setForm(null)} className={btnSecondary}>

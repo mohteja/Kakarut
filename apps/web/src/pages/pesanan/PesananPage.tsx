@@ -11,7 +11,10 @@ import {
   ringkasPesanan,
   sajianBedaDariNota,
   urutkanPesanan,
+  labelAntrean,
   type HitungKirim,
+  type MejaDto,
+  type RuanganDto,
   type JenisMenu,
   type PesananItemRow,
   type PesananLogRow,
@@ -24,6 +27,8 @@ import { useAuth } from "../../context/AuthContext";
 import { useCabangData } from "../../context/BranchContext";
 import { useAlarmPesanan } from "../../lib/alarmPesanan";
 import { api } from "../../lib/api";
+import { bacaLokal, tulisLokal } from "../../lib/simpanan";
+import { DenahPesanan, pesananTanpaMeja } from "./DenahPesanan";
 import {
   formatDurasi,
   formatRupiah,
@@ -75,6 +80,16 @@ function lamaMenunggu(iso: string): string {
  * Riwayat "siapa menandai apa" untuk satu pesanan. Dimuat saat dibuka saja —
  * papan bisa menampung puluhan kartu dan riwayat hampir tak pernah dibaca.
  */
+/**
+ * Judul kotak/kartu: pesanan take away bernomor antrean tampil "🥡 TA-3" —
+ * semuanya berasal dari meja "Kasir & Take Away" yang sama, jadi nama meja
+ * tak membedakan apa pun.
+ */
+function judulPesanan(p: Pick<PesananRow, "nomor" | "meja" | "nomor_antrean">): string {
+  const ta = labelAntrean(p.nomor_antrean);
+  return ta ? `🥡 ${ta}` : (p.nomor ?? p.meja ?? "Pesanan");
+}
+
 function RiwayatModal({
   pesanan,
   branchQuery,
@@ -334,8 +349,8 @@ function KotakPesanan({
   /** jam dinding papan (ms) — berdetak, supaya kotak berubah merah tepat waktu */
   sekarang: number;
 }) {
-  const judul = p.nomor ?? p.meja ?? "Pesanan";
-  const siapa = p.customer ?? (p.nomor ? p.meja : null);
+  const judul = judulPesanan(p);
+  const siapa = p.customer ?? (p.nomor && p.nomor_antrean == null ? p.meja : null);
   const hitung = hitungKirimPerJenis(p.items);
   const batal = dibatalkanDapur(p.status);
   const selesai = p.status === "selesai";
@@ -434,7 +449,7 @@ function KartuPesanan({
   const lihatSaja = useContext(LihatSaja);
   // label meja SUDAH berbunyi "Meja 1"/"Ruang Tunggu" — jangan diberi awalan
   // lagi, hasilnya "Meja Meja 1".
-  const judul = p.nomor ?? p.meja ?? "Pesanan";
+  const judul = judulPesanan(p);
   // Penanda penyajian BEDA dari fakta pembukuan (is_dine_in) → katakan, jangan
   // sembunyikan. Diperiksa PER BARIS: kartu yang cuma sebagian dibungkus tetap
   // berbeda, dan pada penjualan lunas kemasannya sudah masuk HPP & keluar dari
@@ -631,6 +646,30 @@ export function PesananPage() {
   /** kunci `jenis:id` pesanan yang detailnya sedang dibuka */
   const [dibuka, setDibuka] = useState<string | null>(null);
   const [riwayat, setRiwayat] = useState<PesananRow | null>(null);
+  /**
+   * DENAH (bawaan) atau GRID kotak — permintaan pemilik 2026-11-11: papan
+   * mengikuti denah meja & ruangan; grid tetap ada untuk hari yang sangat
+   * ramai. Pilihan diingat per perangkat.
+   */
+  const [tampilan, setTampilan] = useState<"denah" | "grid">(() =>
+    bacaLokal("kakarut.papanTampilan") === "grid" ? "grid" : "denah",
+  );
+  useEffect(() => {
+    tulisLokal("kakarut.papanTampilan", tampilan);
+  }, [tampilan]);
+  /** meja yang daftar pesanannya sedang dibuka (lebih dari satu pesanan) */
+  const [mejaDibuka, setMejaDibuka] = useState<string | null>(null);
+  const { data: mejaList, error: gagalMeja } = useQuery({
+    queryKey: ["meja", branchQuery],
+    queryFn: () => api<MejaDto[]>(`/meja${branchQuery}`),
+  });
+  // Ruangan hanya bingkai tata letak: gagal dimuat → denah tetap tampil
+  // tanpa bingkai, dan papan MENGATAKANNYA (bukan diam-diam tanpa ruangan).
+  const { data: ruanganData, error: gagalRuangan } = useQuery({
+    queryKey: ["meja-ruangan", branchQuery],
+    queryFn: () => api<RuanganDto[]>(`/meja/ruangan${branchQuery}`),
+  });
+  const ruanganList = ruanganData ?? [];
 
   const kunci = ["pesanan", branchQuery, tanggal];
   const qs = `${branchQuery ? `${branchQuery}&` : "?"}tanggal=${tanggal}`;
@@ -936,7 +975,9 @@ export function PesananPage() {
           data-testid="spanduk-terlambat"
         >
           🚨 {terlambat.length} pesanan lewat {TENGGAT_PESANAN_MENIT} menit — segera selesaikan:{" "}
-          {terlambat.map((r) => r.customer ?? r.meja ?? r.nomor ?? "Pesanan").join(", ")}
+          {terlambat
+            .map((r) => (r.nomor_antrean != null ? judulPesanan(r) : (r.customer ?? r.meja ?? r.nomor ?? "Pesanan")))
+            .join(", ")}
           {alarm.terkunci && (
             <span className="ml-1 font-normal">
               (suara belum bisa berbunyi — ketuk di mana saja pada halaman ini untuk menyalakannya)
@@ -1016,6 +1057,63 @@ export function PesananPage() {
         </Card>
       ) : (
         <>
+          <div className="mb-3 flex gap-2">
+            {(["denah", "grid"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                data-testid={`tampilan-${t}`}
+                onClick={() => setTampilan(t)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                  tampilan === t ? "bg-stone-800 text-white" : "bg-white text-stone-600 ring-1 ring-stone-200"
+                }`}
+              >
+                {t === "denah" ? "🗺️ Denah" : "▦ Grid"}
+              </button>
+            ))}
+          </div>
+          {tampilan === "denah" && mejaList ? (
+            <>
+              {gagalRuangan && (
+                <div className="mb-2 text-xs text-amber-800">
+                  Ruangan denah gagal dimuat — meja tetap di posisinya, tanpa bingkai ruangan.
+                </div>
+              )}
+              <DenahPesanan
+                pesanan={tampilGrid}
+                meja={mejaList}
+                ruangan={ruanganList}
+                sekarang={sekarang}
+                onBukaMeja={(id) => {
+                  const di = tampilGrid.filter((p) => p.meja_id === id);
+                  if (di.length === 1) setDibuka(kunciKartu(di[0]));
+                  else setMejaDibuka(id);
+                }}
+                onBukaPesanan={(p) => setDibuka(kunciKartu(p))}
+              />
+              {pesananTanpaMeja(tampilGrid, mejaList).length > 0 && (
+                <>
+                  <div className="mb-2 mt-4 text-sm font-semibold text-stone-600">Tanpa meja</div>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+                    {pesananTanpaMeja(tampilGrid, mejaList).map((p) => (
+                      <KotakPesanan
+                        key={kunciKartu(p)}
+                        p={p}
+                        sekarang={sekarang}
+                        onBuka={() => setDibuka(kunciKartu(p))}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+          <>
+          {tampilan === "denah" && gagalMeja && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Denah meja gagal dimuat — pesanan ditampilkan sebagai grid.
+            </div>
+          )}
           {/* Grid kotak: 4 kolom di layar lebar, menyusut ke 3/2 di layar
               sempit. */}
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
@@ -1028,18 +1126,41 @@ export function PesananPage() {
               />
             ))}
           </div>
+          </>
+          )}
           {tampilGrid.length === 0 && (
-            <Card className="p-6 text-center text-sm text-stone-400">Kosong.</Card>
+            <Card className="mt-3 p-6 text-center text-sm text-stone-400">Kosong.</Card>
           )}
         </>
       )}
+
+      {/* Meja dengan lebih dari satu pesanan → pilih pesanannya dulu. */}
+      <Modal
+        open={mejaDibuka !== null && pesananDibuka === undefined}
+        onClose={() => setMejaDibuka(null)}
+        title={mejaList?.find((m) => m.id === mejaDibuka)?.nama ?? "Pesanan"}
+        lebar="max-w-xl"
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid="daftar-pesanan-meja">
+          {tampilGrid
+            .filter((p) => p.meja_id === mejaDibuka)
+            .map((p) => (
+              <KotakPesanan
+                key={kunciKartu(p)}
+                p={p}
+                sekarang={sekarang}
+                onBuka={() => setDibuka(kunciKartu(p))}
+              />
+            ))}
+        </div>
+      </Modal>
 
       {/* Detail: kartu lengkap — tombol per sajian, bawa pulang, pindahkan ke
           selesai, riwayat. Pesanan yang hilang dari daftar menutup dirinya. */}
       <Modal
         open={pesananDibuka !== undefined}
         onClose={() => setDibuka(null)}
-        title={pesananDibuka ? (pesananDibuka.nomor ?? pesananDibuka.meja ?? "Pesanan") : ""}
+        title={pesananDibuka ? judulPesanan(pesananDibuka) : ""}
         lebar="max-w-xl"
       >
         {pesananDibuka && (

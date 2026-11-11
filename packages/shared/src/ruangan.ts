@@ -37,3 +37,24 @@ export function ruanganUntukTitik(
   }
   return pilih?.id ?? null;
 }
+
+/**
+ * Meja take away WAJIB satu per cabang, digabung dengan posisi kasir
+ * (permintaan pemilik 2026-11-11). Dulu bernama "Ruang Tunggu".
+ */
+export const NAMA_KASIR_TAKE_AWAY = "Kasir & Take Away";
+
+/** Label nomor antrean take away: 3 → "TA-3". null → null (dine-in). */
+export function labelAntrean(nomor: number | null | undefined): string | null {
+  return nomor == null ? null : `TA-${nomor}`;
+}
+
+/**
+ * Label meja sebuah pesanan untuk layar & kertas: pesanan take away bernomor
+ * tampil "Take Away TA-3" (nama mejanya sama untuk semua, jadi tak membedakan
+ * apa pun); selain itu nama meja apa adanya.
+ */
+export function labelMejaPesanan(meja: string | null, nomorAntrean: number | null | undefined): string | null {
+  const ta = labelAntrean(nomorAntrean);
+  return ta ? `Take Away ${ta}` : meja;
+}

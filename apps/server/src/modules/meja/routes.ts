@@ -284,7 +284,7 @@ export const mejaRoutes = new Hono<AppEnv>()
       if (row.tipe === "takeaway") {
         throw new HTTPException(400, {
           message:
-            "Ruang Tunggu dipakai bergantian sepanjang hari — tidak perlu dikosongkan",
+            "Kasir & Take Away dipakai bergantian sepanjang hari — tidak perlu dikosongkan",
         });
       }
 
@@ -472,6 +472,21 @@ export const mejaRoutes = new Hono<AppEnv>()
       body.branch_id,
       "Hanya boleh menambah meja di cabang sendiri",
     );
+    // "Kasir & Take Away" TEPAT satu per cabang (permintaan pemilik
+    // 2026-11-11) — sudah dibuat otomatis bersama cabangnya. Take away kedua
+    // memecah antrean bawa pulang ke dua tempat.
+    if (body.tipe === "takeaway") {
+      const [ada] = await db
+        .select({ nama: meja.nama })
+        .from(meja)
+        .where(and(eq(meja.companyId, auth.company_id!), eq(meja.branchId, branchId), eq(meja.tipe, "takeaway")))
+        .limit(1);
+      if (ada) {
+        throw new HTTPException(409, {
+          message: `Cabang ini sudah punya meja take away ("${ada.nama}") — cukup satu, digabung dengan kasir`,
+        });
+      }
+    }
     const [row] = await db
       .insert(meja)
       .values({
@@ -587,6 +602,11 @@ export const mejaRoutes = new Hono<AppEnv>()
       // Menonaktifkan meja yang masih ada tamunya membuat pilihan meja kasir
       // tercabut di tengah transaksi (halaman kasir melepas meja yang hilang dari
       // daftar aktif), dan bill yang sah jadi tak bisa ditagih.
+      if (body.is_active === false && existing.tipe === "takeaway") {
+        throw new HTTPException(400, {
+          message: "Meja Kasir & Take Away wajib ada — tidak bisa dinonaktifkan",
+        });
+      }
       if (body.is_active === false)
         await tolakBilaTerisi(existing.id, existing.branchId, auth);
       const [row] = await tanpaBentrok(
@@ -629,7 +649,7 @@ export const mejaRoutes = new Hono<AppEnv>()
     }
     if (existing.tipe === "takeaway") {
       throw new HTTPException(400, {
-        message: "Meja Ruang Tunggu tidak bisa dihapus",
+        message: "Meja Kasir & Take Away wajib ada — tidak bisa dihapus",
       });
     }
     // `sales.meja_id` & `open_bills.meja_id` ber-onDelete "set null": menghapus

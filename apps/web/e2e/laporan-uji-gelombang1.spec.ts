@@ -153,6 +153,8 @@ test("papan Pesanan Masuk: owner lihat saja, tanpa tombol tanda", async ({ page,
   await expect(page.getByTestId("pesanan-lihat-saja")).toBeVisible();
   // Tombol tanda kini hidup di DETAIL (ketuk kotak grid) — periksa di sana.
   await page.getByTestId("saringan-semua").click();
+  // Papan kini bawaannya DENAH (2026-11-11); kotak grid ada di tampilan Grid.
+  await page.getByTestId("tampilan-grid").click();
   await page.getByTestId("kotak-pesanan").first().click();
   await expect(page.getByRole("button", { name: "Riwayat" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Pindahkan ke Selesai/ })).toHaveCount(0);
@@ -178,6 +180,7 @@ test("papan Pesanan Masuk: lewat 10 menit → kotak merah berkedip + spanduk ala
 
   await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
   await page.goto("/pesanan");
+  await page.getByTestId("tampilan-grid").click();
   // Sebelum tenggat: tak ada kotak terlambat.
   await expect(page.getByTestId("kotak-pesanan").first()).toBeVisible();
   await expect(page.locator('[data-terlambat="ya"]')).toHaveCount(0);
@@ -214,6 +217,7 @@ test("papan Pesanan Masuk: grid kotak berhitungan makanan/minuman, ketuk membuka
   await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
   await page.goto("/pesanan");
   await page.getByTestId("saringan-semua").click();
+  await page.getByTestId("tampilan-grid").click();
   const kotak = page.getByTestId("kotak-pesanan");
   await expect(kotak.first()).toBeVisible();
   // Empat kotak sebaris di layar lebar (bila pesanannya cukup).
