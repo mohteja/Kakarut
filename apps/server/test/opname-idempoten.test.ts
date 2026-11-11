@@ -64,7 +64,8 @@ describe("server: memakai ledger yang sama dengan jalur lain", () => {
     // (mis. petugas rak berubah sesudah sesi pertama tersimpan).
     const iIdem = OPNAME.indexOf("const { data } = await denganKlaimIdempoten(");
     const iCabang = OPNAME.indexOf("const branchId = body.branch_id");
-    const iPetugas = OPNAME.indexOf("bukan petugas opname tempat");
+    // Pemeriksaan petugas kini satu fungsi bersama dengan cek harian.
+    const iPetugas = OPNAME.indexOf("await pastikanPetugasBahan(auth, ids, infoById);");
     expect(iIdem, "klaim idempotensi tak ditemukan").toBeGreaterThan(0);
     expect(iCabang).toBeGreaterThan(iIdem);
     expect(iPetugas).toBeGreaterThan(iIdem);

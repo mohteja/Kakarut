@@ -131,6 +131,7 @@ GET /api/shift/selisih
 GET /api/shift/selisih/ringkas
 GET /api/stok
 GET /api/stok/awal
+GET /api/stok/cek-harian
 GET /api/stok/exp
 GET /api/stok/fifo/:ingredientId
 GET /api/stok/kartu/:ingredientId
@@ -269,6 +270,7 @@ POST /api/shift/buka
 POST /api/shift/kunci-hitungan
 POST /api/shift/tutup
 POST /api/stok/awal
+POST /api/stok/cek-harian
 POST /api/stok/opname
 POST /api/stok/opname/sesi/:sessionId/acc
 POST /api/stok/opname/sesi/:sessionId/tolak

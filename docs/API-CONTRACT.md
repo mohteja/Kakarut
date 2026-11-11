@@ -1435,6 +1435,8 @@ Laporan:
 - `GET /api/stok/exp` — [any] — query: `branch_id?`, `hari?=7` (clamp 0..60) — res: `ExpLotRow[]` (lot masuk stok ber-`exp_date` ≤ hari ini + `hari`, urut exp ASC, maks 300 + **`X-Kakarut-Terpotong`**; lot sebelum baseline opname terakhir bahan itu dikecualikan). **APROKSIMASI**: ledger stok agregat tanpa FIFO — `qty_masuk` = qty saat lot masuk, BUKAN sisa lot; `saldo` live bahan disandingkan agar pemakai menilai sendiri. `sisa_hari` = exp − hari ini (negatif = lewat)
 - `POST /api/stok/waste` — [owner/admin/cashier/tim/kitchen/bar] (peran terikat cabang hanya cabangnya) — req: `{ branch_id?: uuid, ingredient_id: uuid, qty: number(>0), foto_url: string (min 1, **bukti foto wajib**), catatan?|null (max300) }` — mencatat WASTE (mis. bahan kedaluwarsa) lewat mekanisme penyesuaian yang ada: menulis SATU sesi `stock_opnames` (fisik = saldo − qty, `penyesuaian_kategori:"waste_bahan"`, status `menunggu`) → tampil di Riwayat SO dan **baru memotong stok setelah di-ACC** owner/admin — res: **201** `{ ok, session_id, nomor }` (SO-xxxx) — error: **400** (bahan invalid/tak dilacak, qty > saldo), **403** luar cabang
 - `POST /api/stok/opname` — [owner/admin/cashier/tim/kitchen/bar] (inline) — req `OpnameBody`: `{ branch_id?: uuid, catatan?|null, client_ref?: uuid, device_id?|null, items: [{ingredient_id:uuid, qty:number(≥0), foto_url?|null, alasan?|null}] (min 1) }` — res: **201** `{ ok, jumlah, session_id, nomor, ringkasan }` — error: **400** bahan invalid/tak dilacak, **403** (luar cabang / bukan petugas opname rak itu — hanya petugas ANGGOTA AKTIF yang dihitung; penugasan basi diabaikan)
+- `POST /api/stok/cek-harian` — [owner/admin/cashier/tim/kitchen/bar] — **CEK STOK HARIAN** (2026-11-11): req `{ branch_id?: uuid, sesi_id: uuid (dibuat perangkat; kirim ulang aman), opname_session_id?: uuid|null, items: [{ingredient_id:uuid, sesuai:boolean}] (1..1000) }` (`.strict()`) — tanpa jumlah, TIDAK mengubah saldo. Bahan `sesuai:false` WAJIB sudah dihitung lebih dulu lewat `POST /api/stok/opname` (selisih/ACC/baseline seperti biasa) dan sesinya dikirim di `opname_session_id` — res: **201** `{ ok, sesi_id, sesuai, tidak_sesuai }` — error: **400** bahan invalid/tak dilacak, tidak sesuai tanpa sesi opname, atau bahannya tak ada di sesi itu; **403** luar cabang / bukan petugas rak itu (aturan sama dengan opname)
+- `GET /api/stok/cek-harian` — [any tenant] — query: `branch_id?` — res: **`CekHarianStatusDto`** `{ tanggal, sudah_cek_hari_ini, opname_jumlah_terakhir: date|null, hari_sejak_opname_jumlah: int|null, opname_jumlah_jatuh_tempo, riwayat: CekHarianRiwayatRow[] (≤14, terbaru dulu) }`. Opname JUMLAH = sesi opname fisik yang bukan hitungan cek harian dan bukan catat waste; jatuh tempo bila belum pernah atau ≥ `OPNAME_JUMLAH_TIAP_HARI` (7) hari.
 
 > ### ♻️ `client_ref` pada opname — kiriman ulang tak melahirkan sesi kembar
 >
@@ -3926,12 +3928,52 @@ export interface PenyesuaianRow {
   disetujui_oleh: string | null;
 }
 
+/**
+ * CEK STOK HARIAN — permintaan pemilik (2026-11-11): saat closing petugas
+ * cukup menandai tiap bahan SESUAI / TIDAK SESUAI dengan catatan sistem,
+ * tanpa menyebut jumlah, supaya cepat dan bisa langsung pulang. Bahan yang
+ * TIDAK SESUAI langsung dihitung lewat opname biasa (`POST /stok/opname`) dan
+ * sesinya ditautkan di sini. Opname JUMLAH lengkap dikerjakan mingguan.
+ */
+export interface CekHarianRiwayatRow {
+  sesi_id: string;
+  /** ISO — waktu cek dicatat */
+  waktu: string;
+  oleh: string | null;
+  sesuai: number;
+  tidak_sesuai: number;
+  /** sesi opname yang menghitung bahan tidak sesuai; null = semua sesuai */
+  opname_session_id: string | null;
+}
+
+/** `GET /stok/cek-harian` — status cabang + riwayat 14 cek terakhir. */
+export interface CekHarianStatusDto {
+  /** hari ini (YYYY-MM-DD) di zona perusahaan */
+  tanggal: string;
+  sudah_cek_hari_ini: boolean;
+  /** tanggal opname JUMLAH terakhir (bukan cek harian, bukan catat waste) */
+  opname_jumlah_terakhir: string | null;
+  hari_sejak_opname_jumlah: number | null;
+  /** belum pernah, atau ≥ OPNAME_JUMLAH_TIAP_HARI hari sejak yang terakhir */
+  opname_jumlah_jatuh_tempo: boolean;
+  riwayat: CekHarianRiwayatRow[];
+}
+
 export interface OpnameRingkasan {
   dihitung: number;
   cocok: number;
   lebih: number;
   kurang: number;
   total_selisih: number;
+}
+
+/** Balasan `POST /stok/opname` (201). */
+export interface OpnameSimpanHasil {
+  ok: boolean;
+  jumlah: number;
+  session_id: string;
+  nomor: string | null;
+  ringkasan: OpnameRingkasan;
 }
 
 export interface OpnameSesiRow {

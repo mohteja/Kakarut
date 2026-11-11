@@ -55,6 +55,17 @@ const MAKS_UTANG = 0;
 
 /** kunci: `berkas` → teks argumen `.limit(…)` → alasan. */
 const daftar: Record<string, Record<string, Alasan>> = {
+  "modules/stok/routes.ts": {
+    "14": {
+      kelas: "sah",
+      jumlah: 1,
+      teks:
+        "Riwayat CEK STOK HARIAN di `GET /stok/cek-harian`: memang '14 cek " +
+        "terakhir' (dua minggu closing), bukan klaim kelengkapan — layarnya " +
+        "berjudul riwayat ringkas, dan cek lama tak dibutuhkan siapa pun " +
+        "(selisihnya hidup di Riwayat SO, yang berhalaman sendiri).",
+    },
+  },
   "modules/mail/service.ts": {
     BATAS_PERCOBAAN_EMAIL: {
       kelas: "sah",

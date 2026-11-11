@@ -77,6 +77,7 @@ export const JUDUL_RUTE: Record<string, string> = {
 
   // Stok
   "/stok": "Stok",
+  "/stok/cek-harian": "Cek Stok Harian",
   "/stok/awal": "Stok Awal",
   "/stok/opname": "Opname Bahan Baku",
   "/stok/opname-perlengkapan": "Opname Perlengkapan",

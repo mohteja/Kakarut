@@ -139,6 +139,11 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
      * pinjaman. DITIMBANG DAN AMAN: tak ada kode yang membacanya sebagai bukti
      * apa pun (sisa kasbon dihitung dari `kasbon_potongan`), bentuknya sama
      * dengan `menu_price_logs.oleh_user_id`.
+     *
+     * KE-23 (2026-11-11): `cek_stok_harian.user_id` — siapa yang mengecek.
+     * DITIMBANG DAN AMAN: faktanya (`tanggal`, `sesuai`, `opname_session_id`)
+     * ada di barisnya sendiri; `user_id` hanya nama di riwayat, null = nama
+     * hilang, arti barisnya tetap.
      */
     const jumlah = (SCHEMA.match(/onDelete:\s*"set null"/g) ?? []).length;
     expect(
@@ -146,7 +151,7 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
       "jumlah FK ON DELETE SET NULL berubah. Untuk yang baru: adakah kode yang " +
         "membacanya sebagai BUKTI sebuah peristiwa? Kalau ya, faktanya harus " +
         "disimpan terpisah — lihat `pernah_jadi_penjualan`",
-    ).toBe(22);
+    ).toBe(23);
   });
 
   it("PASANGAN: pemindainya membaca berkas yang benar & tak hijau karena kosong", () => {

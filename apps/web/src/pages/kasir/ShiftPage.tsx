@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { Shift } from "@kakarut/shared";
+import type { CekHarianStatusDto, Shift } from "@kakarut/shared";
 import {
   Card,
   ErrorText,
@@ -73,6 +73,12 @@ export function ShiftPage() {
     queryFn: () => api<Shift[]>(`/shift${branchQuery}`),
   });
 
+  // Pengingat CEK STOK HARIAN saat closing (permintaan pemilik 2026-11-11):
+  // tidak memblokir Tutup Kasir, hanya mengingatkan + tautan.
+  const { data: cekHarian } = useQuery({
+    queryKey: ["cek-harian", branchQuery],
+    queryFn: () => api<CekHarianStatusDto>(`/stok/cek-harian${branchQuery}`),
+  });
   const [modalAwal, setModalAwal] = useState("");
   const [uangFisik, setUangFisik] = useState("");
   const [catatan, setCatatan] = useState("");
@@ -146,6 +152,36 @@ export function ShiftPage() {
       >
         Tutup Kasir
       </PageTitle>
+
+      {aktif && cekHarian && !cekHarian.sudah_cek_hari_ini && (
+        <div
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          data-testid="pengingat-cek-harian"
+        >
+          <span>
+            ⏳ <b>Cek stok harian belum dikerjakan</b> hari ini — cukup tandai sesuai / tidak sesuai.
+          </span>
+          <Link to="/stok/cek-harian" className={btnSecondary}>
+            ✅ Cek sekarang
+          </Link>
+        </div>
+      )}
+      {aktif && cekHarian?.opname_jumlah_jatuh_tempo && (
+        <div
+          className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800"
+          data-testid="pengingat-opname-mingguan"
+        >
+          <span>
+            📋 <b>Opname jumlah mingguan jatuh tempo</b>
+            {cekHarian.opname_jumlah_terakhir
+              ? ` — terakhir ${cekHarian.hari_sejak_opname_jumlah} hari lalu.`
+              : " — belum pernah dikerjakan di cabang ini."}
+          </span>
+          <Link to="/stok/opname" className={btnSecondary}>
+            Opname jumlah
+          </Link>
+        </div>
+      )}
 
       {gagalAktif ? (
         <Card className="space-y-2 border-amber-300 bg-amber-50 p-5">

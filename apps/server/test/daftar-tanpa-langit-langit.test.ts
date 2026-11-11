@@ -400,12 +400,16 @@ describe("SQL mentah: bacaan daftar tanpa langit-langit", () => {
    *   · `stok/service.ts:830,857` — `GROUP BY ingredient_id`, satu baris per
    *     bahan.
    *
+   * Ditambah 2026-11-11 (cek stok harian, `GET /stok/cek-harian`):
+   *   · riwayat — `GROUP BY sesi_id … LIMIT 14`, langit-langitnya 14 baris;
+   *   · opname jumlah terakhir — `MAX(...)`, SATU baris.
+   *
    * Katalog bahan/meja/cabang adalah data master: jumlahnya kira-kira tetap,
    * tak bertambah tiap transaksi. Naik berarti ada kueri mentah BARU tanpa
    * langit-langit — beri `LIMIT`, atau naikkan DASAR dengan alasan di pesan
    * commit.
    */
-  const DASAR_SQL = 9;
+  const DASAR_SQL = 11;
 
   it("INTI: jumlahnya tidak melebihi DASAR_SQL", () => {
     expect(

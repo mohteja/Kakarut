@@ -108,6 +108,9 @@ const BELUM_TAYANG = new Set([
   // PARUH "belum di-merge" KOSONG LAGI sejak 2026-11-11 — HRD, penggajian,
   // jenis makanan/minuman, dan open bill memesan bahan tayang lewat merge
   // PR #248 (`0222e56`); stempelnya dipasang pada commit yang SAMA.
+  //
+  // BELUM DI-MERGE (2026-11-11): cek stok harian.
+  "## 🟢 Cek stok harian (`/api/stok/cek-harian`) — sesuai/tidak sesuai tanpa jumlah",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */

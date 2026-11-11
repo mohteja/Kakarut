@@ -25,6 +25,21 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Cek stok harian (`/api/stok/cek-harian`) — sesuai/tidak sesuai tanpa jumlah
+
+🟢 **BARU** — tak mengubah perilaku klien lama.
+
+**Belum tayang.**
+
+- `POST /stok/cek-harian` — tiap bahan `sesuai: true|false`, tanpa jumlah.
+  Bahan tidak sesuai dihitung dulu lewat `POST /stok/opname` (jalur lama), lalu
+  `opname_session_id`-nya dikirim di sini.
+- `GET /stok/cek-harian` — `CekHarianStatusDto`: sudah cek hari ini, opname
+  jumlah terakhir & jatuh tempo mingguan (`OPNAME_JUMLAH_TIAP_HARI` = 7),
+  riwayat 14 cek terakhir.
+
+---
+
 ## 🟡 Open bill memesan bahan: sisa porsi & gerbang stok dihitung dari stok bebas
 
 🟡 **PERLU DICEK** — bentuk kawat tak berubah, ARTI angkanya berubah.

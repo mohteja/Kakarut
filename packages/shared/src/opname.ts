@@ -84,3 +84,10 @@ export type SaringanStatusOpnamePerlengkapan =
 export function lolosSaringanStatus(status: string, pilihan: string): boolean {
   return pilihan === "semua" || status === pilihan;
 }
+
+/**
+ * Opname JUMLAH (hitung fisik lengkap) jatuh tempo tiap sekian hari —
+ * permintaan pemilik (2026-11-11): harian cukup cek sesuai/tidak sesuai,
+ * hitung jumlahnya mingguan.
+ */
+export const OPNAME_JUMLAH_TIAP_HARI = 7;

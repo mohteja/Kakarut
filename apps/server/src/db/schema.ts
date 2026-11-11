@@ -2429,6 +2429,38 @@ export const fakturLogs = pgTable(
   ],
 );
 
+/**
+ * CEK STOK HARIAN — satu baris per bahan per cek (permintaan pemilik
+ * 2026-11-11). TIDAK mengubah saldo: yang "tidak sesuai" dihitung lewat
+ * opname biasa, dan sesinya ditautkan di `opname_session_id`.
+ * `sesi_id` dibuat perangkat → kirim ulang aman (unik per bahan).
+ */
+export const cekStokHarian = pgTable(
+  "cek_stok_harian",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+    sesiId: uuid("sesi_id").notNull(),
+    tanggal: date("tanggal").notNull(),
+    ingredientId: uuid("ingredient_id")
+      .notNull()
+      .references(() => ingredients.id, { onDelete: "cascade" }),
+    sesuai: boolean("sesuai").notNull(),
+    opnameSessionId: uuid("opname_session_id"),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("cek_stok_harian_sesi_bahan_uq").on(t.companyId, t.sesiId, t.ingredientId),
+    index("cek_stok_harian_cabang_tanggal_idx").on(t.companyId, t.branchId, t.tanggal),
+  ],
+);
+
 export const stockOpnames = pgTable(
   "stock_opnames",
   {
