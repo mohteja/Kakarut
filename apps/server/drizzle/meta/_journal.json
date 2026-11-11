@@ -813,6 +813,13 @@
       "when": 1794362838912,
       "tag": "0115_glorious_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1794374850411,
+      "tag": "0116_aspiring_serpent_society",
+      "breakpoints": true
     }
   ]
 }

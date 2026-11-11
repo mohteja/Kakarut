@@ -838,6 +838,11 @@ Aksesnya sengaja **asimetris**: membaca terbuka untuk seluruh peran cabang
 - `GET /api/meja/:id/log` — [any] — res: `MejaKosongLogRow[]` (maks 50, terbaru dulu)
 - `POST /api/meja` — **[owner/admin/cashier]** — req: `{ branch_id?: uuid, nama: string, tipe?: "dine_in"|"takeaway", is_active?: bool }` — res: **201** `MejaDto` — error: **403**, **409** nama ada di cabang
 - `PUT /api/meja/tata-letak` — **[owner/admin/cashier]** — query: `branch_id?` — req: `{ items: [{id:uuid, pos_x:int(0..100), pos_y:int(0..100)}] (max 500) }` — res: `MejaDto[]`
+- `GET /api/meja/ruangan` — [any tenant] — query `branch_id?` — res: **`RuanganDto[]`** `{id, branch_id, nama, pos_x, pos_y, lebar, tinggi}` (persen kanvas denah; `pos_*` = sudut kiri atas). **Baru 2026-11-11.**
+- `POST /api/meja/ruangan` — [owner/admin/cashier] — req `{ branch_id?, nama (1..40), pos_x?, pos_y?, lebar?, tinggi? }` (`.strict()`; kotak dirapikan `rapikanRuangan`: ukuran ≥ 8, tetap di dalam kanvas) — res **201** `RuanganDto` — error **409** nama kembar di cabang.
+- `PATCH /api/meja/ruangan/:id` — [owner/admin/cashier] — req `{ nama }` — res `RuanganDto` — error **404**, **409**.
+- `DELETE /api/meja/ruangan/:id` — [owner/admin/cashier] — res `{ ok: true }`; mejanya tidak terhapus (`ruangan_id` → null) — error **404**.
+- `PUT /api/meja/tata-letak` kini juga menerima `ruangan?: [{id, pos_x, pos_y, lebar, tinggi}]`; sesudah menyimpan, `ruangan_id` TIAP meja cabang dihitung ulang dari posisinya (`ruanganUntukTitik`: ruangan terkecil yang memuat titik meja). `MejaDto` membawa `ruangan_id: string|null`.
 - `PATCH /api/meja/:id` — **[owner/admin/cashier]** — req: parsial `{ nama?, tipe?, is_active?, branch_id? }` — res: `MejaDto` — error: **403**, **404**, **409** meja masih terisi (khusus `is_active:false`)
 - `DELETE /api/meja/:id` — **[owner/admin/cashier]** — res: `{ ok: true }` — error: **400** (takeaway "Ruang Tunggu" tak bisa dihapus), **403**, **404**, **409** meja masih terisi
 
@@ -3800,6 +3805,28 @@ export interface MejaDto {
   pos_x: number;
   pos_y: number;
   is_active: boolean;
+  /**
+   * Ruangan tempat meja ini berada di denah — DITURUNKAN server dari posisi
+   * meja saat tata letak disimpan (`ruanganUntukTitik`). null = di luar
+   * semua ruangan.
+   */
+  ruangan_id: string | null;
+}
+
+/**
+ * RUANGAN di denah meja (permintaan pemilik 2026-11-11): diatur lebih dulu,
+ * lalu meja diletakkan di dalamnya. Kotak dalam persen kanvas denah (0..100):
+ * `pos_x`/`pos_y` = sudut kiri atas, `lebar`/`tinggi` = ukurannya — bisa
+ * dipanjangkan & dilebarkan sesuai perkiraan pemakai.
+ */
+export interface RuanganDto {
+  id: string;
+  branch_id: string;
+  nama: string;
+  pos_x: number;
+  pos_y: number;
+  lebar: number;
+  tinggi: number;
 }
 
 /** Meja sedang dipakai tamu, atau siap ditempati. */

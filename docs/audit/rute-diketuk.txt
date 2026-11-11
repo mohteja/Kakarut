@@ -10,6 +10,7 @@ DELETE /api/kategori/:id
 DELETE /api/kebersihan/:id
 DELETE /api/kebersihan/area/:id
 DELETE /api/meja/:id
+DELETE /api/meja/ruangan/:id
 DELETE /api/menu/:id
 DELETE /api/onboarding/akun
 DELETE /api/open-bill/:id
@@ -73,6 +74,7 @@ GET /api/laporan/menu-laris
 GET /api/laporan/pembelian
 GET /api/meja
 GET /api/meja/:id/log
+GET /api/meja/ruangan
 GET /api/meja/status
 GET /api/member-cari
 GET /api/menu
@@ -156,6 +158,7 @@ PATCH /api/kebersihan/:id
 PATCH /api/kebersihan/:id/catatan
 PATCH /api/kebersihan/area/:id
 PATCH /api/meja/:id
+PATCH /api/meja/ruangan/:id
 PATCH /api/pembelian/faktur/:key
 PATCH /api/pengajuan/:id
 PATCH /api/penyimpanan/:id
@@ -203,6 +206,7 @@ POST /api/kebersihan
 POST /api/kebersihan/area
 POST /api/meja
 POST /api/meja/:id/kosongkan
+POST /api/meja/ruangan
 POST /api/menu
 POST /api/menu/terapkan-saran
 POST /api/onboarding/perusahaan

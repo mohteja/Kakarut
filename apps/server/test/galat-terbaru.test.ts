@@ -84,7 +84,7 @@ describe("galatTerbaru memilih aksi terakhir, bukan yang pertama", () => {
 describe("kedua layar memakainya, dan rantai `||` sudah hilang", () => {
   it.each([
     ["../../web/src/pages/produksi/PenerimaanPage.tsx", /galatTerbaru\(terima, terimaSebagian, tolak, batalTolak\)/],
-    ["../../web/src/pages/pengaturan/MejaPage.tsx", /galatTerbaru\(toggle, hapus, simpanTataLetak\)/],
+    ["../../web/src/pages/pengaturan/MejaPage.tsx", /galatTerbaru\(toggle, hapus, simpanTataLetak, hapusRuangan\)/],
   ])("%s memakai galatTerbaru", (berkas, pola) => {
     const src = tanpaKomentar(baca(berkas));
     expect(src).toMatch(pola);

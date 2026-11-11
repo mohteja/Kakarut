@@ -25,6 +25,19 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Ruangan di denah meja (`/api/meja/ruangan`) + `MejaDto.ruangan_id`
+
+🟢 **BARU** — medan & rute tambahan; klien lama tak terpengaruh.
+
+**Belum tayang.**
+
+- `GET/POST/PATCH/DELETE /meja/ruangan` — kotak ruangan per cabang
+  (`RuanganDto`: `pos_x`, `pos_y`, `lebar`, `tinggi` dalam persen kanvas).
+- `PUT /meja/tata-letak` menerima `ruangan` (opsional) dan menghitung ulang
+  `ruangan_id` tiap meja dari posisinya. `MejaDto.ruangan_id` (string|null).
+
+---
+
 ## 🟢 Cek stok harian (`/api/stok/cek-harian`) — sesuai/tidak sesuai tanpa jumlah
 
 🟢 **BARU** — tak mengubah perilaku klien lama.

@@ -2082,6 +2082,28 @@ export interface MejaDto {
   pos_x: number;
   pos_y: number;
   is_active: boolean;
+  /**
+   * Ruangan tempat meja ini berada di denah — DITURUNKAN server dari posisi
+   * meja saat tata letak disimpan (`ruanganUntukTitik`). null = di luar
+   * semua ruangan.
+   */
+  ruangan_id: string | null;
+}
+
+/**
+ * RUANGAN di denah meja (permintaan pemilik 2026-11-11): diatur lebih dulu,
+ * lalu meja diletakkan di dalamnya. Kotak dalam persen kanvas denah (0..100):
+ * `pos_x`/`pos_y` = sudut kiri atas, `lebar`/`tinggi` = ukurannya — bisa
+ * dipanjangkan & dilebarkan sesuai perkiraan pemakai.
+ */
+export interface RuanganDto {
+  id: string;
+  branch_id: string;
+  nama: string;
+  pos_x: number;
+  pos_y: number;
+  lebar: number;
+  tinggi: number;
 }
 
 /** Meja sedang dipakai tamu, atau siap ditempati. */

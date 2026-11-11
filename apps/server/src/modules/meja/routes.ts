@@ -3,9 +3,10 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import type { MejaDto, MejaKosongLogRow, MejaStatusDto } from "@kakarut/shared";
+import { rapikanRuangan, ruanganUntukTitik } from "@kakarut/shared";
+import type { MejaDto, MejaKosongLogRow, MejaStatusDto, RuanganDto } from "@kakarut/shared";
 import { db } from "../../db/client";
-import { meja, mejaKosongLogs, users } from "../../db/schema";
+import { meja, mejaKosongLogs, ruanganMeja, users } from "../../db/schema";
 import { tanpaBentrok } from "../../lib/pg-galat";
 import {
   branchUntukTulis,
@@ -53,7 +54,75 @@ const TataLetakBody = z.object({
       }),
     )
     .max(500),
+  /**
+   * Kotak ruangan (2026-11-11) — opsional: klien lama yang hanya mengirim
+   * meja tetap jalan. Keanggotaan meja di ruangan dihitung ulang tiap simpan.
+   */
+  ruangan: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        pos_x: z.number().int().min(0).max(100),
+        pos_y: z.number().int().min(0).max(100),
+        lebar: z.number().int().min(1).max(100),
+        tinggi: z.number().int().min(1).max(100),
+      }),
+    )
+    .max(100)
+    .optional(),
 });
+
+const RuanganBody = z.object({
+  branch_id: z.string().uuid().optional(),
+  nama: z.string().trim().min(1).max(40),
+  pos_x: z.number().int().min(0).max(100).optional(),
+  pos_y: z.number().int().min(0).max(100).optional(),
+  lebar: z.number().int().min(1).max(100).optional(),
+  tinggi: z.number().int().min(1).max(100).optional(),
+}).strict();
+const RuanganPatchBody = z.object({ nama: z.string().trim().min(1).max(40) }).strict();
+
+function ruanganDto(row: typeof ruanganMeja.$inferSelect): RuanganDto {
+  return {
+    id: row.id,
+    branch_id: row.branchId,
+    nama: row.nama,
+    pos_x: row.posX,
+    pos_y: row.posY,
+    lebar: row.lebar,
+    tinggi: row.tinggi,
+  };
+}
+
+/**
+ * Hitung ulang ruangan tiap meja cabang dari posisinya — satu pernyataan.
+ * Dipanggil sesudah tata letak (meja atau ruangan) berubah.
+ */
+async function selaraskanRuanganMeja(companyId: string, branchId: string): Promise<void> {
+  const [ruangan, daftar] = await Promise.all([
+    db
+      .select()
+      .from(ruanganMeja)
+      .where(and(eq(ruanganMeja.companyId, companyId), eq(ruanganMeja.branchId, branchId))),
+    db
+      .select({ id: meja.id, x: meja.posX, y: meja.posY })
+      .from(meja)
+      .where(and(eq(meja.companyId, companyId), eq(meja.branchId, branchId))),
+  ]);
+  if (daftar.length === 0) return;
+  const kotak = ruangan.map(ruanganDto);
+  await db.execute(sql`
+    UPDATE ${meja}
+    SET ruangan_id = v.ruangan
+    FROM (
+      SELECT unnest(${sql.param(daftar.map((m) => m.id))}::uuid[]) AS id,
+             unnest(${sql.param(daftar.map((m) => ruanganUntukTitik(m.x, m.y, kotak)))}::uuid[]) AS ruangan
+    ) AS v
+    WHERE ${meja.id} = v.id
+      AND ${meja.companyId} = ${companyId}
+      AND ${meja.branchId} = ${branchId}
+  `);
+}
 
 function toDto(row: typeof meja.$inferSelect): MejaDto {
   return {
@@ -64,6 +133,7 @@ function toDto(row: typeof meja.$inferSelect): MejaDto {
     pos_x: row.posX,
     pos_y: row.posY,
     is_active: row.isActive,
+    ruangan_id: row.ruanganId ?? null,
   };
 }
 
@@ -319,6 +389,81 @@ export const mejaRoutes = new Hono<AppEnv>()
       ),
     );
   })
+  /** RUANGAN denah cabang (2026-11-11) — dibaca semua peran yang melihat denah. */
+  .get("/ruangan", async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    const rows = await db
+      .select()
+      .from(ruanganMeja)
+      .where(and(eq(ruanganMeja.companyId, auth.company_id!), eq(ruanganMeja.branchId, branchId)))
+      .orderBy(asc(ruanganMeja.posY), asc(ruanganMeja.posX), asc(ruanganMeja.nama), asc(ruanganMeja.id));
+    return c.json(rows.map(ruanganDto));
+  })
+  .post("/ruangan", bolehAturMeja, zValidator("json", RuanganBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    const branchId = await branchUntukTulis(c, body.branch_id, "Hanya boleh menambah ruangan di cabang sendiri");
+    const kotak = rapikanRuangan({
+      pos_x: body.pos_x ?? 5,
+      pos_y: body.pos_y ?? 5,
+      lebar: body.lebar ?? 40,
+      tinggi: body.tinggi ?? 40,
+    });
+    const [row] = await db
+      .insert(ruanganMeja)
+      .values({
+        companyId: auth.company_id!,
+        branchId,
+        nama: body.nama,
+        posX: kotak.pos_x,
+        posY: kotak.pos_y,
+        lebar: kotak.lebar,
+        tinggi: kotak.tinggi,
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (!row) throw new HTTPException(409, { message: `Ruangan "${body.nama}" sudah ada di cabang ini` });
+    await selaraskanRuanganMeja(auth.company_id!, branchId);
+    return c.json(ruanganDto(row), 201);
+  })
+  .patch("/ruangan/:id", bolehAturMeja, zValidator("json", RuanganPatchBody), async (c) => {
+    const auth = c.get("auth");
+    const body = c.req.valid("json");
+    const branchId = await resolveBranchId(c);
+    const [row] = await tanpaBentrok(`Ruangan "${body.nama}" sudah ada di cabang ini`, () =>
+      db
+        .update(ruanganMeja)
+        .set({ nama: body.nama })
+        .where(
+          and(
+            eq(ruanganMeja.id, c.req.param("id")),
+            eq(ruanganMeja.companyId, auth.company_id!),
+            eq(ruanganMeja.branchId, branchId),
+          ),
+        )
+        .returning(),
+    );
+    if (!row) throw new HTTPException(404, { message: "Ruangan tidak ditemukan" });
+    return c.json(ruanganDto(row));
+  })
+  .delete("/ruangan/:id", bolehAturMeja, async (c) => {
+    const auth = c.get("auth");
+    const branchId = await resolveBranchId(c);
+    // Mejanya TIDAK ikut terhapus — hanya keluar dari ruangan (FK set null).
+    const [row] = await db
+      .delete(ruanganMeja)
+      .where(
+        and(
+          eq(ruanganMeja.id, c.req.param("id")),
+          eq(ruanganMeja.companyId, auth.company_id!),
+          eq(ruanganMeja.branchId, branchId),
+        ),
+      )
+      .returning({ id: ruanganMeja.id });
+    if (!row) throw new HTTPException(404, { message: "Ruangan tidak ditemukan" });
+    return c.json({ ok: true });
+  })
   .post("/", bolehAturMeja, zValidator("json", MejaBody), async (c) => {
     const auth = c.get("auth");
     const body = c.req.valid("json");
@@ -367,6 +512,23 @@ export const mejaRoutes = new Hono<AppEnv>()
        * Transaksinya ikut dibuang — satu pernyataan sudah atomik sendiri.
        * Pengurungan perusahaan DAN cabang tetap di WHERE.
        */
+      if (body.ruangan && body.ruangan.length > 0) {
+        const kotak = body.ruangan.map(rapikanRuangan);
+        await db.execute(sql`
+          UPDATE ${ruanganMeja}
+          SET pos_x = v.x, pos_y = v.y, lebar = v.l, tinggi = v.t
+          FROM (
+            SELECT unnest(${sql.param(kotak.map((k) => k.id))}::uuid[]) AS id,
+                   unnest(${sql.param(kotak.map((k) => k.pos_x))}::int[]) AS x,
+                   unnest(${sql.param(kotak.map((k) => k.pos_y))}::int[]) AS y,
+                   unnest(${sql.param(kotak.map((k) => k.lebar))}::int[]) AS l,
+                   unnest(${sql.param(kotak.map((k) => k.tinggi))}::int[]) AS t
+          ) AS v
+          WHERE ${ruanganMeja.id} = v.id
+            AND ${ruanganMeja.companyId} = ${auth.company_id!}
+            AND ${ruanganMeja.branchId} = ${branchId}
+        `);
+      }
       if (body.items.length > 0) {
         await db.execute(sql`
           UPDATE ${meja}
@@ -381,6 +543,8 @@ export const mejaRoutes = new Hono<AppEnv>()
             AND ${meja.branchId} = ${branchId}
         `);
       }
+      // Meja masuk ruangan tempat ia diletakkan — dihitung server, bukan klien.
+      await selaraskanRuanganMeja(auth.company_id!, branchId);
       const rows = await db
         .select()
         .from(meja)

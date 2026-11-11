@@ -144,6 +144,11 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
      * DITIMBANG DAN AMAN: faktanya (`tanggal`, `sesuai`, `opname_session_id`)
      * ada di barisnya sendiri; `user_id` hanya nama di riwayat, null = nama
      * hilang, arti barisnya tetap.
+     *
+     * KE-24 (2026-11-11): `meja.ruangan_id` — ruangan denah tempat meja
+     * berada. DITIMBANG DAN AMAN: ia TURUNAN posisi meja (dihitung ulang
+     * tiap tata letak disimpan), bukan bukti peristiwa; ruangan dihapus →
+     * meja cukup tampil di luar ruangan.
      */
     const jumlah = (SCHEMA.match(/onDelete:\s*"set null"/g) ?? []).length;
     expect(
@@ -151,7 +156,7 @@ describe("bukti peristiwa tak boleh disimpan sebagai FK yang bisa dinihilkan", (
       "jumlah FK ON DELETE SET NULL berubah. Untuk yang baru: adakah kode yang " +
         "membacanya sebagai BUKTI sebuah peristiwa? Kalau ya, faktanya harus " +
         "disimpan terpisah — lihat `pernah_jadi_penjualan`",
-    ).toBe(23);
+    ).toBe(24);
   });
 
   it("PASANGAN: pemindainya membaca berkas yang benar & tak hijau karena kosong", () => {

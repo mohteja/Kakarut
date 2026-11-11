@@ -133,6 +133,13 @@ const DIIZINKAN: Entri[] = [
     catatan: "posisi meja: saat mode edit, seretan yang belum disimpan digabung",
   },
   {
+    berkas: "pages/pengaturan/MejaPage.tsx",
+    deps: "ruanganList",
+    jenis: "semai",
+    tanda: "if (editingRef.current)",
+    catatan: "kotak ruangan: pola yang sama dengan posisi meja — seretan/ukuran yang belum disimpan digabung",
+  },
+  {
     berkas: "pages/menu/LihatMenuPage.tsx",
     deps: "menus, kategori, kategoriPending",
     jenis: "semai",

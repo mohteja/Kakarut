@@ -67,8 +67,10 @@ test("meja: hapus yang KALAH BALAPAN mengatakan sebabnya di layar", async ({ pag
   const hapusDuluan = await request.delete(`${BASE}/api/meja/${meja.id}`, { headers: h });
   expect(hapusDuluan.ok(), "premis: penghapusan pertama berhasil").toBeTruthy();
 
-  // Tombol Hapus hanya ada di mode atur denah.
+  // Tombol Hapus hanya ada di mode atur denah — langkah 2 (Atur Meja);
+  // langkah 1 (Atur Ruangan) yang terbuka lebih dulu.
   await page.getByRole("button", { name: /Atur Denah/i }).click();
+  await page.getByTestId("langkah-meja").click();
 
   // Sekarang layar ini menekan hapus atas meja yang sudah tak ada → 404.
   page.once("dialog", (d) => void d.accept());

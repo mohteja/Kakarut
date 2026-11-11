@@ -180,6 +180,8 @@ const BUKAN_KOLOM: Record<string, string> = {
   urutan: "kolom integer",
   pos_x: "kolom integer",
   pos_y: "kolom integer",
+  lebar: "kolom integer (ruangan denah, persen kanvas 1..100)",
+  tinggi: "kolom integer (ruangan denah, persen kanvas 1..100)",
   port: "kolom integer",
   radius_absen_m: "kolom integer",
   masa_simpan_hari: "kolom integer",

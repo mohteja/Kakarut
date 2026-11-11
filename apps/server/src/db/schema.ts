@@ -712,6 +712,30 @@ export const storageLocationIngredients = pgTable(
  * posX/posY disimpan dalam persen (0..100) agar tata letak denah bebas resolusi.
  * Selalu ada minimal satu meja bertipe "takeaway" (Ruang Tunggu) per cabang.
  */
+/**
+ * RUANGAN di denah meja per cabang (permintaan pemilik 2026-11-11). Kotak
+ * dalam persen kanvas: `pos_x`/`pos_y` sudut kiri atas, `lebar`/`tinggi`.
+ */
+export const ruanganMeja = pgTable(
+  "ruangan_meja",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branches.id, { onDelete: "cascade" }),
+    nama: text("nama").notNull(),
+    posX: integer("pos_x").notNull().default(5),
+    posY: integer("pos_y").notNull().default(5),
+    lebar: integer("lebar").notNull().default(40),
+    tinggi: integer("tinggi").notNull().default(40),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ruangan_meja_cabang_nama_uq").on(t.branchId, t.nama)],
+);
+
 export const meja = pgTable(
   "meja",
   {
@@ -726,6 +750,11 @@ export const meja = pgTable(
     tipe: mejaTipeEnum("tipe").notNull().default("dine_in"),
     posX: integer("pos_x").notNull().default(0),
     posY: integer("pos_y").notNull().default(0),
+    /**
+     * Ruangan tempat meja ini berada — DITURUNKAN dari posisinya saat tata
+     * letak disimpan (`ruanganUntukTitik`). Ruangan dihapus → null.
+     */
+    ruanganId: uuid("ruangan_id").references(() => ruanganMeja.id, { onDelete: "set null" }),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

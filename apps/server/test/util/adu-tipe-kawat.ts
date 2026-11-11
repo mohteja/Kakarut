@@ -228,7 +228,7 @@ export const RUTE: { peran: "owner" | "sa" | "kasir"; jalur: string }[] = [
     "/kategori", "/kategori-bahan", "/kebersihan/area", "/kebersihan/rekap",
     "/kebersihan/ringkas", "/kebersihan", "/laporan", "/laporan/pembelian",
     "/laporan/menu-laris", "/laporan/durasi-pesanan", "/laporan/bep?biaya_tetap=10000000",
-    "/meja", "/meja/status", "/menu/panduan-markup", "/menu", "/menu/ketersediaan",
+    "/meja", "/meja/status", "/meja/ruangan", "/menu/panduan-markup", "/menu", "/menu/ketersediaan",
     "/menu/analisis-harga", "/onboarding/status", "/penerimaan", "/penerimaan/riwayat",
     "/penerimaan/anomali", "/pengajuan", "/penjualan", "/penyimpanan", "/perlengkapan",
     "/perlengkapan/belanja", "/perlengkapan/master", "/perlengkapan/opname/riwayat",

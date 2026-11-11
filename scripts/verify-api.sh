@@ -19276,6 +19276,39 @@ cek "§329 semua sesuai → tanpa opname (201)" "V == 201" \
 cek "§329 HRD tak boleh cek stok (403)" "V == 403" \
   "$(status_code_body "$THRD" POST /stok/cek-harian "{\"sesi_id\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"items\":[{\"ingredient_id\":\"$BH255\",\"sesuai\":true}]}")"
 
+echo "── §330 ruangan denah: diatur dulu, meja otomatis masuk ruangan tempat ia diletakkan ──"
+# Permintaan pemilik (2026-11-11): atur ruangan sebelum meja; ruangan bisa
+# dipanjangkan & dilebarkan. Keanggotaan meja DITURUNKAN server dari posisi.
+R330=$(api "$OWNER" POST /meja/ruangan "{\"branch_id\":\"$BR\",\"nama\":\"Ruang 330\",\"pos_x\":0,\"pos_y\":0,\"lebar\":50,\"tinggi\":50}")
+RID330=$(echo "$R330" | jq -r '.id // ""')
+cek "§330 ruangan dibuat (201) dengan kotaknya" "V == 1" \
+  "$(echo "$R330" | jq '(.nama=="Ruang 330" and .lebar==50 and .tinggi==50)|if . then 1 else 0 end')"
+cek "§330 nama ruangan kembar di cabang ditolak (409)" "V == 409" \
+  "$(status_code_body "$OWNER" POST /meja/ruangan "{\"branch_id\":\"$BR\",\"nama\":\"Ruang 330\"}")"
+M330=$(api "$OWNER" POST /meja "{\"branch_id\":\"$BR\",\"nama\":\"Meja 330\"}" | jq -r '.id // ""')
+TL330=$(api "$OWNER" PUT "/meja/tata-letak?branch_id=$BR" "{\"items\":[{\"id\":\"$M330\",\"pos_x\":20,\"pos_y\":20}],\"ruangan\":[{\"id\":\"$RID330\",\"pos_x\":10,\"pos_y\":10,\"lebar\":40,\"tinggi\":40}]}")
+cek "§330 meja di dalam kotak ruangan → ruangan_id terisi" "V == 1" \
+  "$(echo "$TL330" | jq --arg m "$M330" --arg r "$RID330" '[.[]|select(.id==$m and .ruangan_id==$r)]|length')"
+cek "§330 tiap meja membawa ruangan_id (string atau null)" "V == 0" \
+  "$(echo "$TL330" | jq '[.[]|select(has("ruangan_id")|not)]|length')"
+cek "§330 meja dipindah keluar ruangan → ruangan_id null" "V == 1" \
+  "$(api "$OWNER" PUT "/meja/tata-letak?branch_id=$BR" "{\"items\":[{\"id\":\"$M330\",\"pos_x\":80,\"pos_y\":80}]}" | jq --arg m "$M330" '[.[]|select(.id==$m and .ruangan_id==null)]|length')"
+cek "§330 ruangan diperbesar menutupi meja → meja masuk lagi (dihitung server)" "V == 1" \
+  "$(api "$OWNER" PUT "/meja/tata-letak?branch_id=$BR" "{\"items\":[],\"ruangan\":[{\"id\":\"$RID330\",\"pos_x\":10,\"pos_y\":10,\"lebar\":80,\"tinggi\":80}]}" | jq --arg m "$M330" --arg r "$RID330" '[.[]|select(.id==$m and .ruangan_id==$r)]|length')"
+api "$OWNER" PUT "/meja/tata-letak?branch_id=$BR" "{\"items\":[],\"ruangan\":[{\"id\":\"$RID330\",\"pos_x\":95,\"pos_y\":95,\"lebar\":1,\"tinggi\":1}]}" >/dev/null
+cek "§330 ukuran terlalu kecil & keluar kanvas dirapikan (≥ 8, tetap di dalam)" "V == 1" \
+  "$(api "$OWNER" GET "/meja/ruangan?branch_id=$BR" | jq --arg r "$RID330" '[.[]|select(.id==$r and .lebar>=8 and .tinggi>=8 and (.pos_x+.lebar)<=100 and (.pos_y+.tinggi)<=100)]|length')"
+cek "§330 ganti nama ruangan (200)" "V == 1" \
+  "$(api "$OWNER" PATCH "/meja/ruangan/$RID330?branch_id=$BR" '{"nama":"Teras 330"}' | jq '(.nama=="Teras 330")|if . then 1 else 0 end')"
+cek "§330 kasir membaca ruangan cabangnya (200)" "V == 200" "$(status_code "$REISS105" GET /meja/ruangan)"
+cek "§330 HRD tak boleh mengubah ruangan (403)" "V == 403" \
+  "$(status_code_body "$THRD" POST /meja/ruangan "{\"branch_id\":\"$BR\",\"nama\":\"HRD 330\"}")"
+cek "§330 hapus ruangan (200) — mejanya tetap ada, keluar dari ruangan" "V == 200" \
+  "$(status_code "$OWNER" DELETE "/meja/ruangan/$RID330?branch_id=$BR")"
+cek "§330 meja tetap ada dengan ruangan_id null" "V == 1" \
+  "$(api "$OWNER" GET "/meja?branch_id=$BR" | jq --arg m "$M330" '[.[]|select(.id==$m and .ruangan_id==null)]|length')"
+api "$OWNER" DELETE "/meja/$M330?branch_id=$BR" >/dev/null
+
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════

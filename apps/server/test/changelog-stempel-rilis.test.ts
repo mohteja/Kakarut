@@ -111,6 +111,9 @@ const BELUM_TAYANG = new Set([
   //
   // …dan cek stok harian tayang lewat merge PR #249 (`c3f0794`); stempelnya
   // dipasang pada commit yang SAMA.
+  //
+  // BELUM DI-MERGE (2026-11-11): ruangan denah meja.
+  "## 🟢 Ruangan di denah meja (`/api/meja/ruangan`) + `MejaDto.ruangan_id`",
 ]);
 
 /** Dua bentuk stempel yang sah — baris mandiri (baru) dan blockquote (lama). */
