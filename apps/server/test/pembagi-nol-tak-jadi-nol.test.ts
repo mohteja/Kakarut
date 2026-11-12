@@ -111,6 +111,17 @@ const DIPILAH_TANGAN = new Map<string, { situs: number; kelas: Kelas; alasan: st
     },
   ],
   [
+    "server/modules/laporan/routes.ts",
+    {
+      situs: 1,
+      kelas: "BENAR",
+      alasan:
+        "`persen` per jenis (makanan/minuman) = omzet jenis ÷ Σ omzet kedua jenis. Penyebut " +
+        "nol berarti TAK ADA penjualan sama sekali pada rentang itu — kedua jenis memang " +
+        "0% dari Rp0, dan omzet Rp0 tampil di sebelahnya; bukan ketidaktahuan yang menyamar",
+    },
+  ],
+  [
     "shared/refund.ts",
     {
       situs: 1,

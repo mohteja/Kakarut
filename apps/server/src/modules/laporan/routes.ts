@@ -5,9 +5,11 @@ import { lewatTargetDurasi } from "@kakarut/shared";
 import type {
   BasisBep,
   BepResult,
+  JenisMenu,
   LaporanDurasiPesanan,
   LaporanHarian,
   LaporanPembelian,
+  LaporanPerJenisRow,
   MenuLaris,
 } from "@kakarut/shared";
 import { db } from "../../db/client";
@@ -141,17 +143,64 @@ export const laporanRoutes = new Hono<AppEnv>()
     // `sales`, yang memang disusutkan tiap refund; rincian per menu ini dulu
     // menjumlah `sale_items` mentah, jadi satu layar memuat dua angka yang
     // berselisih persis sebesar uang yang sudah dikembalikan.
+    /*
+     * JENIS MAKANAN/MINUMAN (permintaan pemilik 2026-11-12: "pemisahan laporan
+     * pendapatan makanan dan minuman") — dari kategori menu SAAT INI, aturan
+     * yang sama dengan papan pesanan: menu/kategori yang sudah tiada →
+     * makanan. Terkurung perusahaan di kedua join.
+     */
+    const jenisExpr = sql<JenisMenu>`COALESCE(${menuCategories.jenis}, 'makanan')`;
     const itemTerjual = await db
       .select({
         menu_nama: saleItems.menuNama,
+        jenis: jenisExpr,
         qty: sumQtyDitagihSql,
         omzet: omzetDitagihSql,
       })
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      .leftJoin(menus, and(eq(menus.id, saleItems.menuId), eq(menus.companyId, auth.company_id!)))
+      .leftJoin(
+        menuCategories,
+        and(eq(menuCategories.id, menus.categoryId), eq(menuCategories.companyId, auth.company_id!)),
+      )
       .where(saleFilter)
-      .groupBy(saleItems.menuNama)
+      .groupBy(saleItems.menuNama, sql`2`)
       .orderBy(desc(omzetDitagihSql));
+
+    const hppDitagihSql = sql<number>`COALESCE(SUM(${saleItems.hppSatuan} * GREATEST(${saleItems.qty} - ${saleItems.qtyRefund}, 0)), 0)::float8`;
+    const perJenisRows = await db
+      .select({
+        jenis: jenisExpr,
+        qty: sumQtyDitagihSql,
+        omzet: omzetDitagihSql,
+        hpp: hppDitagihSql,
+      })
+      .from(saleItems)
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      .leftJoin(menus, and(eq(menus.id, saleItems.menuId), eq(menus.companyId, auth.company_id!)))
+      .leftJoin(
+        menuCategories,
+        and(eq(menuCategories.id, menus.categoryId), eq(menuCategories.companyId, auth.company_id!)),
+      )
+      .where(saleFilter)
+      .groupBy(sql`1`);
+    // Kedua jenis SELALU ada (0 bila tak terjual) — "minuman: Rp0" adalah
+    // jawaban, baris yang hilang bukan.
+    const totalJenis = perJenisRows.reduce((t, r) => t + Number(r.omzet ?? 0), 0);
+    const perJenis: LaporanPerJenisRow[] = (["makanan", "minuman"] as const).map((jenis) => {
+      const r = perJenisRows.find((x) => x.jenis === jenis);
+      const omzetJ = Number(r?.omzet ?? 0);
+      const hppJ = Number(r?.hpp ?? 0);
+      return {
+        jenis,
+        qty: Number(r?.qty ?? 0),
+        omzet: omzetJ,
+        hpp: hppJ,
+        laba_kotor: omzetJ - hppJ,
+        persen: totalJenis > 0 ? Math.round((omzetJ / totalJenis) * 100) : 0,
+      };
+    });
 
     const konsumsi = await db
       .select({
@@ -243,8 +292,10 @@ export const laporanRoutes = new Hono<AppEnv>()
       total_hpp: totalHpp,
       // laba mundur oleh diskon yang diberikan: omzet(kotor) − diskon − HPP
       estimasi_profit: omzet - totalDiskon - totalHpp,
+      per_jenis: perJenis,
       item_terjual: itemTerjual.map((r) => ({
         menu_nama: r.menu_nama,
+        jenis: r.jenis,
         qty: Number(r.qty ?? 0),
         omzet: Number(r.omzet ?? 0),
       })),

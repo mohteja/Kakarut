@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import type { BepResult, LaporanHarian } from "@kakarut/shared";
+import type { BepResult, JenisMenu, LaporanHarian } from "@kakarut/shared";
 import { Card, ErrorText, PageTitle, Spinner, StatCard, btnPrimary, inputClass, tdClass, thClass } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useBranch } from "../../context/BranchContext";
@@ -37,6 +37,12 @@ export function LaporanPage() {
     queryFn: () =>
       api<LaporanHarian>(`/laporan?dari=${dari}&sampai=${sampai}${branchParam}`),
   });
+
+  /** Saringan tabel Item Terjual: semua / makanan / minuman. */
+  const [saringJenis, setSaringJenis] = useState<"semua" | JenisMenu>("semua");
+  const itemTampil = (lap?.item_terjual ?? []).filter(
+    (it) => saringJenis === "semua" || it.jenis === saringJenis,
+  );
 
   async function hitungBep() {
     setBepError(null);
@@ -168,6 +174,60 @@ export function LaporanPage() {
             </p>
           )}
 
+          {/* PENDAPATAN MAKANAN vs MINUMAN (permintaan pemilik 2026-11-12). Jenis
+              dari kategori menu (Kelola Kategori Menu → 🍛 Makanan / 🥤 Minuman). */}
+          <div className="mb-6" data-testid="laporan-per-jenis">
+            <h2 className="mb-2 text-lg font-semibold text-stone-700">Pendapatan Makanan &amp; Minuman</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {lap.per_jenis.map((j) => {
+                const persen = j.persen;
+                return (
+                  <Card key={j.jenis} className="p-4">
+                    <div className="flex items-center justify-between" data-testid={`jenis-${j.jenis}`}>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                        {j.jenis === "minuman" ? "🥤 Minuman" : "🍛 Makanan"}
+                      </div>
+                      <div className="text-xs font-semibold text-stone-500">{persen}%</div>
+                    </div>
+                    <div
+                      className={`mt-1 text-2xl font-bold ${j.jenis === "minuman" ? "text-sky-700" : "text-orange-600"}`}
+                      data-testid={`omzet-${j.jenis}`}
+                    >
+                      {formatRupiah(j.omzet)}
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-stone-100">
+                      <div
+                        className={`h-1.5 rounded-full ${j.jenis === "minuman" ? "bg-sky-500" : "bg-orange-500"}`}
+                        style={{ width: `${persen}%` }}
+                      />
+                    </div>
+                    <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <dt className="text-stone-400">Porsi</dt>
+                        <dd className="font-semibold text-stone-700">{formatAngka(j.qty)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">HPP</dt>
+                        <dd className="font-semibold text-stone-700">{formatRupiah(j.hpp)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-stone-400">Laba kotor</dt>
+                        <dd className={`font-semibold ${j.laba_kotor >= 0 ? "text-green-700" : "text-red-700"}`}>
+                          {formatRupiah(j.laba_kotor)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </Card>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-stone-500">
+              Dihitung dari harga menu × porsi yang ditagih (sesudah refund), <b>sebelum</b> diskon
+              per transaksi dan PB1. Jenis mengikuti kategori menunya — atur di{" "}
+              <b>Kelola Kategori Menu</b>.
+            </p>
+          </div>
+
           <GrafikTransaksiPerJam data={lap.per_jam} />
 
           {lap.per_metode.length > 0 && (
@@ -191,7 +251,24 @@ export function LaporanPage() {
 
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
-              <h2 className="mb-2 text-lg font-semibold text-stone-700">Item Terjual</h2>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-lg font-semibold text-stone-700">Item Terjual</h2>
+                <div className="flex gap-1.5">
+                  {(["semua", "makanan", "minuman"] as const).map((j) => (
+                    <button
+                      key={j}
+                      type="button"
+                      data-testid={`saring-item-${j}`}
+                      onClick={() => setSaringJenis(j)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        saringJenis === j ? "bg-orange-600 text-white" : "bg-white text-stone-600 ring-1 ring-stone-200"
+                      }`}
+                    >
+                      {j === "semua" ? "Semua" : j === "makanan" ? "🍛 Makanan" : "🥤 Minuman"}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <Card className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="border-b border-stone-200 bg-stone-50">
@@ -202,14 +279,16 @@ export function LaporanPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-100">
-                    {lap.item_terjual.map((it) => (
-                      <tr key={it.menu_nama}>
-                        <td className={`${tdClass} font-medium`}>{it.menu_nama}</td>
+                    {itemTampil.map((it) => (
+                      <tr key={`${it.jenis}:${it.menu_nama}`}>
+                        <td className={`${tdClass} font-medium`}>
+                          {it.jenis === "minuman" ? "🥤" : "🍛"} {it.menu_nama}
+                        </td>
                         <td className={`${tdClass} text-right`}>{formatAngka(it.qty)}</td>
                         <td className={`${tdClass} text-right`}>{formatRupiah(it.omzet)}</td>
                       </tr>
                     ))}
-                    {lap.item_terjual.length === 0 && (
+                    {itemTampil.length === 0 && (
                       <tr>
                         <td colSpan={3} className="py-8 text-center text-sm text-stone-400">
                           Belum ada penjualan.

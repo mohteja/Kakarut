@@ -25,6 +25,19 @@ tanpa akses repo server.
 
 ---
 
+## 🟢 Laporan pendapatan dipisah makanan & minuman (`GET /laporan` → `per_jenis`)
+
+🟢 **BARU** — medan tambahan; klien lama tak terpengaruh.
+
+**Belum tayang.**
+
+- `LaporanHarian.per_jenis: LaporanPerJenisRow[]` — selalu dua baris
+  (makanan, minuman): `qty`, `omzet` (harga × porsi ditagih, sebelum diskon
+  per transaksi & PB1), `hpp`, `laba_kotor`, `persen` (dihitung server).
+- `item_terjual[].jenis` — jenis kategori menunya (menu/kategori tiada → makanan).
+
+---
+
 ## 🟢 Kunci perangkat — masuk lagi tanpa password (`/api/auth/perangkat`)
 
 🟢 **BARU** — rute tambahan; token akses tetap 12 jam, klien lama tak terpengaruh.

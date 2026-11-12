@@ -220,3 +220,26 @@ test.describe("laporan di browser = balasan API", () => {
     await expect(periode).toHaveValue("");
   });
 });
+
+/**
+ * PENDAPATAN MAKANAN vs MINUMAN (permintaan pemilik 2026-11-12): dua kartu
+ * dengan angka SERVER apa adanya, dan tabel item bisa disaring per jenis.
+ */
+test("laporan: pendapatan dipisah makanan & minuman", async ({ page, request }) => {
+  const { token } = await sesiApi(request, OWNER_EMAIL, OWNER_PASS);
+  const lap = (await (
+    await request.get(`${BASE}/api/laporan?branch_id=all`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json()) as { per_jenis: { jenis: string; omzet: number }[] };
+  expect(lap.per_jenis.map((j) => j.jenis)).toEqual(["makanan", "minuman"]);
+
+  await masukLewatSesi(page, request, OWNER_EMAIL, OWNER_PASS);
+  await page.goto("/laporan");
+  const bagian = page.getByTestId("laporan-per-jenis");
+  await expect(bagian).toBeVisible();
+  await expect(bagian.getByTestId("jenis-makanan")).toContainText("Makanan");
+  await expect(bagian.getByTestId("jenis-minuman")).toContainText("Minuman");
+  // Saringan item: memilih Minuman hanya menyisakan baris 🥤 (atau kosong).
+  await page.getByTestId("saring-item-minuman").click();
+  const baris = page.locator("tbody tr").filter({ hasText: "🍛" });
+  await expect(baris).toHaveCount(0);
+});

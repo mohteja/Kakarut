@@ -19386,6 +19386,37 @@ cek "§332 cabut kunci (200)" "V == 200" \
 cek "§332 kunci yang dicabut tak bisa dipakai (401)" "V == 401" \
   "$(status_code_body "" POST /auth/perangkat/masuk "{\"kunci_perangkat\":\"$K332B\"}")"
 
+echo "── §333 laporan pendapatan dipisah makanan & minuman ──"
+# Permintaan pemilik (2026-11-12): pemisahan laporan pendapatan makanan dan
+# minuman — jenis dari kategori menu (`menu_categories.jenis`).
+lap333() { api "$OWNER" GET "/laporan?branch_id=all" | jq -r "$1"; }
+KM333=$(api "$OWNER" POST /kategori '{"nama":"Minuman 333","jenis":"minuman"}' | jq -r '.id // ""')
+KF333=$(api "$OWNER" POST /kategori '{"nama":"Makanan 333","jenis":"makanan"}' | jq -r '.id // ""')
+MM333=$(api "$OWNER" POST /menu "{\"nama\":\"Jus 333\",\"category_id\":\"$KM333\",\"harga_jual\":7000,\"mult\":1}" | jq -r '.id // ""')
+MF333=$(api "$OWNER" POST /menu "{\"nama\":\"Nasi 333\",\"category_id\":\"$KF333\",\"harga_jual\":11000,\"mult\":1}" | jq -r '.id // ""')
+OM0=$(lap333 '[.per_jenis[]|select(.jenis=="minuman")][0].omzet')
+OF0=$(lap333 '[.per_jenis[]|select(.jenis=="makanan")][0].omzet')
+api "$REISS105" POST /penjualan "{\"is_dine_in\":true,\"metode_bayar\":\"tunai\",\"uang_diterima\":100000,\"items\":[{\"menu_id\":\"$MM333\",\"qty\":2},{\"menu_id\":\"$MF333\",\"qty\":1}]}" >/dev/null
+LAP333=$(api "$OWNER" GET "/laporan?branch_id=all")
+cek "§333 per_jenis selalu dua baris: makanan & minuman" "V == 1" \
+  "$(echo "$LAP333" | jq '([.per_jenis[].jenis] == ["makanan","minuman"])|if . then 1 else 0 end')"
+cek "§333 omzet minuman naik tepat 2 × 7.000" "abs(V - 14000) < 0.001" \
+  "$(python3 -c "print($(echo "$LAP333" | jq '[.per_jenis[]|select(.jenis=="minuman")][0].omzet') - $OM0)")"
+cek "§333 omzet makanan naik tepat 11.000" "abs(V - 11000) < 0.001" \
+  "$(python3 -c "print($(echo "$LAP333" | jq '[.per_jenis[]|select(.jenis=="makanan")][0].omzet') - $OF0)")"
+cek "§333 Σ per_jenis.omzet = omzet kartu (selisih pembulatan float < Rp0,01)" "abs(V) < 0.01" \
+  "$(echo "$LAP333" | jq '([.per_jenis[].omzet]|add) - .omzet')"
+cek "§333 Σ per_jenis.hpp = HPP terpakai" "abs(V) < 0.01" \
+  "$(echo "$LAP333" | jq '([.per_jenis[].hpp]|add) - .total_hpp')"
+cek "§333 laba_kotor = omzet − hpp per jenis" "V == 0" \
+  "$(echo "$LAP333" | jq '[.per_jenis[]|select((.laba_kotor - (.omzet - .hpp))|fabs > 0.001)]|length')"
+cek "§333 persen kedua jenis berjumlah ±100 (dihitung server)" "V >= 99 and V <= 101" \
+  "$(echo "$LAP333" | jq '[.per_jenis[].persen]|add')"
+cek "§333 item terjual membawa jenis menunya" "V == 1" \
+  "$(echo "$LAP333" | jq '([.item_terjual[]|select(.menu_nama=="Jus 333" and .jenis=="minuman")]|length==1) and ([.item_terjual[]|select(.menu_nama=="Nasi 333" and .jenis=="makanan")]|length==1)|if . then 1 else 0 end')"
+cek "§333 tiap item terjual bersifat makanan/minuman" "V == 0" \
+  "$(echo "$LAP333" | jq '[.item_terjual[]|select(.jenis!="makanan" and .jenis!="minuman")]|length')"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # §311 — SELURUH PERMUKAAN, TERMASUK RUTE TULIS: rekaman balasan diadu
 # ═══════════════════════════════════════════════════════════════════════════

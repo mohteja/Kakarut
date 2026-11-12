@@ -1531,6 +1531,7 @@ Laporan:
 ## 8. `/api/laporan` — Laporan (`modules/laporan/routes.ts`) — group guard **[owner/admin]**
 
 - `GET /api/laporan` — query: `branch_id?` (atau `all`), `dari?`, `sampai?`, `tanggal?` — res: `LaporanHarian` (**sejak 2026-09-02** memuat `omzet_sebelum_refund` = Σ subtotal seperti sebelum refund mana pun; jangan merakitnya dari `omzet + total_refund` — satuannya berbeda: `omzet` kotor, `total_refund` nominal bersih)
+  - **Sejak 2026-11-12:** `per_jenis: LaporanPerJenisRow[]` — pendapatan dipisah **makanan** & **minuman** (jenis kategori menu; menu/kategori tiada = makanan), selalu dua baris berurutan makanan, minuman: `{jenis, qty, omzet, hpp, laba_kotor, persen}`. `omzet` = Σ harga × porsi ditagih (sesudah refund, sebelum diskon per transaksi & PB1) — Σ kedua `omzet` = `omzet` kartu. `persen` dihitung server. `item_terjual[]` membawa `jenis`.
   - **`per_jam: { jam, jumlah, omzet }[]` — sebaran transaksi per jam.** Deretnya sudah BERSAMBUNG dan sudah DIPANGKAS ujungnya: mulai dari jam transaksi pertama, berhenti di yang terakhir. **Jam kosong DI TENGAH ikut, bernilai nol, dan jangan disaring klien** — itu jeda sungguhan, dan membuangnya membuat jam 12 dan jam 17 tergambar bersebelahan sehingga bentuk harinya berbohong. `[]` berarti tak ada transaksi pada rentangnya.
   - **`jam` dihitung di ZONA PERUSAHAAN** (`companies.timezone`, bawaan `Asia/Jakarta`) — bukan UTC dan bukan zona perangkat, jadi klien tidak boleh menggesernya lagi. Server berjalan UTC: tanpa konversi ini seluruh grafik meleset tujuh jam di WIB, dan "jam ramai" yang dibaca pemilik warung jadi jam yang salah.
   - **`jumlah` memakai saringan yang sama dengan `jumlah_transaksi`**, jadi jumlah seluruh ember dijamin sama dengan kartu "Transaksi". `omzet` per ember adalah `SUM(sales.subtotal)` — sudah bersih dari refund, sama seperti `omzet` di tingkat laporan; jangan menguranginya lagi dengan `total_refund`.
@@ -4552,6 +4553,20 @@ export interface BepResult {
   porsi_per_hari_30: number;
 }
 
+/** Satu baris `LaporanHarian.per_jenis` — pendapatan satu jenis menu. */
+export interface LaporanPerJenisRow {
+  jenis: JenisMenu;
+  /** porsi ditagih (sesudah refund) */
+  qty: number;
+  /** Σ harga × porsi ditagih, sebelum diskon per transaksi & PB1 */
+  omzet: number;
+  hpp: number;
+  /** omzet − hpp */
+  laba_kotor: number;
+  /** bagian omzet jenis ini dari Σ omzet kedua jenis, persen bulat 0..100 */
+  persen: number;
+}
+
 export interface LaporanHarian {
   dari: string;
   sampai: string;
@@ -4584,7 +4599,15 @@ export interface LaporanHarian {
   pb1_terkumpul: number;
   total_hpp: number;
   estimasi_profit: number;
-  item_terjual: { menu_nama: string; qty: number; omzet: number }[];
+  /**
+   * Pendapatan dipisah MAKANAN vs MINUMAN (permintaan pemilik 2026-11-12) —
+   * jenis dari kategori menu saat ini; menu/kategori yang tiada = makanan.
+   * Selalu dua baris (makanan, minuman), 0 bila tak terjual. `omzet` = Σ harga
+   * × porsi DITAGIH (sesudah refund, SEBELUM diskon per transaksi & PB1);
+   * `laba_kotor` = omzet − hpp.
+   */
+  per_jenis: LaporanPerJenisRow[];
+  item_terjual: { menu_nama: string; jenis: JenisMenu; qty: number; omzet: number }[];
   konsumsi_bahan: { nama: string; slug: string; qty: number }[];
   /**
    * Sebaran transaksi per JAM pada rentang, di zona waktu perusahaan.
